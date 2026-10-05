@@ -202,8 +202,10 @@ namespace MphRead.Entities
             }
             else
             {
-                float factor = Fixed.ToFloat(Values.Field84);
-                CameraInfo.Position += (posVec - CameraInfo.Position) * factor; // sktodo: FPS stuff?
+                // vanilla moves the camera this fraction of the way per 30 Hz tick; the 60 Hz equivalent keeps sqrt of the
+                // remainder per frame (a whole fraction per frame followed ~1.8x as stiffly). docs/ACCURACY.md A3, measured
+                float factor = 1 - MathF.Sqrt(1 - Fixed.ToFloat(Values.Field84));
+                CameraInfo.Position += (posVec - CameraInfo.Position) * factor;
             }
             if (_field553 > 0)
             {
@@ -551,8 +553,10 @@ namespace MphRead.Entities
             }
             else
             {
-                float factor = Fixed.ToFloat(Values.Field84);
-                CameraInfo.Position += (posVec - CameraInfo.Position) * factor; // sktodo: FPS stuff?
+                // vanilla moves the camera this fraction of the way per 30 Hz tick; the 60 Hz equivalent keeps sqrt of the
+                // remainder per frame (a whole fraction per frame followed ~1.8x as stiffly). docs/ACCURACY.md A3, measured
+                float factor = 1 - MathF.Sqrt(1 - Fixed.ToFloat(Values.Field84));
+                CameraInfo.Position += (posVec - CameraInfo.Position) * factor;
             }
             CollisionResult result = default;
             if (CollisionDetection.CheckBetweenPoints(camTarget, CameraInfo.Position, TestFlags.Players, _scene, ref result))

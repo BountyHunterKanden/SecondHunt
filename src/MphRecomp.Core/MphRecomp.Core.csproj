@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- OUR code, separated from the forked upstream MphRead. This project holds the
+       original mph-recomp systems (Save, Config, Sim, Mods, Input, Game, Assets,
+       World) that were previously living inside src/MphRead for expedience. The
+       fork boundary is now one-way: MphRecomp.Core references MphRead as a
+       read-only ROM data/asset layer (only World/RoomLoader uses it), never the
+       reverse. All API used is public, so no InternalsVisibleTo is required.
+       See docs/MIGRATION_MEMO.md §5b. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <DebugType>embedded</DebugType>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+    <RootNamespace>MphRecomp</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lua modding runtime (interpreter mode, AOT-safe). Moved here from MphRead;
+         only the Mods/ code uses it. -->
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Import recipes (repo recipes/<kind>/<Name>.json: ids and parameters only, never game data) ship inside this
+         library so the app can make every derived file from the user's own games. Read by Import/Recipes.cs. -->
+    <EmbeddedResource Include="..\..\recipes\**\*.json" LogicalName="recipes/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The forked runtime, used purely as a data layer (Read/Metadata/Collision/
+         Entity) by World/RoomLoader. OpenTK/ImageSharp flow transitively. -->
+    <ProjectReference Include="..\MphRead\MphRead.csproj" />
+  </ItemGroup>
+
+</Project>

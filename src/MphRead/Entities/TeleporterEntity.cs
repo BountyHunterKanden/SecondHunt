@@ -302,8 +302,12 @@ namespace MphRead.Entities
                 AnimationInfo animInfo = _models[0].AnimInfo;
                 if (animInfo.Index[0] == 2)
                 {
-                    if (_scene.FrameCount > 1 && animInfo.Flags[0].TestFlag(AnimFlags.Reverse)
-                        && animInfo.Frame[0] < animInfo.FrameCount[0] / 2 && _scene.FrameCount % 2 == 0) // todo: FPS stuff
+                    // the game's "frame count > 1" in 30 fps frames = > 3 at 60 fps: an arrival through a portal (the player
+                    // spawns at the teleporter right after the room load, frame 2) stays silent, as in vanilla. This was
+                    // "FrameCount > 1 && FrameCount % 2 == 0" (todo: FPS stuff), which played on that arrival and skipped
+                    // any walk-up that landed on an odd frame (Android campaign, owner queue #28 / #6, BizHawk: 10-01)
+                    if (_scene.FrameCount > 3 && animInfo.Flags[0].TestFlag(AnimFlags.Reverse)
+                        && animInfo.Frame[0] < animInfo.FrameCount[0] / 2)
                     {
                         _soundSource.PlaySfx(SfxId.TELEPORT_ACTIVATE);
                     }

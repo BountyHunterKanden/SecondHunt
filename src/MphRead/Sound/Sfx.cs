@@ -240,8 +240,30 @@ namespace MphRead.Sound
             Instance.QueueStream((int)id, delay, expiration);
         }
 
+        // no OpenAL: every sound call becomes a no-op (the base instance), for hosts that own audio
+        public static void LoadSilent()
+        {
+            Instance = new SfxInstanceBase();
+            SfxMute = false;
+            ForceFieldSfxMute = 0;
+            TimedSfxMute = 0;
+            LongSfxMute = 0;
+        }
+
+        // A host-owned backend (Android SoundPool, etc.) replacing the no-op base instance. Call after the scene/room
+        // has loaded (Sfx.Load runs during room setup and would otherwise overwrite Instance back to the no-op base).
+        public static void SetHost(SfxInstanceBase host)
+        {
+            Instance = host;
+        }
+
         public static void Load(Scene scene)
         {
+            if (Scene.Headless)
+            {
+                LoadSilent();
+                return;
+            }
             Instance = new SfxInstance();
             try
             {

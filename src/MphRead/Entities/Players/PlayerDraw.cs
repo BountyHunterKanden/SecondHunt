@@ -8,8 +8,31 @@ namespace MphRead.Entities
 {
     public partial class PlayerEntity
     {
+        // host hook: don't draw the main player (a host's own fixed camera, e.g. the gunship cockpit view while the
+        // in-ship menu is open, where a camera sequence would otherwise show the body)
+        public static bool HostHideMainPlayer { get; set; }
+
+        // recomp: the campaign host draws the main player's biped / alt form itself (an HD suit): MphRead still poses
+        // them and draws the rest (trail, ice, charge and muzzle effects). HostShowMainBiped draws the main player's
+        // biped in first person too (the host's third-person view: render only, the game's camera stays first person).
+        // HostMainBipedAlpha = the main biped's alpha as last drawn (unmorph fade, cloak), 0 when it wasn't drawn.
+        // All default off.
+        public static bool HostOwnMainBiped { get; set; }
+        public static bool HostOwnMainAlt { get; set; }
+        public static bool HostShowMainBiped { get; set; }
+        public static float HostMainBipedAlpha { get; private set; }
+        public ModelInstance HostBipedModel1 => _bipedModel1; // the legs layer (BipedModel2 = the torso layer)
+
         public void Draw()
         {
+            if (IsMainPlayer)
+            {
+                HostMainBipedAlpha = 0;
+            }
+            if (IsMainPlayer && HostHideMainPlayer)
+            {
+                return;
+            }
             DrawShadow();
             if (IsMainPlayer && ScanVisor)
             {
@@ -42,7 +65,8 @@ namespace MphRead.Entities
             if (IsMainPlayer || IsVisible(NodeRef))
             {
                 drawBiped = !IsMainPlayer || CameraType != CameraType.First || CameraSequence.Current != null
-                    || _camSwitchTimer < Values.CamSwitchTime * 2; // todo: FPS stuff
+                    || _camSwitchTimer < Values.CamSwitchTime * 2 // todo: FPS stuff
+                    || HostShowMainBiped;
                 if (IsAltForm)
                 {
                     _modelTransform.Row3.Xyz = Position;
@@ -61,7 +85,10 @@ namespace MphRead.Entities
                     else
                     {
                         UpdateTransforms(_altModel, _modelTransform, Recolor);
-                        GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
+                        if (!IsMainPlayer || !HostOwnMainAlt)
+                        {
+                            GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
+                        }
                     }
                     PaletteOverride = null;
                     if (_frozenGfxTimer > 0)
@@ -133,7 +160,14 @@ namespace MphRead.Entities
                             alpha = Math.Clamp(alpha, 0, 1);
                         }
                         UpdateMaterials(_bipedModel2, Recolor);
-                        GetDrawItems(_bipedModel2, _bipedModel2.Model.Nodes[0], alpha);
+                        if (IsMainPlayer)
+                        {
+                            HostMainBipedAlpha = alpha;
+                        }
+                        if (!IsMainPlayer || !HostOwnMainBiped)
+                        {
+                            GetDrawItems(_bipedModel2, _bipedModel2.Model.Nodes[0], alpha);
+                        }
                         PaletteOverride = null;
                         if (_chargeEffect != null || _muzzleEffect != null)
                         {

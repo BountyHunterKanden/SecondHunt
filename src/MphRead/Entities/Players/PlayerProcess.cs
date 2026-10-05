@@ -12,6 +12,10 @@ namespace MphRead.Entities
 {
     public partial class PlayerEntity
     {
+        // host hook: the main player stays unspawned (no spawn effect / PLAYER_SPAWN) until the host clears it -- the
+        // gunship cockpit view, where vanilla spawns her only when she steps out of the ship. Default off.
+        public static bool HostHoldMainSpawn { get; set; }
+
         public override bool Process()
         {
             bool result = ProcessPlayer();
@@ -132,7 +136,7 @@ namespace MphRead.Entities
             }
             if (_health == 0)
             {
-                if (_respawnTimer == 0 && EnemySpawner == null)
+                if (_respawnTimer == 0 && EnemySpawner == null && !(IsMainPlayer && HostHoldMainSpawn))
                 {
                     if (_scene.Room?.LoadEntityId >= 0)
                     {
@@ -203,7 +207,8 @@ namespace MphRead.Entities
                                 }
                             }
                         }
-                        if (GameState.SinglePlayer || Controls.Shoot.IsDown || time <= 0 || IsBot) // todo: or forced
+                        // network play: a match client never spawns anyone itself; the host's spawn arrives (PlayerNet.cs)
+                        if (!NetClient && (GameState.SinglePlayer || Controls.Shoot.IsDown || time <= 0 || IsBot)) // todo: or forced
                         {
                             // todo?: something with wi-fi
                             // else...
@@ -1171,7 +1176,8 @@ namespace MphRead.Entities
         private void PickUpItems()
         {
             if (_health == 0 || (IsBot && GameState.SinglePlayer) || IgnoreItemPickups
-                || IsMainPlayer && CameraSequence.Current?.BlockInput == true)
+                || IsMainPlayer && CameraSequence.Current?.BlockInput == true
+                || NetClient && !IsMainPlayer) // network play: the host's item list decides for puppets
             {
                 return;
             }

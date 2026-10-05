@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Desktop-only tools (never ships on Android). CLI entry point (Program),
+       test harnesses (Testing/), content repackers (Utility/Repack*), analyzer,
+       console setup, and the Blender/COLLADA scripting export. References the
+       runtime core; keeps the same MphRead namespaces (no using churn), reaching
+       runtime internals via [InternalsVisibleTo] declared in the runtime. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>MphRead.Tools</AssemblyName>
+    <RootNamespace>MphRead</RootNamespace>
+    <DebugType>embedded</DebugType>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MphRead\MphRead.csproj" />
+    <!-- Our systems (Save/Config/Sim/Mods/Input/Game/Assets/World) + their test harnesses. -->
+    <ProjectReference Include="..\MphRecomp.Core\MphRecomp.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="paths.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

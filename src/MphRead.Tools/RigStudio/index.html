@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rig Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #111318; --panel: #1a1d24; --panel2: #22262f; --line: #2e3340; --text: #e6e8ee; --dim: #9aa1b1;
+    --accent: #4f8cff; --warn: #ffb347; --bad: #ff6b6b; --good: #5fd08a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #app { display: grid; grid-template-columns: 330px 1fr; grid-template-rows: 44px 1fr 26px; height: 100%; }
+  header { grid-column: 1 / 3; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: .02em; }
+  select, button, input[type=number] { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:disabled { opacity: .45; cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--panel2); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .spacer { flex: 1; }
+  #dirty { color: var(--warn); font-weight: 600; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 12px; }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 14px 0 6px; font-weight: 600; }
+  aside h2:first-child { margin-top: 2px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .active-bone { display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--panel2); border-radius: 8px; border: 1px solid var(--line); }
+  .sw { width: 14px; height: 14px; border-radius: 3px; flex: none; border: 1px solid rgba(255,255,255,.25); }
+  .active-bone .sw { width: 22px; height: 22px; }
+  #bones { display: flex; flex-direction: column; gap: 2px; }
+  .bone { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+  .bone:hover { background: var(--panel2); }
+  .bone.on { background: #28324a; outline: 1px solid var(--accent); }
+  .bone .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bone .nm small { color: var(--dim); margin-left: 4px; }
+  .bone .cnt { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 11px; }
+  .bone .seam { grid-column: 2 / 4; display: flex; gap: 6px; align-items: center; color: var(--dim); font-size: 11px; }
+  .bone .seam select, .bone .seam input { padding: 1px 4px; font-size: 11px; }
+  .bone .seam input { width: 58px; }
+  .bone.nomesh { opacity: .55; }
+  .help { color: var(--dim); font-size: 12px; }
+  .help b { color: var(--text); font-weight: 600; }
+  kbd { background: var(--panel2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+  main { position: relative; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .cap { position: absolute; top: 10px; font-size: 12px; color: var(--dim); background: rgba(17,19,24,.7); padding: 3px 8px; border-radius: 6px; pointer-events: none; }
+  #capL { left: 12px; } #capR { right: 12px; }
+  #hoverTip { position: absolute; pointer-events: none; background: rgba(10,12,16,.9); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font-size: 12px; display: none; white-space: nowrap; }
+  #preview { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: none; gap: 8px; align-items: center; background: rgba(26,29,36,.94); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  #preview input[type=range] { width: 320px; }
+  #notice { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: #3a2f16; border: 1px solid #6b5520; color: #ffd98a; border-radius: 8px; padding: 4px 10px; font-size: 12px; display: none; }
+  footer { grid-column: 1 / 3; background: var(--panel); border-top: 1px solid var(--line); display: flex; align-items: center; padding: 0 12px; color: var(--dim); font-size: 12px; gap: 16px; white-space: nowrap; overflow: hidden; }
+  #log { white-space: pre-wrap; font: 11px/1.35 ui-monospace, Consolas, monospace; color: var(--dim); background: var(--panel2); border-radius: 6px; padding: 6px; max-height: 220px; overflow: auto; display: none; }
+  .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 14px; background: rgba(17,19,24,.6); }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Rig Studio</h1>
+    <select id="trophy" title="Trophy"></select>
+    <div class="seg" id="modeSeg">
+      <button data-mode="group" class="on" title="Group the trophy into the game model's chunks (P)">Group chunks</button>
+      <button data-mode="preview" title="Play the game's clips on the rigged trophy (P)">Preview animation</button>
+    </div>
+    <span class="spacer"></span>
+    <span id="dirty"></span>
+    <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+    <button id="save" class="primary" title="Write the grouping beside the trophy and refit the rig">Save &amp; refit</button>
+  </header>
+
+  <aside>
+    <h2>Painting with</h2>
+    <div class="active-bone"><span class="sw" id="activeSw"></span><div><div id="activeName">—</div><div class="help" id="activeHint">Click a chunk on the game model, or a bone below</div></div></div>
+
+    <h2>Paint</h2>
+    <div class="seg" id="layerSeg">
+      <button data-layer="bone" class="on" title="(B) Give parts to the bone above">Bone</button>
+      <button data-layer="stiff" title="(K) Mark parts that must keep their shape: they never bend or stretch">Keep shape</button>
+      <button data-layer="soft" title="(L) Clear keep-shape: the part may bend at seams">Let bend</button>
+    </div>
+    <div class="row"><label class="help"><input type="checkbox" id="showStiff" checked> show keep-shape parts (pale)</label></div>
+
+    <h2>Tool</h2>
+    <div class="seg" id="toolSeg">
+      <button data-tool="patch" class="on" title="(1) Click or drag: assign small surface patches">Patches</button>
+      <button data-tool="brush" title="(2) Click or drag: assign everything under the brush">Brush</button>
+      <button data-tool="piece" title="(3) Click: assign a whole separate mesh piece">Whole piece</button>
+    </div>
+    <div class="row" id="brushRow"><span class="help">Brush size</span><input id="brush" type="range" min="0.01" max="0.30" step="0.005" value="0.06" style="flex:1"><span id="brushVal" class="help"></span></div>
+    <div class="row"><label class="help"><input type="checkbox" id="showDs" checked> game model</label><label class="help"><input type="checkbox" id="showGhost" checked> hidden pieces</label><label class="help"><input type="checkbox" id="showBones"> skeletons</label></div>
+
+    <h2>Bones <span class="help" style="text-transform:none;letter-spacing:0">— trophy vertices · seam to parent</span></h2>
+    <div id="bones"></div>
+
+    <h2>How to use</h2>
+    <div class="help">
+      <p><b>Left</b> is the game model, split into the chunks each bone moves rigidly. <b>Right</b> is the trophy, coloured by the bone each part follows. Left/right in bone names are the <i>character's</i> own sides.</p>
+      <p>Pick a bone (click a chunk on the game model or a row here), then click or drag on the trophy to hand it parts. <kbd>Alt</kbd>+click the trophy picks up the bone under the cursor. Drag empty space to orbit, right-drag to pan, wheel to zoom.</p>
+      <p><b>Seams</b>: <i>rigid</i> moves the two chunks separately, like the game model; <i>blend</i> bends a continuous surface across a narrow band (width in % of body height).</p>
+      <p><b>Keep shape</b>: paint it over parts that must never stretch (armour plates, blades, the head). Next to one, the soft side takes the whole bend. Shown pale.</p>
+      <p><b>Save &amp; refit</b> writes the grouping beside the trophy, refits the rig and updates the cache the app loads. Then preview the game's clips.</p>
+      <p><kbd>B</kbd><kbd>K</kbd><kbd>L</kbd> paint bone / keep shape / let bend · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tools · <kbd>[</kbd><kbd>]</kbd> brush · <kbd>P</kbd> mode · <kbd>Space</kbd> play · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd></p>
+    </div>
+    <h2><a href="#" id="logToggle" style="color:inherit">Fit log ▸</a></h2>
+    <div id="log"></div>
+  </aside>
+
+  <main>
+    <canvas id="view"></canvas>
+    <div class="cap" id="capL">◀ game model</div>
+    <div class="cap" id="capR">trophy ▶</div>
+    <div id="notice"></div>
+    <div id="hoverTip"></div>
+    <div id="preview">
+      <select id="clip"></select>
+      <button id="play">Play</button>
+      <input type="range" id="frame" min="0" max="0" value="0">
+      <span id="frameVal" class="help" style="width:70px"></span>
+      <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option></select>
+    </div>
+    <div class="loading" id="loading">Loading…</div>
+  </main>
+  <footer><span id="status">Starting…</span><span class="spacer"></span><span id="stats"></span></footer>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

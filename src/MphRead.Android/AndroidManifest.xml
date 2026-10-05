@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The manifest template: the build merges the [Activity] / [Application] / [assembly: UsesPermission] attributes
+     into it and fills in the package id and version from MphRead.Android.csproj (public beta audit S3/S4, 2026-10-04).
+     - GLES 3.0 is required (every shader is "#version 300 es"), so stores and installers can filter on it.
+     - Backup covers only the player's saves and settings. The extracted ROM (FilesDir) and the imported hd/, guns/
+       and arenas/ folders are game data the app rebuilds from the user's own files; they're never backed up.
+     - label = ${appLabel} (MphRead.Android.csproj: dev "MPH Recomp", public builds the owner's pick, board D1); the icon
+       is provisional. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+  <application
+      android:label="${appLabel}"
+      android:icon="@mipmap/appicon"
+      android:roundIcon="@mipmap/appicon_round"
+      android:allowBackup="true"
+      android:fullBackupContent="@xml/backup_rules"
+      android:dataExtractionRules="@xml/data_extraction_rules" />
+</manifest>

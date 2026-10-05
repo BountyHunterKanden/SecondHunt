@@ -6,7 +6,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using CommunityToolkit.HighPerformance.Buffers;
 using NCSFCommon.NC;
-using NCSFCommon.ReplayGain;
 
 namespace MphRead
 {
@@ -79,7 +78,7 @@ namespace MphRead
             }
             Paths.SetPath(rootName, newPath);
             var lines = new List<string>();
-            lines.Add(Program.Version.ToString());
+            lines.Add(AppInfo.Version.ToString());
             lines.Add($"{Ver.AMFE0}={Paths.AllPaths[Ver.AMFE0]}");
             lines.Add($"{Ver.AMFP0}={Paths.AllPaths[Ver.AMFP0]}");
             lines.Add($"{Ver.A76E0}={Paths.AllPaths[Ver.A76E0]}");
@@ -269,7 +268,6 @@ namespace MphRead
             string ncsflibFilename = "mph.ncsflib";
             NCSFCommon.NCSF.MakeNCSF(Paths.Combine(outputDir, ncsflibFilename), [], memoryOwner.Span);
             NCSFCommon.TagList tags = [("_lib", ncsflibFilename), ("utf8", "1"), ("ncsfby", "MphRead")];
-            AlbumGain albumGain = new();
             Dictionary<uint, NCSFCommon.TagList> fileTags = new(seqEntries.Length);
             for (uint i = 0, count = (uint)seqEntries.Length; i < count; ++i)
             {

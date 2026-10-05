@@ -911,7 +911,9 @@ namespace MphRead.Entities
                         EffectEntry? effect = _effects[i];
                         if (effect != null)
                         {
-                            effect.SetDrawEnabled(draw);
+                            // a hidden ship (the recomp's cockpit view, the viewer's hide toggle) hides its nozzle jets too
+                            // (EntityBase.GetDrawInfo: "todo: hide attached effects")
+                            effect.SetDrawEnabled(draw && !Hidden);
                         }
                     }
                 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1579,17 +1580,17 @@ namespace MphRead
 
         public static string Combine(string path1, string path2)
         {
-            return Path.Combine(Replace(path1), Replace(path2));
+            return ResolveCase(Path.Combine(Replace(path1), Replace(path2)));
         }
 
         public static string Combine(string path1, string path2, string path3)
         {
-            return Path.Combine(Replace(path1), Replace(path2), Replace(path3));
+            return ResolveCase(Path.Combine(Replace(path1), Replace(path2), Replace(path3)));
         }
 
         public static string Combine(string path1, string path2, string path3, string path4)
         {
-            return Path.Combine(Replace(path1), Replace(path2), Replace(path3), Replace(path4));
+            return ResolveCase(Path.Combine(Replace(path1), Replace(path2), Replace(path3), Replace(path4)));
         }
 
         public static string Combine(params string[] paths)
@@ -1598,7 +1599,49 @@ namespace MphRead
             {
                 paths[i] = Replace(paths[i]);
             }
-            return Path.Combine(paths);
+            return ResolveCase(Path.Combine(paths));
+        }
+
+        // recomp: the ROM's file names are mixed case and MphRead's names were written on Windows, which ignores case
+        // (e.g. "unit1_RM1_Boss_Node.bin" for the ROM's "unit1_RM1_Boss_node.bin"). On a case-sensitive file system
+        // (Android) a path that doesn't exist as written resolves, folder by folder, to the existing entry whose name
+        // differs only in case; anything unmatched comes back as written. Cached and thread-safe (room loads run on a
+        // worker thread). Windows and macOS file systems ignore case already.
+        private static readonly bool _caseSensitiveFs = !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS();
+        private static readonly ConcurrentDictionary<string, string> _caseResolved = new ConcurrentDictionary<string, string>();
+
+        private static string ResolveCase(string path)
+        {
+            if (!_caseSensitiveFs || path.Length == 0)
+            {
+                return path;
+            }
+            return _caseResolved.GetOrAdd(path, static p =>
+            {
+                if (File.Exists(p) || Directory.Exists(p))
+                {
+                    return p;
+                }
+                string? dir = Path.GetDirectoryName(p);
+                string name = Path.GetFileName(p);
+                if (String.IsNullOrEmpty(dir) || name.Length == 0)
+                {
+                    return p;
+                }
+                string parent = ResolveCase(dir);
+                if (!Directory.Exists(parent))
+                {
+                    return p;
+                }
+                foreach (string entry in Directory.EnumerateFileSystemEntries(parent))
+                {
+                    if (String.Equals(Path.GetFileName(entry), name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return entry;
+                    }
+                }
+                return Path.Combine(parent, name);
+            });
         }
     }
 

@@ -237,6 +237,12 @@ namespace MphRead.Entities
         public BeamType WeaponSelection { get; private set; }
         public readonly Effectiveness[] BeamEffectiveness = new Effectiveness[9];
         public GunAnimation GunAnimation { get; private set; }
+
+        // for host renderers replacing the first-person gun: its animation frame (slot 0, 30 Hz) and where it is drawn
+        public int GunAnimFrame => _gunModel.AnimInfo.Frame[0];
+        public int GunAnimFrameCount => _gunModel.AnimInfo.FrameCount[0];
+        public Matrix4 GunDrawTransform => GetTransformMatrix(_aimVec, _upVector, _gunDrawPos);
+        public Vector3 GunMuzzlePosition => _muzzlePos;
         private ushort _bombCooldown = 0;
         private ushort _bombRefillTimer = 0;
         private byte _bombAmmo = 0;
@@ -466,6 +472,8 @@ namespace MphRead.Entities
             }
             PlayerCount = 0;
             PlayersCreated = 0;
+            MainPlayerIndex = 0; // network play: a match client plays another seat (set again after the new scene)
+            NetClient = false;
         }
 
         public static PlayerEntity? Create(Hunter hunter, int recolor)
@@ -668,6 +676,7 @@ namespace MphRead.Entities
 
         public void Spawn(Vector3 pos, Vector3 facing, Vector3 up, NodeRef nodeRef, bool respawn)
         {
+            NetAimEpoch++; // network play: the game re-aims the player (PlayerNet.cs)
             LoadFlags |= LoadFlags.Spawned;
             if (IsMainPlayer)
             {
@@ -1100,6 +1109,7 @@ namespace MphRead.Entities
 
         public void Reposition(Vector3 position, Vector3 facing, NodeRef nodeRef)
         {
+            NetAimEpoch++; // network play: the game re-aims the player (PlayerNet.cs)
             _gunVec1 = facing;
             _facingVector = facing;
             SetTransform(facing, _upVector, position);
@@ -1621,7 +1631,7 @@ namespace MphRead.Entities
 
         public void TakeDamage(uint damage, DamageFlags flags, Vector3? direction, EntityBase? source)
         {
-            if (_health == 0)
+            if (_health == 0 || !NetDamageAllowed) // a match client takes damage only from the host (PlayerNet.cs)
             {
                 return;
             }
@@ -1698,6 +1708,10 @@ namespace MphRead.Entities
                     bomb = (BombEntity)source;
                     attacker = bomb.Owner;
                 }
+            }
+            if (_netApplyingDamage && _netDamageAttacker != null)
+            {
+                attacker = _netDamageAttacker; // a match client: the host's attacker (PlayerNet.cs)
             }
             bool ignoreDamage = false;
             if (GameState.SinglePlayer && IsBot && attacker == this || GameState.Teams && !GameState.FriendlyFire
@@ -1785,6 +1799,7 @@ namespace MphRead.Entities
                 dead = true;
             }
             // todo?: something for wifi
+            NetRecordHit(attacker, beam, flags); // network play: the last hit goes out in the snapshot (PlayerNet.cs)
             if (attacker != null)
             {
                 if (attacker == Main)
@@ -1801,7 +1816,7 @@ namespace MphRead.Entities
             if (dead)
             {
                 // todo?: the game encodes the beam in the damage flags for wifi stuff
-                BeamType beamType = BeamType.Platform;
+                BeamType beamType = _netApplyingDamage ? _netDamageBeam : BeamType.Platform; // (PlayerNet.cs)
                 if (beam != null)
                 {
                     beamType = beam.Beam;
@@ -2290,7 +2305,7 @@ namespace MphRead.Entities
                         QueueHudMessage(128, 70, 140, 90 / 30f, 2, 242); // the prime hunter is dead!
                     }
                 }
-                if (GameState.Multiplayer && attacker != null && attacker != this)
+                if (GameState.Multiplayer && attacker != null && attacker != this && !NetClient) // (host drops it)
                 {
                     ItemType itemType = ItemType.UASmall;
                     if (attacker.EquipInfo.Weapon.AmmoType == 1)

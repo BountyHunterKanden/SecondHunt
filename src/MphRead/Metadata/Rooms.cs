@@ -4084,20 +4084,20 @@ namespace MphRead
 
         public static readonly FrozenDictionary<int, string> EncounterNodeDataOverrides = Frozen.Create<int, string>(
         [
-            new(28, @"levels\nodeData\unit1_C0_Boss_Node.bin"),   // 28 - UNIT1_C0 (Echo Hall)
-            new(29, @"levels\nodeData\unit1_RM1_Boss_Node.bin"),  // 29 - UNIT1_RM1 (High Ground)
-            new(31, @"levels\nodeData\unit1_RM6_Boss_Node.bin"),  // 31 - UNIT1_RM6 (Elder Passage)
+            new(28, @"levels\nodeData\unit1_C0_Boss_node.bin"),   // 28 - UNIT1_C0 (Echo Hall)
+            new(29, @"levels\nodeData\unit1_RM1_Boss_node.bin"),  // 29 - UNIT1_RM1 (High Ground)
+            new(31, @"levels\nodeData\unit1_RM6_Boss_node.bin"),  // 31 - UNIT1_RM6 (Elder Passage)
             new(50, @"levels\nodeData\unit2_RM2_Boss_Node.bin"),  // 50 - UNIT2_RM2 (Data Shrine 02)
             new(52, @"levels\nodeData\unit2_RM3_Boss_Node.bin"),  // 52 - UNIT2_RM3 (Data Shrine 03)
-            new(65, @"levels\nodeData\unit3_Land_Boss_Node.bin"), // 65 - UNIT3_LAND (VDO Gateway)
-            new(68, @"levels\nodeData\unit3_RM1_Boss_Node.bin"),  // 68 - UNIT3_RM1 (Weapons Complex)
-            new(79, @"levels\nodeData\unit4_RM3_Boss_Node.bin")   // 79 - UNIT4_RM3 (Sic Transit)
+            new(65, @"levels\nodeData\unit3_Land_Boss_node.bin"), // 65 - UNIT3_LAND (VDO Gateway)
+            new(68, @"levels\nodeData\unit3_RM1_Boss_node.bin"),  // 68 - UNIT3_RM1 (Weapons Complex)
+            new(79, @"levels\nodeData\Unit4_RM3_Boss_node.bin")   // 79 - UNIT4_RM3 (Sic Transit)
         ]);
 
         public static readonly FrozenDictionary<int, string> CtfNodeDataOverrides = Frozen.Create<int, string>(
         [
-            new( 93, @"levels\nodeData\mp1_CTF_node.bi)"),    // MP1 SANCTORUS (Data Shrine)
-            new( 99, @"levels\nodeData\mp6_CTF_node.bi)"),    // MP6 HEADSHOT (Head Shot)
+            new( 93, @"levels\nodeData\mp1_CTF_node.bin"),    // MP1 SANCTORUS (Data Shrine)
+            new( 99, @"levels\nodeData\mp6_CTF_node.bin"),    // MP6 HEADSHOT (Head Shot)
             new(101, @"levels\nodeData\mp8_CTF_node.bin"),    // MP8 FIRE CONTROL (Weapons Complex)
             new(102, @"levels\nodeData\mp9_CTF_node.bin"),    // MP9 CRYOCHASM (Ice Hive)
             new(105, @"levels\nodeData\mp12_CTF_node.bin"),   // MP12 SIC TRANSIT (Sic Transit)

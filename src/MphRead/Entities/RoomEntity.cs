@@ -512,9 +512,31 @@ namespace MphRead.Entities
             _scene.AreaId = Metadata.GetAreaInfo(GameState.TransitionRoomId);
             if (fromDoor)
             {
-                Task.Run(() => ProcessTransition(_cts.Token), _cts.Token);
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        ProcessTransition(_cts.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        // recomp: an exception here used to vanish with the task, leaving the transition (and the
+                        // shot door) waiting forever. Hosts read this to report it.
+                        TransitionFailure = ex;
+                        Console.Error.WriteLine($"room load failed: {ex}");
+                    }
+                }, _cts.Token);
             }
         }
+
+        // recomp: the last exception a door's background room load threw (null = none)
+        public static Exception? TransitionFailure { get; set; }
+
+        // recomp: hosts can time EndTransition, the frame a room swaps in (its model's textures decoded, the doors and
+        // entities handed over, a forced compacting GC), and skip that GC, which blocks the host's frame (Android: part
+        // of a 100-190 ms room-arrival hitch). null / true = MphRead's own behavior.
+        public static Action<string>? HostTransitionTrace { get; set; }
+        public static bool HostTransitionGc { get; set; } = true;
 
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
 
@@ -550,6 +572,22 @@ namespace MphRead.Entities
             if (token.IsCancellationRequested)
             {
                 return;
+            }
+            if (Scene.HostPredecodeTextures && LoaderDoor != null)
+            {
+                // recomp: the room's and the incoming entities' textures, decoded here instead of on the GL thread
+                _scene.PredecodeTextures(_models[0].Model);
+                for (int i = 0; i < entities.Count && !token.IsCancellationRequested; i++)
+                {
+                    foreach (ModelInstance model in entities[i].GetModels())
+                    {
+                        _scene.PredecodeTextures(model.Model);
+                    }
+                }
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
             }
             AiPersonality.LoadAll(GameState.Mode);
             if (token.IsCancellationRequested)
@@ -606,12 +644,16 @@ namespace MphRead.Entities
 
         private Model? _unloadModel = null;
 
+        private static double Ms(long from, long to) => (to - from) * 1000.0 / Stopwatch.Frequency;
+
         private void EndTransition()
         {
             RoomMetadata? roomMeta = Metadata.GetRoomById(GameState.TransitionRoomId);
             Debug.Assert(roomMeta != null);
+            long traceStart = Stopwatch.GetTimestamp();
             ModelInstance inst = _models[0];
             _scene.LoadModel(inst.Model, isRoom: true);
+            long traceModel = Stopwatch.GetTimestamp();
             inst.SetAnimation(0);
             _scene.SetRoomValues(roomMeta);
             for (int i = 0; i < _connectorModels.Count; i++)
@@ -773,7 +815,18 @@ namespace MphRead.Entities
             }
             _unloadModel = null;
             LoaderDoor = null;
-            GC.Collect(generation: 2, GCCollectionMode.Forced, blocking: false, compacting: true);
+            _scene.ClearPredecodedTextures();
+            long traceHandOver = Stopwatch.GetTimestamp();
+            if (HostTransitionGc)
+            {
+                GC.Collect(generation: 2, GCCollectionMode.Forced, blocking: false, compacting: true);
+            }
+            if (HostTransitionTrace != null)
+            {
+                HostTransitionTrace($"room {_scene.RoomId} swapped in: room model {Ms(traceStart, traceModel):0} ms "
+                    + $"({inst.Model.Name}), doors + entities {Ms(traceModel, traceHandOver):0} ms, "
+                    + (HostTransitionGc ? $"forced GC {Stopwatch.GetElapsedTime(traceHandOver).TotalMilliseconds:0} ms" : "no forced GC"));
+            }
             GameState.TransitionState = TransitionState.None;
             GameState.TransitionRoomId = -1;
         }
@@ -1249,6 +1302,17 @@ namespace MphRead.Entities
         }
 
         private readonly HashSet<NodeData3> _drawnNodeData = [];
+
+        // Headless without a draw list GetDrawInfo never runs, but entity logic reads room-part visibility and
+        // audibility (scan targets, enemies, sounds): update just those, under the same conditions GetDrawInfo does
+        public void UpdateVisibility()
+        {
+            if (!Hidden ? !GameState.InRoomTransition && _scene.ProcessFrame : _scene.ProcessFrame)
+            {
+                ClearRoomPartState();
+                UpdateRoomParts();
+            }
+        }
 
         public override void GetDrawInfo()
         {

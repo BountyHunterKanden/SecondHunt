@@ -112,6 +112,10 @@ namespace MphRead.Entities
                 entity.GetPosition(out Vector3 entPos);
                 Matrix.GetProjectedValues(entPos, CameraInfo.Position, _scene.ViewMatrix, _scene.PerspectiveMatrix,
                     out float dist, out float depth, out float scaleInv, out Vector3 targetPos, out Vector2 distPos);
+                if (depth > 0 && Scene.HostScreenWarp != null)
+                {
+                    distPos = Scene.HostScreenWarp(distPos); // recomp: Panini view
+                }
                 var screenPos = new Vector2((distPos.X + 1) / 2, (1 - distPos.Y) / 2);
                 if (depth < 0)
                 {

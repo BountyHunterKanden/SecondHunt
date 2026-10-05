@@ -48,6 +48,10 @@ namespace MphRead
         public static bool InRoomTransition => TransitionState != TransitionState.None;
         public static EscapeState EscapeState { get; set; } = EscapeState.None;
         public static float EscapeTimer { get; set; } = -1;
+        // A headless embedder's own ship-on-ground menu (MphRecomp.Core/Campaign/ShipMenu.cs) owns the takeoff
+        // cutscene itself (LAUNCH SHIP, played standalone): the hatch's YES should never also play one. Not a
+        // user-facing cheat (unlike Cheats.SkipPlanetIntros, below) -- desktop MphRead never sets this.
+        public static bool SkipShipTakeoffMovie { get; set; }
         public static bool EscapePaused { get; set; }
         public static int[] EncounterState { get; } = new int[4];
         public static bool[] CompletedRandomEncounterRooms { get; } = new bool[66]; // only for the no repeat encounters feature
@@ -675,7 +679,7 @@ namespace MphRead
                             77 => Movie.ArcterraTakeoff,
                             _ => Movie.None
                         };
-                        if (movieId != Movie.None && !Cheats.SkipPlanetIntros)
+                        if (movieId != Movie.None && !Cheats.SkipPlanetIntros && !SkipShipTakeoffMovie)
                         {
                             scene.StartMovie(movieId, FadeType.FadeOutInWhite, 20 / 30f,
                                 FadeType.FadeOutBlack, 5 / 30f, afterMovieAction: AfterMovie.EndGame);
@@ -1359,6 +1363,14 @@ namespace MphRead
         private static StorySave _cleanStorySave = null!;
         public static StorySave StorySave { get; private set; } = null!;
 
+        // for hosts that own save persistence (Menu.SaveSlot 0): adopt a story save after the scene is constructed
+        // and before the room is added, and make it the clean (continue-from) snapshot too
+        public static void UseStorySave(StorySave save)
+        {
+            StorySave = save;
+            UpdateCleanSave(force: true);
+        }
+
         public static void UpdateCleanSave(bool force)
         {
             if (!force && EscapeTimer != -1 && EscapeState == EscapeState.Escape)
@@ -1671,15 +1683,16 @@ namespace MphRead
             WeaponSlots[1] = (int)BeamType.Missile;
             WeaponSlots[2] = (int)BeamType.None;
             // todo: initialize more fields
-            UpdateLogbook(0); // SCAN VISOR
-            UpdateLogbook(1); // THERMAL POSITIONER
-            UpdateLogbook(2); // ARM CANNON
-            UpdateLogbook(3); // POWER BEAM
-            UpdateLogbook(4); // MISSILE LAUNCHER
-            UpdateLogbook(5); // MORPH BALL
-            UpdateLogbook(6); // MORPH BALL BOMB
-            UpdateLogbook(26); // JUMP BOOTS
-            UpdateLogbook(28); // CHARGE SHOT
+            // scan ids are ScanLog record numbers, which start at 1 (L001 = SCAN VISOR)
+            UpdateLogbook(1); // SCAN VISOR
+            UpdateLogbook(2); // THERMAL POSITIONER
+            UpdateLogbook(3); // ARM CANNON
+            UpdateLogbook(4); // POWER BEAM
+            UpdateLogbook(5); // MISSILE LAUNCHER
+            UpdateLogbook(6); // MORPH BALL
+            UpdateLogbook(7); // MORPH BALL BOMB
+            UpdateLogbook(27); // JUMP BOOTS
+            UpdateLogbook(29); // CHARGE SHOT
             if (Cheats.StartWithAllOctoliths)
             {
                 FoundOctoliths = CurrentOctoliths = 0xFF;
@@ -1854,6 +1867,12 @@ namespace MphRead
             return (Logbook[index] & bit) != 0;
         }
 
+        // a ScanLog record's scan id is its own number ("L032" = 32), not its position: the table skips numbers
+        public bool CheckLogbook(StringTableEntry entry)
+        {
+            return Int32.TryParse(entry.Id.AsSpan(1), out int scanId) && CheckLogbook(scanId);
+        }
+
         public int GetLogbookCount(bool unlockedOnly, params char[] categories)
         {
             IReadOnlyList<StringTableEntry> logbook = Strings.ReadStringTable(StringTables.ScanLog);
@@ -1861,7 +1880,7 @@ namespace MphRead
             for (int i = 0; i < logbook.Count; i++)
             {
                 StringTableEntry entry = logbook[i];
-                if (categories.Any(c => c == entry.Category) && (!unlockedOnly || CheckLogbook(i)))
+                if (categories.Any(c => c == entry.Category) && (!unlockedOnly || CheckLogbook(entry)))
                 {
                     result++;
                 }

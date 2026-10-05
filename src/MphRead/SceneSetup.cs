@@ -203,6 +203,10 @@ namespace MphRead
             }
         }
 
+        // recomp: test hosts make every hunter spawn's chance roll pass (the roll still runs, so the RNG sequence is
+        // unchanged); default off
+        public static bool HostForceEncounters { get; set; }
+
         public static void InitHunterSpawns(Scene scene, IReadOnlyList<EntityBase> entities, bool initialize)
         {
             for (int i = 1; i < PlayerEntity.MaxPlayers; i++)
@@ -249,7 +253,7 @@ namespace MphRead
                     {
                         return;
                     }
-                    if (Rng.GetRandomInt2(100) >= spawner.Data.Fields.S09.HunterChance)
+                    if (Rng.GetRandomInt2(100) >= spawner.Data.Fields.S09.HunterChance && !HostForceEncounters)
                     {
                         continue;
                     }

@@ -1,0 +1,21 @@
+{
+  "suits": ["MP2VariaSuit", "MP1VariaSuit", "MP3VariaSuit", "MP1PowerSuit", "MP4LegacySuit", "MP2LightSuit", "MP2DarkSuit",
+            "MP1GravitySuit", "MP1FusionSuit", "Phazonsuit", "MP3PEDSuit", "MP4DefaultSuit", "MP4ViolaSuit", "MP4PsychicSuit"],
+  "pose": "built",
+  "clip": 8,
+  "frame": 0,
+  "eye": [0, 1.406, -2],
+  "target": [0, 1.406, 0],
+  "fovY": 19.63,
+  "visor": {
+    "MP2VariaSuit": { "hide": ["DolMP2VariaSuit_mat4"], "opaque": ["DolMP2VariaSuit_mat5"] },
+    "MP1VariaSuit": { "hide": ["DolMP1VariaSuit_mat3"], "opaque": ["DolMP1VariaSuit_mat5"] },
+    "MP3VariaSuit": { "hide": ["DolMP3VariaSuit_mat9", "DolMP3VariaSuit_mat0", "DolMP3VariaSuit_mat1"], "opaque": ["DolMP3VariaSuit_mat6"] },
+    "MP1PowerSuit": { "hide": ["DolMP1PowerSuit_mat6"], "opaque": ["DolMP1PowerSuit_mat4"] },
+    "MP2DarkSuit": { "hide": ["DolMP2DarkSuit_mat4"], "opaque": ["DolMP2DarkSuit_mat0"] },
+    "MP1GravitySuit": { "hide": ["DolMP1GravitySuit_mat10"], "opaque": ["DolMP1GravitySuit_mat4"] },
+    "MP1FusionSuit": { "hide": ["DolMP1FusionSuit_mat1"], "opaque": ["DolMP1FusionSuit_mat2"] },
+    "Phazonsuit": { "hide": ["DolPhazonsuit_mat3"], "opaque": ["DolPhazonsuit_mat7"] },
+    "MP3PEDSuit": { "hide": ["DolMP3PEDSuit_mat5", "DolMP3PEDSuit_mat0", "DolMP3PEDSuit_mat1"], "opaque": ["DolMP3PEDSuit_mat8"] }
+  }
+}

@@ -16,6 +16,7 @@ using MphRead.Formats;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
 using MphRead.Hud;
+using MphRead.Rendering;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
@@ -83,6 +84,151 @@ namespace MphRead
 
     public partial class Scene
     {
+        // True when a host (the Android app, headless tests) drives the simulation and owns drawing, audio and
+        // input: the scene then makes no GL, OpenAL or audio-device calls, skips draw-item collection, advances
+        // fades from the update loop, skips movie decoding (running the after-movie action at once), and takes the
+        // main player's buttons from Keybind.HostDown instead of the OpenTK keyboard/mouse. Set before constructing.
+        public static bool Headless { get; set; }
+
+        // Headless with a host renderer: still build MphRead's per-frame draw list (CPU only -- entity/room/effect
+        // GetDrawInfo, portal culling, animation to node matrices). Meshes get stand-in list ids instead of GL
+        // display lists; HostMeshes[listId - 1] says which model/mesh each is, so the host can bake it once.
+        public static bool CollectDrawItems { get; set; }
+        private readonly List<(Model Model, Mesh Mesh, bool IsRoom)> _hostMeshes = new();
+        public IReadOnlyList<(Model Model, Mesh Mesh, bool IsRoom)> HostMeshes => _hostMeshes;
+        public IReadOnlyList<RenderItem> OpaqueItems => _nonDecalItems;
+        public IReadOnlyList<RenderItem> DecalItems => _decalItems;
+        public IReadOnlyList<RenderItem> TranslucentItems => _translucentItems;
+
+        // Headless + CollectDrawItems: the pixels behind every texture binding id a RenderItem can carry, decoded
+        // once on the CPU (the host uploads them). Version bumps when MphRead re-binds new data to the same id.
+        public sealed class HostTexture
+        {
+            public int Width;
+            public int Height;
+            public ColorRgba[] Pixels = Array.Empty<ColorRgba>();
+            public int Version;
+        }
+        private readonly Dictionary<int, HostTexture> _hostTextures = new();
+        public IReadOnlyDictionary<int, HostTexture> HostTextures => _hostTextures;
+
+        private void SetHostTexture(int bindingId, IReadOnlyList<ColorRgba> data, int width, int height)
+        {
+            if (!_hostTextures.TryGetValue(bindingId, out HostTexture? tex))
+            {
+                _hostTextures[bindingId] = tex = new HostTexture();
+            }
+            tex.Width = width;
+            tex.Height = height;
+            tex.Pixels = data as ColorRgba[] ?? data.ToArray();
+            tex.Version++;
+        }
+
+        // Headless + CollectDrawItems: the HUD, recorded where MphRead would draw it (DrawHudLayer / DrawHudObject /
+        // DrawHudFilterModel) -- quads in NDC, in draw order, each with its texture. Sprites share one texture buffer that
+        // is re-bound per glyph/meter tile, so their pixels are copied at draw time and interned by content
+        // (HudSprites); layers and the filter use their static HostTextures entry.
+        public sealed class HostHudItem
+        {
+            public float Left, Right, Top, Bottom;
+            public float Alpha;
+            public bool UseMask;
+            public int SpriteIndex = -1; // HudSprites
+            public int BindingId = -1;   // HostTextures
+        }
+
+        public sealed class HostHudSprite
+        {
+            public int Width;
+            public int Height;
+            public ColorRgba[] Pixels = Array.Empty<ColorRgba>();
+        }
+
+        private readonly List<HostHudItem> _hudItems = new();
+        private int _hudItemCount;
+        private readonly List<HostHudSprite> _hudSprites = new();
+        private readonly Dictionary<ulong, List<int>> _hudSpriteIndex = new();
+        public int HudItemCount => _hudItemCount;
+        public HostHudItem GetHudItem(int index) => _hudItems[index];
+        public IReadOnlyList<HostHudSprite> HudSprites => _hudSprites;
+        public int HudMaskBindingId { get; private set; } = -1;
+
+        private HostHudItem NextHudItem()
+        {
+            if (_hudItemCount == _hudItems.Count)
+            {
+                _hudItems.Add(new HostHudItem());
+            }
+            HostHudItem item = _hudItems[_hudItemCount++];
+            item.SpriteIndex = -1;
+            item.BindingId = -1;
+            item.UseMask = false;
+            return item;
+        }
+
+        private int InternHudSprite(int bindingId)
+        {
+            if (!_hostTextures.TryGetValue(bindingId, out HostTexture? tex) || tex.Width == 0)
+            {
+                return -1;
+            }
+            int count = tex.Width * tex.Height;
+            ReadOnlySpan<ColorRgba> pixels = tex.Pixels.AsSpan(0, Math.Min(count, tex.Pixels.Length));
+            ulong hash = 14695981039346656037UL ^ (ulong)tex.Width << 32 ^ (ulong)tex.Height;
+            foreach (ColorRgba c in pixels)
+            {
+                hash = (hash ^ (uint)(c.Red | c.Green << 8 | c.Blue << 16 | c.Alpha << 24)) * 1099511628211UL;
+            }
+            if (!_hudSpriteIndex.TryGetValue(hash, out List<int>? candidates))
+            {
+                _hudSpriteIndex[hash] = candidates = new List<int>(1);
+            }
+            foreach (int index in candidates)
+            {
+                HostHudSprite known = _hudSprites[index];
+                // compared as uints: ColorRgba isn't IEquatable, so SequenceEqual on it boxed every pixel (MBs a second)
+                if (known.Width == tex.Width && known.Height == tex.Height && System.Runtime.InteropServices.MemoryMarshal.Cast<ColorRgba, uint>(pixels)
+                    .SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.Cast<ColorRgba, uint>(known.Pixels)))
+                {
+                    return index;
+                }
+            }
+            _hudSprites.Add(new HostHudSprite { Width = tex.Width, Height = tex.Height, Pixels = pixels.ToArray() });
+            candidates.Add(_hudSprites.Count - 1);
+            return _hudSprites.Count - 1;
+        }
+
+        // the HUD part of OnRenderFrame, recorded instead of drawn (once per simulation step)
+        private void RecordHud()
+        {
+            _hudItemCount = 0;
+            HudMaskBindingId = -1;
+            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
+            {
+                PlayerEntity.Main.DrawHudModels();
+                DrawHudLayer(Layer4Info); // ice layer
+                DrawHudLayer(Layer3Info); // helmet back
+                DrawHudLayer(Layer1Info); // visor
+                DrawHudLayer(Layer2Info); // helmet front
+                DrawHudLayer(Layer5Info); // dialog overlay
+                HudMaskBindingId = Layer1Info.MaskId;
+                PlayerEntity.Main.DrawHudObjects();
+            }
+        }
+
+        // the screen fade MphRead draws over everything (room loads, landings, deaths): gray level and coverage
+        public float HostFadeColor => _fadeColor;
+        public float HostFadeAmount => _fadeType == FadeType.None || CameraMode != CameraMode.Player
+            || !PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) ? 0 : _fadeIn ? 1 - _fadePercent : _fadePercent;
+
+        // room values a host renderer needs (read after OnUpdateFrame; the view matrices are exposed above)
+        public bool RoomLighting => _lighting;
+        public bool FogEnabled => _hasFog && _showFog;
+        public Vector4 FogColor => _fogColor;
+        public float FogMin => _fogOffset / (float)0x7FFF;
+        public float FogMax => (_fogOffset + 32 * (0x400 >> _fogSlope)) / (float)0x7FFF;
+        public Color4 ClearColor => _clearColor;
+
         public Vector2i Size { get; set; }
         private Matrix4 _viewMatrix = Matrix4.Identity;
         private Matrix4 _viewInvRotMatrix = Matrix4.Identity;
@@ -131,6 +277,7 @@ namespace MphRead
         private readonly Dictionary<int, TextureMap> _texPalMap = new Dictionary<int, TextureMap>();
 
         private int _shaderProgramId = 0;
+        private LayeredDraw<RenderItem>? _layeredDraw;
         private int _rttShaderProgramId = 0;
         private int _shiftShaderProgramId = 0;
         private readonly ShaderLocations _shaderLocations = new ShaderLocations();
@@ -235,6 +382,10 @@ namespace MphRead
             GameState.Reset();
             PlayerEntity.Construct(this);
             Music.Init();
+            if (Headless)
+            {
+                Sound.Sfx.LoadSilent();
+            }
         }
 
         // called before load
@@ -433,11 +584,14 @@ namespace MphRead
 
         public void OnLoad()
         {
-            GL.ClearColor(_clearColor);
-            GL.Enable(EnableCap.DepthTest);
-            GL.Enable(EnableCap.Texture2D);
-            GL.DepthFunc(DepthFunction.Lequal);
-            InitShaders();
+            if (!Headless)
+            {
+                GL.ClearColor(_clearColor);
+                GL.Enable(EnableCap.DepthTest);
+                GL.Enable(EnableCap.Texture2D);
+                GL.DepthFunc(DepthFunction.Lequal);
+                InitShaders();
+            }
             AllocateEffects();
             CollisionDetection.Init();
             for (int i = 0; i < _renderItemAlloc; i++)
@@ -463,9 +617,16 @@ namespace MphRead
                     InitEntity(player.Halfturret);
                 }
             }
-            OutputStart();
+            if (!Headless)
+            {
+                OutputStart();
+            }
             GC.Collect(generation: 2, GCCollectionMode.Forced, blocking: true, compacting: true);
-            GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+            if (!Headless)
+            {
+                // desktop runtime tuning; Android's runtime throws PlatformNotSupportedException here
+                GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+            }
         }
 
         private int _frameBuffer = 0;
@@ -492,10 +653,10 @@ namespace MphRead
             string fragmentLog;
             string vertexLog;
             int vertexShader = GL.CreateShader(ShaderType.VertexShader);
-            GL.ShaderSource(vertexShader, Shaders.VertexShader);
+            GL.ShaderSource(vertexShader, SceneShaderSource.DesktopVertex);
             GL.CompileShader(vertexShader);
             int fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
-            GL.ShaderSource(fragmentShader, Shaders.FragmentShader);
+            GL.ShaderSource(fragmentShader, SceneShaderSource.DesktopFragment);
             GL.CompileShader(fragmentShader);
             GL.GetShader(vertexShader, ShaderParameter.CompileStatus, out int vertexStatus);
             GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out int fragmentStatus);
@@ -607,34 +768,34 @@ namespace MphRead
 
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
-            _shaderLocations.UseLight = GL.GetUniformLocation(_shaderProgramId, "use_light");
-            _shaderLocations.ShowColors = GL.GetUniformLocation(_shaderProgramId, "show_colors");
-            _shaderLocations.UseTexture = GL.GetUniformLocation(_shaderProgramId, "use_texture");
-            _shaderLocations.Light1Color = GL.GetUniformLocation(_shaderProgramId, "light1col");
-            _shaderLocations.Light1Vector = GL.GetUniformLocation(_shaderProgramId, "light1vec");
-            _shaderLocations.Light2Color = GL.GetUniformLocation(_shaderProgramId, "light2col");
-            _shaderLocations.Light2Vector = GL.GetUniformLocation(_shaderProgramId, "light2vec");
-            _shaderLocations.Diffuse = GL.GetUniformLocation(_shaderProgramId, "diffuse");
-            _shaderLocations.Ambient = GL.GetUniformLocation(_shaderProgramId, "ambient");
-            _shaderLocations.Specular = GL.GetUniformLocation(_shaderProgramId, "specular");
-            _shaderLocations.Emission = GL.GetUniformLocation(_shaderProgramId, "emission");
-            _shaderLocations.UseFog = GL.GetUniformLocation(_shaderProgramId, "fog_enable");
-            _shaderLocations.FogColor = GL.GetUniformLocation(_shaderProgramId, "fog_color");
-            _shaderLocations.FogMinDistance = GL.GetUniformLocation(_shaderProgramId, "fog_min");
-            _shaderLocations.FogMaxDistance = GL.GetUniformLocation(_shaderProgramId, "fog_max");
-            _shaderLocations.UseOverride = GL.GetUniformLocation(_shaderProgramId, "use_override");
-            _shaderLocations.OverrideColor = GL.GetUniformLocation(_shaderProgramId, "override_color");
-            _shaderLocations.UsePaletteOverride = GL.GetUniformLocation(_shaderProgramId, "use_pal_override");
-            _shaderLocations.PaletteOverrideColor = GL.GetUniformLocation(_shaderProgramId, "pal_override_color");
-            _shaderLocations.MaterialAlpha = GL.GetUniformLocation(_shaderProgramId, "mat_alpha");
-            _shaderLocations.MaterialMode = GL.GetUniformLocation(_shaderProgramId, "mat_mode");
-            _shaderLocations.ViewMatrix = GL.GetUniformLocation(_shaderProgramId, "view_mtx");
-            _shaderLocations.ViewInvMatrix = GL.GetUniformLocation(_shaderProgramId, "view_inv_mtx");
-            _shaderLocations.ProjectionMatrix = GL.GetUniformLocation(_shaderProgramId, "proj_mtx");
-            _shaderLocations.TextureMatrix = GL.GetUniformLocation(_shaderProgramId, "tex_mtx");
-            _shaderLocations.TexgenMode = GL.GetUniformLocation(_shaderProgramId, "texgen_mode");
-            _shaderLocations.MatrixStack = GL.GetUniformLocation(_shaderProgramId, "mtx_stack");
-            _shaderLocations.ToonTable = GL.GetUniformLocation(_shaderProgramId, "toon_table");
+            _shaderLocations.UseLight = GL.GetUniformLocation(_shaderProgramId, "u_lit");
+            _shaderLocations.ShowColors = GL.GetUniformLocation(_shaderProgramId, "u_vertexColors");
+            _shaderLocations.UseTexture = GL.GetUniformLocation(_shaderProgramId, "u_textured");
+            _shaderLocations.Light1Color = GL.GetUniformLocation(_shaderProgramId, "u_light0Color");
+            _shaderLocations.Light1Vector = GL.GetUniformLocation(_shaderProgramId, "u_light0Dir");
+            _shaderLocations.Light2Color = GL.GetUniformLocation(_shaderProgramId, "u_light1Color");
+            _shaderLocations.Light2Vector = GL.GetUniformLocation(_shaderProgramId, "u_light1Dir");
+            _shaderLocations.Diffuse = GL.GetUniformLocation(_shaderProgramId, "u_matDiffuse");
+            _shaderLocations.Ambient = GL.GetUniformLocation(_shaderProgramId, "u_matAmbient");
+            _shaderLocations.Specular = GL.GetUniformLocation(_shaderProgramId, "u_matSpecular");
+            _shaderLocations.Emission = GL.GetUniformLocation(_shaderProgramId, "u_matEmission");
+            _shaderLocations.UseFog = GL.GetUniformLocation(_shaderProgramId, "u_fogOn");
+            _shaderLocations.FogColor = GL.GetUniformLocation(_shaderProgramId, "u_fogColor");
+            _shaderLocations.FogMinDistance = GL.GetUniformLocation(_shaderProgramId, "u_fogNear");
+            _shaderLocations.FogMaxDistance = GL.GetUniformLocation(_shaderProgramId, "u_fogFar");
+            _shaderLocations.UseOverride = GL.GetUniformLocation(_shaderProgramId, "u_colorOverrideOn");
+            _shaderLocations.OverrideColor = GL.GetUniformLocation(_shaderProgramId, "u_colorOverride");
+            _shaderLocations.UsePaletteOverride = GL.GetUniformLocation(_shaderProgramId, "u_paletteOverrideOn");
+            _shaderLocations.PaletteOverrideColor = GL.GetUniformLocation(_shaderProgramId, "u_paletteOverride");
+            _shaderLocations.MaterialAlpha = GL.GetUniformLocation(_shaderProgramId, "u_matAlpha");
+            _shaderLocations.MaterialMode = GL.GetUniformLocation(_shaderProgramId, "u_polyMode");
+            _shaderLocations.ViewMatrix = GL.GetUniformLocation(_shaderProgramId, "u_view");
+            _shaderLocations.ViewInvMatrix = GL.GetUniformLocation(_shaderProgramId, "u_billboard");
+            _shaderLocations.ProjectionMatrix = GL.GetUniformLocation(_shaderProgramId, "u_projection");
+            _shaderLocations.TextureMatrix = GL.GetUniformLocation(_shaderProgramId, "u_texMatrix");
+            _shaderLocations.TexgenMode = GL.GetUniformLocation(_shaderProgramId, "u_texgen");
+            _shaderLocations.MatrixStack = GL.GetUniformLocation(_shaderProgramId, "u_bones");
+            _shaderLocations.ToonTable = GL.GetUniformLocation(_shaderProgramId, "u_toonRamp");
 
             _shaderLocations.FadeColor = GL.GetUniformLocation(_rttShaderProgramId, "fade_color");
             _shaderLocations.LayerAlpha = GL.GetUniformLocation(_rttShaderProgramId, "alpha");
@@ -696,6 +857,29 @@ namespace MphRead
 
         private void GenerateLists(Model model, bool isRoom)
         {
+            if (Headless)
+            {
+                if (CollectDrawItems)
+                {
+                    // same sharing rule as below: meshes drawing the same dlist share one id
+                    var hostIds = new Dictionary<int, int>();
+                    foreach (Mesh mesh in model.Meshes)
+                    {
+                        if (mesh.ListId != 0)
+                        {
+                            continue;
+                        }
+                        if (!hostIds.TryGetValue(mesh.DlistId, out int hostId))
+                        {
+                            _hostMeshes.Add((model, mesh, isRoom));
+                            hostId = _hostMeshes.Count;
+                            hostIds.Add(mesh.DlistId, hostId);
+                        }
+                        mesh.ListId = hostId;
+                    }
+                }
+                return;
+            }
             var tempListIds = new Dictionary<int, int>();
             foreach (Mesh mesh in model.Meshes)
             {
@@ -993,12 +1177,59 @@ namespace MphRead
             GenerateLists(model, isRoom);
         }
 
+        // recomp: a host can have the room-load worker (RoomEntity.ProcessTransition) decode the next room's textures --
+        // the room model's and every incoming entity's -- so the frames that set the room up (one entity per step, then
+        // the room model in EndTransition) only file them (Android, 2026-10-03: decoding was 15-23 ms of the swap-in frame
+        // on a desktop CPU, several times that on the Odin, plus 5-10 ms per entity while crossing). Off = MphRead's own.
+        public static bool HostPredecodeTextures { get; set; }
+        private readonly ConcurrentDictionary<(int, int, int, int), (IReadOnlyList<ColorRgba> Pixels, bool Opaque)> _predecoded = new();
+
+        // any thread: GetPixels only reads the model (InitTextures' RenderMode fix-up stays on the GL thread)
+        public void PredecodeTextures(Model model)
+        {
+            foreach ((int textureId, int paletteId, int recolorId) in TextureCombos(model, fixRenderModes: false))
+            {
+                if (_predecoded.ContainsKey((model.Id, textureId, paletteId, recolorId)))
+                {
+                    continue;
+                }
+                IReadOnlyList<ColorRgba> decoded = model.GetPixels(textureId, paletteId, recolorId);
+                bool opaque = true;
+                for (int i = 0; i < decoded.Count; i++)
+                {
+                    opaque &= decoded[i].Alpha == 255;
+                }
+                _predecoded[(model.Id, textureId, paletteId, recolorId)] = (decoded, opaque);
+            }
+        }
+
+        // the room is in: drop what was decoded for models whose textures were already filed
+        public void ClearPredecodedTextures()
+        {
+            _predecoded.Clear();
+        }
+
         private void InitTextures(Model model)
         {
             if (_texPalMap.ContainsKey(model.Id))
             {
                 return;
             }
+            HashSet<(int, int, int)> combos = TextureCombos(model, fixRenderModes: true);
+            if (combos.Count > 0)
+            {
+                var map = new TextureMap();
+                foreach ((int textureId, int paletteId, int recolorId) in combos)
+                {
+                    bool onlyOpaque = BindTexture(model, textureId, paletteId, recolorId);
+                    map.Add(textureId, paletteId, recolorId, _textureCount, onlyOpaque);
+                }
+                _texPalMap.Add(model.Id, map);
+            }
+        }
+
+        private static HashSet<(int, int, int)> TextureCombos(Model model, bool fixRenderModes)
+        {
             var combos = new HashSet<(int, int, int)>();
             foreach (Material material in model.Materials)
             {
@@ -1006,7 +1237,7 @@ namespace MphRead
                 {
                     continue;
                 }
-                if (material.RenderMode == RenderMode.Unknown3 || material.RenderMode == RenderMode.Unknown4)
+                if (fixRenderModes && (material.RenderMode == RenderMode.Unknown3 || material.RenderMode == RenderMode.Unknown4))
                 {
                     material.RenderMode = RenderMode.Normal;
                 }
@@ -1033,16 +1264,7 @@ namespace MphRead
             {
                 combos.Add((0, 0, 0));
             }
-            if (combos.Count > 0)
-            {
-                var map = new TextureMap();
-                foreach ((int textureId, int paletteId, int recolorId) in combos)
-                {
-                    bool onlyOpaque = BindTexture(model, textureId, paletteId, recolorId);
-                    map.Add(textureId, paletteId, recolorId, _textureCount, onlyOpaque);
-                }
-                _texPalMap.Add(model.Id, map);
-            }
+            return combos;
         }
 
         public int BindGetTexture(Model model, int textureId, int paletteId, int recolorId)
@@ -1058,6 +1280,32 @@ namespace MphRead
         private bool BindTexture(Model model, int textureId, int paletteId, int recolorId)
         {
             _textureCount++;
+            if (Headless)
+            {
+                if (!CollectDrawItems)
+                {
+                    return true;
+                }
+                // decode once: the host needs the pixels, and "only opaque" decides which pass the items go in
+                IReadOnlyList<ColorRgba> decoded;
+                bool opaque = true;
+                if (_predecoded.TryRemove((model.Id, textureId, paletteId, recolorId), out var pre))
+                {
+                    decoded = pre.Pixels;
+                    opaque = pre.Opaque;
+                }
+                else
+                {
+                    decoded = model.GetPixels(textureId, paletteId, recolorId);
+                    for (int i = 0; i < decoded.Count; i++)
+                    {
+                        opaque &= decoded[i].Alpha == 255;
+                    }
+                }
+                Texture tex = model.Recolors[recolorId].Textures[textureId];
+                SetHostTexture(_textureCount, decoded, tex.Width, tex.Height);
+                return opaque;
+            }
             bool onlyOpaque = true;
             var pixels = new List<uint>();
             foreach (ColorRgba pixel in model.GetPixels(textureId, paletteId, recolorId))
@@ -1076,6 +1324,14 @@ namespace MphRead
         public int BindGetTexture(IReadOnlyList<ColorRgba> data, int width, int height)
         {
             _textureCount++;
+            if (Headless)
+            {
+                if (CollectDrawItems)
+                {
+                    SetHostTexture(_textureCount, data, width, height);
+                }
+                return _textureCount;
+            }
             GL.BindTexture(TextureTarget.Texture2D, _textureCount);
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
@@ -1085,6 +1341,14 @@ namespace MphRead
 
         public void BindTexture(IReadOnlyList<ColorRgba> data, int width, int height, int bindingId)
         {
+            if (Headless)
+            {
+                if (CollectDrawItems)
+                {
+                    SetHostTexture(bindingId, data, width, height);
+                }
+                return;
+            }
             GL.BindTexture(TextureTarget.Texture2D, bindingId);
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
@@ -1130,8 +1394,11 @@ namespace MphRead
 
         public void OnUpdateFrame()
         {
-            GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
-            GL.UseProgram(_shaderProgramId);
+            if (!Headless)
+            {
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
+                GL.UseProgram(_shaderProgramId);
+            }
             LoadAndUnload();
             // todo: FPS stuff
             _frameTime = 1 / 60f;
@@ -1151,10 +1418,20 @@ namespace MphRead
                 {
                     PlayerEntity.Main.Controls.ClearAll();
                 }
-                PlayerEntity.ProcessInput(_keyboardState, _mouseState, _inputMode == InputMode.CameraOnly);
+                if (Headless)
+                {
+                    PlayerEntity.ProcessHostInput(_inputMode == InputMode.CameraOnly);
+                }
+                else
+                {
+                    PlayerEntity.ProcessInput(_keyboardState, _mouseState, _inputMode == InputMode.CameraOnly);
+                }
                 _room?.UpdateTransition();
             }
-            OnKeyHeld();
+            if (!Headless)
+            {
+                OnKeyHeld(); // viewer debug camera keys
+            }
             _singleParticleCount = 0;
             _decalItems.Clear();
             _nonDecalItems.Clear();
@@ -1176,8 +1453,11 @@ namespace MphRead
                 {
                     UpdateScene();
                 }
-                Sound.Sfx.Update(_frameTime);
-                Music.UpdateMusic();
+                if (!Headless)
+                {
+                    Sound.Sfx.Update(_frameTime);
+                    Music.UpdateMusic();
+                }
             }
             if (ProcessFrame || CameraMode != CameraMode.Player)
             {
@@ -1189,7 +1469,26 @@ namespace MphRead
             {
                 PlayerEntity.Main.UpdateHud();
             }
-            GetDrawItems();
+            if (Headless)
+            {
+                // fades normally advance in OnRenderFrame -> UpdateUniforms; their end actions load rooms/movies
+                if (ProcessFrame)
+                {
+                    UpdateFade();
+                }
+            }
+            if (!Headless || CollectDrawItems)
+            {
+                GetDrawItems();
+                if (Headless)
+                {
+                    RecordHud();
+                }
+            }
+            else
+            {
+                _room?.UpdateVisibility();
+            }
             if (ProcessFrame)
             {
                 if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
@@ -1216,13 +1515,54 @@ namespace MphRead
             return Matrix4.CreatePerspectiveFieldOfView(fov, aspect, _nearClip, _useClip ? _farClip : 10000f);
         }
 
+        // Host hooks (recomp view options; the defaults keep MphRead's own picture).
+        // HostFramingAspect > 0: a screen wider than this keeps that aspect's side-to-side view and gives up top-to-bottom
+        // view instead (4/3 = the DS's framing). 0 = MphRead's own: the game's 78 degrees top to bottom, sides widen.
+        public static float HostFramingAspect { get; set; }
+        // HostScreenWarp: the host redraws the 3D view through a 2D warp (Panini), so HUD markers placed on 3D points
+        // (reticle, locator icons, scan brackets) go through it too. NDC in and out, (-1, -1) = bottom-left.
+        public static Func<Vector2, Vector2>? HostScreenWarp { get; set; }
+        // bot vision (PlayerAi's "can I see you") uses this fixed aspect instead of the window's, so bots see the same on
+        // every screen. 16:9 = ~110 degrees side to side; the DS's 4:3 = ~94.
+        public static float HostAiAspect { get; set; } = 16f / 9;
+
+        public Matrix4 GetAiPerspectiveMatrix(float fov)
+        {
+            return Matrix4.CreatePerspectiveFieldOfView(fov, HostAiAspect, _nearClip, _useClip ? _farClip : 10000f);
+        }
+
+        // Matrix.ProjectPosition's output (percentages from the top-left) through HostScreenWarp
+        public static Vector2 HostWarpScreenPos(Vector2 pos)
+        {
+            if (HostScreenWarp == null)
+            {
+                return pos;
+            }
+            Vector2 ndc = HostScreenWarp(new Vector2(pos.X * 2 - 1, 1 - pos.Y * 2));
+            return new Vector2((ndc.X + 1) / 2, (1 - ndc.Y) / 2);
+        }
+
+        private float FramedFov(float fov)
+        {
+            float aspect = Size.X / (float)Size.Y;
+            if (HostFramingAspect > 0 && aspect > HostFramingAspect)
+            {
+                return 2 * MathF.Atan(MathF.Tan(fov / 2) * HostFramingAspect / aspect);
+            }
+            return fov;
+        }
+
         private void UpdateProjection()
         {
             // todo: update this only when the viewport or camera values change
-            _perspectiveMatrix = GetPerspectiveMatrix(_cameraFov);
-            GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref _perspectiveMatrix);
+            float fov = FramedFov(_cameraFov); // recomp: HostFramingAspect
+            _perspectiveMatrix = GetPerspectiveMatrix(fov);
+            if (!Headless)
+            {
+                GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref _perspectiveMatrix);
+            }
             // update frustum info
-            Vector3 camPos = PlayerEntity.Main.CameraInfo.Position;
+            Vector3 camPos = PlayerEntity.Main.CameraInfo.Position + HostCameraOffset;
             var camRight = new Vector3(_viewMatrix.Row0.X, _viewMatrix.Row0.Y, -_viewMatrix.Row0.Z);
             var camUp = new Vector3(_viewMatrix.Row1.X, _viewMatrix.Row1.Y, -_viewMatrix.Row1.Z);
             var camFacing = new Vector3(_viewMatrix.Row2.X, _viewMatrix.Row2.Y, -_viewMatrix.Row2.Z);
@@ -1239,9 +1579,9 @@ namespace MphRead
             }
 
             float aspect = Size.X / (float)Size.Y;
-            float cosFov = MathF.Cos(_cameraFov / 2);
+            float cosFov = MathF.Cos(fov / 2);
             float cosFovDiv = cosFov / aspect;
-            float sinFov = MathF.Sin(_cameraFov / 2);
+            float sinFov = MathF.Sin(fov / 2);
 
             FrustumInfo.Index = 1;
             FrustumInfo.Count = 5;
@@ -1316,81 +1656,9 @@ namespace MphRead
             {
                 return false;
             }
-            // pass 1: opaque
-            GL.ColorMask(true, true, true, true);
-            GL.Enable(EnableCap.AlphaTest);
-            GL.AlphaFunc(AlphaFunction.Equal, 1.0f);
-            GL.DepthFunc(DepthFunction.Less);
-            GL.DepthMask(true);
-            GL.Enable(EnableCap.StencilTest);
-            GL.StencilMask(0xFF);
-            GL.StencilOp(StencilOp.Zero, StencilOp.Zero, StencilOp.Zero);
-            GL.StencilFunc(StencilFunction.Always, 0, 0xFF);
-            for (int i = 0; i < _nonDecalItems.Count; i++)
-            {
-                RenderItem item = _nonDecalItems[i];
-                RenderItem(item);
-            }
-            GL.Disable(EnableCap.AlphaTest);
-            // pass 2: decal
-            GL.Enable(EnableCap.PolygonOffsetFill);
-            GL.PolygonOffset(-1, -1);
-            // todo?: decals shouldn't render unless they have ~equal depth to the previous polygon,
-            // which means the rendering order here needs to be the same as it is in-game
-            GL.DepthFunc(DepthFunction.Lequal);
-            GL.Enable(EnableCap.Blend);
-            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-            for (int i = 0; i < _decalItems.Count; i++)
-            {
-                RenderItem item = _decalItems[i];
-                RenderItem(item);
-            }
-            GL.PolygonOffset(0, 0);
-            GL.Disable(EnableCap.PolygonOffsetFill);
-            // pass 3: mark transparent faces in stencil
-            GL.Enable(EnableCap.AlphaTest);
-            GL.AlphaFunc(AlphaFunction.Less, 1.0f);
-            GL.ColorMask(false, false, false, false);
-            GL.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Replace);
-            for (int i = 0; i < _translucentItems.Count; i++)
-            {
-                RenderItem item = _translucentItems[i];
-                GL.StencilFunc(StencilFunction.Greater, item.PolygonId, 0xFF);
-                RenderItem(item);
-            }
-            // pass 4: rebuild depth buffer
-            GL.Clear(ClearBufferMask.DepthBufferBit);
-            GL.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Keep);
-            GL.StencilFunc(StencilFunction.Always, 0, 0xFF);
-            GL.AlphaFunc(AlphaFunction.Equal, 1.0f);
-            for (int i = 0; i < _nonDecalItems.Count; i++)
-            {
-                RenderItem item = _nonDecalItems[i];
-                RenderItem(item);
-            }
-            // pass 5: translucent (behind)
-            GL.AlphaFunc(AlphaFunction.Less, 1.0f);
-            GL.ColorMask(true, true, true, true);
-            GL.DepthMask(false);
-            GL.DepthFunc(DepthFunction.Lequal);
-            GL.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Keep);
-            for (int i = 0; i < _translucentItems.Count; i++)
-            {
-                RenderItem item = _translucentItems[i];
-                GL.StencilFunc(StencilFunction.Notequal, item.PolygonId, 0xFF);
-                RenderItem(item);
-            }
-            // pass 6: translucent (before)
-            GL.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Keep);
-            for (int i = 0; i < _translucentItems.Count; i++)
-            {
-                RenderItem item = _translucentItems[i];
-                GL.StencilFunc(StencilFunction.Equal, item.PolygonId, 0xFF);
-                RenderItem(item);
-            }
-            GL.DepthMask(true);
-            GL.Disable(EnableCap.AlphaTest);
-            GL.Disable(EnableCap.StencilTest);
+            // solids, decals, then translucent surfaces in two layers (Rendering/LayeredDraw.cs)
+            _layeredDraw ??= new LayeredDraw<RenderItem>(new DesktopLayerGl(), item => item.PolygonId, item => RenderItem(item));
+            _layeredDraw.DrawFrame(_nonDecalItems, _decalItems, _translucentItems);
             GL.PolygonMode(TriangleFace.FrontAndBack, OpenTK.Graphics.OpenGL.PolygonMode.Fill);
 
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
@@ -1564,15 +1832,21 @@ namespace MphRead
         {
             if (_texPalMap.TryGetValue(model.Id, out TextureMap? map))
             {
-                foreach (KeyValuePair<int, (int BindingId, bool OnlyOpaque)> kvp in map)
+                if (!Headless)
                 {
-                    GL.DeleteTexture(kvp.Value.BindingId);
+                    foreach (KeyValuePair<int, (int BindingId, bool OnlyOpaque)> kvp in map)
+                    {
+                        GL.DeleteTexture(kvp.Value.BindingId);
+                    }
                 }
                 _texPalMap.Remove(model.Id);
             }
-            foreach (Mesh mesh in model.Meshes)
+            if (!Headless)
             {
-                GL.DeleteLists(mesh.ListId, 1);
+                foreach (Mesh mesh in model.Meshes)
+                {
+                    GL.DeleteLists(mesh.ListId, 1);
+                }
             }
             Read.RemoveModel(model.Name, model.FirstHunt);
         }
@@ -1596,6 +1870,10 @@ namespace MphRead
                 if (_cameraMode == CameraMode.Player)
                 {
                     _viewMatrix = PlayerEntity.Main.CameraInfo.ViewMatrix;
+                    if (HostCameraOffset != Vector3.Zero)
+                    {
+                        _viewMatrix = Matrix4.CreateTranslation(-HostCameraOffset) * _viewMatrix;
+                    }
                     float fov = PlayerEntity.Main.CameraInfo.Fov > 0 ? PlayerEntity.Main.CameraInfo.Fov : 78;
                     _cameraFov = MathHelper.DegreesToRadians(fov);
                 }
@@ -1610,7 +1888,10 @@ namespace MphRead
                     _viewInvRotYMatrix.Row2.Xyz = new Vector3(_viewInvRotMatrix.Row2.X, 0, _viewInvRotMatrix.Row2.Z).Normalized();
                 }
             }
-            GL.UniformMatrix4(_shaderLocations.ViewMatrix, transpose: false, ref _viewMatrix);
+            if (!Headless)
+            {
+                GL.UniformMatrix4(_shaderLocations.ViewMatrix, transpose: false, ref _viewMatrix);
+            }
         }
 
         private void UpdateCameraPosition()
@@ -1636,7 +1917,7 @@ namespace MphRead
             }
             else if (_cameraMode == CameraMode.Player)
             {
-                _cameraPosition = PlayerEntity.Main.CameraInfo.Position;
+                _cameraPosition = PlayerEntity.Main.CameraInfo.Position + HostCameraOffset;
             }
         }
 
@@ -1724,6 +2005,23 @@ namespace MphRead
         private readonly List<BeamEffectEntity> _activeBeamEffects = new List<BeamEffectEntity>(_beamEffectMax);
         private readonly Queue<BombEntity> _inactiveBombs = new Queue<BombEntity>(_bombMax);
         private readonly List<BombEntity> _activeBombs = new List<BombEntity>(_bombMax);
+
+        // recomp: a second release of an effect entry, or a release reaching an element that another owner has since
+        // taken from the pool, is ignored instead of queueing the same object twice. The double queueing handed one
+        // pooled object to two owners, and one owner's release emptied an element the other still ran, which ended
+        // in an index-out-of-range on its particle definitions in ProcessEffects (Odin, Arcterra escape, 2026-10-01).
+        // Hosts get a warning with the stack for the first few, to find the caller that released twice.
+        public static Action<string>? HostEffectPoolWarning { get; set; }
+        private static int _effectPoolWarnings = 0;
+
+        private void WarnEffectPool(string what)
+        {
+            if (HostEffectPoolWarning != null && _effectPoolWarnings < 8)
+            {
+                _effectPoolWarnings++;
+                HostEffectPoolWarning($"effect pool: {what} (room {RoomId}, frame {_frameCount})\n{Environment.StackTrace}");
+            }
+        }
 
         private void AllocateEffects()
         {
@@ -1817,10 +2115,20 @@ namespace MphRead
 
         public void UnlinkEffectEntry(EffectEntry entry)
         {
+            if (_inactiveEffects.Contains(entry))
+            {
+                WarnEffectPool("effect entry released twice");
+                return;
+            }
             for (int i = 0; i < entry.Elements.Count; i++)
             {
                 EffectElementEntry element = entry.Elements[i];
-                UnlinkEffectElement(element);
+                if (element.EffectEntry != entry)
+                {
+                    WarnEffectPool($"entry fx{entry.EffectId} skipped element {element.EffectName}/{element.ElementName}, now owned elsewhere");
+                    continue;
+                }
+                UnlinkEffectElement(element); // no-op if it's already free (e.g. ClearNonPersistentEffects)
             }
             entry.Elements.Clear();
             _inactiveEffects.Enqueue(entry);
@@ -1828,9 +2136,22 @@ namespace MphRead
 
         public void DetachEffectEntry(EffectEntry entry, bool setExpired)
         {
+            if (_inactiveEffects.Contains(entry))
+            {
+                WarnEffectPool("effect entry detached after its release");
+                return;
+            }
             for (int i = 0; i < entry.Elements.Count; i++)
             {
                 EffectElementEntry element = entry.Elements[i];
+                if (element.EffectEntry != entry || !_activeElements.Contains(element))
+                {
+                    if (element.EffectEntry != entry)
+                    {
+                        WarnEffectPool($"entry fx{entry.EffectId} skipped element {element.EffectName}/{element.ElementName}, now owned elsewhere");
+                    }
+                    continue; // freed (or taken by another owner) since it was spawned into this entry
+                }
                 if (element.Flags.TestFlag(EffElemFlags.DestroyOnDetach))
                 {
                     UnlinkEffectElement(element);
@@ -1893,13 +2214,16 @@ namespace MphRead
 
         private void UnlinkEffectElement(EffectElementEntry element)
         {
+            if (!_activeElements.Remove(element))
+            {
+                return; // already free: queueing it again would hand it to two owners
+            }
             while (element.Particles.Count > 0)
             {
                 EffectParticle particle = element.Particles[0];
                 element.Particles.Remove(particle);
                 UnlinkEffectParticle(particle);
             }
-            _activeElements.Remove(element);
             element.EntityCollision = null;
             element.Definition = null;
             element.Model = null!;
@@ -2129,6 +2453,12 @@ namespace MphRead
                     }
                     int spawnCount = (int)MathF.Floor(element.ParticleAmount);
                     element.ParticleAmount -= spawnCount;
+                    if (spawnCount > 0 && element.ParticleDefinitions.Count == 0)
+                    {
+                        // recomp: only a corrupted pool gets here (see HostEffectPoolWarning); don't index an empty list
+                        WarnEffectPool($"active element {element.EffectName}/{element.ElementName} has no particle definitions");
+                        spawnCount = 0;
+                    }
                     float portionTotal = 0;
                     for (int j = 0; j < spawnCount; j++)
                     {
@@ -2307,12 +2637,16 @@ namespace MphRead
                         {
                             particle.RwField4 = particle.InvokeFloatFunc(info, times);
                         }
-                        if (element.Actions.TryGetValue(FuncAction.SetParticleId, out info))
+                        if (element.Actions.TryGetValue(FuncAction.SetParticleId, out info) && element.ParticleDefinitions.Count > 0)
                         {
                             particle.ParticleId = (int)particle.InvokeFloatFunc(info, times);
                             if (particle.ParticleId >= element.ParticleDefinitions.Count)
                             {
                                 particle.ParticleId = element.ParticleDefinitions.Count - 1;
+                            }
+                            else if (particle.ParticleId < 0) // recomp: no ROM effect does this (Tools -fxscan)
+                            {
+                                particle.ParticleId = 0;
                             }
                             particle.MaterialId = element.ParticleDefinitions[particle.ParticleId].MaterialId;
                         }
@@ -2658,13 +2992,31 @@ namespace MphRead
         public ConcurrentQueue<EntityBase> LoadedEntities { get; } = new ConcurrentQueue<EntityBase>();
         public bool InitEntities { get; set; }
 
+        // recomp: hosts can see which loaded entity's set-up (its models' textures decoded, its resources loaded) took a
+        // frame's time; null = no timing
+        public static Action<string>? HostEntityInitTrace { get; set; }
+
         public void InitLoadedEntity(int count)
         {
             int i = 0;
             while ((count == -1 || i++ < count) && LoadedEntities.TryDequeue(out EntityBase? entity))
             {
+                long start = System.Diagnostics.Stopwatch.GetTimestamp();
                 InitializeEntity(entity);
                 SceneSetup.LoadEntityResources(entity, this);
+                if (HostEntityInitTrace != null)
+                {
+                    double ms = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                    if (ms >= 5)
+                    {
+                        var names = new List<string>();
+                        foreach (ModelInstance inst in entity.GetModels())
+                        {
+                            names.Add(inst.Model.Name);
+                        }
+                        HostEntityInitTrace($"{entity.Type} #{entity.Id} ({String.Join("+", names)}) set up in {ms:0} ms");
+                    }
+                }
             }
         }
 
@@ -2692,12 +3044,19 @@ namespace MphRead
                         RemoveEntity(entity);
                     }
                 }
-                PlayerEntity.PlayerAiData.UpdateVisibilityAndGlobals(this);
+                // RoomEntity.ProcessTransition runs on a worker thread and resets the static AI globals and swaps the
+                // node data (InitializeGlobals/SetNodeData) -- bot AI reading them at the same time can crash
+                // (null player in UpdateGlobals). Hold bot AI for the few frames the load takes.
+                bool roomLoading = GameState.TransitionState == TransitionState.Process;
+                if (!roomLoading)
+                {
+                    PlayerEntity.PlayerAiData.UpdateVisibilityAndGlobals(this);
+                }
                 for (int i = 0; i < PlayerEntity.Players.Count; i++)
                 {
                     PlayerEntity.Players[i].ClosestNode = null;
                 }
-                for (int i = 0; i < PlayerEntity.Players.Count; i++)
+                for (int i = 0; i < PlayerEntity.Players.Count && !roomLoading; i++)
                 {
                     PlayerEntity player = PlayerEntity.Players[i];
                     if (player.IsBot && player.Health != 0)
@@ -2926,7 +3285,10 @@ namespace MphRead
             {
                 _fadeEnded = false;
             }
-            GL.ClearColor(_clearColor);
+            if (!Headless)
+            {
+                GL.ClearColor(_clearColor);
+            }
         }
 
         private void QuitGame(bool enteringShip)
@@ -3418,6 +3780,29 @@ namespace MphRead
             {
                 return;
             }
+            if (Headless)
+            {
+                float w, h;
+                if (info.ScaleX == -1 || info.ScaleY == -1)
+                {
+                    float size = MathF.Max(Size.X, Size.Y) / 2;
+                    w = size / (Size.X / 2f);
+                    h = size / (Size.Y / 2f);
+                }
+                else
+                {
+                    w = info.ScaleX;
+                    h = info.ScaleY;
+                }
+                HostHudItem item = NextHudItem();
+                item.Left = -w + info.ShiftX;
+                item.Right = w + info.ShiftX;
+                item.Top = h + info.ShiftY;
+                item.Bottom = -h + info.ShiftY;
+                item.Alpha = info.Alpha;
+                item.BindingId = info.BindingId;
+                return;
+            }
             GL.Uniform1(_shaderLocations.LayerAlpha, info.Alpha);
             GL.BindTexture(TextureTarget.Texture2D, info.BindingId);
             int minParameter = (int)TextureMinFilter.Nearest;
@@ -3464,6 +3849,11 @@ namespace MphRead
         {
             if (!inst.Enabled)
             {
+                return;
+            }
+            if (Headless)
+            {
+                RecordHudObject(inst, mode);
                 return;
             }
             float x = inst.PositionX;
@@ -3538,6 +3928,10 @@ namespace MphRead
 
         public void DrawIconModel(Vector2 position, float angle, ModelInstance inst, ColorRgb color, float alpha)
         {
+            if (Headless)
+            {
+                return; // multiplayer locator icons; not recorded
+            }
             float scale = Size.Y / 192f;
             var position3d = new Vector3(position.X * Size.X - Size.X / 2, (1 - position.Y) * Size.Y - (Size.Y / 2), -1f);
             Matrix4 transform = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(angle))
@@ -3562,11 +3956,75 @@ namespace MphRead
             GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref identity);
         }
 
+        // DrawHudObject's placement maths, recorded as an NDC quad
+        private void RecordHudObject(HudObjectInstance inst, int mode)
+        {
+            float viewWidth = Size.X;
+            float viewHeight = Size.Y;
+            float width = inst.Width;
+            float height = inst.Height;
+            if (mode == 2)
+            {
+                width = width / 256 * viewWidth;
+                height = height / 192 * viewHeight;
+            }
+            else if (mode == 1)
+            {
+                float aspect = height / width;
+                height = height / 192 * viewHeight;
+                width = height / aspect;
+            }
+            else
+            {
+                float aspect = width / height;
+                width = width / 256 * viewWidth;
+                height = width / aspect;
+            }
+            float leftPos = -viewWidth / 2 + inst.PositionX * viewWidth - (inst.Center ? width / 2 : 0);
+            float topPos = viewHeight / 2 - inst.PositionY * viewHeight + (inst.Center ? height / 2 : 0);
+            float rightPos = (leftPos + width) / (viewWidth / 2);
+            float bottomPos = (topPos - height) / (viewHeight / 2);
+            leftPos /= viewWidth / 2;
+            topPos /= viewHeight / 2;
+            if (inst.FlipHorizontal)
+            {
+                (rightPos, leftPos) = (leftPos, rightPos);
+            }
+            if (inst.FlipVertical)
+            {
+                (bottomPos, topPos) = (topPos, bottomPos);
+            }
+            int sprite = InternHudSprite(inst.BindingId);
+            if (sprite < 0)
+            {
+                return;
+            }
+            HostHudItem item = NextHudItem();
+            item.Left = leftPos;
+            item.Right = rightPos;
+            item.Top = topPos;
+            item.Bottom = bottomPos;
+            item.Alpha = inst.Alpha;
+            item.UseMask = inst.UseMask;
+            item.SpriteIndex = sprite;
+        }
+
         public void DrawHudFilterModel(ModelInstance inst, float alpha = 1)
         {
             Model model = inst.Model;
             UpdateMaterials(model, 0);
             Material material = model.Materials[0];
+            if (Headless)
+            {
+                HostHudItem item = NextHudItem();
+                item.Left = -1;
+                item.Right = 1;
+                item.Top = 1;
+                item.Bottom = -1;
+                item.Alpha = material.Alpha / 31f * alpha;
+                item.BindingId = material.TextureBindingId;
+                return;
+            }
             GL.Uniform1(_shaderLocations.MaterialAlpha, material.Alpha / 31f * alpha);
             GL.BindTexture(TextureTarget.Texture2D, material.TextureBindingId);
             int minParameter = (int)TextureMinFilter.Nearest;
@@ -3600,6 +4058,10 @@ namespace MphRead
 
         public void DrawHudDamageModel(ModelInstance inst)
         {
+            if (Headless)
+            {
+                return; // todo: host drawing of the damage direction indicator
+            }
             Model model = inst.Model;
             UpdateMaterials(model, 0);
             GL.Uniform1(_shaderLocations.MaterialAlpha, 1f);
@@ -4482,7 +4944,7 @@ namespace MphRead
             _sb.Clear();
             string recording = _recording ? " - Recording" : "";
             string frameAdvance = _frameAdvanceOn ? " - Frame Advance" : "";
-            _sb.AppendLine($"MphRead Version {Program.Version}{recording}{frameAdvance}");
+            _sb.AppendLine($"MphRead Version {AppInfo.Version}{recording}{frameAdvance}");
             if (_showBotAiSlot >= 0 && _showBotAiSlot <= 3)
             {
                 OutputGetBotAi();

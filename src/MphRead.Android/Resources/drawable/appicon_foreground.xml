@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Provisional launcher icon (public beta audit S4): our own abstract reticle, no game art and no name, so it can
+     stay or be swapped once the owner picks the app's name (board D1). Adaptive-icon canvas 108 x 108, everything
+     inside the 66 dp safe circle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M28,54 a26,26 0 1,0 52,0 a26,26 0 1,0 -52,0"
+        android:fillColor="#00000000"
+        android:strokeColor="#38D6FF"
+        android:strokeWidth="3.5" />
+    <path
+        android:pathData="M54,33 L54,41 M54,67 L54,75 M33,54 L41,54 M67,54 L75,54"
+        android:strokeColor="#38D6FF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.5" />
+    <path
+        android:pathData="M54,46 L62,54 L54,62 L46,54 Z"
+        android:fillColor="#FF8A1F" />
+</vector>

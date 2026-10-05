@@ -816,8 +816,13 @@ namespace MphRead.Entities
                     // --> compensate for halved gravity so we can't go up steeper slopes
                     // todo?: the response when moving into walls laterally is also not accurate ("wall sliding")
                     // --> needs a hack; just doubling it results in jittering
+                    // walkable floor faces (normal Y > 0.5, the standing test below) keep the whole push-out on a biped: vanilla
+                    // does that (measured in an emulator walking up 26.6 and 45 deg ramps, docs/ACCURACY.md A9), and the quarter
+                    // made walking up them 10% (26.6 deg) to 40% (45 deg) slower than vanilla. Edges, steeper faces and the
+                    // morph balls keep the hack (unmeasured).
                     float factor = 1;
-                    if (result.Plane.Y > 0 && result.Plane.Y < 0.9f)
+                    if (result.Plane.Y > 0 && result.Plane.Y < 0.9f
+                        && (IsAltForm || result.Field0 != 0 || result.Plane.Y <= 0.5f))
                     {
                         factor = 0.5f / 2; // todo: FPS stuff
                     }

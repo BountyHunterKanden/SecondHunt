@@ -1,9 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Runtime core (library). Ships toward the Android app. Desktop-only tooling
+       (CLI entry, test harnesses, repackers, Blender export) was split into the
+       sibling MphRead.Tools project. A few entangled bits remain here for now and
+       are flagged for the M1 sim/presentation pass: Menu (holds runtime save
+       state), Selection (used by entities/renderer), Export/Images + Collada
+       (called by Renderer/HudInfo/Read). See docs/M0_survey_and_split_plan.md. -->
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
-    <PublishSingleFile>true</PublishSingleFile>
     <DebugType>embedded</DebugType>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
@@ -11,24 +15,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Export\modules\__pycache__\**" />
-    <EmbeddedResource Remove="Export\modules\__pycache__\**" />
-    <None Remove="Export\modules\__pycache__\**" />
+    <Compile Remove="Export\modules\**" />
+    <EmbeddedResource Remove="Export\modules\**" />
+    <None Remove="Export\modules\**" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- MoonSharp moved to MphRecomp.Core (only our Mods/ code uses Lua). -->
     <PackageReference Include="OpenTK" Version="4.9.4" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\NcsfPlay\NcsfPlay.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Update="paths.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
   </ItemGroup>
 
 </Project>

@@ -6,6 +6,18 @@ using MphRead.Text;
 
 namespace MphRead.Entities
 {
+    // host-side names for PlayerDialog's touch buttons (same order as _buttonInfo)
+    public enum HostDialogButton
+    {
+        None = -1,
+        Okay = 0,
+        Yes = 1,
+        No = 2,
+        Left = 3,
+        Right = 4,
+        Advance = 5 // not a DS button: next page if there is one, else OK (a gamepad's confirm)
+    }
+
     public enum DialogType
     {
         None = -1,

@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The real Android app. First job (M0): a first-launch flow that extracts the
+       user's ROM into app-private storage using the runtime's Extract. References
+       the runtime core library. If OpenTK (a runtime dependency, desktop-GL) does
+       not package cleanly for android, that forces the M1 sim/presentation split
+       sooner — this project is the canary that tells us. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>com.mphrecomp.app</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The app's name on the device. Dev builds stay "MPH Recomp" / com.mphrecomp.app (the Odin's install and saves);
+         a public build (MphReleaseSign, below) takes the public name and package id (board D1, the owner's pick), so the
+         two install side by side and a dev build never collides with a tester's install. -->
+    <MphAppLabel>MPH Recomp</MphAppLabel>
+    <MphPublicLabel>Second Hunt</MphPublicLabel>
+    <MphPublicAppId>com.secondhunt.app</MphPublicAppId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MphRead\MphRead.csproj" />
+    <!-- Our game/sim/save/mod core, for wiring GameSession into the renderer (M2). -->
+    <ProjectReference Include="..\MphRecomp.Core\MphRecomp.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Mono's nursery 4 MB -> 64 MB (campaign frame drops, 2026-10-03): the campaign sim allocates ~8 MB/s, so a
+         nursery GC ran ~2x a second, and each one made the GC bridge run an explicit Java GC on the GL thread (~9 ms).
+         Keeps the SDK's default concurrent major collector (major=marksweep-conc). -->
+    <AndroidEnvironment Include="gc_environment.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- RECOMP SETTINGS > CREDITS (CreditsActivity, public beta audit S29): the third-party notices the APK must carry -->
+    <EmbeddedResource Include="..\..\THIRD_PARTY_NOTICES.md" LogicalName="notices.md" />
+  </ItemGroup>
+
+  <!-- Release signing for public builds (public beta audit S1; docs/RELEASE.md). OPT-IN: a normal build keeps the
+       machine's debug key, so the Odin's dev install still updates in place (a different key can't update it: the
+       uninstall would wipe its saves). A public build passes -p:MphReleaseSign=true. The keystore lives outside the
+       repo (default %USERPROFILE%\mph-release\mph-release.keystore, or -p:AndroidSigningKeyStore=...), and both
+       passwords come from environment variables, never from a file in the repo. -->
+  <PropertyGroup Condition=" '$(MphReleaseSign)' == 'true' ">
+    <AndroidKeyStore>true</AndroidKeyStore>
+    <AndroidSigningKeyStore Condition=" '$(AndroidSigningKeyStore)' == '' ">$(USERPROFILE)\mph-release\mph-release.keystore</AndroidSigningKeyStore>
+    <AndroidSigningKeyAlias Condition=" '$(AndroidSigningKeyAlias)' == '' ">mph-release</AndroidSigningKeyAlias>
+    <AndroidSigningStorePass>env:MPH_KEYSTORE_PASS</AndroidSigningStorePass>
+    <AndroidSigningKeyPass>env:MPH_KEY_PASS</AndroidSigningKeyPass>
+    <!-- public build: BuildFlags.Public (Campaign's BuildFlags.cs) -> dev activities not exported (board S13/S19/S27/S34) -->
+    <DefineConstants>$(DefineConstants);MPH_PUBLIC</DefineConstants>
+    <ApplicationId>$(MphPublicAppId)</ApplicationId>
+    <MphAppLabel>$(MphPublicLabel)</MphAppLabel>
+  </PropertyGroup>
+  <PropertyGroup>
+    <!-- after the public group, so a public build's label lands in AndroidManifest.xml's ${appLabel} -->
+    <AndroidManifestPlaceholders>appLabel=$(MphAppLabel)</AndroidManifestPlaceholders>
+  </PropertyGroup>
+  <Target Name="MphCheckReleaseSigning" BeforeTargets="BeforeBuild" Condition=" '$(MphReleaseSign)' == 'true' ">
+    <Error Condition=" !Exists('$(AndroidSigningKeyStore)') " Text="MphReleaseSign: keystore not found at $(AndroidSigningKeyStore). Create it first (docs/RELEASE.md, step 1) or pass -p:AndroidSigningKeyStore=..." />
+    <Error Condition=" '$(MPH_KEYSTORE_PASS)' == '' Or '$(MPH_KEY_PASS)' == '' " Text="MphReleaseSign: set the MPH_KEYSTORE_PASS and MPH_KEY_PASS environment variables for this build (docs/RELEASE.md)." />
+  </Target>
+
+</Project>

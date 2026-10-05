@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- M1 de-risk spike: minimal net9.0-android app that opens a GLES surface and
+       clears it, logging GL vendor/renderer/version. Standalone (does not yet
+       reference the MphRead runtime). Proves the Android + direct-GLES toolchain
+       on the Odin 2 before the real renderer port. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>com.mphrecomp.bootspike</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+  </PropertyGroup>
+
+</Project>

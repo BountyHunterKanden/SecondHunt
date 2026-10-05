@@ -83,6 +83,12 @@ namespace MphRead.Utility
             return RepackMphCollision(editors, collision.Info.Portals);
         }
 
+        // Host (recomp): room collision built from outside data (imported Echoes arenas), no portals
+        public static byte[] PackMphCollision(IReadOnlyList<CollisionDataEditor> data)
+        {
+            return RepackMphCollision(data, new List<Portal>());
+        }
+
         public static byte[] RepackFhRoom(string room, RepackFilter filter = RepackFilter.All)
         {
             RoomMetadata meta = Metadata.RoomMetadata[room];

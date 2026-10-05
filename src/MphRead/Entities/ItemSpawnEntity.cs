@@ -90,7 +90,8 @@ namespace MphRead.Entities
             {
                 _spawnCooldown--;
             }
-            if (Item == null && _spawnCooldown == 0 && (_data.MaxSpawnCount == 0 || _spawnCount < _data.MaxSpawnCount))
+            if (Item == null && _spawnCooldown == 0 && (_data.MaxSpawnCount == 0 || _spawnCount < _data.MaxSpawnCount)
+                && !PlayerEntity.NetClient) // network play: a match client's items come from the host
             {
                 Item = SpawnItem(_data.ItemType, Position.AddY(0.65f), NodeRef, _scene);
                 if (Item != null)

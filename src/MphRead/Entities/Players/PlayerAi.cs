@@ -760,7 +760,7 @@ namespace MphRead.Entities
             private void UpdateAggro()
             {
                 float fov = MathHelper.DegreesToRadians(_player.CameraInfo.Fov > 0 ? _player.CameraInfo.Fov : 78);
-                Matrix4 perspectiveMatrix = _scene.GetPerspectiveMatrix(fov);
+                Matrix4 perspectiveMatrix = _scene.GetAiPerspectiveMatrix(fov); // recomp: fixed aspect (Scene.HostAiAspect)
                 foreach (PlayerEntity other in _scene.GetPlayerEntities())
                 {
                     if (other == _player || other.Health == 0 || !IsPlayerVisible(_player, other))
@@ -775,7 +775,9 @@ namespace MphRead.Entities
                         //Debugger.Break();
                         return;
                     }
-                    if (proj.X >= 1 || proj.Y >= 1)
+                    // recomp: all four screen edges, as the ROM checks them (signed pixel x in 0..255, y in 0..191; AMHE0
+                    // overlay 9 at 0x21379A8); MphRead checked only the right and bottom edges
+                    if (proj.X < 0 || proj.X >= 1 || proj.Y < 0 || proj.Y >= 1)
                     {
                         continue;
                     }
@@ -814,7 +816,7 @@ namespace MphRead.Entities
                         AggroFunc214864C(6, 1, 2, null, other, 0, alpha, 10, 3);
                     }
                     float otherFov = MathHelper.DegreesToRadians(other.CameraInfo.Fov > 0 ? other.CameraInfo.Fov : 78);
-                    Matrix4 otherPerspective = _scene.GetPerspectiveMatrix(otherFov);
+                    Matrix4 otherPerspective = _scene.GetAiPerspectiveMatrix(otherFov);
                     w = Matrix.ProjectPosition(_player.Position, other.CameraInfo.ViewMatrix, otherPerspective, out proj);
                     if (w < 0)
                     {
@@ -822,7 +824,7 @@ namespace MphRead.Entities
                         //Debugger.Break();
                         return;
                     }
-                    if (proj.X < 1 && proj.Y < 1)
+                    if (proj.X >= 0 && proj.X < 1 && proj.Y >= 0 && proj.Y < 1) // recomp: all four edges (ROM 0x2137BF8)
                     {
                         AggroFunc214864C(6, 2, 1, other, null, 0, 30, 10, 3);
                     }

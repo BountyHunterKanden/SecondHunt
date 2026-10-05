@@ -1,0 +1,13 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "pak": "MP3/SamusGun.pak",
+  "pakSha1": "94dd265e63fb032407a656942fe7ba898a7cc689",
+  "char": "ef5184d3e884b4cd",
+  "cmdl": "acf2e405f3e829cd",
+  "cskr": "7a0c74817f41f528",
+  "cinf": "9a0c67752d5f88e9",
+  "gunSet": 0,
+  "lights": [5, 8],
+  "animAliases": [["powerChargeShoot", "powerchargeshoot"]]
+}

@@ -22,6 +22,12 @@ namespace MphRead.Utility
             return RepackEntities(converted);
         }
 
+        // Host (recomp): an entity file built from outside data (imported Echoes arenas)
+        public static byte[] PackEntities(IReadOnlyList<EntityEditorBase> entities)
+        {
+            return RepackEntities(entities);
+        }
+
         public static byte[] RepackFhEntities(string room, RepackFilter filter = RepackFilter.All)
         {
             RoomMetadata meta = Metadata.RoomMetadata[room];

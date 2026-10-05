@@ -1579,17 +1579,44 @@ namespace MphRead
             new("cylBossLaserBurn", true)
         ]);
 
+        // Host (recomp): rooms registered at run time (imported Echoes arenas), looked up after the ROM's own table by
+        // name or by their own RoomMetadata.Id (1001+, past the ROM's ids; RoomEntity.Setup gives the scene that id)
+        private static readonly List<RoomMetadata> _hostRooms = new List<RoomMetadata>();
+        public static IReadOnlyList<RoomMetadata> HostRooms => _hostRooms;
+
+        public static void AddHostRoom(RoomMetadata meta)
+        {
+            int index = _hostRooms.FindIndex(r => r.Name == meta.Name);
+            if (index >= 0)
+            {
+                _hostRooms[index] = meta;
+            }
+            else
+            {
+                _hostRooms.Add(meta);
+            }
+        }
+
         public static (RoomMetadata?, int) GetRoomByName(string name)
         {
             if (RoomMetadata.TryGetValue(name, out RoomMetadata? metadata))
             {
                 return (metadata, _roomIds.IndexOf(i => i == metadata.Name));
             }
+            int host = _hostRooms.FindIndex(r => r.Name == name);
+            if (host >= 0)
+            {
+                return (_hostRooms[host], _hostRooms[host].Id);
+            }
             return (null, -1);
         }
 
         public static RoomMetadata? GetRoomById(int id, bool noThrow = false)
         {
+            if (id >= _roomIds.Count && _hostRooms.Find(r => r.Id == id) is RoomMetadata hostRoom)
+            {
+                return hostRoom;
+            }
             if (id < 0 || id > _roomIds.Count)
             {
                 if (noThrow)

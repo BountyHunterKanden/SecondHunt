@@ -688,8 +688,8 @@ namespace MphRead.Entities
         {
             BeamType previousWeapon = WeaponSelection;
             int selection = -1;
-            float x = Input.MouseState?.X ?? 0;
-            float y = Input.MouseState?.Y ?? 0;
+            float x = Scene.Headless ? HostPointerX : Input.MouseState?.X ?? 0;
+            float y = Scene.Headless ? HostPointerY : Input.MouseState?.Y ?? 0;
             float ratioX = _scene.Size.X / 256f;
             float ratioY = _scene.Size.Y / 192f;
             float distX = 224 * ratioX - x; // todo: invert for left-handed mode
@@ -813,6 +813,7 @@ namespace MphRead.Entities
                 }
             }
             Matrix.ProjectPosition(_aimPosition, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
+            pos = Scene.HostWarpScreenPos(pos); // recomp: Panini view
             _targetCircleInst.PositionX = MathF.Round(pos.X, 5);
             _targetCircleInst.PositionY = MathF.Round(pos.Y, 5);
             _targetCircleInst.Enabled = true;
@@ -1172,6 +1173,7 @@ namespace MphRead.Entities
             if (mult.Z < -1)
             {
                 Matrix.ProjectPosition(position, _scene.ViewMatrix, _scene.PerspectiveMatrix, out proj);
+                proj = Scene.HostWarpScreenPos(proj); // recomp: Panini view
                 x = proj.X * _scene.Size.X - W(128);
                 y = proj.Y * _scene.Size.Y - H(106);
             }

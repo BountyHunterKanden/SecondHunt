@@ -1,0 +1,23 @@
+{
+  "game": "mp4",
+  "pak": "universeRoom.pak",
+  "chpr": "7238eaad-21a1-4966-83fb-7fb7d1173bf6",
+  "chprSha1": "dd0180b990769f0d350f4a25fc107e576c22eb02",
+  "model": "8bb87307-3a3a-4539-a820-3666a6c93590",
+  "modelName": "violasuit_ic",
+  "character": "FpsMP4ViolaSuitIC",
+  "meshes": "auto",
+  "idle": "powerBasePosition",
+  "roles": [
+    ["powerBasePosition", "fp_idle_samus"],
+    ["powerShoot", "fpgun_rep_power_shot_samus"],
+    ["powerChargeUp", "fpgun_powerChargeWarmup_samus"],
+    ["powerChargeLoop", "fpgun_powerChargeLoop_samus"],
+    ["powerChargeShoot", "fpgun_powerChargeShoot_samus"],
+    ["powerMissleOpen", "fpgun_rep_powerMissile_open_samus"],
+    ["genericMissleShoot", "fpgun_rep_powerMissile_shot_samus"],
+    ["powerMissleAway", "fpgun_rep_powerMissile_close_samus"],
+    ["powerToHolster", "fpgunRep_iceState_into_samus"],
+    ["powerFromHolster", "fpgunRep_iceState_outof_samus"]
+  ]
+}

@@ -74,6 +74,15 @@ namespace MphRead
             return ReadModel(meta.Name, meta.ModelPath, meta.AnimationPath, meta.AnimationShare, meta.Recolors, meta.FirstHunt);
         }
 
+        // Load a model + animation file straight from paths relative to the file system root, bypassing the metadata
+        // tables. The recomp's front end uses it for the menu widgets the menu file names by path (e.g.
+        // @"main menu\options_Model.bin" + @"main menu\options_Selected_Anim.bin"). Not cached.
+        public static Model ReadModelFile(string name, string modelPath, string? animationPath)
+        {
+            var recolors = new List<RecolorMetadata>() { new RecolorMetadata("default", modelPath) };
+            return ReadModel(name, modelPath, animationPath, animationShare: null, recolors, firstHunt: false);
+        }
+
         public static ModelInstance GetRoomModelInstance(string name)
         {
             ModelInstance? inst = GetRoomModelInstanceOrNull(name);

@@ -154,7 +154,7 @@ namespace MphRead.Export
             sb.AppendLine("import mathutils");
             sb.AppendLine("from mph_common import *");
             sb.AppendLine();
-            sb.AppendLine($"export_version = '{Program.Version}'");
+            sb.AppendLine($"export_version = '{AppInfo.Version}'");
             sb.AppendLine($"# recolors: {String.Join(", ", model.Recolors.Select(r => r.Name))}");
             sb.AppendLine($"recolor = '{model.Recolors[0].Name}'");
             int uvAnimCount = model.AnimationGroups.Texcoord.Count(g => g.Animations.Any());

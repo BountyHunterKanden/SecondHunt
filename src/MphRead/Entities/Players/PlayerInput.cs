@@ -13,6 +13,16 @@ namespace MphRead.Entities
         private float _buttonAimY = 0;
         private const float _maxButtonAimX = 8;
         private const float _maxButtonAimY = 8;
+        // vanilla accuracy: 2 on a jump, so the frame after it keeps the jump frame's gravity (see ProcessMovement)
+        private byte _gravityHold = 0;
+        // vanilla accuracy: this frame's horizontal friction step on foot, sqrt of the per-tick factor (see ProcessMovement)
+        private float _walkFriction = 1;
+        // vanilla accuracy: the strafe/walk camera tilts (_field684/_field688) do tilt = (tilt + Field114) * 0.9 per 30 Hz
+        // tick. Two 60 Hz frames of tilt = (tilt + Field114 * _tiltAdd) * _tiltDecay give exactly that at every tick end;
+        // MphRead's "+ Field114 / 2, * 0.9" per frame leaned only half as far (27 vs 54 degrees) and settled twice as fast.
+        // Measured against the game in an emulator: docs/ACCURACY.md A2.
+        private static readonly float _tiltDecay = MathF.Sqrt(0.9f);
+        private static readonly float _tiltAdd = 0.9f / (0.9f + MathF.Sqrt(0.9f));
 
         private void ProcessInput()
         {
@@ -578,7 +588,7 @@ namespace MphRead.Entities
                         }
                         if (!EquipInfo.Zoomed)
                         {
-                            _field684 += Fixed.ToFloat(Values.Field114) * sign / 2; // todo: FPS stuff
+                            _field684 += Fixed.ToFloat(Values.Field114) * sign * _tiltAdd;
                             _field684 = Math.Clamp(_field684, -180, 180);
                         }
                     }
@@ -611,7 +621,7 @@ namespace MphRead.Entities
                         }
                         if (!EquipInfo.Zoomed)
                         {
-                            _field688 += Fixed.ToFloat(Values.Field114) * sign / 2; // todo: FPS stuff
+                            _field688 += Fixed.ToFloat(Values.Field114) * sign * _tiltAdd;
                             _field688 = Math.Clamp(_field688, -180, 180);
                         }
                     }
@@ -630,7 +640,7 @@ namespace MphRead.Entities
                     }
                     else
                     {
-                        _field684 *= 0.9f; // sktodo: FPS stuff
+                        _field684 *= _tiltDecay;
                     }
                     if (Controls.MoveUp.IsDown)
                     {
@@ -646,7 +656,7 @@ namespace MphRead.Entities
                     }
                     else
                     {
-                        _field688 *= 0.9f; // sktodo: FPS stuff
+                        _field688 *= _tiltDecay;
                     }
                     if (Cheats.UnlimitedJumps)
                     {
@@ -670,6 +680,7 @@ namespace MphRead.Entities
                         {
                             Speed = Speed.WithY(Fixed.ToFloat(Values.JumpSpeed)); // todo: FPS stuff?
                         }
+                        _gravityHold = 2;
                         _timeSinceGrounded = 8 * 2; // todo: FPS stuff
                         PlayHunterSfx(HunterSfx.Jump);
                     }
@@ -1349,6 +1360,14 @@ namespace MphRead.Entities
                     {
                         traction *= Fixed.ToFloat(Values.JumpPadSlideFactor);
                     }
+                    if (!Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
+                    {
+                        // per 30 Hz tick vanilla adds the whole traction, caps, then does speed *= factor. With sqrt(factor)
+                        // friction per 60 Hz frame (ProcessMovement), adding traction * s / (1 + s) per frame (s = sqrt(factor))
+                        // lands on vanilla's speed at every tick end. The whole traction every frame rolled from rest ~2x as
+                        // fast as the game, measured in an emulator: docs/ACCURACY.md A8.
+                        traction *= _walkFriction / (1 + _walkFriction);
+                    }
                     if (Controls.RollUp.IsDown)
                     {
                         speedDelta.X += _altRollFbX * traction;
@@ -1878,8 +1897,25 @@ namespace MphRead.Entities
                 }
             }
             UpdateSlidingSfx(slideSfxAmount);
-            Vector3 speedMul = Speed.WithX(Speed.X * speedFactor).WithZ(Speed.Z * speedFactor);
-            Speed += (speedMul - Speed) / 2; // todo: FPS stuff
+            if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad) || (IsAltForm || IsMorphing) && Values.AltFormStrafe != 0)
+            {
+                Vector3 speedMul = Speed.WithX(Speed.X * speedFactor).WithZ(Speed.Z * speedFactor);
+                Speed += (speedMul - Speed) / 2; // todo: FPS stuff
+                _walkFriction = 1;
+            }
+            else
+            {
+                // per 30 Hz tick vanilla does speed *= factor, then position += speed. With the friction split as sqrt(factor) per
+                // frame and each frame moving speed * sqrt(factor) / 2 (the position step below), full speed covers exactly
+                // vanilla's distance per tick; (1 + factor) / 2 per frame walked ~7% fast on the ground, ~9% in the air.
+                // Walking keeps its traction whole on every frame: halving it (or ticking the walk at 30 Hz) made her stick in
+                // floor creases MphRead's 60 Hz collision gets her out of. Measured against the game in an emulator:
+                // docs/ACCURACY.md A7. Left over: top speed in 2 frames vs vanilla's 3 ticks, ~9% shorter stops.
+                // The rolling morph balls (Samus, Kanden, Spire, Noxus) use the same split, with their traction weighted per
+                // frame (the roll controls above): docs/ACCURACY.md A8.
+                _walkFriction = MathF.Sqrt(speedFactor);
+                Speed = Speed.WithX(Speed.X * _walkFriction).WithZ(Speed.Z * _walkFriction);
+            }
             if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
             {
                 Speed = Speed.AddX(_jumpPadAccel.X);
@@ -1900,11 +1936,24 @@ namespace MphRead.Entities
             {
                 Flags2 &= ~PlayerFlags2.AltFormGravity;
             }
+            // vanilla picks gravity once per 30 Hz tick, so a jump's whole first tick (this frame and the next) runs
+            // on the gravity she had when she pressed it: none if she was standing. Measured against the game in an
+            // emulator (docs/ACCURACY.md A1): without this the arc starts half a tick of gravity early.
+            bool holdGravity = _gravityHold == 1;
+            if (_gravityHold > 0)
+            {
+                _gravityHold--;
+            }
+            float gravityStep = 0;
             if (_health > 0)
             {
                 if (_jumpPadControlLock == 0 && !Flags2.TestFlag(PlayerFlags2.BipedStuck))
                 {
-                    if (Flags2.TestFlag(PlayerFlags2.GravityOverride))
+                    if (holdGravity)
+                    {
+                        // keep the jump frame's _gravity
+                    }
+                    else if (Flags2.TestFlag(PlayerFlags2.GravityOverride))
                     {
                         Flags2 &= ~PlayerFlags2.GravityOverride;
                     }
@@ -1934,9 +1983,16 @@ namespace MphRead.Entities
                             _gravity = Fixed.ToFloat(Values.BipedGravity);
                         }
                     }
-                    Speed = Speed.AddY(_gravity / 2); // todo: FPS stuff
+                    gravityStep = _gravity / 2; // todo: FPS stuff
+                    Speed = Speed.AddY(gravityStep);
                 }
+                // vanilla (30 Hz) does speed += g, then position += speed. Our two 60 Hz halves of that are speed += g/2,
+                // then position += speed/2 plus g/8, which puts her exactly where vanilla does at the end of each tick.
                 Vector3 position = Position + Speed / 2; // todo: FPS stuff
+                position.Y += gravityStep / 4;
+                // the horizontal half of the walking scheme above (1 on jump pads and in Trace/Sylux/Weavel's alt forms)
+                position.X += Speed.X * (_walkFriction - 1) / 2;
+                position.Z += Speed.Z * (_walkFriction - 1) / 2;
                 if (AttachedEnemy?.EnemyType == EnemyType.Quadtroid)
                 {
                     position.X = Position.X;
@@ -2217,6 +2273,113 @@ namespace MphRead.Entities
             }
         }
 
+        // Headless counterpart of ProcessInput: the host sets each Keybind.HostDown (and HostAimX/Y) before the
+        // frame; bots still think for themselves. Same edge rules as the keyboard path.
+        public static void ProcessHostInput(bool noPlayerInput)
+        {
+            for (int i = 0; i < Players.Count; i++)
+            {
+                PlayerEntity player = Players[i];
+                if (player.IsBot)
+                {
+                    if (player.LoadFlags.TestFlag(LoadFlags.Active))
+                    {
+                        player.AiData.ProcessInput();
+                    }
+                    continue;
+                }
+                // network play: a remote seat takes its buttons from its own Controls and its view from its absolute
+                // target (PlayerNet.cs); the local seat is MainPlayerIndex (0 unless this device is a match client)
+                bool remote = player.HostRemote && i != MainPlayerIndex;
+                if (!remote && (noPlayerInput || i != MainPlayerIndex))
+                {
+                    continue;
+                }
+                player.Input.HasInput = false;
+                if (remote)
+                {
+                    (player.Input.HostAimDeltaX, player.Input.HostAimDeltaY) = player.HostRemoteAimDelta();
+                }
+                else
+                {
+                    player.Input.HostAimDeltaX = HostAimX;
+                    player.Input.HostAimDeltaY = HostAimY;
+                }
+                if (player.LoadFlags.TestFlag(LoadFlags.Active))
+                {
+                    for (int j = 0; j < player.Controls.All.Length; j++)
+                    {
+                        Keybind control = player.Controls.All[j];
+                        bool prevDown = control.IsDown;
+                        control.IsDown = control.HostDown;
+                        control.IsPressed = control.IsDown && !prevDown;
+                        control.IsReleased = !control.IsDown && prevDown;
+                        if (control.IsDown || control.IsPressed || control.IsReleased)
+                        {
+                            player.Input.HasInput = true;
+                        }
+                    }
+                }
+                // the DS answers dialogs by tapping OK / YES / NO / the page arrows on the touch screen: a host button
+                // press becomes a tap at the centre of that button's rectangle for one frame
+                if (remote)
+                {
+                    continue; // dialogs and movie skips belong to the local seat
+                }
+                if (HostDialogPress != HostDialogButton.None)
+                {
+                    HostDialogButton press = HostDialogPress;
+                    if (press == HostDialogButton.Advance)
+                    {
+                        press = player._dialogPageIndex < player._dialogPageCount - 1 ? HostDialogButton.Right : HostDialogButton.Okay;
+                    }
+                    ButtonInfo info = _buttonInfo[(int)press];
+                    player.Input.ClickX = (info.Left + info.Right) / 2 * player._scene.Size.X;
+                    player.Input.ClickY = (info.Top + info.Bottom) / 2 * player._scene.Size.Y;
+                    HostDialogPress = HostDialogButton.None;
+                }
+                else
+                {
+                    player.Input.ClickX = -1;
+                    player.Input.ClickY = -1;
+                }
+                if (i == MainPlayerIndex && player._scene.MoviePlaying && player.Controls.Shoot.IsPressed)
+                {
+                    player._scene.SkipMovie();
+                }
+            }
+        }
+
+        // host aim deltas for the next frame, in the same units as mouse pixels
+        public static float HostAimX { get; set; }
+        public static float HostAimY { get; set; }
+
+        // headless: a dialog button to press on the next frame (consumed once)
+        public static HostDialogButton HostDialogPress { get; set; } = HostDialogButton.None;
+
+        // headless: the pointer the radial weapon menu reads while it is held, in Scene.Size pixels (the desktop
+        // reads the absolute mouse position there; see UpdateWeaponSelect)
+        public static float HostPointerX { get; set; }
+        public static float HostPointerY { get; set; }
+
+        // host: equip a weapon the player has (and has ammo for) without the switch sound or animation, the way spawning
+        // equips the Power Beam. The Android campaign carries the held weapon through a full room load with it (owner
+        // queue #8b). False if it isn't available or is out of ammo.
+        public bool HostEquipWeapon(BeamType beam)
+        {
+            if ((int)beam < 0 || (int)beam >= 9 || !_availableWeapons[beam])
+            {
+                return false;
+            }
+            WeaponInfo info = Weapons.Current[(int)beam];
+            int ammo = _ammo[info.AmmoType];
+            if (beam != BeamType.PowerBeam && ammo < info.AmmoCost && ammo != -1)
+            {
+                return false;
+            }
+            return TryEquipWeapon(beam, silent: true);
+        }
+
         public PlayerControls Controls { get; } = PlayerControls.GetDefault();
         private PlayerInput Input { get; } = new PlayerInput();
 
@@ -2227,8 +2390,10 @@ namespace MphRead.Entities
             public MouseState? PrevMouseState { get; set; }
             public MouseState? MouseState { get; set; }
 
-            public float MouseDeltaX => (MouseState?.X - PrevMouseState?.X) ?? 0;
-            public float MouseDeltaY => (MouseState?.Y - PrevMouseState?.Y) ?? 0;
+            public float HostAimDeltaX { get; set; }
+            public float HostAimDeltaY { get; set; }
+            public float MouseDeltaX => Scene.Headless ? HostAimDeltaX : (MouseState?.X - PrevMouseState?.X) ?? 0;
+            public float MouseDeltaY => Scene.Headless ? HostAimDeltaY : (MouseState?.Y - PrevMouseState?.Y) ?? 0;
             public float ClickX { get; set; } = -1;
             public float ClickY { get; set; } = -1;
 
@@ -2252,6 +2417,7 @@ namespace MphRead.Entities
 
         public bool IsPressed { get; set; }
         public bool IsDown { get; set; }
+        public bool HostDown { get; set; } // headless: the host's button state for this frame
         public bool IsReleased { get; set; }
         public bool NeedsRepress { get; set; }
 

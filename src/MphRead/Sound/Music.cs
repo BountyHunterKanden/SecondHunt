@@ -29,6 +29,8 @@ namespace MphRead
         private static bool _playing = false;
         private static bool _paused = false;
         public static bool IsPaused => _paused;
+        // host hook: the game's IsMusicStopped/GetCurrentSeq pair as one value (SeqId.None while stopped)
+        public static SeqId CurrentSeq => _playing ? _currentMusicSeq : SeqId.None;
         private static bool _nextTrackNotReady = false;
         private static bool _isReady = false;
         private static bool _musicQueued = false;
@@ -720,8 +722,28 @@ namespace MphRead
 
     public static class MusicPlayer
     {
-        private static MiniAudioEngine _audioEngine;
-        private static AudioPlaybackDevice _playbackDevice;
+        // Host-owned backend seam: platforms with no SoundFlow/MiniAudio native lib (e.g. Android) render the NCSF
+        // stream themselves and register one of these instead. Desktop behaviour (Host == null) is unchanged; every
+        // member below checks Host first and otherwise falls through to the existing SoundFlow/MiniAudio path.
+        public interface IHost
+        {
+            // starts loading seqId off-thread (tracks/volume as MusicPlayer.Load); call `loaded` when ready so the
+            // caller's Loading flag can clear, same as the desktop path's Task.Run
+            void Load(SeqId seqId, ushort tracks, float volume, Action loaded);
+            void Play(float volume);
+            void Pause();
+            void Stop();
+            PlaybackState State { get; }
+            float Volume { get; set; }
+            ushort Tracks { get; set; }
+            ushort Tempo { get; set; }
+            NCSFCommon.Track? GetTrack(int index);
+        }
+
+        public static IHost? Host { get; set; }
+
+        private static MiniAudioEngine? _audioEngine;
+        private static AudioPlaybackDevice? _playbackDevice;
         private static RawDataProvider? _provider = null;
         private static NCSFPlayerStream? _stream = null;
         private static SoundPlayer? _player = null;
@@ -737,8 +759,11 @@ namespace MphRead
                 Channels = 2,
                 Format = SampleFormat.F32
             };
-            _audioEngine = new MiniAudioEngine();
-            _playbackDevice = _audioEngine.InitializePlaybackDevice(deviceInfo: null, _format);
+            if (!Scene.Headless)
+            {
+                _audioEngine = new MiniAudioEngine();
+                _playbackDevice = _audioEngine.InitializePlaybackDevice(deviceInfo: null, _format);
+            }
         }
 
         public static bool Loading { get; private set; }
@@ -747,8 +772,19 @@ namespace MphRead
         public static void Load(SeqId seqId, ushort tracks = UInt16.MaxValue, float volume = 1)
         {
             Loading = true;
+            if (Host != null)
+            {
+                if (seqId == SeqId.None)
+                {
+                    Loading = false;
+                    Host.Stop();
+                    return;
+                }
+                Host.Load(seqId, tracks, volume, () => Loading = false);
+                return;
+            }
             Stop();
-            if (seqId == SeqId.None)
+            if (seqId == SeqId.None || _playbackDevice == null)
             {
                 Loading = false;
                 return;
@@ -780,17 +816,17 @@ namespace MphRead
                     {
                         return;
                     }
-                    _player = new SoundPlayer(_audioEngine, _format, _provider);
+                    _player = new SoundPlayer(_audioEngine!, _format, _provider);
                     if (StopLoading)
                     {
                         return;
                     }
-                    _playbackDevice.MasterMixer.AddComponent(_player);
+                    _playbackDevice!.MasterMixer.AddComponent(_player);
                     if (StopLoading)
                     {
                         return;
                     }
-                    _playbackDevice.Start();
+                    _playbackDevice!.Start();
                 }
                 finally
                 {
@@ -810,12 +846,22 @@ namespace MphRead
 
         public static void Play(float volume)
         {
+            if (Host != null)
+            {
+                Host.Play(volume);
+                return;
+            }
             Volume = volume;
             _player?.Play();
         }
 
         public static void Pause()
         {
+            if (Host != null)
+            {
+                Host.Pause();
+                return;
+            }
             _player?.Pause();
         }
 
@@ -823,6 +869,10 @@ namespace MphRead
         {
             get
             {
+                if (Host != null)
+                {
+                    return Host.State;
+                }
                 if (_player != null)
                 {
                     return _player.State;
@@ -835,6 +885,10 @@ namespace MphRead
         {
             get
             {
+                if (Host != null)
+                {
+                    return Host.Volume;
+                }
                 if (_stream != null)
                 {
                     return _stream.VolumeModification;
@@ -843,6 +897,11 @@ namespace MphRead
             }
             set
             {
+                if (Host != null)
+                {
+                    Host.Volume = Math.Clamp(value, 0, 1);
+                    return;
+                }
                 if (_stream != null)
                 {
                     _stream.VolumeModification = Math.Clamp(value, 0, 1);
@@ -854,6 +913,10 @@ namespace MphRead
         {
             get
             {
+                if (Host != null)
+                {
+                    return Host.Tracks;
+                }
                 if (_stream != null)
                 {
                     return (ushort)(_stream.Player.TrackMutes ^ UInt16.MaxValue);
@@ -862,6 +925,11 @@ namespace MphRead
             }
             set
             {
+                if (Host != null)
+                {
+                    Host.Tracks = value;
+                    return;
+                }
                 if (_stream != null)
                 {
                     _stream.Player.TrackMutes = (ushort)(value ^ UInt16.MaxValue);
@@ -873,6 +941,10 @@ namespace MphRead
         {
             get
             {
+                if (Host != null)
+                {
+                    return Host.Tempo;
+                }
                 if (_stream != null)
                 {
                     return _stream.Player.TempoRatio;
@@ -881,6 +953,11 @@ namespace MphRead
             }
             set
             {
+                if (Host != null)
+                {
+                    Host.Tempo = value;
+                    return;
+                }
                 if (_stream != null)
                 {
                     _stream.Player.TempoRatio = value;
@@ -890,11 +967,20 @@ namespace MphRead
 
         public static NCSFCommon.Track? GetTrack(int index)
         {
+            if (Host != null)
+            {
+                return Host.GetTrack(index);
+            }
             return _stream?.Player.GetTrack(index);
         }
 
         public static void Stop()
         {
+            if (Host != null)
+            {
+                Host.Stop();
+                return;
+            }
             if (_player != null)
             {
                 _player.Stop();
@@ -910,9 +996,9 @@ namespace MphRead
                 _player.Stop();
                 if (shutdown)
                 {
-                    _playbackDevice.Stop();
+                    _playbackDevice?.Stop();
                 }
-                _playbackDevice.MasterMixer.RemoveComponent(_player);
+                _playbackDevice?.MasterMixer.RemoveComponent(_player);
                 _provider.Dispose();
                 _stream.Dispose();
                 _player.Dispose();

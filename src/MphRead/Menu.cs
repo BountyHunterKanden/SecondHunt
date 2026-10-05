@@ -620,7 +620,7 @@ namespace MphRead
                         while (input != ConsoleKey.Y && input != ConsoleKey.N && input != ConsoleKey.Escape)
                         {
                             Console.Clear();
-                            Console.WriteLine($"MphRead Version {Program.Version}");
+                            Console.WriteLine($"MphRead Version {AppInfo.Version}");
                             Console.WriteLine();
                             Console.WriteLine($"Save game to slot {SaveSlot}? (y/n)");
                             input = Console.ReadKey().Key;
@@ -677,7 +677,7 @@ namespace MphRead
                     string languageString = Paths.MphKey == Ver.AMHK0 ? "Korean" : _language.ToString();
                     string movieString = _movieId == -1 ? "none" : Metadata.MovieDisplayInfo[_movieId];
                     Console.Clear();
-                    Console.WriteLine($"MphRead Version {Program.Version}");
+                    Console.WriteLine($"MphRead Version {AppInfo.Version}");
                     Console.WriteLine();
                     Console.WriteLine("Choose an option using up/down or with the key indicated.");
                     Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the option.");
@@ -715,7 +715,7 @@ namespace MphRead
                             || keyInfo.Key == ConsoleKey.Spacebar && selection == s)
                         {
                             Console.Clear();
-                            Console.WriteLine($"MphRead Version {Program.Version}");
+                            Console.WriteLine($"MphRead Version {AppInfo.Version}");
                             Console.WriteLine();
                             Console.WriteLine("Loading...");
                             CommitSettings();
@@ -1466,7 +1466,7 @@ namespace MphRead
                 }
                 string weaponsString = _affinityWeapons ? "Affinity Weapons" : "Default Weapons";
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"MphRead Version {AppInfo.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");
@@ -1765,7 +1765,7 @@ namespace MphRead
             {
                 int s = 0;
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"MphRead Version {AppInfo.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");
@@ -2391,12 +2391,15 @@ namespace MphRead
             return true;
         }
 
-        private enum MusicType
+        public enum MusicType
         {
             Music = 0,
             Seq = 1,
             Stream = 2
         }
+
+        // the sound test's named playlist, shared with the Android music test
+        public static ImmutableArray<(MusicType Type, int Id, string Name)> MusicList => _musicList;
 
         // todo?: other enemy hunter combinations
         private static readonly ImmutableArray<(MusicType Type, int Id, string Name)> _musicList =
@@ -2696,7 +2699,7 @@ namespace MphRead
             {
                 int s = 0;
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"MphRead Version {AppInfo.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");
@@ -3133,7 +3136,7 @@ namespace MphRead
 
                 void WriteEntry((string, string)[] list, int index)
                 {
-                    if (save.CheckLogbook(i))
+                    if (save.CheckLogbook(entry))
                     {
                         list[index] = (entry.String1, entry.String2);
                     }
@@ -3176,7 +3179,7 @@ namespace MphRead
                 }
 
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"MphRead Version {AppInfo.Version}");
                 Console.WriteLine();
                 if (category == -1)
                 {
@@ -3458,7 +3461,7 @@ namespace MphRead
                     $" Arcterra:{Octolith(6)}{Octolith(7)}";
                 int s = 0;
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"MphRead Version {AppInfo.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");
