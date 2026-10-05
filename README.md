@@ -235,7 +235,7 @@ tracks swapped). They stay, because that's how the original plays.
 
 MphRead's own README also plans a room editor, a save editor, and more rendering and gameplay logic.
 
-## What we've fixed in MphRead
+## What's been fixed in MphRead
 
 Each of these was measured against the original game, which we run in an emulator (BizHawk with the melonDS core) on
 the same route with the same inputs.
@@ -278,8 +278,6 @@ Gameplay values stay the original's. These are changes to how you see, hear and 
 - **A music quality setting** that plays the DS music without its clicks and clipping, or smoother, switchable mid-song.
 - **A fix for a version 1.1 bug:** on 1.1 ROMs the file-select sounds (including the start-game sound) never play,
   because that version misaligned a sound table. Second Hunt plays them as version 1.0 does.
-- **Quality of life:** Android Back never quits the game, crash reports can be shared from the settings, and Lua mods
-  run in a sandbox.
 
 ## Building from source
 
