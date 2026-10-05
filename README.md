@@ -1,7 +1,7 @@
 # Second Hunt
 
-**Second Hunt is _Metroid Prime Hunters_ rebuilt as a native Android game.** It plays the Nintendo DS original, campaign
-and multiplayer, in true widescreen at up to 120 fps, with dual-stick controller controls and a one-screen HUD. It runs
+**Second Hunt is _Metroid Prime Hunters_ rebuilt as a native Android game.** It plays the Nintendo DS original campaign
+and multiplayer, in true widescreen, with dual-stick controller controls and a one-screen HUD. It runs
 everything from your own copy of the game.
 
 Second Hunt is a fan project. It contains no game data and isn't affiliated with or endorsed by Nintendo.
