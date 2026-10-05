@@ -14,7 +14,7 @@ Second Hunt is a fan project and a fork of MphRead. It contains no game data and
 
 ## What Second Hunt is
 
-It's not an emulator. The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
+The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
 [MphRead](https://github.com/NoneGiven/MphRead), NoneGiven's C# recreation of the game, built from reverse engineering.
 Second Hunt adds everything else it takes to play it on Android: the title screen and menus, the gunship, star map and
 saves, the HUD, music and sound, cutscenes, controls, and LAN multiplayer.
