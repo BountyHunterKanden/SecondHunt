@@ -25,7 +25,7 @@ and the touch-screen controls (morph ball, weapon select, scan visor, dialog but
 for a controller, laid out like _Metroid Prime Remastered_, with optional gyro aim and an optional touch overlay.
 
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
-sound), we check it against the original running in an emulator and fix it. Gameplay values aren't changed.
+sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
 ## What's in Beta 1
 
@@ -183,8 +183,8 @@ doing.
 ## MphRead's to-do list
 
 MphRead marks every unfinished or uncertain spot in its code with a `todo` comment, and there are 1,451 of them as of
-October 2026. We're working through them area by area and fixing the ones that change how the game plays, checked
-against the original.
+October 2026. They're being worked through area by area, and the ones that change how the game plays are fixed after
+being compared against the original game.
 
 | Area | TODOs | What they're about |
 |---|---|---|
@@ -226,8 +226,7 @@ MphRead's own README also plans a room editor, a save editor, and more rendering
 
 ## What's been fixed in MphRead
 
-All of these were measured against the original running in BizHawk (melonDS core), on the same route with the same
-inputs.
+All of these were compared against the original game, on the same route with the same inputs.
 
 **Feel and physics** (from the 30 to 60 Hz conversion)
 - Jumping: the arc peaked 3% low. It now matches the original tick for tick.
@@ -254,8 +253,7 @@ inputs.
 Gameplay values are the original's. What's different is how the game looks, sounds and controls:
 
 - Real widescreen 3D at your screen's resolution instead of 256×192
-- 60 fps instead of the original's 30. MphRead runs the game logic at 60 Hz, and we tune it to behave like the
-  original.
+- 60 fps instead of the original's 30. MphRead runs the game logic at 60 Hz, tuned to behave like the original.
 - One screen, with the HUD in the game view and the touch-screen controls moved to buttons
 - Controller controls modeled on _Metroid Prime Remastered_, with optional gyro aim and a touch overlay
 - A pause map on Select. Its Prime-style mode only shows rooms you've explored and lets you move around and hop between
@@ -310,15 +308,15 @@ A significant portion of this project's code was based on the file format inform
 - **[CharlesVanEeckhout's actimagine decoder](https://github.com/CharlesVanEeckhout/actimagine)** - Further understanding of VX video decoding, based on the above ffmpeg patch.
 - **[CyberBotX's NCSF](https://github.com/CyberBotX/NCSF)** - Source code for the NCSF converter and player for Nintendo DS sequenced music.
 
-(Note from Second Hunt: we've since replaced MphRead's VX movie decoder, and the sequencer in the NCSF-based music
-player, with our own clean-room code that gives the same pictures and sound. See [docs/cleanroom](docs/cleanroom).)
+(Note from Second Hunt: MphRead's VX movie decoder, and the sequencer in the NCSF-based music player, have since been
+replaced with clean-room code that gives the same pictures and sound. See [docs/cleanroom](docs/cleanroom).)
 
 ### Special Thanks
 
 This project's reverse engineering effort was developed parallel to **[hackyourlife's mph-viewer](https://github.com/hackyourlife/mph-viewer)**, a model viewer implementation in C. Major features such as the transparency rendering implementation were derived from its source code.
 
-(Note from Second Hunt: we've since replaced that transparency rendering code with our own clean-room version, which
-draws the same result. See [docs/cleanroom](docs/cleanroom).)
+(Note from Second Hunt: that transparency rendering code has since been replaced with a clean-room version that draws
+the same result. See [docs/cleanroom](docs/cleanroom).)
 
 ## About MphRead (upstream)
 
