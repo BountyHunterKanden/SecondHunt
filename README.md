@@ -4,7 +4,7 @@
 and multiplayer, in true widescreen, with dual-stick controller controls and a one-screen HUD. It runs
 everything from your own copy of the game.
 
-Second Hunt is a fan project. It contains no game data and isn't affiliated with or endorsed by Nintendo.
+Second Hunt is a fan project and a fork of MPHRead. It contains no game data and isn't affiliated with or endorsed by Nintendo.
 
 > **Status: Beta 1 (Android).** Playable start to finish, with rough edges. See [Known issues](#known-issues),
 > [What's planned](#whats-planned), [MphRead's to-do list](#mphreads-to-do-list),
