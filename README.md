@@ -8,6 +8,7 @@ Second Hunt is a fan project and a fork of MphRead. It contains no game data and
 
 > **Beta 1 (Android).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
 > [What's planned](#whats-planned).
+> 
 > **AI tools were used for this project.** If you don't support AI in video games, then you don't have to play. Or, look
 > at the product and judge it for yourself. Future support and maintenance is planned to continue regardless.
 
