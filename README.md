@@ -4,89 +4,81 @@
 and multiplayer, in true widescreen, with dual-stick controller controls and a one-screen HUD. It runs
 everything from your own copy of the game.
 
-Second Hunt is a fan project and a fork of MPHRead. It contains no game data and isn't affiliated with or endorsed by Nintendo.
+Second Hunt is a fan project and a fork of MphRead. It contains no game data and isn't affiliated with or endorsed by Nintendo.
 
-> **Status: Beta 1 (Android).** Playable start to finish, with rough edges. See [Known issues](#known-issues),
-> [What's planned](#whats-planned), [MphRead's to-do list](#mphreads-to-do-list),
-> [What we've fixed in MphRead](#what-weve-fixed-in-mphread) and
-> [Improvements over the original game](#improvements-over-the-original-game).
+> **Beta 1 (Android).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
+> [What's planned](#whats-planned).
 
 ## What Second Hunt is
 
-**It isn't an emulator.** An emulator pretends to be a DS and runs the game's original program. Second Hunt is a
-reimplementation instead:
+It's not an emulator. The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
+[MphRead](https://github.com/NoneGiven/MphRead), NoneGiven's C# recreation of the game, built from reverse engineering.
+Second Hunt adds everything else it takes to play it on Android: the title screen and menus, the gunship, star map and
+saves, the HUD, music and sound, cutscenes, controls, and LAN multiplayer.
 
-- **The game's logic is C# code.** Enemies, weapons, physics, rooms, scripting and bots were rebuilt by hand from
-  reverse engineering in [MphRead](https://github.com/NoneGiven/MphRead), NoneGiven's recreation of the game. Second Hunt
-  is a fork of it.
-- **Second Hunt builds the rest of the game around that logic,** as an Android app: the title screen and menus, the
-  gunship, star map and save files, the HUD, music and sound, cutscenes, controls, and LAN multiplayer.
-- **The game's content comes from your ROM.** On first launch you pick your copy of the game. Second Hunt unpacks it into
-  the app's private storage, on your device, and reads the models, rooms, menus, music and movies from it. Nothing is
-  downloaded or uploaded.
+All the game's content comes from your ROM. The first time you launch the app you pick your copy of the game, and
+Second Hunt unpacks it into the app's private storage on your device. Nothing gets downloaded or uploaded.
 
-Because the game is drawn natively rather than by an emulated DS:
+Since the game is drawn natively instead of through an emulated DS, the 3D runs in real widescreen at your screen's
+resolution, at up to 120 fps on displays that support it. The two DS screens become one: the HUD sits in the game view,
+and the touch-screen controls (morph ball, weapon select, scan visor, dialog buttons) move to buttons. Controls are made
+for a controller, laid out like _Metroid Prime Remastered_, with optional gyro aim and an optional touch overlay.
 
-- the 3D is **real widescreen** at your screen's resolution, not a stretched 256×192 image;
-- it runs at **up to 120 fps** on displays that support it;
-- the DS's two screens become **one screen**: the HUD sits in the game view, and what the touch screen did (morph
-  ball, weapon select, scan visor, dialog buttons) moves to buttons;
-- **controls are built for a controller**, modelled on _Metroid Prime Remastered_'s dual-stick layout, with optional
-  gyro aim and an optional on-screen touch overlay.
-
-**The goal is to play like the original.** Where Second Hunt behaves differently from the DS game (speeds, timings, fire
-rates, sounds), we measure the difference against the original and fix it. We don't change gameplay values for
-convenience.
+The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
+sound), we check it against the original running in an emulator and fix it. Gameplay values aren't changed.
 
 ## What's in Beta 1
 
 **Campaign**
-- The full adventure, from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
-  Oubliette.
-- The game's own title screen, attract movie, file select (three save files, with copy and delete), options and credits,
-  rebuilt from the menus in your ROM.
-- The gunship: cockpit, ship menus, star map, planet select, and the landing and take-off movies.
-- All cutscenes, the HUD for every hunter, and the scan visor with its dialogs.
-- A **pause map** on Select. It can show the game's own map, or a Prime-style map of just the rooms you've explored.
-- The game's own music and sound effects, played from your ROM's sound data, plus the title music and voices.
+- The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
+  Oubliette
+- The game's own title screen, attract movie, file select (three files, with copy and delete), options and credits,
+  rebuilt from the menus in your ROM
+- The gunship: cockpit, ship menus, star map, planet select, and the landing and take-off movies
+- Every cutscene, the HUD for every hunter, and the scan visor
+- A pause map on Select, showing either the game's own map or a Prime-style map of the rooms you've explored
+- The game's music and sound effects from your ROM, plus the title music and voices
 
 **Multiplayer**
-- **Bot matches** on one device, in every mode, on the original arenas, with adjustable bot level and time limit.
-- **LAN matches**: two devices on the same Wi-Fi network, Battle mode (experimental). Main menu > MULTIPLAYER.
+- Bot matches on one device in every mode and arena, with adjustable bot level and time limit
+- LAN matches between two devices on the same Wi-Fi, Battle mode only for now (experimental). It's under Main menu >
+  MULTIPLAYER.
 
-**Audio** (the game's own **OPTIONS > AUDIO** page, working as in the original)
-- Sound effect and music volume, heard as you change them.
-- The **sound test** and **music test**: play any of the game's 425 sounds or 34 songs.
-- **QUALITY** (in place of the original's mic setting): how the music is played. ORIG is the DS sound; ORIG+FIX is the
-  DS sound without its clicks and clipping; HQ+FIX is smoother; HQ+TONE is HQ+FIX with the DS's treble added back. It
-  changes live, mid-song.
+**Audio** (OPTIONS > AUDIO, wired up like the original)
+- Sound effect and music volume
+- The sound test and music test, with all 425 sounds and 34 songs
+- A QUALITY setting in place of the mic option. It changes how the music is played, live, mid-song:
+  - ORIG: the DS sound
+  - ORIG+FIX: the DS sound without the clicks and clipping
+  - HQ+FIX: smoother
+  - HQ+TONE: HQ+FIX with the DS's treble added back
 
-**Options** (in the game's Options menu, under **RECOMP SETTINGS**; L / R turn its pages)
-- First-person or third-person camera.
-- Gyro aim: off, on, or only while zoomed or scanning, with its own speed and axis settings.
-- On-screen touch controls: auto (shown when no controller is connected), on or off.
-- Menu presentation: both DS screens merged onto one, or side by side; crisp or smoothed pixel art; the HUD's line art
-  redrawn as clean lines or kept as DS pixels.
-- Pause map look and mode.
-- Credits and licences, and a crash-report share button.
-- **Lua mods**, run in a sandbox that can't touch your files or the network.
+**Options** (Options > RECOMP SETTINGS, L / R to change pages)
+- First- or third-person camera
+- Gyro aim: off, on, or only while zoomed or scanning, with its own speed and axis settings
+- Touch controls: auto (shown when no controller is connected), on or off
+- Menus with both DS screens merged into one or side by side, crisp or smoothed pixel art, and the HUD's line art
+  redrawn as clean lines or kept as DS pixels
+- Pause map look and mode
+- Credits, licenses, and a button to share crash reports
+- Lua mods, sandboxed so they can't touch your files or the network
 
 ## Getting started
 
-**You need:**
-- an Android 8.0+ device with OpenGL ES 3.0;
-- a game controller (recommended); touch controls are available too;
-- your own **_Metroid Prime Hunters_ (USA)** ROM, version 1.0 or 1.1 (game code AMHE). Other regions aren't supported
-  yet; the app tells you if your file is a different one.
+You'll need:
+- An Android 8.0+ device with OpenGL ES 3.0
+- A controller (recommended), though touch controls work too
+- Your own _Metroid Prime Hunters_ (USA) ROM, version 1.0 or 1.1 (game code AMHE). Other regions aren't supported yet,
+  and the app will tell you if your file is one of them.
 
-**To install:**
+To install:
 1. Download the APK from [Releases](../../releases).
 2. Open it on your device. Android will ask you to allow installs from your browser or file manager.
-3. On first launch, pick your ROM file. Second Hunt unpacks it once; after that it starts straight into the game.
+3. On first launch, pick your ROM file. Second Hunt unpacks it once, and after that it goes straight into the game.
 
 ## Controls
 
-**Controller** (positions as on an Xbox-style pad: A bottom, B right, X left, Y top):
+**Controller** (Xbox-style layout: A bottom, B right, X left, Y top)
 
 | Input | Action |
 |---|---|
@@ -105,105 +97,103 @@ convenience.
 | Select | Pause map (campaign only) |
 | Start | Pause menu |
 | A / B in dialogs | OK or YES / NO |
-| Android Back (button or gesture) | Pause menu; in a menu, the map or the ship, it works like B. It never quits the game. |
+| Android Back (button or gesture) | Pause menu. In a menu, the map or the ship it works like B. It never quits the game. |
 
-**Touch:** the overlay puts a move stick on the left half of the screen and an aim stick on the right, with buttons for
+**Touch:** the overlay has a move stick on the left half of the screen and an aim stick on the right, with buttons for
 fire, jump, morph, missile, weapon (hold it and drag toward a weapon, like the DS stylus) and pause, plus visor, scan
-and map in the campaign. While missiles are selected, the missile button reads POWER BEAM: it switches back. In
-dialogs, JUMP becomes OK/YES and FIRE becomes NO.
+and map in the campaign. When missiles are selected, the missile button says POWER BEAM and switches you back. In
+dialogs, JUMP is OK/YES and FIRE is NO.
 
-**Gyro:** turn the device to fine-tune your aim. The right stick still works as usual.
+**Gyro:** tilt the device to fine-tune your aim. The right stick still works as normal.
 
 ## Known issues
 
 **Missing for now**
-- **Beating Gorea ends on a plain "mission complete" screen.** Neither of the real ending sequences nor the credits roll
-  is in yet.
-- **LAN play is limited to two players and Battle mode.** Item pickups may not stay in sync between the two devices.
-- **Only USA ROMs** (1.0 and 1.1) are supported.
-- **No rumble.** The original supported the DS Rumble Pak; controller and phone vibration aren't wired up yet.
-- **No multiplayer license.** Your multiplayer stats (kills, deaths, wins, play time) aren't recorded, and every hunter
-  and arena is open from the start instead of being unlocked through the adventure.
-- **Some save details aren't kept yet:** the game timer, boss records, a few stats and the artifact flags.
-- **Speaker type** (OPTIONS > AUDIO) is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
+- Beating Gorea ends on a plain "mission complete" screen. The real endings and the credits roll aren't in yet.
+- LAN play is two players and Battle mode only, and item pickups may not stay in sync between the two devices.
+- Only USA ROMs (1.0 and 1.1) work.
+- No rumble yet. The original supported the DS Rumble Pak, but controller and phone vibration aren't hooked up.
+- No multiplayer license. Your stats (kills, deaths, wins, play time) aren't recorded, and every hunter and arena is
+  open from the start instead of being unlocked through the adventure.
+- Some save details aren't kept yet: the game timer, boss records, a few stats and the artifact flags.
+- The speaker setting on OPTIONS > AUDIO is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
 
 **Controls**
-- Changing weapons mid-fight is awkward. The DS showed a weapon bar on its bottom screen, which isn't drawn yet, so the
+- Switching weapons mid-fight is awkward. The DS showed a weapon bar on the bottom screen, which isn't drawn yet, so the
   third weapon slot (D-pad left) has no on-screen label. A new weapon ring is planned.
-- The touch overlay has no buttons for D-pad left, up and down; use the weapon button (hold and drag) instead. The morph
-  ball can't be steered by touch the way the DS stylus could.
-- The device's volume and screenshot buttons may do nothing on the title and menu screens.
+- The touch overlay has no buttons for D-pad left, up and down, so use the weapon button (hold and drag) instead. You
+  also can't steer the morph ball by touch the way you could with the DS stylus.
+- The volume and screenshot buttons may not work on the title and menu screens.
 
 **Looks and performance**
-- Pop-ups such as item pickups and the enter-ship prompt look rough. Their layout still needs cleaning up.
-- There can be short frame dips the first time a room or cutscene loads.
+- Pop-ups like item pickups and the enter-ship prompt look rough and still need layout work.
+- You may get short frame dips the first time a room or cutscene loads.
 - The scan visor's box and icon aren't quite the right shape in widescreen.
-- The HUD's energy and ammo bars don't flash and change colour exactly as in the original (low ammo, pickups).
+- The HUD's energy and ammo bars don't flash and change color exactly like the original (low ammo, pickups).
 
-**Reported, being checked against the original**
-- Looping or odd sounds in Piston Cave (Alinos).
-- Flickering lava texture in Processor Core.
-- The Fault Line shock barrier is invisible and can be crossed.
-- The Docking Bay floating platforms slide you backward.
-- Some skybox parts spin at different speeds.
-- Council Chamber: what the shot switch triggers, and whether the bounce pad should always be there.
-- The small red sniper targets (hit with the Imperialist) don't stay folded.
-- Frame drops in Transfer Lock.
-- Which sounds play when you arrive through a portal (the Sic Transit escape, Elder Passage).
+**Reported, still being checked against the original**
+- Looping or odd sounds in Piston Cave (Alinos)
+- Flickering lava texture in Processor Core
+- The Fault Line shock barrier is invisible and can be walked through
+- The Docking Bay floating platforms slide you backward
+- Some skybox parts spin at different speeds
+- Council Chamber: what the shot switch triggers, and whether the bounce pad should always be there
+- The small red sniper targets (hit with the Imperialist) don't stay folded
+- Frame drops in Transfer Lock
+- Which sounds play when you arrive through a portal (the Sic Transit escape, Elder Passage)
 - Feel: the Judicator's fire rate, the Imperialist's auto-zoom, Slench's hit box, and whether the Volt Driver's charged
-  shot should distort your visor.
+  shot should distort your visor
 
-**Devices:** Second Hunt has only been tested on Snapdragon 8 Gen 2 hardware so far (AYN Odin 2 Portal, Galaxy S23).
+**Devices:** so far Second Hunt has only been tested on Snapdragon 8 Gen 2 hardware (AYN Odin 2 Portal, Galaxy S23).
 Reports from other phones and handhelds are very welcome.
 
-**If it crashes:** go to RECOMP SETTINGS > crash log > SHARE to send the newest crash report. It holds no personal
-data. Please include it in a bug report on the [Issues](../../issues) page, along with your device and what you were
+**If it crashes:** go to RECOMP SETTINGS > crash log > SHARE to send the latest crash report (it doesn't contain any
+personal data). Please attach it to a bug report on the [Issues](../../issues) page, with your device and what you were
 doing.
 
 ## What's planned
 
 **Next**
-- **Beta 1.1: HD Samus suits** (her body and morph ball) from your own copy of _Metroid Prime_ (GameCube), imported in
-  the app.
-- **A Windows version.**
-- **The real endings,** both of them, and the credits roll.
-- **A new weapon selector:** hold L2 to open a full-circle weapon ring, point with the right stick, then let go to
-  equip. It will work while you move.
-- **Full touch controls**, including the DS's touch-screen morph ball controls.
-- **Sound timing like the original:** what plays while paused and during escape sequences, and how music and sounds stop
-  or fade when you die, return to the ship or finish a match.
-- **The rest of the save data:** game timer, boss records, stats and artifact flags.
-- **Fixes for the known issues above**, each measured against the original game.
+- Beta 1.1: HD Samus suits (her body and morph ball), imported in the app from your own copy of _Metroid Prime_
+  (GameCube)
+- A Windows version
+- Both real endings and the credits roll
+- A new weapon selector: hold L2 for a full weapon ring, point with the right stick and let go to equip, even while
+  moving
+- Full touch controls, including the DS's touch-screen morph ball controls
+- Sound timing like the original: what plays while paused and during escapes, and how music and sounds stop or fade
+  when you die, go back to the ship or finish a match
+- The rest of the save data: game timer, boss records, stats and artifact flags
+- Fixes for the known issues above, each checked against the original game
 
 **Later**
-- **More multiplayer:** more than two LAN players, every mode over LAN, and online play; the original's rules for how
-  damage, weapons and items are shared between devices; the multiplayer license and your stats; hunters and arenas
-  unlocked through the adventure, as in the original.
-- **Rumble** on controllers and phones that support it.
-- **The original's SURROUND and HEADPHONES speaker types,** and HQ music that keeps more of the DS's treble.
-- **The sound test unlocked the original's way:** OPTIONS > AUDIO's SFX TEST and MUSIC TEST open after the true ending's
-  results screen. For now they are always open.
-- **A Prime-style HUD** option: a mini map and weapon indicators added to the current HUD.
-- **Other regions' ROMs** (Europe, Japan, Korea).
-- **Dual-screen devices:** the DS's second screen on a handheld's second display.
-- **More HD content from games you own:** each Prime game's arm cannon, the _Metroid Prime 2: Echoes_ multiplayer
-  arenas, and the other hunters.
-- **The rest of MphRead's to-do list** (next section).
+- More multiplayer: more than two LAN players, every mode over LAN, online play, the original's rules for sharing
+  damage, weapons and items between devices, the multiplayer license and stats, and unlocking hunters and arenas
+  through the adventure
+- Rumble on controllers and phones that support it
+- The original's SURROUND and HEADPHONES speaker modes, and HQ music that keeps more of the DS's treble
+- Unlocking the sound test the original way (after the true ending's results screen). For now it's always open.
+- An optional Prime-style HUD with a mini map and weapon indicators
+- European, Japanese and Korean ROMs
+- Dual-screen devices, with the DS's second screen on a handheld's second display
+- More HD content from games you own: each Prime game's arm cannon, the _Metroid Prime 2: Echoes_ multiplayer
+  arenas, and the other hunters
+- The rest of MphRead's to-do list (below)
 
 ## MphRead's to-do list
 
-MphRead marks every unfinished or uncertain spot in its code with a `todo` comment: 1,451 of them as of October 2026.
-Second Hunt treats that list as its own. We work through it area by area, check each one against the original game, and
-fix whatever changes how the game plays.
+MphRead marks every unfinished or uncertain spot in its code with a `todo` comment, and there are 1,451 of them as of
+October 2026. We're working through them area by area and fixing the ones that change how the game plays, checked
+against the original.
 
 | Area | TODOs | What they're about |
 |---|---|---|
-| Frame rate | 822 | MphRead runs the game logic at 60 Hz; the DS runs it at 30 Hz. Every timer, speed and step was converted by hand and marked. Most conversions are exact; the ones that weren't are being measured and fixed (see below). |
+| Frame rate | 822 | MphRead runs the game logic at 60 Hz instead of the DS's 30, so every timer, speed and step was converted by hand and marked. Most are exact. The ones that aren't are being measured and fixed (see below). |
 | Naming | 173 | Fields and values whose purpose isn't known yet. No effect on play. |
 | Rendering | 36 | Effects, texture animation, how some objects are drawn. |
-| Wi-Fi rules | 21 | How the original shares damage, weapons and items between DS units in a wireless match. To be ported as LAN rules. |
+| Wi-Fi rules | 21 | How the original shares damage, weapons and items between DS units in a wireless match. These will become the LAN rules. |
 | Viewer and debug tools | 15 | MphRead's desktop viewer. No effect on play. |
-| Bots | 13 | Open questions about the bots' choices, to be answered from the original's code. |
+| Bots | 13 | Open questions about how the bots decide things, to be answered from the original's code. |
 | HUD and menus | 12 | Bar flashes, pop-up text wrapping and size, the multiplayer HUD. |
 | Multiplayer license | 11 | The stats the original records per player. |
 | Sound and music | 9 | Stops, fades and sounds during pauses and escapes. |
@@ -211,73 +201,73 @@ fix whatever changes how the game plays.
 | Rumble | 2 | The DS Rumble Pak. |
 | Everything else | 332 | Gameplay details not ported yet, open questions, and notes about the code itself. |
 
-**Still open, in plain words:**
-- **Movement:** sliding along walls and climbing over edges aren't exact yet. Walking reaches top speed a little sooner
-  and stops a little shorter than the original. The boost ball, jump pads, bomb jumps and Space Jump haven't been
-  measured yet.
-- **Bots:** a few random decisions may happen twice as often as in the original.
-- **Effects:** some particle and beam effects still need their 60 Hz timing checked. The Cretaphid's beam is drawn too
+**Still open:**
+- Movement: sliding along walls and climbing over edges aren't exact yet. Walking gets to top speed a bit sooner and
+  stops a bit shorter than the original. The boost ball, jump pads, bomb jumps and Space Jump haven't been measured yet.
+- Bots: a few random decisions may happen twice as often as in the original.
+- Effects: some particle and beam effects still need their 60 Hz timing checked. The Cretaphid's beam is drawn too
   thin, and Gorea's second form moves jerkily.
-- **Cutscenes:** data from a previous room's cutscenes isn't cleared on a room change, and an object can show for one
+- Cutscenes: data from the previous room's cutscenes isn't cleared when you change rooms, and an object can show for one
   frame before some cutscenes start.
-- **HUD:** energy and ammo bar flashes, the scan visor's proportions, and pop-up text wrapping and size.
-- **Saves:** the game timer, boss records, some stats and the artifact flags.
-- **Sound:** sounds during pauses and escape sequences, music and sound stops and fades, and how often Gorea's Shock
-  Coil sound restarts.
-- **Multiplayer:** the Wi-Fi rules, the license stats, unlocks from the adventure and multiplayer saving.
-- **Endings:** the credits after each ending.
-- **Wide views:** whether portals at the screen edges are tested the right way for a wider screen, and where the gun's
-  muzzle smoke is drawn.
-- **Rumble.**
+- HUD: energy and ammo bar flashes, the scan visor's proportions, and pop-up text wrapping and size.
+- Saves: the game timer, boss records, some stats and the artifact flags.
+- Sound: sounds during pauses and escape sequences, music and sound stops and fades, and how often Gorea's Shock Coil
+  sound restarts.
+- Multiplayer: the Wi-Fi rules, the license stats, unlocks from the adventure, and multiplayer saving.
+- Endings: the credits after each ending.
+- Wide views: whether portals at the screen edges are tested correctly for a wider screen, and where the gun's muzzle
+  smoke is drawn.
+- Rumble.
 
-Five spots are original-game bugs that MphRead reproduces on purpose (for example, Gorea's first form has two weapon
-tracks swapped). They stay, because that's how the original plays.
+Five of the TODOs are bugs in the original game that MphRead copies on purpose (Gorea's first form has two weapon
+tracks swapped, for example). Those stay in, since that's how the original plays.
 
 MphRead's own README also plans a room editor, a save editor, and more rendering and gameplay logic.
 
 ## What's been fixed in MphRead
 
-Each of these was measured against the original game, which we run in an emulator (BizHawk with the melonDS core) on
-the same route with the same inputs.
+All of these were measured against the original running in BizHawk (melonDS core), on the same route with the same
+inputs.
 
-**Feel and physics** (the 30 to 60 Hz conversion)
-- **Jumping:** the jump arc peaked 3% low. It now matches the original tick for tick over the whole arc.
-- **Walking:** top speed was 7-9% too fast. It's now exact.
-- **Morph ball:** it accelerated twice as fast as the original. Acceleration and top speed now match tick for tick.
-- **Slopes:** walking up slopes steeper than about 26° was 10-40% too slow. It's now within a few percent.
-- **Strafing:** the camera leaned half as far as the original and settled twice as fast. It now matches.
-- **Morph ball camera:** it followed the ball too closely. It now matches.
+**Feel and physics** (from the 30 to 60 Hz conversion)
+- Jumping: the arc peaked 3% low. It now matches the original tick for tick.
+- Walking: top speed was 7-9% too fast. It's exact now.
+- Morph ball: it accelerated twice as fast as the original. Acceleration and top speed match now.
+- Slopes: walking up anything steeper than about 26° was 10-40% too slow. It's within a few percent now.
+- Strafing: the camera leaned half as far as it should and settled twice as fast. Fixed.
+- Morph ball camera: it followed the ball too closely. Fixed.
 
 **Bugs**
-- **Logbook:** a new game marked the wrong logbook entries (off by one).
-- **Bots** could see past the left and top edges of their view. They now use all four edges, as the original's code does.
-- **Portal sound:** the sound of a portal opening was skipped about half the time.
-- **Your weapon** reset to the Power Beam whenever a portal or a cutscene reloaded the room. It's now kept.
-- **The gunship's thruster flames** showed while the ship itself was hidden during the landing.
-- **Capture** in Data Shrine and Head Shot failed to load (two misspelled file names).
-- **Bounty:** the marker for the flag base never showed, because it looked up the wrong list.
-- **Boss encounters:** several encounter files were spelled differently from the game's own and failed to load on
-  case-sensitive storage such as Android's.
-- **A crash** when the game released the same effect twice (seen while escaping Arcterra).
+- A new game marked the wrong logbook entries (off by one).
+- Bots could see past the left and top edges of their view. They now use all four edges like the original.
+- The portal opening sound was skipped about half the time.
+- Your weapon reset to the Power Beam whenever a portal or cutscene reloaded the room. It stays selected now.
+- The gunship's thruster flames showed while the ship was hidden during the landing.
+- Capture mode in Data Shrine and Head Shot wouldn't load (two misspelled file names).
+- In Bounty, the flag base marker never showed because it checked the wrong list.
+- Several boss encounter files were spelled differently from the game's own and wouldn't load on case-sensitive
+  storage like Android's.
+- The game could crash when it released the same effect twice (seen while escaping Arcterra).
 
 ## Improvements over the original game
 
-Gameplay values stay the original's. These are changes to how you see, hear and control the game:
+Gameplay values are the original's. What's different is how the game looks, sounds and controls:
 
-- **Real widescreen 3D** at your screen's resolution, instead of 256×192.
-- **Up to 120 fps** on displays that support it. MphRead runs the game logic at 60 Hz instead of the original's 30, and
-  we tune it to behave like the original.
-- **One screen:** the HUD sits in the game view, and the touch-screen controls move to buttons.
-- **Controller controls** modelled on _Metroid Prime Remastered_, with optional gyro aim and an optional touch overlay.
-- **A pause map** on Select. It has a Prime-style mode that shows only the rooms you've explored, lets you move freely
-  and hop between rooms, plus a detailed look that draws every room from its real shape.
-- **An optional third-person camera.**
-- **The HUD's line art redrawn** as clean lines at any resolution, or kept as DS pixels.
-- **Menus** with both DS screens merged into one, or side by side.
-- **Bot matches on one device** in every mode, and **LAN matches over Wi-Fi** without a second DS.
-- **A music quality setting** that plays the DS music without its clicks and clipping, or smoother, switchable mid-song.
-- **A fix for a version 1.1 bug:** on 1.1 ROMs the file-select sounds (including the start-game sound) never play,
-  because that version misaligned a sound table. Second Hunt plays them as version 1.0 does.
+- Real widescreen 3D at your screen's resolution instead of 256×192
+- Up to 120 fps on displays that support it. MphRead runs the game logic at 60 Hz instead of 30, and we tune it to
+  behave like the original.
+- One screen, with the HUD in the game view and the touch-screen controls moved to buttons
+- Controller controls modeled on _Metroid Prime Remastered_, with optional gyro aim and a touch overlay
+- A pause map on Select. Its Prime-style mode only shows rooms you've explored and lets you move around and hop between
+  rooms, and its detailed view draws every room from its real shape.
+- An optional third-person camera
+- The HUD's line art redrawn as clean lines at any resolution, or kept as DS pixels
+- Menus with both DS screens merged into one, or side by side
+- Bot matches on one device in every mode, and LAN matches over Wi-Fi without needing a second DS
+- A music quality setting that takes the clicks and clipping out of the DS music, or smooths it out, and switches
+  mid-song
+- A fix for a version 1.1 bug: on 1.1 ROMs the file-select sounds (including the start-game sound) never play, because
+  that version misaligned a sound table. Second Hunt plays them like version 1.0 does.
 
 ## Building from source
 
@@ -287,9 +277,9 @@ You need the .NET 9 SDK with the Android workload (`dotnet workload install andr
 dotnet build src/MphRead.Android/MphRead.Android.csproj -c Release -p:JavaSdkDirectory=<jdk17> -p:AndroidSdkDirectory=<android-sdk>
 ```
 
-That makes a development build (`com.mphrecomp.app`, signed with your machine's debug key). It installs alongside the
-release app and keeps the developer tools. Release builds are made with `-p:MphReleaseSign=true` and the project's own
-signing key, as `com.secondhunt.app`.
+That gives you a development build (`com.mphrecomp.app`, signed with your machine's debug key), which installs next to
+the release app and has the developer tools. Release builds use `-p:MphReleaseSign=true` and the project's signing key,
+and come out as `com.secondhunt.app`.
 
 | Folder | What's in it |
 |---|---|
@@ -301,8 +291,8 @@ signing key, as `com.secondhunt.app`.
 
 ## Credits
 
-Second Hunt is built on **MphRead** by NoneGiven (MIT; see `LICENSE` and `NOTICE-fork.md`). Third-party libraries and their
-licences are listed in `THIRD_PARTY_NOTICES.md`, which the app also shows under RECOMP SETTINGS > credits.
+Second Hunt is built on **MphRead** by NoneGiven (MIT, see `LICENSE` and `NOTICE-fork.md`). Third-party libraries and
+their licenses are listed in `THIRD_PARTY_NOTICES.md`, which the app also shows under RECOMP SETTINGS > credits.
 
 From MphRead's README:
 
@@ -320,16 +310,15 @@ A significant portion of this project's code was based on the file format inform
 - **[CharlesVanEeckhout's actimagine decoder](https://github.com/CharlesVanEeckhout/actimagine)** - Further understanding of VX video decoding, based on the above ffmpeg patch.
 - **[CyberBotX's NCSF](https://github.com/CyberBotX/NCSF)** - Source code for the NCSF converter and player for Nintendo DS sequenced music.
 
-(Second Hunt note: Second Hunt has since replaced MphRead's VX movie decoder, and the sequencer in the NCSF-based music
-player, with its own clean-room implementations, which give the same pictures and sound. See
-[docs/cleanroom](docs/cleanroom).)
+(Note from Second Hunt: we've since replaced MphRead's VX movie decoder, and the sequencer in the NCSF-based music
+player, with our own clean-room code that gives the same pictures and sound. See [docs/cleanroom](docs/cleanroom).)
 
 ### Special Thanks
 
 This project's reverse engineering effort was developed parallel to **[hackyourlife's mph-viewer](https://github.com/hackyourlife/mph-viewer)**, a model viewer implementation in C. Major features such as the transparency rendering implementation were derived from its source code.
 
-(Second Hunt note: Second Hunt has since replaced that transparency rendering code with its own clean-room implementation,
-which draws the same result. See [docs/cleanroom](docs/cleanroom).)
+(Note from Second Hunt: we've since replaced that transparency rendering code with our own clean-room version, which
+draws the same result. See [docs/cleanroom](docs/cleanroom).)
 
 ## About MphRead (upstream)
 
