@@ -20,7 +20,7 @@ All the game's content comes from your ROM. The first time you launch the app yo
 Second Hunt unpacks it into the app's private storage on your device. Nothing gets downloaded or uploaded.
 
 Since the game is drawn natively instead of through an emulated DS, the 3D runs in real widescreen at your screen's
-resolution, at up to 120 fps on displays that support it. The two DS screens become one: the HUD sits in the game view,
+resolution, and at 60 fps instead of the DS's 30. The two DS screens become one: the HUD sits in the game view,
 and the touch-screen controls (morph ball, weapon select, scan visor, dialog buttons) move to buttons. Controls are made
 for a controller, laid out like _Metroid Prime Remastered_, with optional gyro aim and an optional touch overlay.
 
@@ -254,8 +254,8 @@ inputs.
 Gameplay values are the original's. What's different is how the game looks, sounds and controls:
 
 - Real widescreen 3D at your screen's resolution instead of 256×192
-- Up to 120 fps on displays that support it. MphRead runs the game logic at 60 Hz instead of 30, and we tune it to
-  behave like the original.
+- 60 fps instead of the original's 30. MphRead runs the game logic at 60 Hz, and we tune it to behave like the
+  original.
 - One screen, with the HUD in the game view and the touch-screen controls moved to buttons
 - Controller controls modeled on _Metroid Prime Remastered_, with optional gyro aim and a touch overlay
 - A pause map on Select. Its Prime-style mode only shows rooms you've explored and lets you move around and hop between
