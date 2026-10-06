@@ -25,7 +25,7 @@ namespace MphRecomp.App;
     ScreenOrientation = ScreenOrientation.Landscape)]
 public class MusicTestActivity : Activity
 {
-    // keep this in sync with AndroidMusicPlayer.HeadroomGain: unity, the DS scale once the SDAT sequence volume is on
+    // keep this in sync with GameMusicPlayer.HeadroomGain: unity, the DS scale once the SDAT sequence volume is on
     // the squared curve (SquaredSeqVolume, every lane); the look-ahead limiter catches cues that go over full scale.
     const float HeadroomGain = 1f;
     const float DcBlockHz = 10;
@@ -253,7 +253,7 @@ public class MusicTestActivity : Activity
                 {
                     Stream.DcBlockHz = DcBlockHz;
                     Stream.OutputGain = HeadroomGain;
-                    Stream.Limiter = true; // as AndroidMusicPlayer
+                    Stream.Limiter = true; // as GameMusicPlayer
                     Stream.Player.Smoothing = true;
                     Stream.Player.ExactPitch = true;
                 }

@@ -40,7 +40,7 @@ Uniforms, identical names in both shader pairs:
 | `u_matAlpha` | float | material alpha, 0..1 |
 | `u_polyMode` | int | 0 modulate, 1 decal, 2 toon/highlight (3 shadow is drawn like 0) |
 | `u_toonRamp` | vec3[32] | toon table |
-| `u_alphaPass` | int | **ES only.** 0 keep all, 1 keep only fragments with alpha exactly 1, 2 keep only alpha < 1 |
+| `u_alphaPass` | int | **ES only.** 0 keep all, 1 keep only solid fragments (alpha ≥ 0.99, see step 4), 2 keep only the rest |
 
 Vertex inputs:
 - **Desktop (GLSL 1.20, compatibility profile):** built-ins. Position `gl_Vertex`, normal `gl_Normal`, colour
@@ -98,7 +98,10 @@ Inputs: colour c (rgba, interpolated), texcoord. Let A denote the running alpha.
    - If `u_colorOverrideOn`: rgb = `u_colorOverride`.rgb; A = A × `u_colorOverride`.a.
 2. Else if `u_colorOverrideOn`: the result is `u_colorOverride` (rgb and alpha as given).
 3. Else: the result is (`u_toonRamp`[int(c.r × 31.0)], c.a) when `u_polyMode` is 2, else c; then A = A × `u_matAlpha`.
-4. **ES only:** `u_alphaPass` 1: drop the fragment if A < 1.0. `u_alphaPass` 2: drop it if A ≥ 1.0. (Before fog.)
+4. **ES only:** `u_alphaPass` 1: drop the fragment if A < 0.99. `u_alphaPass` 2: drop it if A ≥ 0.99. (Before fog.)
+   Amended 2026-10-05 (Windows port): the threshold was 1.0. The game's alphas other than 1 are at most 30/31 (0.968)
+   or 0, so 0.99 sorts every one of them the same way; it also catches the 1.0 that a desktop GPU's varying
+   interpolation leaves slightly short on scattered pixels, which dropped them out of the solid pass as speckle.
 5. Fog, if `u_fogOn`: z = window depth of the fragment (`gl_FragCoord.z`). f = 0; if z ≥ `u_fogFar`, f = 1; else if
    z > `u_fogNear`, f = (((z − u_fogNear) / (u_fogFar − u_fogNear)) × 124.0) / 128.0 (left to right; 124/128 is the top
    of MPH's fog density table). Then per channel rgb = (rgb × (1 − f)) + (`u_fogColor`.rgb × f). Alpha unchanged.

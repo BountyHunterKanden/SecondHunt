@@ -11,7 +11,7 @@ using MphRead; // SfxId (Metadata/SoundMeta.cs) -- not MphRead.Formats.Sound or 
 // comes out through Request.
 namespace MphRecomp.Frontend
 {
-    public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, Credits, ShareCrashLog, Multiplayer }
+    public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, Credits, ShareCrashLog, Multiplayer, ControlsDone }
 
     public readonly record struct FrontendRequest(FrontendRequestKind Kind, int Slot = -1, string? Arg = null);
 
@@ -91,6 +91,14 @@ namespace MphRecomp.Frontend
         }
 
         public void ClosePause() => Paused = false;
+
+        // the control customizer on its own over the game (the ship's OPTIONS): its back raises ControlsDone
+        public void OpenControls(bool keys)
+        {
+            Paused = true;
+            _bootTicks = -1;
+            Recomp.OpenControls(Menu, keys);
+        }
 
         // settingsPath: the recomp settings file (null = defaults, nothing saved); modsDir: where installed mods live
         // savesDir: the campaign's save folder (CampaignSaves; files A/B/C = slots 1/2/3), null = every file empty
@@ -229,6 +237,7 @@ namespace MphRecomp.Frontend
             }
             Menu.Tick();
             Popup?.Tick();
+            Recomp.Tick();
             TickGrooves();
             if (_hostGoTo != -1 && --_hostDelay <= 0)
             {
@@ -252,6 +261,7 @@ namespace MphRecomp.Frontend
         public void Press(MenuKeys keys)
         {
             _showFocus = true;
+            if (Recomp.CaptureDevice != null) return; // the control customizer is waiting: the host sends it the press
             if (PopupOpen)
             {
                 Popup!.Press(keys);
@@ -275,6 +285,7 @@ namespace MphRecomp.Frontend
         public void Navigate(int dx, int dy)
         {
             _showFocus = true;
+            if (Recomp.CaptureDevice != null) return;
             if (PopupOpen)
             {
                 Popup!.Navigate(dx);
@@ -287,6 +298,11 @@ namespace MphRecomp.Frontend
         public void TouchCanvas(float x, float y)
         {
             if (_placements == null) return;
+            if (Recomp.CaptureDevice != null)
+            {
+                Recomp.CancelCapture(); // a touch while the customizer waits: keep the buttons as they are
+                return;
+            }
             if (PopupOpen)
             {
                 int region = _layout.RegionOf(PopupCentreX, PopupCentreY);

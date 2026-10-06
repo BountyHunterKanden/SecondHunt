@@ -14,6 +14,7 @@ public class MphApp : Application
     {
         base.OnCreate();
         CrashLog.Install(this);
+        AndroidPlatform.Install(this); // the shared app layer's logging, audio output, images and caches
         MphRecomp.Config.RecompSettings.PublicBuild = BuildFlags.Public;
         MphRecomp.Config.RecompSettings.AppId = PackageName ?? MphRecomp.Config.RecompSettings.AppId;
     }

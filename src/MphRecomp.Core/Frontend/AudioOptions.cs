@@ -8,9 +8,9 @@ using MphRecomp.Config;
 // OPTIONS > AUDIO ("ADJUST AUDIO OPTIONS", page 22): the game code behind the page's callbacks, which the menu data only
 // names (ov0's page-22 switch, callback - 0x31; USA rev 0 and rev 1 use the same numbers; research in
 // handoffs/beta-release-planning_2026-10-05_0300-files/audio_research.md): the speaker type, the SFX and music volumes
-// (steps 0-9, heard at once, kept by SAVE, put back by leaving without it) and the sound test (SFXSELECTLIST.DAT /
-// BGMSELECTLIST.DAT). The recomp's changes: the MIC row (the DS microphone's level) is gone, and the music quality
-// (RecompSettings.Music, GameAudio.cs MusicMode) sits in its place, so a music test song can be heard in every mode, live.
+// (steps 0-9, heard at once) and the sound test (SFXSELECTLIST.DAT / BGMSELECTLIST.DAT). The recomp's changes: the MIC row (the DS microphone's level) is gone, and the music quality
+// (RecompSettings.Music, GameAudio.cs MusicMode) sits in its place, so a music test song can be heard in every mode, live;
+// and every change is saved at once (owner 2026-10-05: no SAVE; vanilla kept them until SAVE, B forgot them).
 // The page's items are found by content (text, widget, callback), as RecompMenus and FileSelect find theirs.
 namespace MphRecomp.Frontend
 {
@@ -37,7 +37,7 @@ namespace MphRecomp.Frontend
         private readonly Action _save;
         private readonly Items _it;
 
-        // the page's own copy while it's open (vanilla's pending config): heard at once, saved by SAVE
+        // the page's own copy while it's open (vanilla's pending config): heard and saved at once (Commit)
         private bool _open;
         private int _sfxVolume, _musicVolume, _speaker;
         private string _quality = "original";
@@ -255,7 +255,7 @@ namespace MphRecomp.Frontend
             RefreshTexts(menu);
         }
 
-        // left without SAVE: everything goes back to the saved values; the tests stop
+        // left: the tests stop (the values were saved as they changed)
         private void Close()
         {
             _open = false;
@@ -295,23 +295,19 @@ namespace MphRecomp.Frontend
             if (!_open) return false;
             switch (call)
             {
-            case CallSave:
-                _settings.SfxVolume = _sfxVolume;
-                _settings.MusicVolume = _musicVolume;
-                _settings.Speakers = RecompSettings.SpeakerTypes[_speaker];
-                _settings.Music = _quality;
-                _save();
-                Log?.Invoke($"audio options saved: sfx {_sfxVolume}, music {_musicVolume}, {_settings.Speakers}, {_quality}");
+            case CallSave: // hidden (RecompMenus.HideSaveButtons); if a ROM still shows it, it just goes back
                 menu.GoTo(FrontendSession.OptionsPage);
                 return true;
             case CallStereoIcon: // a tap on the shown icon: the next type (its own action hides it; the links show the next)
             case CallSurroundIcon:
             case CallHeadphonesIcon:
                 _speaker = (call - CallStereoIcon + 1) % 3;
+                Commit();
                 return true;
             case CallSpeakers: // A on SPEAKERS: the same, by code
                 menu.SetState(_it.Icon[_speaker], MenuState.Hidden);
                 _speaker = (_speaker + 1) % 3;
+                Commit();
                 return true;
             case CallSfxNext:
             case CallSfxPrev:
@@ -349,10 +345,12 @@ namespace MphRecomp.Frontend
             case CallSfxUp:
             case CallSfxDown:
                 _sfxVolume = Step(_sfxVolume, call == CallSfxUp ? 1 : -1);
+                Commit();
                 break;
             case CallMusicUp:
             case CallMusicDown:
                 _musicVolume = Step(_musicVolume, call == CallMusicUp ? 1 : -1);
+                Commit();
                 break;
             case CallMicUp:
             case CallMicDown:
@@ -363,6 +361,7 @@ namespace MphRecomp.Frontend
                 string[] all = RecompSettings.MusicSources;
                 int i = Math.Max(0, Array.IndexOf(all, _quality));
                 _quality = all[(i + (call == CallQualityNext ? 1 : all.Length - 1)) % all.Length];
+                Commit();
                 break;
             }
             default:
@@ -370,6 +369,17 @@ namespace MphRecomp.Frontend
             }
             RefreshTexts(menu);
             return true;
+        }
+
+        // the page's values into the settings file, at once
+        private void Commit()
+        {
+            _settings.SfxVolume = _sfxVolume;
+            _settings.MusicVolume = _musicVolume;
+            _settings.Speakers = RecompSettings.SpeakerTypes[_speaker];
+            _settings.Music = _quality;
+            _save();
+            Log?.Invoke($"audio options saved: sfx {_sfxVolume}, music {_musicVolume}, {_settings.Speakers}, {_quality}");
         }
 
         // 0..9, wrapping round both ways

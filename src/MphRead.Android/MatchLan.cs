@@ -22,9 +22,8 @@ namespace MphRecomp.App;
 // opens CampaignActivity with --es net host|client, which plays the match through LanSession.Current.
 internal static class MatchLan
 {
-    // the revision check both sides compare (LanSession JOIN): US rev 0 and rev 1 share every file a match uses
-    // (docs/ROM_VERSIONS.md 3e), so they count as one
-    static string LanRomKey(string romKey) => romKey is MphRead.Ver.AMHE0 or MphRead.Ver.AMHE1 ? "MPH USA" : romKey;
+    // the revision check both sides compare (LanSession JOIN): MatchLobby.LanRomKey
+    static string LanRomKey(string romKey) => MatchLobby.LanRomKey(romKey);
 
     // onStarted: called once the match screen has been opened (the lobby sets AppNav and closes itself)
     public static void Host(Activity activity, MatchSettings template, string romKey, string hunter, string gun,

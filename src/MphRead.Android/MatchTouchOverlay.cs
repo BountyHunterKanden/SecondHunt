@@ -46,7 +46,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     {
         public string Label = "";
         public string? OkLabel, YesNoLabel; // the label while a dialog is up (OK-type / YES-NO)
-        public Keycode Key;
+        public PadButton Key;
         public Press Kind;
         public float X, Y, R; // fractions of the view: centre and radius (of the height)
         public int Pointer = -1;
@@ -55,11 +55,11 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
 
     static TouchButton[] MatchLayout() => new TouchButton[]
     {
-        new() { Label = "FIRE", Key = Keycode.ButtonB, X = 0.90f, Y = 0.72f, R = 0.10f },
-        new() { Label = "JUMP", Key = Keycode.ButtonA, X = 0.78f, Y = 0.86f, R = 0.08f },
-        new() { Label = "MORPH", Key = Keycode.ButtonX, X = 0.78f, Y = 0.60f, R = 0.065f },
-        new() { Label = "MISSILE", Key = Keycode.ButtonR1, X = 0.91f, Y = 0.45f, R = 0.06f },
-        new() { Label = "WEAPON", Kind = Press.Wheel, Key = Keycode.ButtonY, X = 0.80f, Y = 0.43f, R = 0.055f },
+        new() { Label = "FIRE", Key = PadButton.B, X = 0.90f, Y = 0.72f, R = 0.10f },
+        new() { Label = "JUMP", Key = PadButton.A, X = 0.78f, Y = 0.86f, R = 0.08f },
+        new() { Label = "MORPH", Key = PadButton.X, X = 0.78f, Y = 0.60f, R = 0.065f },
+        new() { Label = "MISSILE", Key = PadButton.R1, X = 0.91f, Y = 0.45f, R = 0.06f },
+        new() { Label = "WEAPON", Kind = Press.Wheel, Key = PadButton.Y, X = 0.80f, Y = 0.43f, R = 0.055f },
         new() { Label = "PAUSE", Kind = Press.Start, X = 0.50f, Y = 0.07f, R = 0.045f },
     };
 
@@ -68,13 +68,13 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     // middle. The reticle and the HUD's middle stay clear.
     static TouchButton[] CampaignLayout() => new TouchButton[]
     {
-        new() { Label = "FIRE", YesNoLabel = "NO", Key = Keycode.ButtonB, X = 0.90f, Y = 0.74f, R = 0.095f },
-        new() { Label = "JUMP", OkLabel = "OK", YesNoLabel = "YES", Key = Keycode.ButtonA, X = 0.775f, Y = 0.87f, R = 0.075f },
-        new() { Label = "MORPH", Key = Keycode.ButtonX, X = 0.775f, Y = 0.625f, R = 0.06f },
-        new() { Label = "MISSILE", Key = Keycode.ButtonR1, X = 0.925f, Y = 0.50f, R = 0.055f },
-        new() { Label = "WEAPON", Kind = Press.Wheel, Key = Keycode.ButtonY, X = 0.82f, Y = 0.41f, R = 0.05f },
-        new() { Label = "VISOR", Key = Keycode.DpadRight, X = 0.055f, Y = 0.42f, R = 0.05f },
-        new() { Label = "SCAN", Key = Keycode.ButtonL2, X = 0.065f, Y = 0.58f, R = 0.06f },
+        new() { Label = "FIRE", YesNoLabel = "NO", Key = PadButton.B, X = 0.90f, Y = 0.74f, R = 0.095f },
+        new() { Label = "JUMP", OkLabel = "OK", YesNoLabel = "YES", Key = PadButton.A, X = 0.775f, Y = 0.87f, R = 0.075f },
+        new() { Label = "MORPH", Key = PadButton.X, X = 0.775f, Y = 0.625f, R = 0.06f },
+        new() { Label = "MISSILE", Key = PadButton.R1, X = 0.925f, Y = 0.50f, R = 0.055f },
+        new() { Label = "WEAPON", Kind = Press.Wheel, Key = PadButton.Y, X = 0.82f, Y = 0.41f, R = 0.05f },
+        new() { Label = "VISOR", Key = PadButton.DpadUp, X = 0.055f, Y = 0.42f, R = 0.05f }, // the pad's visor key
+        new() { Label = "SCAN", Key = PadButton.L2, X = 0.065f, Y = 0.58f, R = 0.06f },
         new() { Label = "MAP", Kind = Press.Select, X = 0.43f, Y = 0.065f, R = 0.042f },
         new() { Label = "PAUSE", Kind = Press.Start, X = 0.57f, Y = 0.065f, R = 0.042f },
     };
@@ -252,10 +252,10 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
                     _wheel.OX = _wheel.X = x;
                     _wheel.OY = _wheel.Y = y;
                     UpdateSticks();
-                    _renderer.Pad.Set(b.Key, true);
+                    _renderer.Pad.SetTouch(b.Key, true);
                     break;
                 default:
-                    _renderer.Pad.Set(b.Key, true);
+                    _renderer.Pad.SetTouch(b.Key, true);
                     break;
                 }
                 return;
@@ -294,7 +294,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
                 if (b.Kind is Press.Key or Press.Wheel)
                 {
                     // Y goes up before the wheel stick recentres, as a gamepad's would (the wheel keeps its pick)
-                    _renderer.Pad.Set(b.Key, false);
+                    _renderer.Pad.SetTouch(b.Key, false);
                 }
             }
         }
@@ -314,7 +314,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         {
             if (b.Pointer != -1 && b.Kind is Press.Key or Press.Wheel)
             {
-                _renderer.Pad.Set(b.Key, false);
+                _renderer.Pad.SetTouch(b.Key, false);
             }
             b.Pointer = -1;
         }
@@ -367,7 +367,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
             _ring.Color = Color.Argb(150, 255, 255, 255);
             canvas.DrawCircle(cx, cy, r, _ring);
             string label = (dialog == 2 ? b.YesNoLabel : dialog == 1 ? b.OkLabel : null)
-                ?? (b.Key == Keycode.ButtonR1 && missile ? "POWER\nBEAM" : b.Label); // what R1 switches to
+                ?? (b.Key == PadButton.R1 && missile ? "POWER\nBEAM" : b.Label); // what R1 switches to
             string[] lines = label.Split('\n');
             _text.TextSize = textSize;
             float w = 0;

@@ -27,6 +27,9 @@
     <ProjectReference Include="..\MphRead\MphRead.csproj" />
     <!-- Our game/sim/save/mod core, for wiring GameSession into the renderer (M2). -->
     <ProjectReference Include="..\MphRecomp.Core\MphRecomp.Core.csproj" />
+    <!-- the app itself (front end, campaign and match screens, audio), shared with the Windows host; this project is the
+         Android shell around it -->
+    <ProjectReference Include="..\MphRecomp.App\MphRecomp.App.csproj" />
   </ItemGroup>
 
   <ItemGroup>

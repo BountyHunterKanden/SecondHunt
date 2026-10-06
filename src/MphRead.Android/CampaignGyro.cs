@@ -14,9 +14,10 @@ namespace MphRecomp.App;
 
 // Gyro aiming for the campaign: the device's own gyroscope, added on top of the right stick (the stick still turns the
 // camera exactly as before; the gyro is for fine aim). The math lives in MphRecomp.Core (Input/GyroAim.cs); this file
-// is only the Android sensor plumbing. CampaignActivity.cs calls two things: AttachGyro (once, from OnCreate) and
-// GyroAimDelta (once per sim step, from BuildInput). Sensor start/stop follows the activity's resume/pause through
-// lifecycle callbacks registered here, so nothing else in the activity changes.
+// is only the Android sensor plumbing: CampaignActivity calls CampaignGyro.Attach once, from OnCreate, and the
+// renderer reads the sensor (IGyroAimSource) once per sim step (MphRecomp.App CampaignGyroAim.cs). Sensor start/stop
+// follows the activity's resume/pause through lifecycle callbacks registered here, so nothing else in the activity
+// changes.
 //
 // Settings (recomp_settings.json, read by name so this works before and after the settings screen grows the rows):
 //   "Gyro": "off" | "on" (always) | "zoom" (only while zoomed or in the scan visor, like Zelda's bow aiming)
@@ -26,15 +27,12 @@ namespace MphRecomp.App;
 // Dev overrides: --es gyro on|off|zoom, --es gyrosens 150, --es gyroaxis roll, --es gyrozoom off (MphRead's own zoom
 // scaling only, for A/B), --es gyrolog 1 (logcat MPHGyro: once a second, raw rate stats and the degrees handed to
 // the game -- lay the device down to read its noise floor).
-internal sealed partial class CampaignRenderer
+internal static class CampaignGyro
 {
-    GyroSensor? _gyro;
-    double _gyroLastTake = -1;
-
-    public static void AttachGyro(Activity activity, CampaignRenderer renderer, string settingsPath, Intent? intent)
+    public static void Attach(Activity activity, CampaignRenderer renderer, string settingsPath, Intent? intent)
     {
         var sensor = new GyroSensor(activity, settingsPath, intent);
-        renderer._gyro = sensor;
+        renderer.Gyro = sensor;
         if (!sensor.HasGyroscope)
         {
             Log.Info(GyroSensor.Tag, "no gyroscope on this device: gyro aim unavailable");
@@ -47,40 +45,9 @@ internal sealed partial class CampaignRenderer
             renderer.PauseMenu.Resumed += sensor.ReloadSettings;
         }
     }
-
-    // Aim to add this sim step, in MphRead's mouse units (see GyroAim.ToMphAim). Motion from while the game wasn't
-    // taking input (a dialog, the pause menu, the ship) is dropped, not delivered late as a jump.
-    System.Numerics.Vector2 GyroAimDelta()
-    {
-        GyroSensor? g = _gyro;
-        PlayerEntity? player = _host?.Player;
-        if (g == null || !g.Running || player == null)
-        {
-            return default;
-        }
-        double now = _clock.Elapsed.TotalSeconds;
-        bool stale = _gyroLastTake < 0 || now - _gyroLastTake > 0.1;
-        _gyroLastTake = now;
-        System.Numerics.Vector2 degrees = g.Aim.TakeDegrees();
-        if (stale)
-        {
-            g.Aim.Reset();
-            return default;
-        }
-        if (g.OnlyWhenZoomed && !player.EquipInfo.Zoomed && !player.ScanVisor)
-        {
-            return default;
-        }
-        if (g.ZoomScaling)
-        {
-            degrees *= GyroMph.ZoomScale(player);
-        }
-        g.NoteTaken(degrees);
-        return GyroAim.ToMphAim(degrees);
-    }
 }
 
-internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener
+internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyroAimSource
 {
     public const string Tag = "MPHGyro";
     const int GyroPeriodUs = 5000;   // 200 Hz: the most Android 12+ allows without HIGH_SAMPLING_RATE_SENSORS
@@ -103,6 +70,9 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener
     public bool Running => _registered;
     public volatile bool OnlyWhenZoomed; // "zoom" mode
     public volatile bool ZoomScaling = true;
+    GyroAim IGyroAimSource.Aim => Aim;
+    bool IGyroAimSource.OnlyWhenZoomed => OnlyWhenZoomed;
+    bool IGyroAimSource.ZoomScaling => ZoomScaling;
 
     public GyroSensor(Activity activity, string settingsPath, Intent? intent)
     {

@@ -4,7 +4,7 @@ using SoundFlow.Enums;
 
 namespace MphRead
 {
-    // A desktop stand-in for MphRead.Android's AndroidMusicPlayer (MusicPlayer.IHost), for comparing what MphRead's
+    // A desktop stand-in for MphRead.Android's GameMusicPlayer (MusicPlayer.IHost), for comparing what MphRead's
     // own game logic (Music.PlayRoomMusic/PlayMusic/Stop/track fades...) actually calls during a headless campaign
     // sim against what the device's MPHAudio log shows, without needing a device. Enable with MPHAUDIOLOG=1
     // (see CampaignSim.Run); every call just logs to the console and fakes minimal state (no real audio).

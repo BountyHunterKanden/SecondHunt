@@ -13,9 +13,9 @@ using GameMode = MphRead.GameMode;
 namespace MphRecomp.App;
 
 // The player-facing multiplayer screen (Beta 1): the front end's MULTIPLAYER opens it (GameActivity,
-// FrontendRequestKind.Multiplayer). A match against bots on this device (every mode the dev launcher offers), or a LAN
-// match between two devices on one Wi-Fi network (MatchLan.cs; Beta 1 scope, board S35: host + one joiner, Battle only).
-// Only the game's own arenas are listed. Works with a gamepad (D-pad / left stick move, left / right or A change a
+// FrontendRequestKind.Multiplayer). The choices and the rules are the shared MatchLobby (MphRecomp.App): a match against
+// bots on this device, or a LAN match between two devices on one Wi-Fi network (MatchLan.cs; Beta 1 scope, board S35:
+// host + one joiner, Battle only). Only the game's own arenas are listed. Works with a gamepad (D-pad / left stick move, left / right or A change a
 // row, B / Back leave) and with touch (tap a row or its arrows). The last choices are kept in SharedPreferences.
 // Leaving a match goes back to the game's menus: CampaignActivity exits through MainActivity, which bounces to
 // GameActivity because AppNav.ReturnToGame is set here.
@@ -27,20 +27,10 @@ namespace MphRecomp.App;
         | Android.Content.PM.ConfigChanges.KeyboardHidden | Android.Content.PM.ConfigChanges.Navigation)]
 public class MatchLobbyActivity : Activity
 {
-    static readonly string[] Hunters = { "Samus", "Kanden", "Trace", "Sylux", "Noxus", "Spire", "Weavel" };
-    static readonly (string label, float? seconds)[] Times =
-    {
-        ("Mode default", null), ("10 min", 600), ("5 min", 300), ("3 min", 180), ("1 min", 60),
-    };
-    // MPH's own arm cannon (CampaignActivity: "none" / "original" = no Prime gun), whatever RECOMP SETTINGS has
-    const string Gun = "original";
     const string PrefsName = "match_lobby";
 
-    static IReadOnlyList<GameMode> Modes => MatchSettings.Modes;
-
-    int _mode, _hunter, _bots = 3, _level = 1, _time;
-    string? _arena; // the arena's RoomMetadata name (kept by name: each mode lists different arenas)
-    bool _pathsReady, _leaving;
+    MatchLobby _lobby = null!;
+    bool _leaving;
     int _hatX, _hatY, _stickX, _stickY;
 
     sealed class Row
@@ -60,94 +50,12 @@ public class MatchLobbyActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        _lobby = new MatchLobby(FilesDir!.AbsolutePath);
         Load();
         BuildUi();
         Refresh();
         _rows[0].View.RequestFocus();
         HideSystemUi();
-    }
-
-    // ---- choices ----
-
-    static string ModeLabel(GameMode mode) => mode switch
-    {
-        GameMode.PrimeHunter => "Prime Hunter",
-        _ when mode.ToString().EndsWith("Teams") => mode.ToString()[..^"Teams".Length] + " (teams)",
-        _ => mode.ToString()
-    };
-
-    // the census reads the extracted ROM's entity files (the same paths CampaignActivity sets up); this also tells the
-    // LAN handshake which ROM revision this is
-    void EnsurePaths()
-    {
-        if (_pathsReady)
-        {
-            return;
-        }
-        try
-        {
-            System.IO.Directory.SetCurrentDirectory(FilesDir!.AbsolutePath);
-            Paths.UpdatePaths();
-            Paths.ChooseMphPath();
-            _pathsReady = true;
-        }
-        catch (Exception ex)
-        {
-            Android.Util.Log.Warn("MPHLobby", "ROM paths: " + ex);
-        }
-    }
-
-    // the retail arenas only (MatchArenas' table range); imported ones (Echoes, Metadata.HostRooms) are left out
-    static List<RoomMetadata> RetailArenas() => Metadata.RoomList
-        .Where(r => r.Multiplayer && !r.FirstHunt && r.Id >= MatchArenas.FirstId && r.Id <= MatchArenas.LastId
-            && !Metadata.HostRooms.Contains(r))
-        .OrderBy(r => r.Id)
-        .ToList();
-
-    // the arenas whose entity data supports the mode for that many players
-    List<RoomMetadata> Arenas(GameMode mode, int players)
-    {
-        List<RoomMetadata> retail = RetailArenas();
-        EnsurePaths();
-        if (_pathsReady)
-        {
-            try
-            {
-                var list = retail.Where(a => MatchArenas.Supports(a, mode, players)).ToList();
-                if (list.Count > 0)
-                {
-                    return list;
-                }
-            }
-            catch (Exception ex)
-            {
-                Android.Util.Log.Warn("MPHLobby", "arena census failed: " + ex.Message);
-            }
-        }
-        return retail;
-    }
-
-    List<RoomMetadata> BotArenas() => Arenas(Modes[_mode], _bots + 1);
-
-    // the chosen arena if the list has it, else the list's first (and that becomes the choice)
-    RoomMetadata CurrentArena(List<RoomMetadata> list)
-    {
-        RoomMetadata? arena = list.FirstOrDefault(a => a.Name == _arena);
-        if (arena == null)
-        {
-            arena = list[0];
-            _arena = arena.Name;
-        }
-        return arena;
-    }
-
-    static int Wrap(int value, int count) => ((value % count) + count) % count;
-
-    void StepArena(int delta)
-    {
-        List<RoomMetadata> list = BotArenas();
-        int index = list.IndexOf(CurrentArena(list));
-        _arena = list[Wrap(index + delta, list.Count)].Name;
     }
 
     // ---- UI ----
@@ -195,13 +103,10 @@ public class MatchLobbyActivity : Activity
         subtitle.SetPadding(0, 0, 0, Dp(8));
         page.AddView(subtitle);
 
-        AddRow(page, "Mode", () => ModeLabel(Modes[_mode]), d => _mode = Wrap(_mode + d, Modes.Count));
-        AddRow(page, "Arena", () => { var a = CurrentArena(BotArenas()); return a.InGameName ?? a.Name; }, StepArena);
-        AddRow(page, "Play as", () => Hunters[_hunter], d => _hunter = Wrap(_hunter + d, Hunters.Length));
-        // a match on this device needs at least one bot; a LAN match has none (host + one joiner)
-        AddRow(page, "Bots (vs bots only)", () => _bots.ToString(), d => _bots = Wrap(_bots - 1 + d, 3) + 1);
-        AddRow(page, "Bot level", () => $"{_level + 1} of 3", d => _level = Wrap(_level + d, 3));
-        AddRow(page, "Time limit", () => Times[_time].label, d => _time = Wrap(_time + d, Times.Length));
+        foreach (MatchLobby.Row r in _lobby.Rows())
+        {
+            AddRow(page, r.Label, r.Value, r.Step);
+        }
 
         // not baseline-aligned: Android lines up the buttons' first text lines by default, which pushed the two-line
         // "Start match (vs bots)" down out of the row
@@ -297,18 +202,10 @@ public class MatchLobbyActivity : Activity
         {
             return;
         }
-        GameMode mode = Modes[_mode];
-        RoomMetadata arena = CurrentArena(BotArenas());
-        var intent = new Intent(this, typeof(CampaignActivity))
-            .PutExtra("match", mode.ToString())
-            .PutExtra("arena", arena.Name)
-            .PutExtra("bots", _bots.ToString())
-            .PutExtra("botlevel", _level.ToString())
-            .PutExtra("hunter", Hunters[_hunter])
-            .PutExtra("gun", Gun);
-        if (Times[_time].seconds is float s)
+        var intent = new Intent(this, typeof(CampaignActivity));
+        foreach ((string key, string value) in _lobby.BotMatchArgs())
         {
-            intent.PutExtra("time", s.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            intent.PutExtra(key, value);
         }
         StartActivity(intent);
         LeftForMatch();
@@ -330,25 +227,19 @@ public class MatchLobbyActivity : Activity
             return;
         }
         // Beta 1: Battle only, the host plus one joiner (no bots)
-        int battle = Modes.ToList().IndexOf(GameMode.Battle);
-        if (_mode != battle)
+        MatchSettings? template = _lobby.LanTemplate(out bool modeChanged);
+        Refresh();
+        if (modeChanged)
         {
-            _mode = battle;
-            Refresh();
             Save();
             Toast.MakeText(this, "LAN matches are Battle only for now: mode set to Battle", ToastLength.Long)!.Show();
         }
-        List<RoomMetadata> lanArenas = Arenas(GameMode.Battle, 2);
-        RoomMetadata arena = CurrentArena(lanArenas);
-        Refresh();
-        if (!_pathsReady)
+        if (template == null)
         {
             Toast.MakeText(this, "Can't read the game's files, so LAN play can't start: restart the app and try again", ToastLength.Long)!.Show();
             return;
         }
-        MatchSettings template = MatchSettings.Quick(GameMode.Battle, arena.Name, Enum.Parse<Hunter>(Hunters[_hunter]), bots: 0, _level);
-        template.TimeLimitSeconds = Times[_time].seconds;
-        MatchLan.Host(this, template, Paths.MphKey, Hunters[_hunter], Gun, LeftForMatch);
+        MatchLan.Host(this, template, Paths.MphKey, MatchLobby.Hunters[_lobby.Hunter], MatchLobby.Gun, LeftForMatch);
     }
 
     void JoinLan()
@@ -357,13 +248,12 @@ public class MatchLobbyActivity : Activity
         {
             return;
         }
-        EnsurePaths(); // the ROM revision the handshake compares
-        if (!_pathsReady)
+        if (!_lobby.EnsurePaths()) // the ROM revision the handshake compares
         {
             Toast.MakeText(this, "Can't read the game's files, so LAN play can't start: restart the app and try again", ToastLength.Long)!.Show();
             return;
         }
-        MatchLan.Join(this, Paths.MphKey, Hunters[_hunter], Gun, LeftForMatch);
+        MatchLan.Join(this, Paths.MphKey, MatchLobby.Hunters[_lobby.Hunter], MatchLobby.Gun, LeftForMatch);
     }
 
     // ---- remembered choices ----
@@ -373,14 +263,7 @@ public class MatchLobbyActivity : Activity
         try
         {
             ISharedPreferences prefs = GetSharedPreferences(PrefsName, FileCreationMode.Private)!;
-            int mode = Modes.ToList().FindIndex(m => m.ToString() == prefs.GetString("mode", null));
-            _mode = mode >= 0 ? mode : 0;
-            _arena = prefs.GetString("arena", null);
-            int hunter = Array.IndexOf(Hunters, prefs.GetString("hunter", null));
-            _hunter = hunter >= 0 ? hunter : 0;
-            _bots = Math.Clamp(prefs.GetInt("bots", 3), 1, 3);
-            _level = Math.Clamp(prefs.GetInt("botlevel", 1), 0, 2);
-            _time = Math.Clamp(prefs.GetInt("time", 0), 0, Times.Length - 1);
+            _lobby.Load(key => prefs.GetString(key, null), (key, fallback) => prefs.GetInt(key, fallback));
         }
         catch (Exception ex)
         {
@@ -393,12 +276,7 @@ public class MatchLobbyActivity : Activity
         try
         {
             ISharedPreferencesEditor edit = GetSharedPreferences(PrefsName, FileCreationMode.Private)!.Edit()!;
-            edit.PutString("mode", Modes[_mode].ToString());
-            edit.PutString("arena", _arena);
-            edit.PutString("hunter", Hunters[_hunter]);
-            edit.PutInt("bots", _bots);
-            edit.PutInt("botlevel", _level);
-            edit.PutInt("time", _time);
+            _lobby.Save((key, value) => edit.PutString(key, value), (key, value) => edit.PutInt(key, value));
             edit.Apply();
         }
         catch (Exception ex)

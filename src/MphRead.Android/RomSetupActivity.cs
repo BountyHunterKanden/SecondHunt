@@ -99,65 +99,21 @@ public class RomSetupActivity : Activity
         });
     }
 
-    // Beta 1 supports Metroid Prime Hunters USA (AMHE), rev 0 (1.0) and rev 1 (1.1): the only ROMs tested end to end
-    // (public beta audit 5.3, board S28). The header's game code (0x0C) and version (0x1E) decide; anything else gets a
-    // plain message instead of a half-working game.
-    static string? Unsupported(string romPath)
-    {
-        byte[] head = new byte[0x20];
-        using (var f = System.IO.File.OpenRead(romPath))
-        {
-            if (f.Read(head, 0, head.Length) < head.Length) return "That file is too small to be a DS ROM.";
-        }
-        string code = Encoding.ASCII.GetString(head, 0x0C, 4);
-        byte version = head[0x1E];
-        if (code == "AMHE" && version <= 1) return null;
-        string what = code switch
-        {
-            "AMHE" => $"Metroid Prime Hunters (USA) with an unknown revision ({version})",
-            "AMHP" => "Metroid Prime Hunters (Europe)",
-            "AMHJ" => "Metroid Prime Hunters (Japan)",
-            "AMHK" => "Metroid Prime Hunters (Korea)",
-            "A76E" => "Metroid Prime Hunters (USA kiosk demo)",
-            "AMFE" or "AMFP" => "Metroid Prime Hunters: First Hunt",
-            _ => $"not Metroid Prime Hunters (game code {(code.All(c => c >= 0x20 && c < 0x7F) ? code : "?")})",
-        };
-        return $"This file is {what}.\n\nThis beta supports Metroid Prime Hunters (USA), version 1.0 or 1.1 (game code "
-            + "AMHE). Other regions aren't supported yet. Please pick a USA copy of the game.";
-    }
+    // the ROMs Beta 1 supports: the shared check (MphRecomp.App RomSetup)
+    static string? Unsupported(string romPath) => RomSetup.Unsupported(romPath);
 
     void Extract(string romPath)
     {
-        try
+        if (RomSetup.Extract(romPath, FilesDir!.AbsolutePath, Log))
         {
-            string files = FilesDir!.AbsolutePath;
-            System.IO.Directory.SetCurrentDirectory(files);
-            var prev = Console.Out;
-            Console.SetOut(new ForwardWriter(Log));
-            try { Log("Extracting…"); MphRead.Extract.Setup(romPath); }
-            finally { Console.SetOut(prev); }
-            string tree = System.IO.Path.Combine(files, "files");
-            int count = System.IO.Directory.Exists(tree)
-                ? System.IO.Directory.GetFiles(tree, "*", System.IO.SearchOption.AllDirectories).Length : 0;
-            if (count == 0)
-            {
-                Log("Nothing was extracted -- is this a Metroid Prime Hunters ROM?");
-                RunOnUiThread(() => _select.Enabled = true);
-                return;
-            }
-            string root = System.IO.Directory.GetDirectories(tree) is { Length: > 0 } dirs ? System.IO.Path.GetFileName(dirs[0]) : "unknown";
-            System.IO.File.WriteAllText(System.IO.Path.Combine(files, ".extracted"),
-                $"version={MphRead.AppInfo.Version}\nrom={root}\nfiles={count}");
-            Log($"Done: {root}, {count} files.");
             RunOnUiThread(() =>
             {
                 StartActivity(new Intent(this, typeof(GameActivity)));
                 Finish();
             });
         }
-        catch (Exception ex)
+        else
         {
-            Log("Extraction failed: " + ex.Message);
             RunOnUiThread(() => _select.Enabled = true);
         }
     }
@@ -167,15 +123,5 @@ public class RomSetupActivity : Activity
         lock (_sb) _sb.AppendLine(msg);
         Android.Util.Log.Info("MPHExtract", msg);
         RunOnUiThread(() => { lock (_sb) _log.Text = _sb.ToString(); });
-    }
-
-    sealed class ForwardWriter : System.IO.TextWriter
-    {
-        readonly Action<string> _sink;
-        readonly StringBuilder _line = new();
-        public ForwardWriter(Action<string> sink) => _sink = sink;
-        public override Encoding Encoding => Encoding.UTF8;
-        public override void Write(char c) { if (c == '\n') { _sink(_line.ToString()); _line.Clear(); } else if (c != '\r') _line.Append(c); }
-        public override void Write(string? s) { if (!string.IsNullOrEmpty(s)) foreach (char c in s!) Write(c); }
     }
 }

@@ -227,6 +227,17 @@ namespace MphRead.Entities
         private readonly BeamType[] _weaponSlots = new BeamType[3];
         private readonly AvailableArray _availableWeapons = new AvailableArray();
         public AvailableArray AvailableWeapons => _availableWeapons;
+        // host hook: whether TryEquipWeapon would take this weapon now (owned, and the ammo for a shot)
+        public bool CanEquipWeapon(BeamType beam)
+        {
+            int index = (int)beam;
+            if (index < 0 || index >= 9 || !_availableWeapons[beam])
+            {
+                return false;
+            }
+            WeaponInfo info = Weapons.Current[index];
+            return beam == BeamType.PowerBeam || _ammo[info.AmmoType] >= info.AmmoCost || _ammo[info.AmmoType] == -1;
+        }
         private readonly AvailableArray _availableCharges = new AvailableArray();
         private AbilityFlags _abilities;
         private readonly BeamProjectileEntity[] _beams;

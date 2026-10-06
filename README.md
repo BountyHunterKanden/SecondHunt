@@ -1,12 +1,12 @@
 # Second Hunt
 
-**Second Hunt is _Metroid Prime Hunters_ rebuilt as a native Android game.** It plays the Nintendo DS original campaign
-and multiplayer, in true widescreen, with dual-stick controller controls and a one-screen HUD. It runs
-everything from your own copy of the game.
+**Second Hunt is _Metroid Prime Hunters_ rebuilt as a native game for Android and Windows.** It plays the Nintendo DS
+original campaign and multiplayer, in true widescreen, with dual-stick controller controls (or keyboard and mouse on PC)
+and a one-screen HUD. It runs everything from your own copy of the game.
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 1 (Android).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
+> **Beta 1.1 (Android and Windows).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
 > [What's planned](#whats-planned).
 
 > **AI tools were used in the making of this project.** If you don't support AI in video games, then you don't have to play. Or, look
@@ -17,21 +17,23 @@ Second Hunt is a fan project and a fork of MphRead. It contains no game data and
 
 The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
 [MphRead](https://github.com/NoneGiven/MphRead), NoneGiven's C# recreation of the game, built from reverse engineering.
-Second Hunt adds everything else it takes to play it on Android: the title screen and menus, the gunship, star map and
-saves, the HUD, music and sound, cutscenes, controls, and LAN multiplayer.
+Second Hunt adds everything else it takes to play it on Android and Windows: the title screen and menus, the gunship,
+star map and saves, the HUD, music and sound, cutscenes, controls, and LAN multiplayer. Both versions run the same game
+code; only the window, the controls and the sound output are each platform's own.
 
 All the game's content comes from your ROM. The first time you launch the app you pick your copy of the game, and
-Second Hunt unpacks it into the app's private storage on your device. Nothing gets downloaded or uploaded.
+Second Hunt unpacks it into the app's own storage on your device or PC. Nothing gets downloaded or uploaded.
 
 Since the game is drawn natively instead of through an emulated DS, the 3D runs in real widescreen at your screen's
 resolution, and at 60 fps instead of the DS's 30. The two DS screens become one: the HUD sits in the game view,
 and the touch-screen controls (morph ball, weapon select, scan visor, dialog buttons) move to buttons. Controls are made
-for a controller, laid out like _Metroid Prime Remastered_, with optional gyro aim and an optional touch overlay.
+for a controller, laid out like _Metroid Prime Remastered_, with optional gyro aim and an optional touch overlay on
+Android. On Windows the keyboard and mouse use MphRead's own PC controls.
 
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
 sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
-## What's in Beta 1
+## What's in Beta 1.1
 
 **Campaign**
 - The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
@@ -45,8 +47,13 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 
 **Multiplayer**
 - Bot matches on one device in every mode and arena, with adjustable bot level and time limit
-- LAN matches between two devices on the same Wi-Fi, Battle mode only for now (experimental). It's under Main menu >
-  MULTIPLAYER.
+- LAN matches between two devices on the same network, Android or Windows in any mix, Battle mode only for now
+  (experimental). It's under Main menu > MULTIPLAYER.
+
+**Controls** (OPTIONS > CONTROLS, also RECOMP SETTINGS > CONTROLS and the gunship's OPTIONS)
+- Change which button does what: pick a function, then press its new button (X on a function adds a second button).
+  For a controller on Android and Windows, and for the keyboard and mouse on Windows.
+- Sensitivity and look invert for the controller, and on Windows a separate sensitivity for the mouse
 
 **Audio** (OPTIONS > AUDIO, wired up like the original)
 - Sound effect and music volume
@@ -59,17 +66,21 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 
 **Options** (Options > RECOMP SETTINGS, L / R to change pages)
 - First- or third-person camera
-- Gyro aim: off, on, or only while zoomed or scanning, with its own speed and axis settings
-- Touch controls: auto (shown when no controller is connected), on or off
+- Music quality, the same setting as QUALITY on OPTIONS > AUDIO. In the pause menu the paused music plays while MUSIC
+  is selected, so a change can be heard.
+- Controls: the same page as OPTIONS > CONTROLS
+- Gyro aim (Android): off, on, or only while zoomed or scanning, with its own speed and axis settings
+- Touch controls (Android): auto (shown when no controller is connected), on or off
 - Menus with both DS screens merged into one or side by side, crisp or smoothed pixel art, and the HUD's line art
   redrawn as clean lines or kept as DS pixels
 - Pause map look and mode
-- Credits, licenses, and a button to share crash reports
+- Credits, licenses, and a button to share crash reports (on Windows it opens their folder)
 - Lua mods, sandboxed so they can't touch your files or the network
+- MODS and RECOMP SETTINGS are on the game's OPTIONS page, where the Nintendo WFC stats option was
 
 ## Getting started
 
-You'll need:
+**Android.** You'll need:
 - An Android 8.0+ device with OpenGL ES 3.0
 - A controller (recommended), though touch controls work too
 - Your own _Metroid Prime Hunters_ (USA) ROM, version 1.0 or 1.1 (game code AMHE). Other regions aren't supported yet,
@@ -80,7 +91,26 @@ To install:
 2. Open it on your device. Android will ask you to allow installs from your browser or file manager.
 3. On first launch, pick your ROM file. Second Hunt unpacks it once, and after that it goes straight into the game.
 
+**Windows.** You'll need:
+- Windows 10 or 11, 64-bit, with a graphics card or chip that has OpenGL 3.3 or newer
+- A keyboard and mouse or a controller
+- The same ROM as above
+
+To install:
+1. Download the Windows zip from [Releases](../../releases) and unzip it anywhere.
+2. Open `SecondHunt.exe`. Windows may say it protected your PC, since the app isn't signed with a paid certificate:
+   click "More info", then "Run anyway".
+3. On first launch, pick your ROM file or drop it on the window. Saves and settings are kept in
+   `%LOCALAPPDATA%\Second Hunt`.
+4. For LAN matches, Windows Firewall has to let Second Hunt through. Windows usually asks the first time you host or
+   join, but the prompt can hide behind a full-screen window, and on a network set to Public nothing gets through until
+   it's allowed. If other devices can't see your match or joining says no answer, go to Windows Security > Firewall &
+   network protection > Allow an app through firewall, add `SecondHunt.exe`, and tick both Private and Public.
+
 ## Controls
+
+These are the defaults. OPTIONS > CONTROLS changes any of the game buttons below; the sticks, Start, Select and the
+buttons in menus and dialogs stay where they are.
 
 **Controller** (Xbox-style layout: A bottom, B right, X left, Y top)
 
@@ -95,18 +125,44 @@ To install:
 | R3 | Zoom |
 | Hold Y + right stick | Weapon wheel: point at a weapon, let go of Y to equip it |
 | R1 | Switch between missiles and the Power Beam |
-| D-pad up / down | Power Beam / missiles |
-| D-pad left | Your third weapon slot (picked in the ship's WEAPON SELECT) |
-| D-pad right | Scan visor on/off |
+| D-pad left / right | Previous / next weapon (only weapons you have, with ammo) |
+| D-pad up | Scan visor on/off (in a match, where there's no visor: Power Beam) |
+| D-pad down | Missiles |
 | Select | Pause map (campaign only) |
 | Start | Pause menu |
-| A / B in dialogs | OK or YES / NO |
+| A / B in dialogs | OK or YES / NO (the press that closes a dialog doesn't also jump or fire) |
 | Android Back (button or gesture) | Pause menu. In a menu, the map or the ship it works like B. It never quits the game. |
+
+**Keyboard and mouse** (Windows; MphRead's own PC controls)
+
+| Input | Action |
+|---|---|
+| W A S D | Move |
+| Mouse | Aim (its own sensitivity: OPTIONS > CONTROLS, under KEYBOARD & MOUSE) |
+| Left click | Fire |
+| Right click | Zoom, or scan with the scan visor on |
+| Space | Jump (boost in morph ball) |
+| C | Morph ball |
+| Q | Lay bombs in morph ball (left click does too), scan with the scan visor on |
+| E | Scan visor on/off |
+| Mouse wheel | Next / previous weapon (only weapons you have, with ammo) |
+| Arrow keys | The controller's D-pad: previous / next weapon, scan visor, missiles |
+| Hold middle click | Weapon menu: move the mouse toward a weapon, let go to equip it |
+| 1 to 9 | Power Beam, missiles, then each weapon in turn |
+| Tab or Esc | Pause menu (Esc also backs out of menus, the map and the ship's screens) |
+| M | Pause map (campaign only) |
+| F3 | Status line: short, detailed or off |
+| F11 or Alt+Enter | Full screen |
+| Space, Enter or left click in dialogs | OK or YES (Backspace or right click is NO) |
+
+In the menus, the arrow keys or W A S D move, Enter or Space choose, Esc or Backspace go back, Q / E change pages, and
+the mouse clicks anything the DS touch screen would. A controller works on Windows too, with the buttons above.
 
 **Touch:** the overlay has a move stick on the left half of the screen and an aim stick on the right, with buttons for
 fire, jump, morph, missile, weapon (hold it and drag toward a weapon, like the DS stylus) and pause, plus visor, scan
 and map in the campaign. When missiles are selected, the missile button says POWER BEAM and switches you back. In
-dialogs, JUMP is OK/YES and FIRE is NO.
+dialogs, JUMP is OK/YES and FIRE is NO. The touch buttons keep these jobs whatever the controller's buttons are changed
+to.
 
 **Gyro:** tilt the device to fine-tune your aim. The right stick still works as normal.
 
@@ -123,9 +179,9 @@ dialogs, JUMP is OK/YES and FIRE is NO.
 - The speaker setting on OPTIONS > AUDIO is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
 
 **Controls**
-- Switching weapons mid-fight is awkward. The DS showed a weapon bar on the bottom screen, which isn't drawn yet, so the
-  third weapon slot (D-pad left) has no on-screen label. A new weapon ring is planned.
-- The touch overlay has no buttons for D-pad left, up and down, so use the weapon button (hold and drag) instead. You
+- The DS showed a weapon bar on the bottom screen, which isn't drawn yet, so there's no on-screen list of the weapons
+  you're carrying. A new weapon ring is planned.
+- The touch overlay has no buttons for stepping through weapons, so use the weapon button (hold and drag) instead. You
   also can't steer the morph ball by touch the way you could with the DS stylus.
 - The volume and screenshot buttons may not work on the title and menu screens.
 
@@ -152,15 +208,14 @@ dialogs, JUMP is OK/YES and FIRE is NO.
 Reports from other phones and handhelds are very welcome.
 
 **If it crashes:** go to RECOMP SETTINGS > crash log > SHARE to send the latest crash report (it doesn't contain any
-personal data). Please attach it to a bug report on the [Issues](../../issues) page, with your device and what you were
+personal data). On Windows the same row says OPEN and shows the report's folder. Please attach it to a bug report on the [Issues](../../issues) page, with your device and what you were
 doing.
 
 ## What's planned
 
 **Next**
-- Beta 1.1: HD Samus suits (her body and morph ball), imported in the app from your own copy of _Metroid Prime_
+- Beta 2: HD Samus suits (her body and morph ball), imported in the app from your own copy of _Metroid Prime_
   (GameCube)
-- A Windows version
 - Both real endings and the credits roll
 - A new weapon selector: hold L2 for a full weapon ring, point with the right stick and let go to equip, even while
   moving
@@ -260,6 +315,9 @@ Gameplay values are the original's. What's different is how the game looks, soun
 - 60 fps instead of the original's 30. MphRead runs the game logic at 60 Hz, tuned to behave like the original.
 - One screen, with the HUD in the game view and the touch-screen controls moved to buttons
 - Controller controls modeled on _Metroid Prime Remastered_, with optional gyro aim and a touch overlay
+- Weapons you can step through with the D-pad or the mouse wheel, where the DS only had its touch screen
+- Every game button can be moved to another one, where the DS had four fixed control types
+- Options save as soon as they change, so the options pages have no SAVE button
 - A pause map on Select. Its Prime-style mode only shows rooms you've explored and lets you move around and hop between
   rooms, and its detailed view draws every room from its real shape.
 - An optional third-person camera
@@ -273,7 +331,8 @@ Gameplay values are the original's. What's different is how the game looks, soun
 
 ## Building from source
 
-You need the .NET 9 SDK with the Android workload (`dotnet workload install android`), JDK 17 and the Android SDK.
+**Android.** You need the .NET 9 SDK with the Android workload (`dotnet workload install android`), JDK 17 and the
+Android SDK.
 
 ```
 dotnet build src/MphRead.Android/MphRead.Android.csproj -c Release -p:JavaSdkDirectory=<jdk17> -p:AndroidSdkDirectory=<android-sdk>
@@ -283,11 +342,23 @@ That gives you a development build (`com.mphrecomp.app`, signed with your machin
 the release app and has the developer tools. Release builds use `-p:MphReleaseSign=true` and the project's signing key,
 and come out as `com.secondhunt.app`.
 
+**Windows.** You need the .NET 9 SDK.
+
+```
+dotnet build src/SecondHunt.Desktop/SecondHunt.Desktop.csproj -c Release
+```
+
+That gives you a development build (it keeps its data in `%LOCALAPPDATA%\MPH Recomp`). The release zip comes from
+`src/SecondHunt.Desktop/Publish-Windows.ps1`, which builds a self-contained public build (`-p:MphPublic=true`) and packs
+it with its README and notices.
+
 | Folder | What's in it |
 |---|---|
 | `src/MphRead` | MphRead's game logic, formats and renderer (upstream, with small hooks for Second Hunt) |
 | `src/MphRecomp.Core` | Second Hunt's shared code: menus, settings, input, multiplayer, mods |
-| `src/MphRead.Android` | The Android app: campaign, front end, matches, audio, touch overlay |
+| `src/MphRecomp.App` | The app itself, shared by both platforms: front end, campaign, ship, map, cutscenes, matches, music and sound, drawn through one GLES 3 binding |
+| `src/MphRead.Android` | The Android shell: activities, AudioTrack output, gyro, touch overlay, lobby, ROM setup |
+| `src/SecondHunt.Desktop` | The Windows shell: window and GL contexts, keyboard, mouse and controllers, sound device, ROM setup, lobby, credits |
 | `src/MphRead.Tools` | MphRead's desktop viewer, plus Second Hunt's PC-side test harnesses |
 | `src/NcsfPlay` | The DS music player |
 

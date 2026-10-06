@@ -373,3 +373,5 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+# Windows release zips (src/SecondHunt.Desktop/Publish-Windows.ps1)
+/out/

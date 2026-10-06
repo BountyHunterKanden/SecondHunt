@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows app: a thin shell around MphRecomp.App (the front end, campaign and match screens, music and sound) with
+       this platform's own parts: the window and its GL contexts, keyboard / mouse / gamepad, the sound device (miniaudio
+       through SoundFlow), the first-launch ROM setup, the multiplayer lobby and the credits. A public build passes
+       -p:MphPublic=true (docs/RELEASE.md); a normal build is the dev flavour (developer rows in RECOMP SETTINGS). -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>SecondHunt</AssemblyName>
+    <RootNamespace>SecondHunt.Desktop</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- the ROM file picker and GDI+ text for this host's own screens (lobby, credits, setup) -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>appicon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>Second Hunt</Product>
+    <Description>Second Hunt</Description>
+    <Copyright></Copyright>
+    <Version>0.1.0</Version>
+    <InformationalVersion>0.1.0-beta</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- symbols inside the exe: a crash report's stack has file and line numbers, with no .pdb to ship -->
+    <DebugType>embedded</DebugType>
+    <!-- as the Android app: the sim allocates steadily, so a concurrent collector keeps pauses off the frame -->
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <!-- WFO0003 wants DPI set through Application.SetHighDpiMode, which only a Windows Forms app runs; this is a GLFW
+         window, so the manifest is the way (the file picker is the only Windows Forms part) -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms' implicit usings would bring Timer, Application, Color... into every file -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <PropertyGroup Condition=" '$(MphPublic)' == 'true' ">
+    <DefineConstants>$(DefineConstants);MPH_PUBLIC</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MphRecomp.App\MphRecomp.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- RECOMP SETTINGS > CREDITS: the third-party notices the app must carry (THIRD_PARTY_NOTICES.md at the repo root) -->
+    <EmbeddedResource Include="..\..\THIRD_PARTY_NOTICES.md" LogicalName="notices.md" />
+    <!-- the window's icon (appicon.ico is the exe's; both drawn from the Android launcher icon's design) -->
+    <EmbeddedResource Include="appicon64.png" LogicalName="appicon64.png" />
+  </ItemGroup>
+
+</Project>

@@ -10,7 +10,7 @@ namespace MphRead
     // SFX way louder than others) can be checked against real numbers instead of by ear. PC-only, no device needed.
     internal static class AudioLevels
     {
-        const float HeadroomGain = 1f; // keep this in sync with AndroidMusicPlayer.HeadroomGain
+        const float HeadroomGain = 1f; // keep this in sync with GameMusicPlayer.HeadroomGain
         const float DcBlockHz = 10;
 
         public static void Run(string[] args)

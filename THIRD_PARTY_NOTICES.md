@@ -1,15 +1,16 @@
 # Third-party notices
 
-What the Second Hunt app (the APK) contains besides its own code, and the notices each licence asks us to pass on. The
-app ships **no game data**: everything it shows comes from the user's own game files at run time. The in-app
-RECOMP SETTINGS > CREDITS screen shows this file.
+What the Second Hunt app (the Android APK and the Windows build) contains besides its own code, and the notices each
+licence asks to have passed on. The app ships **no game data**: everything it shows comes from the user's own game files at
+run time. The in-app RECOMP SETTINGS > CREDITS screen shows this file.
 
 Update this file whenever a package is added, removed or upgraded (`PackageReference` in any `src/*.csproj` that the
-Android app references), and check the APK's `lib/*/libaot-*.dll.so` list against it before each public build.
+Android app or the Windows app references), and check the APK's `lib/*/libaot-*.dll.so` list and the Windows zip's files
+against it before each public build.
 
-| Component | Version | Licence | In the APK as |
+| Component | Version | Licence | In the app as |
 |---|---|---|---|
-| MphRead (upstream of this fork), NoneGiven | fork of 0.35.0.0 | MIT | `MphRead.dll` (with our additions, also MIT: `NOTICE-fork.md`) |
+| MphRead (upstream of this fork), NoneGiven | fork of 0.35.0.0 | MIT | `MphRead.dll` (with this fork's additions, also MIT: `NOTICE-fork.md`) |
 | NcsfPlay (from NCSF), Naram "CyberBotX" Qashat, via MphRead | (vendored, modified) | MIT (see its section for provenance) | `NcsfPlay.dll` |
 | dsdecmp (LZ10), Barubary; swav2wav, loveemu; mph-model-viewer (COLLADA export), McKay42 | (adapted by upstream MphRead) | MIT | inside `MphRead.dll` |
 | in_xsf, Naram Qashat (CyberBotX) | (partly, via NcsfPlay) | BSD 3-clause | inside `NcsfPlay.dll` |
@@ -17,25 +18,26 @@ Android app references), and check the APK's `lib/*/libaot-*.dll.so` list agains
 | MoonSharp | 2.0.0 | BSD 3-clause (parts MIT) | `MoonSharp.Interpreter.dll` |
 | SixLabors.ImageSharp | 3.1.12 | Six Labors Split License 1.0 (Apache 2.0 for open-source use) | `SixLabors.ImageSharp.dll` |
 | SoundFlow | 1.4.1 | MIT | `SoundFlow.dll` |
-| miniaudio (bundled by SoundFlow) | (SoundFlow 1.4.1) | MIT or Unlicense (used under MIT) | `libminiaudio.so` |
+| miniaudio (bundled by SoundFlow) | (SoundFlow 1.4.1) | MIT or Unlicense (used under MIT) | `libminiaudio.so` (Android), `miniaudio.dll` (Windows) |
+| GLFW (bundled by OpenTK as OpenTK.redist.glfw) | 3.4 | zlib | `glfw3.dll` (Windows only: the window, input and GL context) |
 | CommunityToolkit.HighPerformance | 8.4.2 | MIT | `CommunityToolkit.HighPerformance.dll` |
 | lzokay, Jack Andersen (AxioDL) | 2018 (ported to C#) | MIT | ported into `MphRecomp.Core.dll` (`Import/Retro/Lzo1x.cs`: LZO1X decompression for the Echoes / Prime 3 imports) |
-| System.IO.Hashing, .NET runtime, .NET for Android | 10.0.8 / 9.0 | MIT | the `System.*`, `Mono.*`, `Java.Interop` assemblies and the runtime `.so` files |
+| System.IO.Hashing, .NET runtime, .NET for Android, .NET Windows Desktop (Windows Forms, System.Drawing) | 10.0.8 / 9.0 | MIT | Android: the `System.*`, `Mono.*`, `Java.Interop` assemblies and the runtime `.so` files; Windows: inside `SecondHunt.exe` (a self-contained .NET app) |
 
 Format references (no code shipped from them unless the entry says so):
 
 | Project | Licence | Used for |
 |---|---|---|
-| PrimeWorldEditor (Aruki, AxioDL Team) | MIT | the Retro file layouts our `MphRecomp.Core/Import/Retro*` readers follow (via our own Python reference scripts). **Code translated from it: `Import/Retro/Anim.cs` only** (CAnimationLoader, LibCommon CBitStreamInWrapper, CBone::UpdateTransform; board S11), so its notice below applies; the other readers are our own parsers of the layouts it reads |
+| PrimeWorldEditor (Aruki, AxioDL Team) | MIT | the Retro file layouts the `MphRecomp.Core/Import/Retro*` readers follow (via this project's own Python reference scripts). **Code translated from it: `Import/Retro/Anim.cs` only** (CAnimationLoader, LibCommon CBitStreamInWrapper, CBone::UpdateTransform; board S11), so its notice below applies; the other readers are this project's own parsers of the layouts it reads |
 | metaforce (AxioDL) | MIT | the Prime 3 ANIM layout (`Import/Retro3/Anim3.cs`, a clean re-implementation) and CMDL material flag names (`Import/Retro/Cmdl.cs`); no code taken |
 | Dolphin's `docs/WiaAndRvz.md` | (documentation) | the RVZ/WIA format; no Dolphin code was taken (`Import/Disc/WiaReader.cs`) |
-| RFC 8878 (Zstandard), the LZMA and bzip2 format descriptions | (specifications) | our own decoders in `Import/Disc/` |
+| RFC 8878 (Zstandard), the LZMA and bzip2 format descriptions | (specifications) | this project's own decoders in `Import/Disc/` |
 
 ---
 
 ## MphRead
 
-Upstream of this fork; also covers our additions (`NOTICE-fork.md`). Its README's acknowledgements (dsgraph,
+Upstream of this fork; also covers this fork's additions (`NOTICE-fork.md`). Its README's acknowledgements (dsgraph,
 Chemical, McKay42, Barubary's dsdecmp, loveemu's swav2wav, Gericom, CharlesVanEeckhout, CyberBotX's NCSF,
 hackyourlife) are kept in `README.md`.
 
@@ -347,7 +349,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER I
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## miniaudio (bundled by SoundFlow as `libminiaudio.so`)
+## miniaudio (bundled by SoundFlow as `libminiaudio.so` / `miniaudio.dll`)
 
 From SoundFlow's third-party notices:
 
@@ -388,11 +390,39 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## System.IO.Hashing, the .NET runtime and .NET for Android
+## GLFW (bundled by OpenTK as `glfw3.dll`, Windows only)
+
+```text
+Copyright (c) 2002-2006 Marcus Geelnard
+
+Copyright (c) 2006-2019 Camilla Löwy
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would
+   be appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not
+   be misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source
+   distribution.
+```
+
+## System.IO.Hashing, the .NET runtime, .NET for Android and the .NET Windows Desktop runtime
 
 MIT, Copyright (c) .NET Foundation and Contributors. Their own third-party notices:
-https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT and
-https://github.com/dotnet/android/blob/main/THIRD-PARTY-NOTICES.TXT
+https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT,
+https://github.com/dotnet/android/blob/main/THIRD-PARTY-NOTICES.TXT and
+https://github.com/dotnet/winforms/blob/main/THIRD-PARTY-NOTICES.TXT
 
 ```text
 Copyright (c) .NET Foundation and Contributors

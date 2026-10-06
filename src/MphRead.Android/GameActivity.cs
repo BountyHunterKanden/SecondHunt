@@ -29,6 +29,7 @@ public class GameActivity : Activity
     TextView? _status;
     bool _selectHeld;
     int _hatX, _hatY, _stickX, _stickY;
+    float _trigL, _trigR; // the triggers last motion event (the control customizer's capture)
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -56,7 +57,7 @@ public class GameActivity : Activity
         _view.SetEGLContextClientVersion(3);
         _view.SetEGLConfigChooser(8, 8, 8, 8, 0, 0);
         _view.PreserveEGLContextOnPause = true;
-        _view.SetRenderer(_renderer);
+        _view.SetRenderer(new GlScreenRenderer(_renderer));
         var root = new FrameLayout(this);
         root.AddView(_view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
         _status = new TextView(this) { TextSize = 13f, Visibility = ViewStates.Gone };
@@ -193,6 +194,24 @@ public class GameActivity : Activity
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
     {
         if (_renderer == null) return base.OnKeyDown(keyCode, e);
+        // the control customizer waits for a controller button (OPTIONS > CONTROLS): the first press is the answer,
+        // Back / Start / Select keep the buttons as they are; nothing reaches the menu meanwhile
+        if (_renderer.CaptureDevice != null)
+        {
+            if (e?.RepeatCount == 0)
+            {
+                if (CampaignActivity.PadFor(keyCode) is PadButton b)
+                {
+                    string name = b.ToString();
+                    _renderer.Post(s => s.Recomp.CaptureInput(name));
+                }
+                else if (keyCode is Keycode.Back or Keycode.ButtonStart or Keycode.ButtonSelect or Keycode.Escape)
+                {
+                    _renderer.Post(s => s.Recomp.CancelCapture());
+                }
+            }
+            return true;
+        }
         if (keyCode == Keycode.ButtonSelect) _selectHeld = true;
         if (keyCode == Keycode.ButtonStart && _selectHeld && !BuildFlags.Public)
         {
@@ -228,6 +247,18 @@ public class GameActivity : Activity
         if (e != null && e.Source.HasFlag(InputSourceType.Joystick) && e.Action == MotionEventActions.Move)
         {
             int hx = Step(e.GetAxisValue(Axis.HatX)), hy = Step(e.GetAxisValue(Axis.HatY));
+            float l2 = e.GetAxisValue(Axis.Ltrigger), r2 = e.GetAxisValue(Axis.Rtrigger);
+            if (_renderer?.CaptureDevice != null)
+            {
+                // the customizer's capture: a trigger past half way, or a D-pad push (the Odin's D-pad is a HAT axis)
+                string? name = l2 >= 0.5f && _trigL < 0.5f ? "L2" : r2 >= 0.5f && _trigR < 0.5f ? "R2"
+                    : hx != _hatX && hx != 0 ? (hx > 0 ? "DpadRight" : "DpadLeft")
+                    : hy != _hatY && hy != 0 ? (hy > 0 ? "DpadDown" : "DpadUp") : null;
+                if (name != null) _renderer.Post(s => s.Recomp.CaptureInput(name));
+                _hatX = hx; _hatY = hy; _trigL = l2; _trigR = r2;
+                return true;
+            }
+            _trigL = l2; _trigR = r2;
             if (hx != _hatX && hx != 0) Direction(hx, 0);
             if (hy != _hatY && hy != 0) Direction(0, -hy);
             _hatX = hx; _hatY = hy;

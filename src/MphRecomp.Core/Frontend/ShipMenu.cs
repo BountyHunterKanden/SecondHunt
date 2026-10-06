@@ -147,8 +147,32 @@ namespace MphRecomp.Frontend
         public bool RedrawReady => !RedrawArt || _reticleHi >= 0;
         // options page state (display only for now): 0 stylus right, 1 stylus left, 2 dual right, 3 dual left
         public int ControlType { get; set; }
+        // OPTIONS without the DS's four control types (owner 2026-10-05; ClassicControls brings them back in dev builds):
+        // the control customizer's button in their column -- two on a PC (KeyboardControls: controller, keyboard & mouse)
+        // -- drawn with the control-type box and font; A or a tap opens the customizer over the ship (OpenControls(keys))
+        public bool ClassicControls { get; set; }
+        public bool KeyboardControls { get; set; }
+        public Action<bool>? OpenControls;
+        private int ControlButtons => KeyboardControls ? 2 : 1;
+        // a customizer button's slot in the boxes' column (0..3, 29 apart; the panel art has the four dark slots): from
+        // the top, under the column's title
+        private static float ControlSlot(int i) => i;
+        // option rows in use: the control types 0-3 (classic) or the customizer buttons, then 4 sensitivity, 5 invert
+        // (not the mouse's: it has none)
+        private bool OptionRowUsed(int row) => row == 4 || (row == 5 ? !MouseTab : ClassicControls ? row <= 3 : row < ControlButtons);
         public int Sensitivity { get; set; } = 8; // 1..15
         public bool LookInvert { get; set; }
+        // a PC mouse's own sensitivity (OPTIONS > CONTROLS' KEYBOARD & MOUSE column): on a PC the customizer buttons are
+        // tabs -- the lit one (the control-type box's "on" look) is the device the slider shows and changes; LOOK INVERT
+        // is the controller's only (owner 2026-10-05: no mouse invert), hidden on the mouse's tab
+        public int MouseSensitivity { get; set; } = 8;
+        private int _controlDevice; // 0 the controller, 1 the keyboard & mouse
+        private bool MouseTab => !ClassicControls && KeyboardControls && _controlDevice == 1;
+        private int OptSensitivity
+        {
+            get => MouseTab ? MouseSensitivity : Sensitivity;
+            set { if (MouseTab) MouseSensitivity = value; else Sensitivity = value; }
+        }
         // the options page changed ControlType / Sensitivity / LookInvert (the host saves them)
         public Action? OptionsChanged;
         // weapon select equipped a weapon into Story.WeaponSlots[2]
@@ -627,7 +651,7 @@ namespace MphRecomp.Frontend
                 _logState = LogState.Categories;
                 StartTyping(S('L', 2), TypeAfterOpen); // select a category
             }
-            _optRow = Math.Clamp(ControlType, 0, 3);
+            _optRow = ClassicControls ? Math.Clamp(ControlType, 0, 3) : 0;
             _sensDrag = false;
             _dragSlot = -1;
             _weaponSel = -1;
@@ -657,8 +681,8 @@ namespace MphRecomp.Frontend
                 if (!PanelSettled) return;
                 if (_panel == Panel.Logbook) LogKey(key);
                 else if (key == MenuKeys.B) ClosePanel();
-                else if (key == MenuKeys.A && _panel == Panel.Options && _optRow < 4) PickControl(_optRow);
-                else if (key == MenuKeys.A && _panel == Panel.Options && _optRow == 5) SetInvert(!LookInvert);
+                else if (key == MenuKeys.A && _panel == Panel.Options && _optRow < 4) PickControlRow(_optRow);
+                else if (key == MenuKeys.A && _panel == Panel.Options && _optRow == 5 && !MouseTab) SetInvert(!LookInvert);
                 else if (key == MenuKeys.A && _panel == Panel.WeaponSelect && _weaponSel >= 0) Equip(_weaponSel);
                 return;
             }
@@ -837,7 +861,7 @@ namespace MphRecomp.Frontend
         {
             float v = Math.Clamp(py + 68, 122, 180);
             int level = 1 + (int)MathF.Round((180 - v) * 14 / 58);
-            if (level != Sensitivity) SetOption(() => Sensitivity = level);
+            if (level != OptSensitivity) SetOption(() => OptSensitivity = level);
             // the loop's pitch follows the marker every frame (0x210c3b0): 0x1800 at the bottom .. 0x4000 at the top
             if (_sensLoop >= 0) SetLoopPitch?.Invoke(_sensLoop, 0x1800 + (int)((180 - v) * 0x2800 / 58));
         }
@@ -848,6 +872,20 @@ namespace MphRecomp.Frontend
         {
             if (_sensLoop >= 0) StopLoop?.Invoke(_sensLoop);
             _sensLoop = -1;
+        }
+
+        // a box in the control-type column: a control type (classic), else a customizer button
+        private void PickControlRow(int i)
+        {
+            if (ClassicControls)
+            {
+                PickControl(i);
+                return;
+            }
+            if (i >= ControlButtons) return;
+            Sound(SfxId.OPTIONS_CONTROL_TYPE);
+            _controlDevice = i;
+            OpenControls?.Invoke(i == 1);
         }
 
         // a control type / look invert box: its sound only when the setting changes (0x210c14c..0x210c2e0)
@@ -865,17 +903,25 @@ namespace MphRecomp.Frontend
 
         private void OptionsTouch(float x, float y)
         {
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < (ClassicControls ? 4 : ControlButtons); i++)
             {
-                if (Inside((16, 68 + 29 * i, 56, 24), x, y))
+                float slot = ClassicControls ? i : ControlSlot(i);
+                if (Inside((16, 68 + 29 * slot, 56, 24), x, y))
                 {
                     _optRow = i;
-                    PickControl(i);
+                    if (!ClassicControls && _controlDevice != i)
+                    {
+                        // another device's tab: lit (the slider and LOOK INVERT show its values); tapped again, it opens
+                        Sound(SfxId.OPTIONS_CONTROL_TYPE);
+                        _controlDevice = i;
+                        return;
+                    }
+                    PickControlRow(i);
                     return;
                 }
             }
-            if (Inside((100, 162, 20, 20), x, y)) { _optRow = 5; SetInvert(true); return; }
-            if (Inside((157, 162, 20, 20), x, y)) { _optRow = 5; SetInvert(false); return; }
+            if (!MouseTab && Inside((100, 162, 20, 20), x, y)) { _optRow = 5; SetInvert(true); return; }
+            if (!MouseTab && Inside((157, 162, 20, 20), x, y)) { _optRow = 5; SetInvert(false); return; }
             if (Inside((100, 38, 34, 74), x, y))
             {
                 _optRow = 4;
@@ -895,10 +941,14 @@ namespace MphRecomp.Frontend
         {
             if (dy != 0)
             {
-                _optRow = Math.Clamp(_optRow - dy, 0, 5); // no cursor sound (touch-only on the DS)
+                // no cursor sound (touch-only on the DS); rows not in use are stepped over
+                int row = _optRow;
+                do row -= dy; while (row is >= 0 and <= 5 && !OptionRowUsed(row));
+                if (row is >= 0 and <= 5) _optRow = row;
+                if (!ClassicControls && _optRow < ControlButtons) _controlDevice = _optRow; // the cursor lights a tab
             }
-            else if (_optRow == 4) SetOption(() => Sensitivity = Math.Clamp(Sensitivity + dx, 1, 15));
-            else if (_optRow == 5) SetInvert(dx < 0);
+            else if (_optRow == 4) SetOption(() => OptSensitivity = Math.Clamp(OptSensitivity + dx, 1, 15));
+            else if (_optRow == 5 && !MouseTab) SetInvert(dx < 0);
         }
 
         private bool Owns(int slot) => Story != null && (Story.Weapons & (1 << (int)Affinity[slot])) != 0;
@@ -1385,6 +1435,9 @@ namespace MphRecomp.Frontend
             foreach (PageText pt in d.Texts)
             {
                 string text = pt.Type == 'O' ? Strings.GetMessage('O', pt.Id, StringTables.ShipOnGround) : S(pt.Type, pt.Id);
+                // OPTIONS' CONTROL TYPE column holds the customizer's buttons instead (ClassicControls: the game's)
+                if (_panel == Panel.Options && pt.Type == 'O' && pt.Id == 1 && !ClassicControls) text = "controls";
+                if (_panel == Panel.Options && pt.Type == 'O' && pt.Id == 9 && MouseTab) continue; // LOOK INVERT: the mouse has none
                 Text(text, pt.X - d.ScrollX, pt.Y - d.ScrollY, pt.Align, pt.Wrap, pt.Pal);
             }
             switch (_panel)
@@ -1500,27 +1553,36 @@ namespace MphRecomp.Frontend
         private void DrawOptions()
         {
             const float sy = 76; // BG2 scroll on this page
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < (ClassicControls ? 4 : ControlButtons); i++)
             {
-                bool on = ControlType == i;
-                Quad(_controls[on ? 0 : 1], 16, 129 - sy + i * 29, 80, 161 - sy + i * 29, 0, 0, 1, 1, 1, 1, 1, 1);
+                bool on = ClassicControls ? ControlType == i : KeyboardControls && _controlDevice == i;
+                float slot = ClassicControls ? i : ControlSlot(i);
+                Quad(_controls[on ? 0 : 1], 16, 129 - sy + slot * 29, 80, 161 - sy + slot * 29, 0, 0, 1, 1, 1, 1, 1, 1);
                 // these labels are centred on their row's y (8-px lines; matches the real screen's 2- and 3-line labels)
-                string label = Strings.GetMessage('O', 5 + i, StringTables.ShipOnGround);
+                string label = ClassicControls ? Strings.GetMessage('O', 5 + i, StringTables.ShipOnGround)
+                    : KeyboardControls ? (i == 0 ? "controller" : "keyboard\n& mouse") : "customize\ncontrols";
                 int lines = _font.Lines(label, 56).Count;
-                Text(label, 48, 146 - sy + i * 29 - lines * 4, 2, 56, on ? 2 : 3, 1, 8);
+                Text(label, 48, 146 - sy + slot * 29 - lines * 4, 2, 56, on ? 2 : 3, 1, 8);
             }
-            Text(Strings.GetMessage('O', 10, StringTables.ShipOnGround), 110, 230 - sy, 2, 56, LookInvert ? 2 : 3);
-            Text(Strings.GetMessage('O', 11, StringTables.ShipOnGround), 170, 230 - sy, 2, 56, LookInvert ? 3 : 2);
-            Quad(_onOff[LookInvert ? 0 : 1], 106, 240 - sy, 114, 248 - sy, 0, 0, 1, 1, 1, 1, 1, 1);
-            Quad(_onOff[LookInvert ? 1 : 0], 165, 240 - sy, 173, 248 - sy, 0, 0, 1, 1, 1, 1, 1, 1);
+            if (!MouseTab)
+            {
+                bool invert = LookInvert;
+                Text(Strings.GetMessage('O', 10, StringTables.ShipOnGround), 110, 230 - sy, 2, 56, invert ? 2 : 3);
+                Text(Strings.GetMessage('O', 11, StringTables.ShipOnGround), 170, 230 - sy, 2, 56, invert ? 3 : 2);
+                Quad(_onOff[invert ? 0 : 1], 106, 240 - sy, 114, 248 - sy, 0, 0, 1, 1, 1, 1, 1, 1);
+                Quad(_onOff[invert ? 1 : 0], 165, 240 - sy, 173, 248 - sy, 0, 0, 1, 1, 1, 1, 1, 1);
+            }
             // sensitivity: v in 122..180 (180 = 1), marker at (103, v - 76), bar 64 px tall at (130, 115) filled 180 - v of 58
-            float v = 180 - (Math.Clamp(Sensitivity, 1, 15) - 1) * 58f / 14;
+            float v = 180 - (Math.Clamp(OptSensitivity, 1, 15) - 1) * 58f / 14;
             Quad(_sensMarker, 103, v - 76, 135, v - 44, 0, 0, 1, 1, 1, 1, 1, 1);
+            // the value in the grab tab (owner 2026-10-05), centred on the tab's body (x 103..122 of the 32-px marker)
+            Text(OptSensitivity.ToString(System.Globalization.CultureInfo.InvariantCulture), 112, v - 64, 2, 0, 2);
             // the bar fills the slider track in the panel art (screen y 58..122), lit from the bottom up to the marker
             Bar(_sensBar, 180 - v, 58, 64, 130, 58, vertical: true);
             if (_keyFocus)
             {
-                var row = _optRow < 4 ? (16f, 68f + 29 * _optRow, 56f, 24f) : _optRow == 4 ? (100f, v - 76, 34f, 24f) : (100f, 162f, 77f, 20f);
+                float slot = ClassicControls ? _optRow : ControlSlot(_optRow);
+                var row = _optRow < 4 ? (16f, 68f + 29 * slot, 56f, 24f) : _optRow == 4 ? (100f, v - 76, 34f, 24f) : (100f, 162f, 77f, 20f);
                 FocusFrame(row, 2);
             }
         }

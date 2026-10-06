@@ -161,6 +161,8 @@ namespace MphRead
             // FE_SETTINGS=<recomp_settings.json>: those settings (a scratch copy: RECOMP SETTINGS saves changes at once);
             // FE_PUBLIC=1: as a public build (RECOMP SETTINGS without the rows a public build leaves out)
             MphRecomp.Config.RecompSettings.PublicBuild = Environment.GetEnvironmentVariable("FE_PUBLIC") == "1";
+            // FE_DESKTOP=1: as the Windows build (its own rows and buttons: keyboard & mouse, no gyro / touch rows)
+            MphRecomp.Config.RecompSettings.DesktopHost = Environment.GetEnvironmentVariable("FE_DESKTOP") == "1";
             FrontendSession session = FrontendSession.Load(root ?? Paths.FileSystem, settingsPath: Environment.GetEnvironmentVariable("FE_SETTINGS"),
                 modsDir: Environment.GetEnvironmentVariable("FE_MODS"), savesDir: Environment.GetEnvironmentVariable("FE_SAVES"));
             var log = new List<string>();
@@ -184,7 +186,12 @@ namespace MphRead
                 if (f >= 5 && (f - 5) % 20 == 0 && (f - 5) / 20 < presses.Length)
                 {
                     string key = presses[(f - 5) / 20].Trim().ToLowerInvariant();
-                    if (key is "up" or "down" or "left" or "right")
+                    if (key.StartsWith("cap:", StringComparison.Ordinal))
+                    {
+                        // cap:<button>: the control customizer's next press (a ControlBinds name, e.g. cap:L1, cap:Mouse.Left)
+                        session.Recomp.CaptureInput(presses[(f - 5) / 20].Trim()[4..]);
+                    }
+                    else if (key is "up" or "down" or "left" or "right")
                     {
                         session.Navigate(key == "right" ? 1 : key == "left" ? -1 : 0, key == "up" ? 1 : key == "down" ? -1 : 0);
                     }
@@ -192,7 +199,7 @@ namespace MphRead
                     {
                         session.Press(key switch
                         {
-                            "r" => MenuKeys.R, "l" => MenuKeys.L, "a" => MenuKeys.A, "b" => MenuKeys.B, "start" => MenuKeys.Start,
+                            "r" => MenuKeys.R, "l" => MenuKeys.L, "a" => MenuKeys.A, "b" => MenuKeys.B, "x" => MenuKeys.X, "start" => MenuKeys.Start,
                             _ => MenuKeys.None
                         });
                     }
@@ -368,6 +375,10 @@ namespace MphRead
                 + $" scans {ShipLogbook.Percent(fresh, LogCategory.Lore, LogCategory.Bioform, LogCategory.Object)}%; equipment entries: "
                 + String.Join(", ", ShipLogbook.Entries(fresh, LogCategory.Equipment).Select(e => e.Name)));
             menu.RedrawArt = Environment.GetEnvironmentVariable("FE_PIXELART") != "1";
+            // FE_DESKTOP=1: OPTIONS as the Windows build has it (controller and keyboard & mouse tabs)
+            menu.KeyboardControls = Environment.GetEnvironmentVariable("FE_DESKTOP") == "1";
+            // FE_CLASSIC=1: OPTIONS with the game's four control types (RecompSettings.ClassicControlsPage)
+            menu.ClassicControls = Environment.GetEnvironmentVariable("FE_CLASSIC") == "1";
             for (int i = 0; i < 300 && !menu.RedrawReady; i++)
             {
                 menu.Build(1280, 720);
@@ -392,7 +403,9 @@ namespace MphRead
                 .Select(t => t.Split(':')).Select(p => (Frame: Int32.Parse(p[0]), Input: p[1])).ToList();
             int end = args.Length >= 3 ? Int32.Parse(args[2]) : (steps.Count == 0 ? 0 : steps.Max(t => t.Frame) + 60);
             var shots = new List<Image<Rgba32>>();
-            const int W = 1280, H = 720;
+            // FE_SHIPH=<px>: a taller canvas for the snapshots (960 = 4:3, the whole OPTIONS card with LOOK INVERT)
+            const int W = 1280;
+            int H = Int32.TryParse(Environment.GetEnvironmentVariable("FE_SHIPH"), out int shipH) ? shipH : 720;
             for (int f = 0; f <= end; f++)
             {
                 foreach (var st in steps.Where(t => t.Frame == f))
@@ -440,7 +453,8 @@ namespace MphRead
             }
             if (shots.Count > 0)
             {
-                const int cols = 3, tw = 640, th = 360;
+                const int cols = 3, tw = 640;
+                int th = H / 2;
                 using var sheet = new Image<Rgba32>(cols * (tw + 4), (shots.Count + cols - 1) / cols * (th + 4), new Rgba32(40, 40, 40, 255));
                 for (int i = 0; i < shots.Count; i++)
                 {

@@ -37,7 +37,7 @@ namespace MphRead
             public NCSFCommon.Track? GetTrack(int index) => null;
         }
 
-        // what GameAudio's AndroidSfxPlayer would decode on the sim thread (GetPcm: once per sample id, for a sample, every
+        // what GameAudio's GameSfxPlayer would decode on the sim thread (GetPcm: once per sample id, for a sample, every
         // entry of a DGN, every sample entry of a script), timed with the same decode (SoundSample.WaveData)
         private sealed class SfxProbe : SfxInstanceBase
         {

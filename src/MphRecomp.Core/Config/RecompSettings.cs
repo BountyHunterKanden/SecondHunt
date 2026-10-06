@@ -25,6 +25,9 @@ namespace MphRecomp.Config
         public static bool PublicBuild { get; set; }
         // the app's package id (dev and public builds differ), for paths shown to the player
         public static string AppId { get; set; } = "com.mphrecomp.app";
+        // the Windows host (set once at startup): RECOMP SETTINGS leaves out the rows a PC has no use for (gyro, touch
+        // controls) and the crash log opens its folder instead of a share sheet. Not saved.
+        public static bool DesktopHost { get; set; }
 
         public int FrameRate { get; set; } = 60;
         public int RenderScale { get; set; } = 100;
@@ -75,6 +78,16 @@ namespace MphRecomp.Config
         public int GameControlType { get; set; }
         public int GameSensitivity { get; set; } = 8;
         public bool GameLookInvert { get; set; }
+        // A PC mouse's own aim speed (1-15, 8 = MphRead's one unit a pixel): OPTIONS > CONTROLS under KEYBOARD & MOUSE
+        // (owner 2026-10-05; the Game* pair above is the controller's; the mouse has no look invert)
+        public int MouseSensitivity { get; set; } = 8;
+        // The control customizer (OPTIONS > CONTROLS and the gunship's OPTIONS; Config/ControlBinds.cs): function id ->
+        // button names, for a controller and for a PC's keyboard and mouse. A function that isn't listed has its default.
+        public Dictionary<string, string[]> PadBinds { get; set; } = new();
+        public Dictionary<string, string[]> KeyBinds { get; set; } = new();
+        // Dev builds: OPTIONS > CONTROLS and the ship's OPTIONS as the game has them (the four stylus / dual mode boxes,
+        // kept for dual-screen Thor testing) in place of the customizer buttons. Public builds ignore it.
+        public bool ClassicControlsPage { get; set; }
         // The game's OPTIONS > AUDIO page (Frontend/AudioOptions.cs; the DS keeps these in its save): the SFX and music
         // volumes 0-9 and the speaker type (one of SpeakerTypes). The front end and the campaign play at these.
         public static readonly string[] SpeakerTypes = { "stereo", "surround", "headphones" };

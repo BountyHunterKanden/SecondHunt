@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The app itself, shared by every platform host: the front end's renderer, the campaign and match renderer (ship,
+       map, movies, HUD, pause menu), the UI and movie drawing, and the music / sound mixers, all drawing through one
+       direct GLES 3 binding (Gl/GLES30.cs) and playing through IAudioOutput. The hosts are thin: MphRead.Android
+       (activities, AudioTrack output, gyro, touch overlay) and SecondHunt.Desktop (window, keyboard / mouse / gamepad,
+       miniaudio output). Nothing here references Android or Windows. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <DebugType>embedded</DebugType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+    <RootNamespace>MphRecomp.App</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MphRead\MphRead.csproj" />
+    <ProjectReference Include="..\MphRecomp.Core\MphRecomp.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the GL binding and the platform seams, everywhere in this project (their own namespaces, so the Android host's
+         files that use Android's own GLES30 and Log keep them) -->
+    <Using Include="MphRecomp.App.Gl" />
+    <Using Include="MphRecomp.App.Platform" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the hosts drive the screens directly -->
+    <InternalsVisibleTo Include="MphRead.Android" />
+    <InternalsVisibleTo Include="SecondHunt" />
+  </ItemGroup>
+
+</Project>

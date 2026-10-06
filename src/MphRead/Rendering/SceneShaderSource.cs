@@ -262,13 +262,16 @@ public static class SceneShaderSource
                 texel = texture(u_texture, v_uv);
             }
             vec4 result = surfaceColor(v_color, texel);
-            // the alpha filter runs before fog
+            // the alpha filter runs before fog. "Solid" is alpha 1: the game's other alphas are 5-bit (at most 30/31,
+            // 0.968) or a texel's 0, so 0.99 splits them exactly as 1.0 does, and also takes the 1.0 that a GPU's
+            // interpolation leaves a hair short (desktop GPUs do, on scattered pixels: they fell out of the solid pass
+            // as speckle; the Odin's Adreno happens to land on 1.0 exactly)
             if (u_alphaPass == 1) {
-                if (result.a < 1.0) {
+                if (result.a < 0.99) {
                     discard;
                 }
             } else if (u_alphaPass == 2) {
-                if (result.a >= 1.0) {
+                if (result.a >= 0.99) {
                     discard;
                 }
             }

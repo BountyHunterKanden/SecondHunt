@@ -171,7 +171,7 @@ namespace MphRecomp.Campaign
             // pump, which doesn't exist here) -- but Music.UpdateMusic is also where a *queued* PlaySeq (PlayMusic,
             // TryPlayRoomMusic, PlayPausedMusic -- anything that fades the old track out first) actually loads the
             // next one; skipping it left every queued room-music change stuck forever after its own Stop(). Sfx.Update
-            // drives AndroidSfxPlayer's free-sfx-script delays the same way. Both are no-ops with no host registered.
+            // drives GameSfxPlayer's free-sfx-script delays the same way. Both are no-ops with no host registered.
             MphRead.Sound.Sfx.Update(1 / 60f);
             MphRead.Music.UpdateMusic();
             Frame++;
