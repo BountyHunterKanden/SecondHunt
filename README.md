@@ -6,7 +6,7 @@ and a one-screen HUD. It runs everything from your own copy of the game.
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 1.1 (Android and Windows).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
+> **Beta 1.2 (Android and Windows).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
 > [What's planned](#whats-planned).
 
 > **AI tools were used in the making of this project.** If you don't support AI in video games, then you don't have to play. Or, look
@@ -33,7 +33,7 @@ Android. On Windows the keyboard and mouse use MphRead's own PC controls.
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
 sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
-## What's in Beta 1.1
+## What's in Beta 1.2
 
 **Campaign**
 - The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
@@ -169,6 +169,9 @@ to.
 ## Known issues
 
 **Missing for now**
+
+Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pick it, closed with its check.
+
 - Beating Gorea ends on a plain "mission complete" screen. The real endings and the credits roll aren't in yet.
 - LAN play is two players and Battle mode only, and item pickups may not stay in sync between the two devices.
 - Only USA ROMs (1.0 and 1.1) work.
@@ -177,6 +180,8 @@ to.
   open from the start instead of being unlocked through the adventure.
 - Some save details aren't kept yet: the game timer, boss records, a few stats and the artifact flags.
 - The speaker setting on OPTIONS > AUDIO is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
+- ERASE ALL DATA on OPTIONS isn't in yet.
+- The MOVIES gallery doesn't unlock movies yet, so every movie shows "?".
 
 **Controls**
 - The DS showed a weapon bar on the bottom screen, which isn't drawn yet, so there's no on-screen list of the weapons

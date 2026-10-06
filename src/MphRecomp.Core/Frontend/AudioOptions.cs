@@ -56,6 +56,10 @@ namespace MphRecomp.Frontend
         private MenuEngine? _menu;
         public Action<string>? Log { get; set; }
 
+        // SURROUND and HEADPHONES are picked and saved, but sound like STEREO until the speaker modes are in: the session
+        // shows its WORK IN PROGRESS box
+        public Action? WorkInProgress { get; set; }
+
         // what to hear right now: the page's values while it's open, else the saved ones
         public int SfxVolume => _open ? _sfxVolume : Math.Clamp(_settings.SfxVolume, 0, 9);
         public int MusicVolume => _open ? _musicVolume : Math.Clamp(_settings.MusicVolume, 0, 9);
@@ -303,11 +307,13 @@ namespace MphRecomp.Frontend
             case CallHeadphonesIcon:
                 _speaker = (call - CallStereoIcon + 1) % 3;
                 Commit();
+                if (_speaker != 0) WorkInProgress?.Invoke();
                 return true;
             case CallSpeakers: // A on SPEAKERS: the same, by code
                 menu.SetState(_it.Icon[_speaker], MenuState.Hidden);
                 _speaker = (_speaker + 1) % 3;
                 Commit();
+                if (_speaker != 0) WorkInProgress?.Invoke();
                 return true;
             case CallSfxNext:
             case CallSfxPrev:

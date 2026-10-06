@@ -597,6 +597,24 @@ namespace MphRecomp.Frontend
         // focusable item is focused (TOUCH_NEUTRAL unless its flag 1) and its action runs on the same tap -- one tap on
         // OPTIONS or MULTIPLAYER opens it -- except an action with Flags bit 1, which waits for a second tap (save
         // files). The action makes its item's sound; a touch has no fallback sound, and page-level touch actions none.
+        // the disabled (State5) item whose touch rectangle holds (x, y), as Touch reads it, or -1: those take no touch in
+        // the game, so a host that wants to answer them (the WORK IN PROGRESS box) asks here first
+        public int DisabledItemAt(float x, float y)
+        {
+            if (Page == null || _pendingPage != -1) return -1;
+            for (int i = _items.Length - 1; i >= 0; i--)
+            {
+                if (_items[i].State != MenuState.State5) continue;
+                MenuItem it = Page.Items[i];
+                foreach (MenuAction a in it.Actions)
+                {
+                    if (TryRect(a, it, out float x0, out float y0, out float x1, out float y1)
+                        && x >= x0 && x <= x1 && y >= y0 && y <= y1) return i;
+                }
+            }
+            return -1;
+        }
+
         public void Touch(float x, float y)
         {
             if (Page == null || _pendingPage != -1) return;

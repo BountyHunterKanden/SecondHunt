@@ -60,6 +60,7 @@ namespace MphRecomp.Frontend
             Files = files;
             Audio = audio;
             if (audio != null) audio.Log = message => Log?.Invoke(message);
+            if (audio != null) audio.WorkInProgress = () => ShowWorkInProgress("speakers");
             Popup = popup;
             Menu = menu;
             Textures = textures;
@@ -319,7 +320,7 @@ namespace MphRecomp.Frontend
                 if (_layout.Regions[i].Contains(mx, my))
                 {
                     _showFocus = false;
-                    Menu.Touch(mx, my + 192);
+                    TouchMenu(mx, my + 192);
                     return;
                 }
             }
@@ -330,7 +331,33 @@ namespace MphRecomp.Frontend
         {
             _showFocus = false;
             if (PopupOpen) Popup!.Touch(x, y);
-            else Menu.Touch(x, 192 - y);
+            else TouchMenu(x, 192 - y);
+        }
+
+        // a touch in the engine's text space; Options' greyed RUMBLE PAK (State5, no touch in the game) answers with the
+        // WORK IN PROGRESS box instead of nothing
+        private void TouchMenu(float x, float y)
+        {
+            if (Menu.Page?.Index == OptionsPage && Menu.DisabledItemAt(x, y) >= 0)
+            {
+                ShowWorkInProgress("rumble pak");
+                return;
+            }
+            Menu.Touch(x, y);
+        }
+
+        // ---- WORK IN PROGRESS: a press with nothing behind it yet gets the game's message box with one check ----
+
+        public const string WorkInProgressText = "work in progress.";
+
+        // pages whose presses with no handler are features still to come: Options (ERASE ALL DATA) and both MOVIES pages
+        // (every tile: movie unlocks aren't kept yet, so all of them show "?")
+        private static readonly int[] WorkInProgressPages = { OptionsPage, 19, 20 };
+
+        private void ShowWorkInProgress(string what)
+        {
+            Log?.Invoke($"work in progress: {what}");
+            Popup?.Inform(WorkInProgressText);
         }
 
         // ---- game callbacks the data names (inferred per page from the data + the real game, 2026-09-29) ----
@@ -415,6 +442,13 @@ namespace MphRecomp.Frontend
                 {
                     Log?.Invoke($"file select: created file {(char)('A' + Files.FocusedSlot)}");
                 }
+                return true;
+            }
+            // a press (A or a tap) that nothing handles and that opens no page, on a page of features still to come
+            if ((action.Kind & (ushort)MenuKeys.A) != 0 && action.TargetPage == 0xFF
+                && Array.IndexOf(WorkInProgressPages, menu.Page?.Index ?? -1) >= 0)
+            {
+                ShowWorkInProgress($"page {menu.Page!.Index} call {b}");
                 return true;
             }
             return false;

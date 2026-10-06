@@ -4,7 +4,7 @@ using System.IO;
 using MphRead; // SfxId
 
 // The front end's message box (ov0 USA rev 1: open 0x21263fc, per-frame 0x21266e0; rev 0 0x2125970 / 0x2125c54): a box
-// over the touch screen with a message and either a YES / NO pair or the busy spinner. The game's code draws it, not the
+// over the touch screen with a message and either a YES / NO pair, the busy spinner, or one check button (Inform). The game's code draws it, not the
 // menu data, all from the ROM's own 2D art in _archives/frontend2d: 2box (a BG layer: a 50% stipple over the touch
 // screen and the box with its orange border), yes / no (32x32 buttons; image 1 = lit; their frame list is the press
 // flash), waiting (the spinner, 5 images) and fontcolors (bank 5 colour 2 = the text's orange).
@@ -29,7 +29,7 @@ namespace MphRecomp.Frontend
         private const int WrapWidth = 140;
         private const float Z = 3000;
 
-        private enum Mode { Closed, Ask, Busy }
+        private enum Mode { Closed, Ask, Busy, Info }
 
         private readonly int _box;
         private readonly int[,] _buttons; // [button, image]
@@ -117,6 +117,14 @@ namespace MphRecomp.Frontend
             _answered = answered;
         }
 
+        // a message with the game's single centred check button (its x 0x70, the one-button layout): A, B or a tap on the
+        // check closes it after the press flash, then runs `closed`
+        public void Inform(string text, Action? closed = null)
+        {
+            Open(Mode.Info, text);
+            _done = closed;
+        }
+
         // a message with the spinner that closes itself after `ticks` menu ticks, then runs `done`
         public void Busy(string text, int ticks, Action done)
         {
@@ -151,6 +159,12 @@ namespace MphRecomp.Frontend
                 _mode = Mode.Closed;
                 answered?.Invoke(yes); // may open the busy box straight away
             }
+            else if (_mode == Mode.Info && _pressed >= 0 && ++_pressTick >= PressTicks)
+            {
+                Action? closed = _done;
+                _mode = Mode.Closed;
+                closed?.Invoke();
+            }
             else if (_mode == Mode.Busy && _tick >= _busyTicks)
             {
                 Action? done = _done;
@@ -173,6 +187,11 @@ namespace MphRecomp.Frontend
 
         public void Press(MenuKeys keys)
         {
+            if (_mode == Mode.Info && _pressed < 0 && (keys & (MenuKeys.A | MenuKeys.B)) != 0)
+            {
+                PressButton(0); // the check is the only button: A or B takes it
+                return;
+            }
             if (_mode != Mode.Ask || _pressed >= 0) return;
             if ((keys & MenuKeys.B) != 0) PressButton(1);
             else if ((keys & MenuKeys.A) != 0)
@@ -195,6 +214,11 @@ namespace MphRecomp.Frontend
         // a touch at DS touch-screen pixel (x, y), y down
         public void Touch(float x, float y)
         {
+            if (_mode == Mode.Info)
+            {
+                if (_pressed < 0 && y >= ButtonY && y < ButtonY + ButtonSize && x >= SpinnerX && x < SpinnerX + ButtonSize) PressButton(0);
+                return;
+            }
             if (_mode != Mode.Ask || _pressed >= 0 || y < ButtonY || y >= ButtonY + ButtonSize) return;
             if (x >= YesX && x < YesX + ButtonSize) PressButton(0);
             else if (x >= NoX && x < NoX + ButtonSize) PressButton(1);
@@ -230,6 +254,10 @@ namespace MphRecomp.Frontend
                     int x = button == 0 ? YesX : NoX;
                     Quad(output, _buttons[button, ButtonImage(button)], x, ButtonY, x + ButtonSize, ButtonY + ButtonSize);
                 }
+            }
+            else if (_mode == Mode.Info)
+            {
+                Quad(output, _buttons[0, ButtonImage(0)], SpinnerX, ButtonY, SpinnerX + ButtonSize, ButtonY + ButtonSize);
             }
             else
             {

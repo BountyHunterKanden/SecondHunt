@@ -191,6 +191,13 @@ namespace MphRead
                         // cap:<button>: the control customizer's next press (a ControlBinds name, e.g. cap:L1, cap:Mouse.Left)
                         session.Recomp.CaptureInput(presses[(f - 5) / 20].Trim()[4..]);
                     }
+                    else if (key.StartsWith("tap@", StringComparison.Ordinal))
+                    {
+                        // tap@<x>;<y>: a touch at DS touch-screen pixel (x, y), y down
+                        string[] xy = key[4..].Split(';');
+                        session.TouchDs(Single.Parse(xy[0], System.Globalization.CultureInfo.InvariantCulture),
+                            Single.Parse(xy[1], System.Globalization.CultureInfo.InvariantCulture));
+                    }
                     else if (key is "up" or "down" or "left" or "right")
                     {
                         session.Navigate(key == "right" ? 1 : key == "left" ? -1 : 0, key == "up" ? 1 : key == "down" ? -1 : 0);
