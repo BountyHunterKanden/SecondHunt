@@ -15,6 +15,10 @@ namespace MphRead
     //       writes MphRead room files for the arena(s) into the desktop extraction (src/MphRead/bin/Debug/net9.0/files/AMHE0)
     //   -echoesarena sim <arena> [matchsim options: mode= bots= level= time= hunter= move]
     //       registers the imported arenas and runs a -matchsim bot match in one
+    //   -echoesarena music [disc=<echoes .iso>] [wav=<dir>] [match=<arena>] [time=<s>]
+    //       copies the arenas' music streams from the disc (as import does), prints each track's loop and level; wav=
+    //       writes the first play + one loop of each; match= runs a headless Battle there with a logging stream output
+    //       (time= its time limit, default 70 s) to show when ArenaMusic starts, switches at one minute and stops
     //   -echoesarena check [arena]
     //       the device's match start per arena x mode (Battle, Survival, Prime Hunter; Combat Hall as the control):
     //       CampaignHost.StartMatch with draw items, 300 frames, and every frame the room lookups the Android status
@@ -121,9 +125,14 @@ namespace MphRead
                 }
                 return;
             }
+            if (verb == "music")
+            {
+                MusicVerb(args);
+                return;
+            }
             if (verb != "import")
             {
-                Console.WriteLine($"-echoesarena: unknown verb {verb} (import, sim, check, bots, alloc, preview, padinfo, padtest, spec)");
+                Console.WriteLine($"-echoesarena: unknown verb {verb} (import, music, sim, check, bots, alloc, preview, padinfo, padtest, spec)");
                 return;
             }
             string disc = Arg(args, "disc") ?? DefaultDisc;
@@ -143,6 +152,100 @@ namespace MphRead
                 EchoesArena.Import(pak, def, Paths.FileSystem, scale, Console.WriteLine);
                 Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
             }
+            ArenaMusic.Import(gc, Paths.FileSystem, Console.WriteLine);
+        }
+
+        static void MusicVerb(string[] args)
+        {
+            string disc = Arg(args, "disc") ?? DefaultDisc;
+            if (File.Exists(disc))
+            {
+                using FileStream fs = File.OpenRead(disc);
+                using var gc = new GcDisc(fs);
+                ArenaMusic.Import(gc, Paths.FileSystem, Console.WriteLine);
+            }
+            string dir = ArenaMusic.Folder(Paths.FileSystem);
+            string? wav = Arg(args, "wav");
+            if (wav != null) Directory.CreateDirectory(wav);
+            foreach (string file in ArenaMusic.Files)
+            {
+                string path = Path.Combine(dir, file);
+                if (!File.Exists(path))
+                {
+                    Console.WriteLine($"  {file}: missing");
+                    continue;
+                }
+                var stream = new RetroStream(File.ReadAllBytes(path));
+                // level of the first play + one loop, as interleaved PCM16
+                RetroStreamReader reader = stream.OpenReader();
+                long frames = stream.Loops ? stream.LoopEnd + (long)(stream.LoopEnd - stream.LoopStart) : stream.SampleCount;
+                var buf = new short[4096 * stream.Channels];
+                var pcm = wav != null ? new List<short>() : null;
+                double sumSq = 0;
+                int peak = 0;
+                long n = 0;
+                for (long left = frames; left > 0;)
+                {
+                    int got = reader.Read(buf, (int)Math.Min(4096, left));
+                    if (got == 0) break;
+                    for (int i = 0; i < got * stream.Channels; i++)
+                    {
+                        sumSq += (double)buf[i] * buf[i];
+                        peak = Math.Max(peak, Math.Abs((int)buf[i]));
+                    }
+                    n += got * stream.Channels;
+                    pcm?.AddRange(buf.AsSpan(0, got * stream.Channels).ToArray());
+                    left -= got;
+                }
+                static double Db(double v) => 20 * Math.Log10(Math.Max(v, 1e-9) / 32768);
+                Console.WriteLine($"  {file}: {stream.Channels} ch {stream.SampleRate} Hz, {stream.SampleCount / (double)stream.SampleRate:0.0} s, "
+                    + (stream.Loops ? $"loop {stream.LoopStart / (double)stream.SampleRate:0.00}-{stream.LoopEnd / (double)stream.SampleRate:0.00} s" : "no loop")
+                    + $", peak {Db(peak):0.0} dBFS, RMS {Db(Math.Sqrt(sumSq / Math.Max(n, 1))):0.0} dBFS");
+                if (pcm != null) WriteWav(Path.Combine(wav!, Path.ChangeExtension(file, ".wav")), pcm, stream.Channels, stream.SampleRate);
+            }
+            if (Arg(args, "match") is string arena)
+            {
+                MusicMatch(arena, Arg(args, "time") is string t ? float.Parse(t, System.Globalization.CultureInfo.InvariantCulture) : 70);
+            }
+        }
+
+        static void WriteWav(string path, List<short> pcm, int channels, int rate)
+        {
+            using var w = new BinaryWriter(File.Create(path));
+            int bytes = pcm.Count * 2;
+            w.Write("RIFF"u8); w.Write(36 + bytes); w.Write("WAVE"u8);
+            w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)channels); w.Write(rate);
+            w.Write(rate * channels * 2); w.Write((short)(channels * 2)); w.Write((short)16);
+            w.Write("data"u8); w.Write(bytes);
+            foreach (short v in pcm) w.Write(v);
+        }
+
+        sealed class LogOutput : ArenaMusic.IOutput
+        {
+            public Func<long> Frame = () => 0;
+            public void Start(RetroStream stream, float gain, float fadeIn, float delay, float oldFadeOut) =>
+                Console.WriteLine($"    frame {Frame()}: Start {stream.SampleCount / (double)stream.SampleRate:0.0} s stream, gain {gain:0.00}, fade in {fadeIn} s, after {delay} s, old fades {oldFadeOut} s");
+            public void Stop(float fadeOut) => Console.WriteLine($"    frame {Frame()}: Stop, fade {fadeOut:0.00} s");
+        }
+
+        // a Battle with bots at the arena, a short time limit, the music hook's calls logged with the frame they came on
+        static void MusicMatch(string arena, float seconds)
+        {
+            EchoesArena.Register(Paths.FileSystem);
+            EchoesArena.Def def = EchoesArena.Find(arena) ?? throw new ArgumentException($"no Echoes arena {arena}");
+            var output = new LogOutput();
+            ArenaMusic.Attach(output, m => Console.WriteLine($"    {m}"));
+            var settings = MphRecomp.Multiplayer.MatchSettings.Quick(GameMode.Battle, def.Room, Hunter.Samus, 3, 1);
+            settings.TimeLimitSeconds = seconds;
+            Console.WriteLine($"  match at {def.InGameName}, time limit {seconds} s:");
+            MphRecomp.Campaign.CampaignHost? host = null;
+            output.Frame = () => host?.Frame ?? 0;
+            host = MphRecomp.Campaign.CampaignHost.StartMatch(settings, collectDrawItems: false, viewWidth: 1920, viewHeight: 1080);
+            var input = new MphRecomp.Campaign.CampaignInput { SelectWeapon = BeamType.None };
+            int limit = (int)((seconds + 20) * 60);
+            for (int f = 0; f < limit && !host.Ended; f++) host.Step(input);
+            Console.WriteLine($"  ended {host.Ended} at frame {host.Frame}");
+            MphRead.Music.RoomHost = null;
         }
 
         static void Check(string? only)

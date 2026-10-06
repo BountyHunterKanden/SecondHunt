@@ -131,3 +131,33 @@ licence, with a few tables and helpers from DeSmuME. The rest of NcsfPlay was no
 
 **Not published.** As with C and B, the comparison harness and the old-code snapshot contain the replaced code, so they
 stay out of the repository.
+
+## D: Echoes streamed music (2026-10-06)
+
+**Why.** The imported Metroid Prime 2: Echoes arenas (`docs/MP2_MULTIPLAYER_IMPORT.md`) needed their music: Retro's
+"RS03" streams of GameCube DSP-ADPCM audio in the disc's `Audio` folder. Nothing was replaced; the owner asked for the
+new decoder to be written clean-room from the start.
+
+**Process.**
+1. **Specification** ([D_echoes_music_spec.md](D_echoes_music_spec.md)). Written by the spec author from the files
+   themselves: all 84 streams were measured (header fields, the 0x8F00-byte channel interleave and its short last
+   block, the 0xFF filler at the end of the last channel, the loop fields), plus the DSP-ADPCM sample maths, a fact of
+   the console's sound hardware, checked against the decoder state Metroid Prime's standard stream headers store. No
+   other program's code was consulted. Every name in it is new.
+2. **Implementation.** Written only from the specification, in a folder holding nothing but the specification, an empty
+   project and four sample streams. The implementer didn't open the repository, any other decoder or the web, and only
+   wrote new files. It reported four places where the specification could be read two ways (the state carried over a
+   loop jump that ends inside a frame, when `Position` wraps, when `Finished` turns true, fields or properties); all
+   four were read as intended.
+3. **Equivalence.** Against an independent reference decoder written by the spec author from the same specification
+   (a different language): every stream on the disc, one full play plus, for the 47 looping streams, three passes
+   through the loop, read in blocks of irregular sizes: 1,328,091,754 samples, all identical. The codec alone matches
+   the history stored at the loop point of all 67 looping Metroid Prime streams (in 5 of them the file's loop field
+   sits one sample after the history it stores; the decoded values are exact). The harness's self-test confirms it
+   catches one flipped bit of sound data and one changed coefficient. The decoder runs over 1,000 times faster than
+   real time on a desktop CPU and under 1% of one core on the Odin.
+4. **Swap-in** (2026-10-05 23:58; the harness passed 2026-10-06 00:05 on the same files). New:
+   `src/MphRecomp.Core/Import/Retro/DspAdpcm.cs`, `RetroStream.cs`. The player and the match logic around it
+   (`Core/Arenas/ArenaMusic.cs`, `MphRecomp.App/Audio/StreamMusicPlayer.cs`) are ordinary project code.
+
+**Not published.** The harness and the reference decoder read the user's game files and stay out of the repository.

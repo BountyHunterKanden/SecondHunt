@@ -6,7 +6,7 @@ and a one-screen HUD. It runs everything from your own copy of the game.
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 1.2 (Android and Windows).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
+> **Beta 1.3 (Android and Windows).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
 > [What's planned](#whats-planned).
 
 > **AI tools were used in the making of this project.** If you don't support AI in video games, then you don't have to play. Or, look
@@ -22,7 +22,8 @@ star map and saves, the HUD, music and sound, cutscenes, controls, and LAN multi
 code; only the window, the controls and the sound output are each platform's own.
 
 All the game's content comes from your ROM. The first time you launch the app you pick your copy of the game, and
-Second Hunt unpacks it into the app's own storage on your device or PC. Nothing gets downloaded or uploaded.
+Second Hunt unpacks it into the app's own storage on your device or PC. Nothing gets downloaded or uploaded, except a
+new version of Second Hunt when you ask for one (RECOMP SETTINGS > UPDATES).
 
 Since the game is drawn natively instead of through an emulated DS, the 3D runs in real widescreen at your screen's
 resolution, and at 60 fps instead of the DS's 30. The two DS screens become one: the HUD sits in the game view,
@@ -33,7 +34,7 @@ Android. On Windows the keyboard and mouse use MphRead's own PC controls.
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
 sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
-## What's in Beta 1.2
+## What's in Beta 1.3
 
 **Campaign**
 - The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
@@ -75,6 +76,9 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   redrawn as clean lines or kept as DS pixels
 - Pause map look and mode
 - Credits, licenses, and a button to share crash reports (on Windows it opens their folder)
+- Updates: CHECK asks GitHub for a newer Second Hunt and, if there is one, downloads and installs it in the game. It
+  goes online only when you press CHECK, never on its own, and it only installs a release signed with the project's
+  update key. It works from the main menu, not from a paused campaign or match.
 - Lua mods, sandboxed so they can't touch your files or the network
 - MODS and RECOMP SETTINGS are on the game's OPTIONS page, where the Nintendo WFC stats option was
 
@@ -106,6 +110,12 @@ To install:
    join, but the prompt can hide behind a full-screen window, and on a network set to Public nothing gets through until
    it's allowed. If other devices can't see your match or joining says no answer, go to Windows Security > Firewall &
    network protection > Allow an app through firewall, add `SecondHunt.exe`, and tick both Private and Public.
+
+**Updating.** From Beta 1.3 on, go to Options > RECOMP SETTINGS > UPDATES and press CHECK. If a newer version is out,
+Second Hunt downloads it, checks its signature, and installs it over the old one, keeping your saves and settings.
+On Android, the first update asks you to allow Second Hunt to install apps, then Android asks you to confirm the
+update. On Windows the game restarts by itself when it's done (keep the Second Hunt folder somewhere you can write to,
+not Program Files). Older betas don't have the button: install Beta 1.3 from Releases once, as before.
 
 ## Controls
 

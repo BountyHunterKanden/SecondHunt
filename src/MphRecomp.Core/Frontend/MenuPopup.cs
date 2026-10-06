@@ -144,6 +144,12 @@ namespace MphRecomp.Frontend
             _done = null;
         }
 
+        // new text in the open box, buttons and state kept (the update download's progress in its busy box)
+        public void SetText(string text)
+        {
+            if (_mode != Mode.Closed) _text = text;
+        }
+
         // closed from outside (the page went away): no callbacks
         public void Close() => _mode = Mode.Closed;
 

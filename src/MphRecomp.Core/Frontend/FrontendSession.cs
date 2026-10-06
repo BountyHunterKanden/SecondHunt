@@ -2,6 +2,8 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
+using MphRecomp.Update;
 using MphRead; // SfxId (Metadata/SoundMeta.cs) -- not MphRead.Formats.Sound or MphRead.Sound, neither of which has it
 
 // The whole front end as one object a platform drives: the ROM's menu graph (MenuEngine) ticking at the game's rate,
@@ -11,7 +13,8 @@ using MphRead; // SfxId (Metadata/SoundMeta.cs) -- not MphRead.Formats.Sound or 
 // comes out through Request.
 namespace MphRecomp.Frontend
 {
-    public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, Credits, ShareCrashLog, Multiplayer, ControlsDone }
+    public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, Credits, ShareCrashLog, Multiplayer, ControlsDone,
+        CheckUpdates }
 
     public readonly record struct FrontendRequest(FrontendRequestKind Kind, int Slot = -1, string? Arg = null);
 
@@ -68,7 +71,11 @@ namespace MphRecomp.Frontend
             Recomp = recomp;
             _beginGameCall = beginGameCall;
             menu.Host = this;
-            recomp.Requested += kind => Request?.Invoke(new FrontendRequest(kind));
+            recomp.Requested += kind =>
+            {
+                if (kind == FrontendRequestKind.CheckUpdates) CheckForUpdates(); // answered here, in the game's box
+                else Request?.Invoke(new FrontendRequest(kind));
+            };
             menu.Redirect = page => Paused && (page == 21 || page == Recomp.ModsPage) ? Recomp.PausePage : page;
             files.Popup = popup;
             files.Log = message => Log?.Invoke(message);
@@ -238,6 +245,7 @@ namespace MphRecomp.Frontend
             }
             Menu.Tick();
             Popup?.Tick();
+            TickUpdateCheck();
             Recomp.Tick();
             TickGrooves();
             if (_hostGoTo != -1 && --_hostDelay <= 0)
@@ -358,6 +366,135 @@ namespace MphRecomp.Frontend
         {
             Log?.Invoke($"work in progress: {what}");
             Popup?.Inform(WorkInProgressText);
+        }
+
+        // ---- RECOMP SETTINGS > UPDATES: a check per press (never on its own); YES downloads, verifies and installs the
+        //      update in the game (Update/UpdateCheck.cs, UpdateInstall.cs). Every step answers in the game's box. ----
+
+        private enum UpdateStep { Idle, Checking, Asking, Downloading, Installing }
+
+        private UpdateStep _updateStep;
+        private Task<UpdateResult>? _updateCheck;
+        private Task<(string? Path, string Error, string Detail)>? _updateDownload;
+        private UpdateResult? _updateOffer;
+        private volatile float _updateProgress;
+        private volatile string? _updateEnd; // the installer's answer (from any thread)
+        private int _updateTicks;
+        // the checking box stays up at least this long, so a fast answer doesn't flash past
+        private const int UpdateMinTicks = 30;
+
+        // owner 2026-10-06: no updating from a running campaign or match (RECOMP SETTINGS from the pause menu)
+        public const string UpdateInGameText = "updates are checked from the main menu. quit to it first, then press check.";
+
+        private void CheckForUpdates()
+        {
+            if (Popup == null || _updateStep != UpdateStep.Idle) return;
+            if (Paused)
+            {
+                Log?.Invoke("update check: refused in game");
+                Popup.Inform(UpdateInGameText);
+                return;
+            }
+            string? feed = Config.RecompSettings.PublicBuild ? null : UpdateHost.DevFeed();
+            Log?.Invoke($"update check: {UpdateHost.AppVersion} on {UpdateHost.Platform}" + (feed != null ? $", test feed {feed}" : ""));
+            Popup.Busy("checking for updates.", int.MaxValue, () => { });
+            _updateStep = UpdateStep.Checking;
+            _updateTicks = 0;
+            _updateCheck = Task.Run(() => UpdateCheck.RunAsync(UpdateHost.AppVersion, UpdateHost.Platform,
+                Config.RecompSettings.PublicBuild, feed));
+        }
+
+        private void TickUpdateCheck()
+        {
+            if (_updateStep == UpdateStep.Idle || Popup == null) return;
+            _updateTicks++;
+            switch (_updateStep)
+            {
+            case UpdateStep.Checking when _updateTicks >= UpdateMinTicks && _updateCheck!.IsCompleted:
+                UpdateResult result = _updateCheck.IsCompletedSuccessfully
+                    ? _updateCheck.Result
+                    : new UpdateResult(UpdateStatus.Failed, UpdateHost.AppVersion, Detail: _updateCheck.Exception?.GetBaseException().Message ?? "");
+                _updateCheck = null;
+                _updateStep = UpdateStep.Idle;
+                Log?.Invoke($"update check: {result.Status} latest {result.Latest ?? "-"} {result.Detail}");
+                if (!Popup.IsOpen) return; // the box was closed from outside
+                OfferUpdate(result);
+                break;
+            case UpdateStep.Asking when !Popup.IsOpen:
+                _updateStep = UpdateStep.Idle; // closed from outside before an answer
+                break;
+            case UpdateStep.Downloading:
+                if (!_updateDownload!.IsCompleted)
+                {
+                    Popup.SetText($"downloading {_updateOffer!.Latest}. {(int)(_updateProgress * 100)}%");
+                    break;
+                }
+                (string? path, string error, string detail) = _updateDownload.IsCompletedSuccessfully
+                    ? _updateDownload.Result
+                    : (null, UpdateDownload.Failed, _updateDownload.Exception?.GetBaseException().Message ?? "");
+                _updateDownload = null;
+                Log?.Invoke($"update download: {(path != null ? "ok " + path : "failed")} {detail}");
+                if (path == null)
+                {
+                    _updateStep = UpdateStep.Idle;
+                    Popup.Inform(error);
+                    break;
+                }
+                _updateStep = UpdateStep.Installing;
+                _updateEnd = null;
+                Popup.SetText($"installing {_updateOffer!.Latest}.");
+                UpdateHost.Installer!.Install(path, _updateOffer, message => _updateEnd = message);
+                break;
+            case UpdateStep.Installing when _updateEnd != null:
+                Log?.Invoke("update install: " + _updateEnd);
+                Popup.Inform(_updateEnd);
+                _updateEnd = null;
+                _updateStep = UpdateStep.Idle;
+                break;
+            }
+        }
+
+        private void OfferUpdate(UpdateResult result)
+        {
+            string text = UpdateCheck.Describe(result, UpdateHost.Platform);
+            if (result.Status != UpdateStatus.Available)
+            {
+                Popup!.Inform(text);
+                return;
+            }
+            if (UpdateHost.Installer == null)
+            {
+                string url = result.PageUrl!;
+                Popup!.Ask(text + " open its download page?", yes =>
+                {
+                    if (yes) UpdateHost.OpenUrl?.Invoke(url);
+                });
+                return;
+            }
+            _updateStep = UpdateStep.Asking;
+            Popup!.Ask(text + " update now? the game restarts when it's done.",
+                yes =>
+                {
+                    _updateStep = UpdateStep.Idle;
+                    if (yes) StartUpdateDownload(result);
+                });
+        }
+
+        private void StartUpdateDownload(UpdateResult offer)
+        {
+            IUpdateInstaller installer = UpdateHost.Installer!;
+            string? blocker = installer.Blocker(offer, out Action? fix);
+            if (blocker != null)
+            {
+                Log?.Invoke("update: can't install here: " + blocker);
+                Popup!.Inform(blocker, fix);
+                return;
+            }
+            _updateOffer = offer;
+            _updateProgress = 0;
+            _updateStep = UpdateStep.Downloading;
+            Popup!.Busy($"downloading {offer.Latest}. 0%", int.MaxValue, () => { });
+            _updateDownload = Task.Run(() => UpdateDownload.RunAsync(offer, installer.DownloadDir, p => _updateProgress = p));
         }
 
         // ---- game callbacks the data names (inferred per page from the data + the real game, 2026-09-29) ----

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The release's update file (docs/RELEASE.md, "Update file"): makes the owner's update key once, signs each
+       release's SecondHunt-<version>-update.txt, and checks a file or a live release the way the game does. It compiles
+       the game's own Update/ code (linked below, not a copy), so what it signs is exactly what the game checks.
+       Its commands: build it, then run SecondHuntRelease.exe help. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SecondHuntRelease</AssemblyName>
+    <RootNamespace>SecondHunt.ReleaseTool</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\MphRecomp.Core\Update\UpdateManifest.cs" Link="Update\UpdateManifest.cs" />
+    <Compile Include="..\MphRecomp.Core\Update\UpdateKeys.cs" Link="Update\UpdateKeys.cs" />
+    <Compile Include="..\MphRecomp.Core\Update\UpdateCheck.cs" Link="Update\UpdateCheck.cs" />
+    <Compile Include="..\MphRecomp.Core\Update\UpdateInstall.cs" Link="Update\UpdateInstall.cs" />
+  </ItemGroup>
+
+</Project>

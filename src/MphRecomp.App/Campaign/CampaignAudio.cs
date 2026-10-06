@@ -31,6 +31,8 @@ internal sealed partial class CampaignRenderer
         string? music = settings?.Music;
         _music = new GameMusicPlayer(music);
         MusicPlayer.Host = _music;
+        // Echoes' streamed music in the imported arenas, through Music's room hook (Core Arenas/ArenaMusic.cs)
+        MphRecomp.Arenas.ArenaMusic.Attach(_music.Stream, m => Log.Info("MPHAudio", m));
         _sfx = new GameSfxPlayer();
         _sfx.LoadTables();
         // OPTIONS > AUDIO's volumes (Frontend/AudioOptions.cs), as the DS applies its saved ones to the whole game

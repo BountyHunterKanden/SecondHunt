@@ -122,11 +122,20 @@ namespace MphRecomp.Frontend
             // guns/ sits beside the settings file (both under the external files dir; see CampaignActivity, MainActivity)
             string? gunsRoot = settingsPath != null
                 ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(settingsPath) ?? "", "guns") : null;
+            // an unreadable folder is skipped, not fatal: on Android, once the app may install its own updates (the "install
+            // unknown apps" switch) it can't read folders it didn't create itself (adb-pushed hd/ and guns/; 2026-10-06)
             if (gunsRoot != null && System.IO.Directory.Exists(gunsRoot))
             {
-                foreach (string d in System.IO.Directory.GetDirectories(gunsRoot))
-                    if (System.IO.File.Exists(System.IO.Path.Combine(d, "gun.bin")) && !NotSuits.Contains(System.IO.Path.GetFileName(d)))
-                        _suits.Add(System.IO.Path.GetFileName(d));
+                try
+                {
+                    foreach (string d in System.IO.Directory.GetDirectories(gunsRoot))
+                        if (System.IO.File.Exists(System.IO.Path.Combine(d, "gun.bin")) && !NotSuits.Contains(System.IO.Path.GetFileName(d)))
+                            _suits.Add(System.IO.Path.GetFileName(d));
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or System.IO.IOException)
+                {
+                    Console.Error.WriteLine("recomp menus: guns/ unreadable (" + ex.Message + ")");
+                }
             }
             // (Campaign mode assembly) every other HD model on Samus's own DS rig, hd/<Id>/ with its .dae beside guns/:
             // Brawl's Samus, Dark Samus, Zero Suit, ... The campaign wears the suit's body (third person, morph ball) and
@@ -135,17 +144,35 @@ namespace MphRecomp.Frontend
                 ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(settingsPath) ?? "", "hd") : null;
             if (hdRoot != null && System.IO.Directory.Exists(hdRoot))
             {
-                foreach (string d in System.IO.Directory.GetDirectories(hdRoot))
+                foreach (string d in SafeDirectories(hdRoot))
                 {
                     string id = System.IO.Path.GetFileName(d);
                     if (_suits.Contains(id, StringComparer.OrdinalIgnoreCase) || id.EndsWith("Rest", StringComparison.OrdinalIgnoreCase)
                         || id.EndsWith("Tpose", StringComparison.OrdinalIgnoreCase) || NotSuits.Contains(id)) continue;
                     if (!MphRecomp.Anim.TrophyRigs.TryHunterFor(id, out MphRead.Hunter rig) || rig != MphRead.Hunter.Samus) continue;
-                    if (System.IO.Directory.EnumerateFiles(d, "*.dae").Any()) _suits.Add(id);
+                    try
+                    {
+                        if (System.IO.Directory.EnumerateFiles(d, "*.dae").Any()) _suits.Add(id);
+                    }
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or System.IO.IOException) { }
                 }
             }
             _suits.Sort((x, y) => string.Compare(SuitLabel(x), SuitLabel(y), StringComparison.OrdinalIgnoreCase));
             _suits.Add("original"); // MPH's own DS gun, no HD
+        }
+
+        // a folder's subfolders, or none when it can't be read (see the guns/ note above)
+        private static string[] SafeDirectories(string dir)
+        {
+            try
+            {
+                return System.IO.Directory.GetDirectories(dir);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.IO.IOException)
+            {
+                Console.Error.WriteLine($"recomp menus: {System.IO.Path.GetFileName(dir)}/ unreadable ({ex.Message})");
+                return Array.Empty<string>();
+            }
         }
 
         // A device suit folder (MP1PowerSuit, Phazonsuit, MP4ViolaSuitIC, ...) as a friendly name ("PRIME 1 POWER
@@ -482,6 +509,16 @@ namespace MphRecomp.Frontend
                         : "if the app has crashed, share the newest crash report (it holds no personal data) with the developer.",
                     Value = () => RecompSettings.DesktopHost ? "OPEN" : "SHARE",
                     Step = _ => Requested?.Invoke(FrontendRequestKind.ShareCrashLog),
+                    Action = true
+                },
+                // owner 2026-10-06: checked only when pressed, never on its own, and installed by the game; from the main
+                // menu only, not a paused campaign or match (FrontendSession.CheckForUpdates)
+                new()
+                {
+                    Label = "updates",
+                    Description = "from the main menu: asks github.com for a newer second hunt and installs it. it goes online only when you press this.",
+                    Value = () => "CHECK",
+                    Step = _ => Requested?.Invoke(FrontendRequestKind.CheckUpdates),
                     Action = true
                 },
             };

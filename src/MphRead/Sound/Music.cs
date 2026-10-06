@@ -50,8 +50,22 @@ namespace MphRead
         private static ushort _mutedTracks = 0;
         private static ushort _fadingTracks = 0;
 
+        // Host (recomp): music for rooms the ROM's tables don't have (imported Echoes arenas, whose music is streamed).
+        // PlayRoomMusic offers a room to the host first; the host's music then follows Music's stops (a new seq
+        // starting, the match-end fades), the multiplayer last-minute tempo-up, and Init.
+        public interface IRoomMusicHost
+        {
+            // true: the host plays this room's music (MPH's own tables aren't searched)
+            bool PlayRoom(int roomId, int track);
+            void Stop(float fadeTime);
+            void Tempo(ushort tempo, float time);
+        }
+
+        public static IRoomMusicHost? RoomHost { get; set; }
+
         public static void Init()
         {
+            RoomHost?.Stop(0);
             _musicInfo = SoundRead.ReadInterMusicInfo();
             _roomMusic = SoundRead.ReadAssignMusic();
             _pendingTracks = 0;
@@ -130,6 +144,10 @@ namespace MphRead
 
         public static void PlayRoomMusic(int roomId, int track)
         {
+            if (RoomHost?.PlayRoom(roomId, track) == true)
+            {
+                return;
+            }
             track = Math.Clamp(track, 0, 2);
             for (int i = 0; i < _roomMusic.Count; i++)
             {
@@ -472,6 +490,7 @@ namespace MphRead
 
         public static void Stop(float fadeTime = 0)
         {
+            RoomHost?.Stop(fadeTime);
             _playing = false;
             _musicQueued = false;
             _nextMusicSeq = SeqId.None;
@@ -542,6 +561,7 @@ namespace MphRead
 
         public static void UpdateTempo(ushort tempo, float time)
         {
+            RoomHost?.Tempo(tempo, time);
             if (time <= 0)
             {
                 MusicPlayer.Tempo = tempo;

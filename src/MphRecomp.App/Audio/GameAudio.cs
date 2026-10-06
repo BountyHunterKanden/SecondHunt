@@ -82,6 +82,10 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
     // OPTIONS > AUDIO's music volume as a gain on the track (MasterGain), on top of the game's own fades
     volatile float _master = 1;
 
+    // streamed music next to the sequenced (Echoes' arena music: ArenaMusic, attached by CampaignAudio): it follows this
+    // player's Pause/Play, MasterVolume and Dispose, so whatever pauses the music pauses it too
+    public StreamMusicPlayer Stream { get; } = new();
+
     // the DS's master volume steps 0..9 (OPTIONS > AUDIO) as an amplitude: the game sets v * 127 / 9 on its sound
     // players, which put a volume through the squared decibel curve (Player.DecibelSquare, tenths of a dB)
     public static float MasterGain(int step) => step >= 9 ? 1f : step <= 0 ? 0f
@@ -98,6 +102,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
                 _master = value;
                 _track?.SetVolume(value);
             }
+            Stream.MasterVolume = value;
         }
     }
 
@@ -500,6 +505,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
             _playing = _track != null;
             _resume.Set();
         }
+        Stream.Resume();
     }
 
     public void Pause()
@@ -511,6 +517,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
             _resume.Reset();
             _track?.Pause();
         }
+        Stream.Pause();
     }
 
     public void Stop()
@@ -588,6 +595,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
         {
             StopLocked();
         }
+        Stream.Dispose();
     }
 }
 

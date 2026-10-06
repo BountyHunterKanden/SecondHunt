@@ -17,6 +17,38 @@ public class MphApp : Application
         AndroidPlatform.Install(this); // the shared app layer's logging, audio output, images and caches
         MphRecomp.Config.RecompSettings.PublicBuild = BuildFlags.Public;
         MphRecomp.Config.RecompSettings.AppId = PackageName ?? MphRecomp.Config.RecompSettings.AppId;
+        InstallUpdateHost();
+    }
+
+    // RECOMP SETTINGS > UPDATES (Core Update/): this build's version and its installer (AndroidUpdater)
+    void InstallUpdateHost()
+    {
+        try
+        {
+            string name = PackageName!;
+            Android.Content.PM.PackageInfo info = OperatingSystem.IsAndroidVersionAtLeast(33)
+                ? PackageManager!.GetPackageInfo(name, Android.Content.PM.PackageManager.PackageInfoFlags.Of(0L))!
+                : PackageManager!.GetPackageInfo(name, 0)!;
+            MphRecomp.Update.UpdateHost.AppVersion = info.VersionName ?? "0.0.0";
+        }
+        catch (Exception ex) { Android.Util.Log.Warn("MPHUpdate", "no version name: " + ex.Message); }
+        MphRecomp.Update.UpdateHost.Platform = MphRecomp.Update.UpdatePlatform.Android;
+        // dev builds: `adb push` a one-line update_feed.txt (a test server's base URL) into the external files dir
+        MphRecomp.Update.UpdateHost.DevFeedFile = BuildFlags.Public
+            ? null
+            : Path.Combine(GetExternalFilesDir(null)?.AbsolutePath ?? FilesDir!.AbsolutePath, "update_feed.txt");
+        Context app = ApplicationContext!;
+        MphRecomp.Update.UpdateHost.Installer = new AndroidUpdater(app); // the game installs updates itself (owner 10-06)
+        MphRecomp.Update.UpdateHost.OpenUrl = url =>
+        {
+            try
+            {
+                var view = new Intent(Intent.ActionView, Android.Net.Uri.Parse(url));
+                view.AddFlags(ActivityFlags.NewTask); // started from the application, not an activity
+                app.StartActivity(view);
+            }
+            catch (ActivityNotFoundException) { Android.Util.Log.Warn("MPHUpdate", "no browser for " + url); }
+        };
     }
 }
 

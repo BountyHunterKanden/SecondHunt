@@ -30,6 +30,8 @@ keys.txt
 # release signing (docs/RELEASE.md) -- the keystore never enters the repo
 *.keystore
 *.jks
+# the update key (docs/RELEASE.md section 10)
+*.pem
 # generated or machine-local
 tools/board/out/
 
