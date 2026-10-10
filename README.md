@@ -4,9 +4,9 @@
 original campaign and multiplayer, in true widescreen, with dual-stick controller controls (or keyboard and mouse on PC)
 and a one-screen HUD. It runs everything from your own copy of the game.
 
-Second Hunt aims to modernize and add new features and content to the original Hunters experience. New weapons, playable characters, maps, and additional music are all already available and more is planned, all from user provided and legally obtained roms.
+Second Hunt aims to modernize and add new features and content to the original Hunters experience. New weapons, playable characters, maps, and additional music are all already available and more is planned, all from user provided, legally obtained roms.
 
-Second Hunt is a fan project and a fork of MphRead. It contains no game data and isn't affiliated with or endorsed by Nintendo.
+Second Hunt is a fan project and a fork of MphRead. It contains no game data from any Metroid game and isn't affiliated with or endorsed by Nintendo.
 
 > **Beta 1.3 (Android and Windows).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
 > [What's planned](#whats-planned).
