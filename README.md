@@ -12,8 +12,6 @@ Second Hunt is a fan project and a fork of MphRead. It contains no game data fro
 > players, and new characters, suits and arenas imported from your own Metroid Prime discs. Playable start to finish,
 > with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
-> **AI tools were used in the making of this project.** 
-
 ## What Second Hunt is
 
 The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
@@ -466,6 +464,9 @@ This project's reverse engineering effort was developed parallel to **[hackyourl
 
 (Note from Second Hunt: that transparency rendering code has since been replaced with a clean-room version that draws
 the same result. See [docs/cleanroom](docs/cleanroom).)
+
+### Notice
+> **AI tools were used in the making of this project.** 
 
 ## About MphRead (upstream)
 
