@@ -43,6 +43,7 @@ internal static class Program
             DesktopPlatform.Install();
             using (var app = new DesktopApp(options))
             {
+                DesktopImport.Install(app.Defer); // IMPORT GAMES' file dialog (between frames, on this STA thread)
                 app.Run();
             }
             DesktopPlatform.Shutdown();

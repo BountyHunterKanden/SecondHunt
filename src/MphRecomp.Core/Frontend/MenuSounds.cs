@@ -90,9 +90,33 @@ namespace MphRecomp.Frontend
         // the sound an A-key page action makes when nothing else did (only the title has one: TOUCH_TO_START_SCR)
         public int PageSound(int page) => page >= 0 && page < _pageSound.Length ? _pageSound[page] : 0;
 
-        // an item's own sound and flags (pages/items the file doesn't cover -- the recomp's own -- have none)
+        // The recomp's own pages and items that sound like the game's (RecompMenus.ApplySounds): a whole page that copies a
+        // ROM page item for item, or one item (a rows page's back button sounds like the Controls page's back arrow). A
+        // borrowed item's sound plays for any of its actions: the recomp's back buttons that leave by a callback (IMPORT
+        // GAMES, CONTROLLER) would be silenced by the ROM item's "only with a page change" flag.
+        private readonly Dictionary<int, int> _pageLike = new();
+        private readonly Dictionary<(int Page, int Item), (int Page, int Item)> _itemLike = new();
+
+        public void PageLike(int page, int romPage)
+        {
+            if (!ReferenceEquals(this, Empty)) _pageLike[page] = romPage;
+        }
+
+        public void ItemLike(int page, int item, int romPage, int romItem)
+        {
+            if (!ReferenceEquals(this, Empty)) _itemLike[(page, item)] = (romPage, romItem);
+        }
+
+        // an item's own sound and flags (pages/items the file doesn't cover -- the recomp's own -- have none, unless they
+        // borrow a ROM page's or item's)
         public (int Sound, MenuSoundFlags Flags) Item(int page, int item)
         {
+            if (_itemLike.TryGetValue((page, item), out (int Page, int Item) like))
+            {
+                (int sound, MenuSoundFlags flags) = Item(like.Page, like.Item);
+                return (sound, flags & ~MenuSoundFlags.OnlyWithPageChange);
+            }
+            if (_pageLike.TryGetValue(page, out int romPage)) page = romPage;
             if (page >= 0 && _entryOf.TryGetValue(page, out int[]? entryOf))
             {
                 item = item >= 0 && item < entryOf.Length ? entryOf[item] : -1;

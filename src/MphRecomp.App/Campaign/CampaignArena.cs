@@ -18,7 +18,9 @@ namespace MphRecomp.App;
 // materials and textures ArenaHdWriter put in _archives/<archive>/hd/, through the GX-TEV shader the HD suit and the
 // Prime guns use (plus a second UV set: lightmaps read TEX0, the surfaces TEX1). Opaque materials draw with the opaque
 // items (passes 1 and 4 of the frame), blended ones after the translucent passes; the area's sky (if it has one) after
-// the opaque world at the far plane, around the camera, in pass 1. Single-mip textures (the lightmap atlases) get no mipmaps. Once it's ready the DS stand-in room
+// the opaque world at the far plane, around the camera, in pass 1; the weapon crates that are up (EchoesCrates) after the
+// opaque world, the bundle's prop model at each; the breakables that are up (EchoesBreakables) with them, each its own
+// placed model; the Dark Water surfaces with the blended materials. Single-mip textures (the lightmap atlases) get no mipmaps. Once it's ready the DS stand-in room
 // model is hidden (RoomEntity.Hidden: collision, room parts and everything else stay MphRead's). If the bundle is
 // missing or GL fails, the stand-in simply stays.
 internal sealed partial class CampaignRenderer
@@ -44,7 +46,7 @@ internal sealed partial class CampaignRenderer
             RoomMetadata? meta = Metadata.GetRoomById(_host.RoomId, noThrow: true);
             if (meta != null && EchoesArena.IsEchoesRoom(meta.Name) && meta.Archive is string archive)
             {
-                string dir = Path.Combine(Paths.FileSystem, "_archives", archive, ArenaHdWriter.Dir);
+                string dir = EchoesArena.HdDir(meta.Name) ?? Path.Combine(Paths.FileSystem, "_archives", archive, ArenaHdWriter.Dir);
                 _arenaHdLoad = Task.Run(() => ArenaHdDraw.TryLoad(dir));
             }
         }
@@ -56,6 +58,7 @@ internal sealed partial class CampaignRenderer
             if (_arenaHd == null) return;
         }
         ArenaHdDraw hd = _arenaHd;
+        ArenaWatch(hd);
         if (!hd.Warm(pass == 0 ? 3 : 0)) return;   // GL objects a few ms per frame; the stand-in draws meanwhile
         if (hd.Failed) return;
         if (scene.Room is RoomEntity room) room.Hidden = true;
@@ -64,6 +67,7 @@ internal sealed partial class CampaignRenderer
         bool first = pass == 0 && restoreDepthFunc == GLES30.GlLess;
         if (first) ArenaPerfFrame();
         hd.Draw(scene.ViewMatrix, scene.PerspectiveMatrix, pass, _clock.Elapsed.TotalSeconds, sky: first);
+        if (pass == 0) DrawCrates(scene, hd);
         ArenaGl.UseProgram(_program);
         ArenaGl.BindVertexArray(0);
         ArenaGl.ActiveTexture(GLES30.GlTexture0);
@@ -72,9 +76,67 @@ internal sealed partial class CampaignRenderer
         ArenaGl.Disable(CullFaceCap);
         ArenaGl.DepthMask(pass == 0);
         ArenaGl.DepthFunc(restoreDepthFunc);
+        if (pass == 1) DrawUnderwater(scene);
         double ms = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
         _arenaMs[first ? 0 : pass == 0 ? 1 : 2] += ms;
         _arenaFrameMs += ms;
+    }
+
+    // how much of Echoes' underwater fog colour covers the view under water
+    const float UnderwaterTint = 0.35f;
+
+    // with the camera inside Pipeline's water (Echoes movement's boxes, PlayerEntity.HostWater) the view takes Echoes'
+    // underwater fog colour (WATR UnderwaterFogColor): after the arena's blended surfaces, under the HUD
+    void DrawUnderwater(Scene scene)
+    {
+        if (!PlayerEntity.HostEchoesMoves || PlayerEntity.HostWater is not { } water) return;
+        Vector3 c = scene.CameraPosition;
+        bool inside = false;
+        foreach ((Vector3 min, Vector3 max) in water)
+        {
+            if (c.X >= min.X && c.X <= max.X && c.Z >= min.Z && c.Z <= max.Z && c.Y >= min.Y && c.Y < max.Y) { inside = true; break; }
+        }
+        if (!inside) return;
+        float[] fog = EchoesArena.WaterFog;
+        GLES30.GlDisable(GLES30.GlDepthTest);
+        GLES30.GlUseProgram(_hudProgram);
+        GLES30.GlBindVertexArray(_hudVao);
+        GLES30.GlUniform1f(HU("view_width"), _width);
+        GLES30.GlUniform1f(HU("view_height"), _height);
+        GLES30.GlUniform4f(HU("fade_color"), fog[0], fog[1], fog[2], UnderwaterTint);
+        DrawHudQuad(-1, 1, 1, -1);
+        GLES30.GlUniform4f(HU("fade_color"), 0, 0, 0, 0);
+        GLES30.GlUseProgram(_program);
+        GLES30.GlBindVertexArray(0);
+        GLES30.GlEnable(GLES30.GlDepthTest);
+    }
+
+    readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass)> _crates = new();
+
+    // Echoes' weapon crates that are up, spinning about the vertical (EchoesCrateEntity.Spin), and the breakables that
+    // are up (their models placed already), red while just hit, lit as Echoes lights them there; with both opaque
+    // passes (the depth rebuild has colour masked: depth only)
+    void DrawCrates(Scene scene, ArenaHdDraw hd)
+    {
+        if (!hd.HasProps && !hd.HasPlaced) return;
+        _crates.Clear();
+        foreach (EnemyInstanceEntity e in scene.GetEnemyInstanceEntities())
+        {
+            if (e is EchoesCrateEntity { Up: true } c && hd.HasProps)
+            {
+                _crates.Add((Matrix4.CreateRotationY(c.Spin) * Matrix4.CreateTranslation(c.Position), c.Flash, c.Light, ArenaHdWriter.PropPass));
+            }
+            else if (e is EchoesBreakableEntity { Up: true } br && hd.HasPlaced)
+            {
+                _crates.Add((Matrix4.Identity, br.Flash, br.Light, br.Pass));
+            }
+        }
+        // the arena's static actor models (Spires' pillars: solid in the collision, not in the render mesh; T6 N3)
+        if (hd.HasPlaced && _host != null)
+        {
+            foreach ((int pass, CrateLight? light) in EchoesStatics.For(_host.RoomId)) _crates.Add((Matrix4.Identity, false, light, pass));
+        }
+        if (_crates.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _crates);
     }
 
     // the frame's first arena call: closes the last frame, logs every 2 s
@@ -89,6 +151,7 @@ internal sealed partial class CampaignRenderer
             int n = _arenaFrames;
             Log.Info("MPHArena", $"arena CPU {(_arenaMs[0] + _arenaMs[1] + _arenaMs[2]) / n:0.00} ms/frame (opaque {_arenaMs[0] / n:0.00} + depth rebuild "
                 + $"{_arenaMs[1] / n:0.00} + blended {_arenaMs[2] / n:0.00}), max {_arenaMaxMs:0.0} ms; {n} frames");
+            if (_arenaHd is { } watched) ArenaCheckShared(watched);
             Array.Clear(_arenaMs);
             _arenaMaxMs = 0;
             _arenaFrames = 0;
@@ -98,7 +161,61 @@ internal sealed partial class CampaignRenderer
     }
 
     // OnSurfaceCreated: a new context, every GL name is gone
-    void ArenaGlReset() => _arenaHd?.ResetGl();
+    void ArenaGlReset()
+    {
+        s_arenaGlGen++;
+        _arenaHd?.ResetGl();
+    }
+
+    // the newest GL context's generation: an arena watched on an older one (a renderer whose context is gone) ignores
+    // deletes, which are another context's names
+    static int s_arenaGlGen;
+    Action<int>? _arenaDeleteHook;
+
+    // The arena's textures keep their GL names for the whole match. Owner 10-08 01:27: Sidehopper's planet showed a
+    // station texture although the files, the material and its program were right, i.e. the planet's name held another
+    // texture. Watch for it: a name of ours freed by anyone else (GLES30.TextureDeleted, with who freed it) or held by
+    // one of MPH's texture tables (every 2 s) is logged and our texture goes up again under a fresh name.
+    void ArenaWatch(ArenaHdDraw hd)
+    {
+        _arenaDeleteHook ??= ArenaTextureDeleted;
+        if (GLES30.TextureDeleted != _arenaDeleteHook)
+        {
+            GLES30.TextureDeleted = _arenaDeleteHook;
+        }
+        hd.GlGen = s_arenaGlGen;
+        hd.ReclaimStolen();
+    }
+
+    void ArenaTextureDeleted(int name)
+    {
+        ArenaHdDraw? hd = _arenaHd;
+        if (hd == null || hd.GlGen != s_arenaGlGen || !hd.Owns(name, out string? png)) return;
+        Log.Warn("MPHArena", $"arena: texture {png} (GL {name}) freed by another owner; it goes up again. Freed at:\n{Environment.StackTrace}");
+        hd.MarkStolen(name);
+    }
+
+    void ArenaCheckShared(ArenaHdDraw hd)
+    {
+        foreach (KeyValuePair<int, GpuTexture> kv in _textures)
+        {
+            if (hd.Owns(kv.Value.Tex, out string? png) && hd.MarkStolen(kv.Value.Tex))
+            {
+                Log.Warn("MPHArena", $"arena: texture {png} (GL {kv.Value.Tex}) is also MPH's texture binding {kv.Key}; it goes up again");
+            }
+        }
+        foreach (KeyValuePair<int, int> kv in _hudSpriteTex)
+        {
+            if (hd.Owns(kv.Value, out string? png) && hd.MarkStolen(kv.Value))
+            {
+                Log.Warn("MPHArena", $"arena: texture {png} (GL {kv.Value}) is also HUD sprite {kv.Key}'s; it goes up again");
+            }
+        }
+        if (_warpTex != 0 && hd.Owns(_warpTex, out string? warp) && hd.MarkStolen(_warpTex))
+        {
+            Log.Warn("MPHArena", $"arena: texture {warp} (GL {_warpTex}) is also the view warp's target; it goes up again");
+        }
+    }
 }
 
 internal sealed class ArenaHdDraw
@@ -161,6 +278,12 @@ internal sealed class ArenaHdDraw
     readonly int[] _unitTex = new int[8];
     readonly Dictionary<int, (int S, int T)> _wrap = new();
     readonly float[] _scroll = new float[72];
+    // every GL name this arena's textures hold -> its PNG (CampaignRenderer.ArenaWatch), and the ones another owner
+    // freed or holds too, to go up again under fresh names
+    readonly Dictionary<int, string> _texNames = new();
+    readonly HashSet<int> _stolen = new();
+    const string WhiteName = "(white)";
+    public int GlGen;
 
     public bool Failed { get; private set; }
 
@@ -295,13 +418,15 @@ internal sealed class ArenaHdDraw
             foreach (int tc in uv1[mat]) if (tc >= 0 && tc < 8 && p.TgMode[tc] == 0) p.TgMode[tc] = 2;
             var b = new Batch { Start = start, Count = n, Pass = pass, Gx = m, P = p };
             if (pass == ArenaHdWriter.SkyPass) _skyTriangles += n / 3;
+            if (pass == ArenaHdWriter.PropPass) HasProps = true;
+            if (pass >= ArenaHdWriter.FirstPlacedPass) HasPlaced = true;
             if (fast[mat] is { } f)
             {
                 b.FastLm = Path.Combine(_dir, f.Lm + ".png");
                 b.FastTex = Path.Combine(_dir, f.Tex + ".png");
                 b.FastGlow = f.Glow is string g ? Path.Combine(_dir, g + ".png") : null;
             }
-            else if (ArenaGxSpec.Frag(p) is string spec)
+            else if (pass < ArenaHdWriter.PropPass && ArenaGxSpec.Frag(p) is string spec)
             {
                 b.SpecSrc = spec;
                 if (!_specOrder.Contains(spec)) _specOrder.Add(spec);
@@ -429,6 +554,7 @@ internal sealed class ArenaHdDraw
             string png = _texOrder[_step - 2];
             (int[] Px, int W, int H)? img = _pixels.TryGetValue(png, out var pre) ? pre : Decode(png);
             _texIds[png] = img.HasValue ? Upload(img.Value.Px, img.Value.W, img.Value.H, !_noMips.Contains(png)) : White();
+            if (img.HasValue) _texNames[_texIds[png]] = png;
         }
         else if (_step - 2 - _texOrder.Count < _specOrder.Count)
         {
@@ -447,7 +573,8 @@ internal sealed class ArenaHdDraw
             _pixels.Clear();
             _vertBuf = null;
             _glReady = true;
-            Log.Info(Tag, $"arena: GL ready (program {_prog}, {_texIds.Count} textures, {_warmMs:0} ms of GL work; "
+            Log.Info(Tag, $"arena: GL ready (program {_prog}, {_texIds.Count} textures as GL {(_texNames.Count > 0 ? _texNames.Keys.Min() : 0)}.."
+                + $"{(_texNames.Count > 0 ? _texNames.Keys.Max() : 0)}, {_warmMs:0} ms of GL work; "
                 + $"fast path {(_fastOk ? _batches.Count(b => b.Fast) : 0)} of {_batches.Count(b => b.Pass == 0)} opaque batches; "
                 + $"own TEV programs {_specs.Values.Count(s => s != null)} of {_specOrder.Count} for {_batches.Count(b => b.Spec != null)} of "
                 + $"{_batches.Count(b => !(b.Fast && _fastOk))} other batches)");
@@ -470,7 +597,13 @@ internal sealed class ArenaHdDraw
         _curProg = _active = _blend = _blendSrc = _blendDst = _depthMask = _depthFunc = -1;
         Array.Fill(_unitTex, -1);
         for (int t = 0; t < 8; t++) ArenaGl.BindSampler(t, 0); // MPH's sampler objects would override the layers' wrap modes
-        ArenaGl.Disable(0x0B44); // GL_CULL_FACE: both faces, as the suit (Retro's winding isn't checked against GL's yet)
+        // Back faces culled, as Retro does (the sky's rule below; the caller turns culling off again). Echoes builds thin
+        // walls as two back-to-back faces in one plane: unculled they z-fought (Sidehopper's railings by the planet
+        // flickered dark, owner 10-08 01:57; 730 of its 14,377 triangles, 13-64 in the other arenas). All 6 arenas'
+        // world triangles wind counter-clockwise toward their normals, as the sky (all but 100 of Sidehopper's).
+        ArenaGl.Enable(0x0B44); // GL_CULL_FACE
+        ArenaGl.CullFace(0x0405); // GL_BACK
+        ArenaGl.FrontFace(0x0901); // GL_CCW
         ArenaGl.BindVertexArray(_vao);
         bool fast = pass == 0 && _fastOk;
         if (fast)
@@ -504,7 +637,8 @@ internal sealed class ArenaHdDraw
         }
         foreach (Batch b in _batches)
         {
-            if (pass == 0 ? b.Pass != 0 || fast && b.Fast : b.Pass is not (1 or 2)) continue;
+            // the blended pass: the world's blended materials, then the fluid surfaces (arena.bin keeps them after)
+            if (pass == 0 ? b.Pass != 0 || fast && b.Fast : b.Pass is not (1 or 2 or ArenaHdWriter.FluidPass)) continue;
             Bind(b, seconds, sky: false);
             Blend(b.P);
             DepthMask(!b.P.Blend);
@@ -512,6 +646,75 @@ internal sealed class ArenaHdDraw
             ArenaGl.DrawArrays(GLES30.GlTriangles, b.Start, b.Count);
         }
         if (sky && _skyTriangles > 0) DrawSky(view, proj, seconds);
+    }
+
+    // the bundle has a prop model (the weapon crate: arena.bin pass 4), placed breakable models (passes 6 and up)
+    public bool HasProps { get; private set; }
+    public bool HasPlaced { get; private set; }
+
+    readonly float[] _propMvp = new float[16], _propRot = new float[9], _propDir = new float[12], _propCol = new float[12];
+
+    // the prop model (pass 4), or a placed model (its own pass), at each placement (model matrix; flash: tinted red, as
+    // MphRead's enemies flash when hit; light:
+    // Echoes' lighting there (EchoesCrates.Lighting): its ambient + up to 4 directional lights, the normals turned with
+    // the model; none (an import before it) = lit like the sky: lights off, ambient white), after the opaque world:
+    // depth tested and written, back faces culled. Through the GX interpreter (uTint); call right after Draw with the
+    // same view
+    public void DrawProps(Matrix4 view, Matrix4 proj, double seconds, List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass)> props)
+    {
+        if (!_glReady || Failed) return;
+        _curProg = _active = _blend = _blendSrc = _blendDst = _depthMask = _depthFunc = -1;
+        Array.Fill(_unitTex, -1);
+        ArenaGl.Enable(0x0B44); // GL_CULL_FACE
+        ArenaGl.CullFace(0x0405); // GL_BACK
+        ArenaGl.FrontFace(0x0901); // GL_CCW
+        ArenaGl.BindVertexArray(_vao);
+        Use(_prog);
+        bool tinted = false;
+        foreach ((Matrix4 model, bool flash, CrateLight? light, int pass) in props)
+        {
+            Matrix4 mv = model * view;
+            HunterRig.ToArray(mv * proj, _propMvp);
+            ArenaGl.UniformMatrix4(U("uMvp"), 1, _propMvp);
+            // the normal's way to the camera through the model's turn (as _viewRot holds the view's)
+            _propRot[0] = mv.M11; _propRot[1] = mv.M12; _propRot[2] = mv.M13;
+            _propRot[3] = mv.M21; _propRot[4] = mv.M22; _propRot[5] = mv.M23;
+            _propRot[6] = mv.M31; _propRot[7] = mv.M32; _propRot[8] = mv.M33;
+            ArenaGl.UniformMatrix3(U("uViewRot"), 1, _propRot);
+            Vector3 amb = light?.Ambient ?? Vector3.One;
+            int n = light == null ? 0 : Math.Min(4, light.Dirs.Length);
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 d = Vector3.TransformVector(light!.Dirs[i], view).Normalized(), c = light.Colors[i];
+                _propDir[3 * i] = d.X; _propDir[3 * i + 1] = d.Y; _propDir[3 * i + 2] = d.Z;
+                _propCol[3 * i] = c.X; _propCol[3 * i + 1] = c.Y; _propCol[3 * i + 2] = c.Z;
+            }
+            ArenaGl.Uniform3f(U("uSceneAmb"), amb.X, amb.Y, amb.Z);
+            ArenaGl.Uniform1i(U("uNumLights"), n);
+            if (n > 0)
+            {
+                ArenaGl.Uniform3fv(U("uLightDir"), 4, _propDir);
+                ArenaGl.Uniform3fv(U("uLightCol"), 4, _propCol);
+            }
+            if (flash != tinted)
+            {
+                GLES30.GlUniform4f(U("uTint"), 1, 0.25f, 0.2f, flash ? 1 : 0);
+                tinted = flash;
+            }
+            foreach (Batch b in _batches)
+            {
+                if (b.Pass != pass) continue;
+                Material(b, seconds);
+                Blend(b.P);
+                DepthMask(!b.P.Blend);
+                DepthFunc(GLES30.GlLequal);
+                ArenaGl.DrawArrays(GLES30.GlTriangles, b.Start, b.Count);
+            }
+        }
+        if (tinted) GLES30.GlUniform4f(U("uTint"), 0, 0, 0, 0);
+        ArenaGl.Uniform1i(U("uNumLights"), 0); // the world draws with no lights (its lightmaps)
+        _progStamp = -1; // the world's MVP, view turn and ambient go back on with its next draw
+        ArenaGl.Disable(0x0B44);
     }
 
     // Retro's sky: the area's sky model around the camera (translation only), lights off and the ambient white (its lit
@@ -740,7 +943,64 @@ internal sealed class ArenaHdDraw
 
 
 
-    int White() => _white != 0 ? _white : _white = Upload(new[] { unchecked((int)0xFFFFFFFF) }, 1, 1, false);
+    int White()
+    {
+        if (_white == 0)
+        {
+            _white = Upload(new[] { unchecked((int)0xFFFFFFFF) }, 1, 1, false);
+            _texNames[_white] = WhiteName;
+        }
+        return _white;
+    }
+
+    // a GL name one of this arena's textures holds (its PNG's file name)
+    public bool Owns(int name, out string? png)
+    {
+        png = name != 0 && _texNames.TryGetValue(name, out string? p) ? Path.GetFileName(p) : null;
+        return png != null;
+    }
+
+    // true the first time a name is reported
+    public bool MarkStolen(int name) => _texNames.ContainsKey(name) && _stolen.Add(name);
+
+    // GL thread, before drawing: each texture whose name another owner freed or holds goes up again under a fresh name
+    // (from its PNG), and the batches follow it
+    public void ReclaimStolen()
+    {
+        if (_stolen.Count == 0 || !_glReady) return;
+        foreach (int old in _stolen)
+        {
+            if (!_texNames.Remove(old, out string? png)) continue;
+            int fresh;
+            if (png == WhiteName)
+            {
+                _white = 0;
+                fresh = White();
+            }
+            else
+            {
+                (int[] Px, int W, int H)? img = Decode(png);
+                if (img == null)
+                {
+                    Log.Warn(Tag, $"arena: {Path.GetFileName(png)} could not be read again; it stays on GL {old}");
+                    continue;
+                }
+                fresh = Upload(img.Value.Px, img.Value.W, img.Value.H, !_noMips.Contains(png));
+                _texIds[png] = fresh;
+                _texNames[fresh] = png;
+            }
+            _wrap.Remove(old);
+            foreach (Batch b in _batches)
+            {
+                for (int u = 0; u < 8; u++) if (b.Tex[u] == old) b.Tex[u] = fresh;
+                if (b.TexLm == old) b.TexLm = fresh;
+                if (b.TexD == old) b.TexD = fresh;
+                if (b.TexG == old) b.TexG = fresh;
+            }
+            Log.Info(Tag, $"arena: {Path.GetFileName(png)} up again as GL {fresh} (was {old})");
+        }
+        _stolen.Clear();
+    }
 
     static int Upload(int[] px, int w, int h, bool mipmap)
     {
@@ -767,6 +1027,8 @@ internal sealed class ArenaHdDraw
         Failed = false;
         _u.Clear();
         _texIds.Clear();
+        _texNames.Clear();
+        _stolen.Clear();
         _wrap.Clear();
         _progStamp = -1;
     }
@@ -798,6 +1060,7 @@ internal static class ArenaGl
     public static void Uniform2iv(int location, int count, int[] v) => GLES30.GlUniform2iv(location, count, v, 0);
     public static void Uniform4iv(int location, int count, int[] v) => GLES30.GlUniform4iv(location, count, v, 0);
     public static void Uniform2fv(int location, int count, float[] v) => GLES30.GlUniform2fv(location, count, v, 0);
+    public static void Uniform3fv(int location, int count, float[] v) => GLES30.GlUniform3fv(location, count, v, 0);
     public static void Uniform4fv(int location, int count, float[] v) => GLES30.GlUniform4fv(location, count, v, 0);
     // count matrices from the start of v (untransposed, column-major)
     public static void UniformMatrix3(int location, int count, float[] v) => GLES30.GlUniformMatrix3fv(location, count, false, v, 0);

@@ -442,7 +442,7 @@ namespace MphRead
             {
                 return list[0];
             }
-            return list[playerCount == 3 ? 1 : (playerCount == 4 ? 2 : 0)];
+            return list[playerCount == 3 ? 1 : (playerCount >= 4 ? 2 : 0)]; // recomp: 5-8 players (P8) load the 4-player layer
         }
 
         public static string GetLayerName(int layerId, bool multiplayer)
@@ -902,7 +902,9 @@ namespace MphRead
             /* 20 */ "pick_deathball",
             /* 21 */ "pick_wpn_all",
             // unused
-            /* 22 */ "pick_wpn_missile"
+            /* 22 */ "pick_wpn_missile",
+            // recomp: the Pirate Blaster pickup (placeholder model until the Pickups track's art)
+            /* 23 */ "pick_wpn_blaster" // recomp: built by the host (Read.HostBuildModel), else pick_wpn_all
         };
 
         public static readonly IReadOnlyList<string> FhItems
@@ -1116,18 +1118,21 @@ namespace MphRead
         public static readonly IReadOnlyList<string> WeaponNames = new List<string>()
         {
             "Power Beam", "Volt Driver", "Missiles", "Battlehammer", "Imperialist",
-            "Judicator", "Magmaul", "Shock Coil", "Omega Cannon", "Platform", "Enemy"
+            "Judicator", "Magmaul", "Shock Coil", "Omega Cannon", "Platform", "Enemy",
+            "Pirate Blaster" // recomp (BeamType.PirateBlaster = 11)
         };
 
         public static readonly IReadOnlyList<string> WeaponNamesUpper = new List<string>()
         {
             "POWER BEAM", "VOLT DRIVER", "MISSILES", "BATTLEHAMMER", "IMPERIALIST",
-            "JUDICATOR", "MAGMAUL", "SHOCK COIL", "OMEGA CANNON", "PLATFORM", "ENEMY"
+            "JUDICATOR", "MAGMAUL", "SHOCK COIL", "OMEGA CANNON", "PLATFORM", "ENEMY",
+            "PIRATE BLASTER" // recomp
         };
 
         public static readonly IReadOnlyList<int> WeaponMessageIds = new List<int>()
         {
-            0, 109, 0, 110, 111, 112, 113, 114, 115, 0, 0
+            0, 109, 0, 110, 111, 112, 113, 114, 115, 0, 0,
+            0 // recomp: the Pirate Blaster (no ROM message)
         };
 
         public static Vector3 GetEventColor(Message eventId)
@@ -1595,6 +1600,12 @@ namespace MphRead
             {
                 _hostRooms.Add(meta);
             }
+        }
+
+        // Host (recomp): a registered room whose files are gone (an imported arena cleared on IMPORT GAMES)
+        public static void RemoveHostRoom(string name)
+        {
+            _hostRooms.RemoveAll(r => r.Name == name);
         }
 
         public static (RoomMetadata?, int) GetRoomByName(string name)
@@ -2825,6 +2836,11 @@ namespace MphRead
                 new(
                     "pick_wpn_electro",
                     new ModelMetadata("pick_wpn_electro", animation: false)
+                ),
+                // recomp: the Pirate Blaster's pickup (item 23) when no host builds its own: the affinity pickup
+                new(
+                    "pick_wpn_blaster",
+                    new ModelMetadata("pick_wpn_all", animation: false)
                 ),
                 new(
                     "pick_wpn_ghostbuster",

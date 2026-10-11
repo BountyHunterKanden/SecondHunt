@@ -1,0 +1,29 @@
+{
+  "Room": "AD2 ALINOS PERCH",
+  "RoomId": 113,
+  "Arena": "Alinos Perch",
+  "Saved": "2026-10-10 13:06:33",
+  "Pickups": [
+    {
+      "Item": "PirateBlaster",
+      "Pos": [
+        -54.839,
+        6.624,
+        -18.193
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -53.203,
+        6.624,
+        -18.183
+      ],
+      "RespawnSeconds": 10
+    }
+  ],
+  "Crates": [],
+  "RemovedItems": [],
+  "RemovedCrates": []
+}

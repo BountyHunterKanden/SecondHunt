@@ -107,7 +107,24 @@ namespace MphRecomp.Import.Guns
         // muzzle at 0.378): the Prime gun is scaled so its elbow-to-muzzle length matches
         public const double MphGunLength = 0.3483;
 
+        // a native Retro body (Import/Bodies/BodyImporter) instead of a gun, in the same format: its own file names
+        // (body.bin / body.gx.json / body.cfg), its own .cfg text in place of the gun's LBEAM scale, a material whose
+        // corners use more than GxShader's 32 bones written as several (split by triangle), and every clip key passed
+        // through KeyFilter before it is written (the body's root motion taken out). The defaults are the gun's.
+        public sealed class Options
+        {
+            public string BaseName = "gun";
+            public Func<GunSkeleton, string>? Cfg;
+            public bool SplitPalettes;
+            // per clip (the decoded Anim, its name): a filter given each key's sampled rotations and translations
+            // (Retro space, by CINF bone id) to change in place
+            public Func<Retro.Anim, string, Action<Dictionary<uint, double[]>, Dictionary<uint, double[]>>?>? KeyFilter;
+        }
+
         public static void Write(GunSource src, string outDir, GunImporter.Result result, Action<float, string>? progress = null,
+            CancellationToken ct = default) => Write(src, outDir, result, new Options(), progress, ct);
+
+        public static void Write(GunSource src, string outDir, GunImporter.Result result, Options opt, Action<float, string>? progress = null,
             CancellationToken ct = default)
         {
             void Say(float f, string msg)
@@ -150,20 +167,48 @@ namespace MphRecomp.Import.Guns
             // GxShader): pos3 normal3 uv2 colour3 (r, g, packed b+a) bones4 (palette-local) weights4
             const float whiteBa = (float)(255 + 0.999);
             var allMats = new List<GunMaterial>();
-            w.Write((uint)src.Meshes.Sum(p => p.Materials.Count));
+            // per written material: its mesh, its material and its triangles' corners (one per model material; a body's
+            // over 32 bones in several, split by triangle)
+            var parts = new List<(GunMesh Model, int Mi, List<Cmdl.Corner> Corners)>();
             foreach (GunMesh model in src.Meshes)
             {
-                float[] P = model.Positions, N = model.Normals, UV = model.Uv0;
-                int nuv = UV.Length / 2;
                 for (int mi = 0; mi < model.Materials.Count; mi++)
                 {
-                    allMats.Add(model.Materials[mi]);
                     var corners = new List<Cmdl.Corner>();
                     for (int t = 0; t < model.TriangleMaterial.Length; t++)
                     {
                         if (model.TriangleMaterial[t] != mi) continue;
                         corners.Add(model.Triangles[3 * t]); corners.Add(model.Triangles[3 * t + 1]); corners.Add(model.Triangles[3 * t + 2]);
                     }
+                    if (!opt.SplitPalettes)
+                    {
+                        parts.Add((model, mi, corners));
+                        continue;
+                    }
+                    var bones = new HashSet<uint>();
+                    var chunk = new List<Cmdl.Corner>();
+                    for (int c = 0; c < corners.Count; c += 3)
+                    {
+                        var tri = new HashSet<uint>(corners.Skip(c).Take(3).SelectMany(k => model.SkinOf(k).Select(bw => bw.Bone)));
+                        if (chunk.Count > 0 && bones.Union(tri).Count() > 32)
+                        {
+                            parts.Add((model, mi, chunk));
+                            chunk = new List<Cmdl.Corner>();
+                            bones.Clear();
+                        }
+                        bones.UnionWith(tri);
+                        chunk.AddRange(corners.Skip(c).Take(3));
+                    }
+                    if (chunk.Count > 0 || corners.Count == 0) parts.Add((model, mi, chunk));
+                }
+            }
+            w.Write((uint)parts.Count);
+            foreach ((GunMesh model, int mi, List<Cmdl.Corner> corners) in parts)
+            {
+                float[] P = model.Positions, N = model.Normals, UV = model.Uv0;
+                int nuv = UV.Length / 2;
+                {
+                    allMats.Add(model.Materials[mi]);
                     var skins = corners.Select(c => model.SkinOf(c).Select(bw => (Bone: bix[bw.Bone], bw.Weight)).ToList()).ToList();
                     var palette = new SortedSet<int>(skins.SelectMany(s => s.Select(bw => bw.Bone))).ToList();
                     if (palette.Count > 32) throw new InvalidDataException($"material {mi}: {palette.Count} bones");
@@ -203,12 +248,14 @@ namespace MphRecomp.Import.Guns
             {
                 ct.ThrowIfCancellationRequested();
                 Retro.Anim A = load();
+                Action<Dictionary<uint, double[]>, Dictionary<uint, double[]>>? filter = opt.KeyFilter?.Invoke(A, nm);
                 Name(nm);
                 w.Write((float)A.Duration); w.Write((float)A.Tick);
                 w.Write((uint)A.Keys);
                 for (int k = 0; k < A.Keys; k++)
                 {
                     A.Sample(k * A.Tick, out Dictionary<uint, double[]> rot, out Dictionary<uint, double[]> trans);
+                    filter?.Invoke(rot, trans);
                     foreach (uint b in boneIds)
                     {
                         if (rot.TryGetValue(b, out double[]? q))
@@ -239,21 +286,29 @@ namespace MphRecomp.Import.Guns
                 progress?.Invoke(0.3f + 0.5f * done / src.Animations.Count, $"animation {nm}");
             }
             w.Flush();
-            File.WriteAllBytes(Path.Combine(outDir, "gun.bin"), ms.ToArray());
+            string bn = opt.BaseName;
+            File.WriteAllBytes(Path.Combine(outDir, bn + ".bin"), ms.ToArray());
             result.Bones = boneIds.Count; result.Materials = allMats.Count; result.Animations = src.Animations.Count; result.Bytes = (int)ms.Length;
-            Say(0.8f, $"gun.bin: {boneIds.Count} bones, {allMats.Count} materials, {src.Animations.Count} animations, {ms.Length / 1024.0:F0} KB");
+            Say(0.8f, $"{bn}.bin: {boneIds.Count} bones, {allMats.Count} materials, {src.Animations.Count} animations, {ms.Length / 1024.0:F0} KB");
 
-            // gun.cfg: the lights, and the scale that makes the elbow-to-muzzle length MPH's
-            int lb = Array.IndexOf(names, "LBEAM");
-            if (lb < 0) throw new InvalidDataException("the gun skeleton has no 'LBEAM'");
-            double[] muzzle = bind[lb];
-            double scale = MphGunLength / Math.Sqrt(muzzle[0] * muzzle[0] + muzzle[1] * muzzle[1] + muzzle[2] * muzzle[2]);
-            var cfg = new StringBuilder();
-            string lights = String.Join(" ", src.Lights);
-            if (lights.Length > 0) cfg.Append("lights ").Append(lights).Append('\n');
-            cfg.Append("scale ").Append(scale.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
-            File.WriteAllText(Path.Combine(outDir, "gun.cfg"), cfg.ToString());
-            result.Scale = scale;
+            // gun.cfg: the lights, and the scale that makes the elbow-to-muzzle length MPH's (a body: its own)
+            if (opt.Cfg != null)
+            {
+                File.WriteAllText(Path.Combine(outDir, bn + ".cfg"), opt.Cfg(sk));
+            }
+            else
+            {
+                int lb = Array.IndexOf(names, "LBEAM");
+                if (lb < 0) throw new InvalidDataException("the gun skeleton has no 'LBEAM'");
+                double[] muzzle = bind[lb];
+                double scale = MphGunLength / Math.Sqrt(muzzle[0] * muzzle[0] + muzzle[1] * muzzle[1] + muzzle[2] * muzzle[2]);
+                var cfg = new StringBuilder();
+                string lights = String.Join(" ", src.Lights);
+                if (lights.Length > 0) cfg.Append("lights ").Append(lights).Append('\n');
+                cfg.Append("scale ").Append(scale.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
+                File.WriteAllText(Path.Combine(outDir, "gun.cfg"), cfg.ToString());
+                result.Scale = scale;
+            }
 
             // textures (upside down, like the trophies)
             var texIds = new SortedSet<ulong>(allMats.SelectMany(m => m.TexIds));
@@ -317,7 +372,7 @@ namespace MphRecomp.Import.Guns
                 bool blend = !(bs == 1 && bd == 0);
                 gx.Add(new PyJson.Obj
                 {
-                    { "name", $"gun{mi}" }, { "stages", stages }, { "konst", konst.Take(4).ToList() },
+                    { "name", $"{bn}{mi}" }, { "stages", stages }, { "konst", konst.Take(4).ToList() },
                     { "lit", mm.Channels.Length > 0 && (mm.Channels[0] & 1) != 0 }, { "layers", layers },
                     { "blend", blend }, { "blendSrc", bs }, { "blendDst", bd }, { "depthWrite", !blend },
                     { "alphaTest", (mm.Flags & 0x20) != 0 }, { "cull", 2 },
@@ -328,8 +383,8 @@ namespace MphRecomp.Import.Guns
                 { "source", src.Source },
                 { "materials", gx },
             };
-            File.WriteAllText(Path.Combine(outDir, "gun.gx.json"), PyJson.Dump(root));
-            Say(1f, $"gun.gx.json: {gx.Count} materials ({allMats.Count(m => !(m.BlendSrc == 1 && m.BlendDst == 0))} blended); {texIds.Count} textures");
+            File.WriteAllText(Path.Combine(outDir, bn + ".gx.json"), PyJson.Dump(root));
+            Say(1f, $"{bn}.gx.json: {gx.Count} materials ({allMats.Count(m => !(m.BlendSrc == 1 && m.BlendDst == 0))} blended); {texIds.Count} textures");
         }
     }
 }

@@ -263,7 +263,7 @@ namespace MphRead.Entities.Enemies
             {
                 float angle = MathHelper.DegreesToRadians(3);
                 var cross = Vector3.Cross(_targetFacing, facing);
-                var rotY = Matrix4.CreateRotationY(angle * (cross.Y > 0 ? -1 : 1));
+                var rotY = DetMatrix.CreateRotationY(angle * (cross.Y > 0 ? -1 : 1));
                 facing = Matrix.Vec3MultMtx4(facing, rotY).Normalized();
                 SetTransform(facing, UpVector, Position);
                 // sktodo: (document) rotating the vector to the end point by +/-3 degrees, then updating all the other vecs
@@ -357,7 +357,7 @@ namespace MphRead.Entities.Enemies
                 {
                     _field21C -= 360;
                 }
-                _grappleMtx = Matrix4.CreateFromAxisAngle(between, MathHelper.DegreesToRadians(_field21C));
+                _grappleMtx = DetMatrix.CreateFromAxisAngle(between, MathHelper.DegreesToRadians(_field21C));
             }
             else
             {

@@ -50,6 +50,7 @@
   <ItemGroup>
     <!-- RECOMP SETTINGS > CREDITS: the third-party notices the app must carry (THIRD_PARTY_NOTICES.md at the repo root) -->
     <EmbeddedResource Include="..\..\THIRD_PARTY_NOTICES.md" LogicalName="notices.md" />
+    <EmbeddedResource Include="..\..\docs\ONLINE_RULES_IN_APP.md" LogicalName="online.md" />
     <!-- the window's icon (appicon.ico is the exe's; both drawn from the Android launcher icon's design) -->
     <EmbeddedResource Include="appicon64.png" LogicalName="appicon64.png" />
   </ItemGroup>

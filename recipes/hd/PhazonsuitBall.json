@@ -1,0 +1,26 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "paks": [
+    {
+      "name": "TestAnim.Pak",
+      "sha1": "b3b12c3e00dff1766d1fdcac9c0930ee710e047f"
+    }
+  ],
+  "ancs": "d7f7c8ec",
+  "char": "Node1",
+  "static": true,
+  "matset": 0,
+  "scale": 9.728,
+  "add": [
+    {
+      "cmdl": "e8acd4f3",
+      "matset": 0
+    }
+  ],
+  "core": [
+    255,
+    80,
+    30
+  ]
+}

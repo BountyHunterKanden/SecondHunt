@@ -20,6 +20,13 @@ namespace MphRead.Entities
         public bool AlwaysActive { get; set; }
         public ItemInstanceEntity? Item { get; set; }
         public NodeData3? ClosestNode { get; set; } = null;
+        // recomp (online host migration, MphRecomp Net/HostHandoff): the spawner's counters as the match host has them, so
+        // a match client promoted to host carries on with them
+        public (ushort Cooldown, ushort Count) HostSpawnState
+        {
+            get => (_spawnCooldown, _spawnCount);
+            set => (_spawnCooldown, _spawnCount) = value;
+        }
 
         // used if there is no base model
         protected override Vector4? OverrideColor { get; } = new ColorRgb(0xC8, 0x00, 0xC8).AsVector4();
@@ -185,6 +192,10 @@ namespace MphRead.Entities
         public static ItemInstanceEntity? SpawnItemDrop(ItemType type, Vector3 position,
             NodeRef nodeRef, uint chance, Scene scene)
         {
+            if (PlayerEntity.NetClient) // recomp: a match client's drops come from the host (as its items: ItemSync)
+            {
+                return null;
+            }
             return SpawnItem(type, position, nodeRef, scene, chance, despawnTime: 450 * 2); // todo: FPS stuff
         }
 

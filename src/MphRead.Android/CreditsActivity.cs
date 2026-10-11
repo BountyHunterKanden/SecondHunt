@@ -9,7 +9,8 @@ namespace MphRecomp.App;
 
 // RECOMP SETTINGS > CREDITS (public beta audit S29): the app's version, what it is built on, and every third-party
 // notice the APK must carry (THIRD_PARTY_NOTICES.md at the repo root, embedded at build time as "notices.md").
-// Scrolls with touch, the D-pad or the stick; B / Back closes it.
+// Scrolls with touch, the D-pad or the stick; B / Back closes it. With --es doc online: the online play rules instead
+// (privacy, code of conduct, ages 13+: docs/ONLINE_RULES_IN_APP.md, embedded as "online.md"; Options' bottom-left line).
 [Activity(Name = "com.mphrecomp.app.CreditsActivity", Label = "Credits", Exported = false,
     ScreenOrientation = Android.Content.PM.ScreenOrientation.SensorLandscape,
     Theme = "@android:style/Theme.Black.NoTitleBar.Fullscreen")]
@@ -23,7 +24,7 @@ public class CreditsActivity : Activity
         string version = PackageManager?.GetPackageInfo(PackageName!, 0)?.VersionName ?? "";
         var text = new TextView(this)
         {
-            Text = Header(version) + Notices(),
+            Text = Intent?.GetStringExtra("doc") == "online" ? Notices("online.md") : Header(version) + Notices(),
             TextSize = 13f,
             Typeface = Typeface.Monospace,
         };
@@ -45,9 +46,9 @@ public class CreditsActivity : Activity
         + "you provide. It is not affiliated with or endorsed by Nintendo.\n\n"
         + "----------------------------------------------------------------------------------------------\n\n";
 
-    static string Notices()
+    static string Notices(string name = "notices.md")
     {
-        using Stream? s = typeof(CreditsActivity).Assembly.GetManifestResourceStream("notices.md");
+        using Stream? s = typeof(CreditsActivity).Assembly.GetManifestResourceStream(name);
         if (s == null) return "(notices missing from this build)";
         using var r = new StreamReader(s);
         return r.ReadToEnd();

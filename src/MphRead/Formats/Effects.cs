@@ -582,6 +582,9 @@ namespace MphRead.Effects
     public class EffectEntry
     {
         public int EffectId { get; set; }
+        // recomp: its particles drawn in this colour at their own brightness (a skin's morph sphere, e.g. Dark Samus's
+        // blue samusFurl); null = the effect's own colours. Cleared when the entry is reused (Scene.InitEffectEntry)
+        public Vector3? HostColor { get; set; }
         public List<EffectElementEntry> Elements { get; } = new List<EffectElementEntry>(); // todo: pre-size?
 
         public bool IsFinished
@@ -740,6 +743,8 @@ namespace MphRead.Effects
         public float ParticleAmount { get; set; }
         public bool Expired { get; set; }
         public int ChildEffectId { get; set; }
+        // recomp: runs as always but isn't drawn (Scene.HostSpawnHidden when it was spawned: a host draws its own look)
+        public bool HostHidden { get; set; }
         public float RoField1 { get; set; }
         public float RoField2 { get; set; }
         public float RoField3 { get; set; }
@@ -1391,9 +1396,9 @@ namespace MphRead.Effects
                     texcoordMtx = Matrix4.CreateTranslation(material.ScaleS * material.TranslateS,
                         material.ScaleT * material.TranslateT, 0.0f);
                     texcoordMtx = Matrix4.CreateScale(material.ScaleS, material.ScaleT, 1.0f) * texcoordMtx;
-                    texcoordMtx = Matrix4.CreateRotationZ(material.RotateZ) * texcoordMtx;
+                    texcoordMtx = DetMatrix.CreateRotationZ(material.RotateZ) * texcoordMtx;
                 }
-                material.CurrentDiffuse = Color;
+                material.CurrentDiffuse = Owner.EffectEntry?.HostColor is Vector3 host ? host * MathF.Max(Color.X, MathF.Max(Color.Y, Color.Z)) : Color;
                 material.CurrentAlpha = Alpha;
                 Debug.Assert(model.NodeMatrixIds.Count == 0);
                 scene.UpdateMaterials(model, 0); // probably not necessary unless the model has texture animation
@@ -1447,7 +1452,8 @@ namespace MphRead.Effects
                 {
                     transform = Matrix4.CreateTranslation(Position);
                 }
-                scene.AddRenderItem(RenderItemType.Particle, Alpha, scene.GetNextPolygonId(), Color, xRepeat, yRepeat,
+                Vector3 color = Owner.EffectEntry?.HostColor is Vector3 host ? host * MathF.Max(Color.X, MathF.Max(Color.Y, Color.Z)) : Color;
+                scene.AddRenderItem(RenderItemType.Particle, Alpha, scene.GetNextPolygonId(), color, xRepeat, yRepeat,
                     scaleS, scaleT, transform, uvsAndVerts, bindingId, BillboardMode);
             }
         }

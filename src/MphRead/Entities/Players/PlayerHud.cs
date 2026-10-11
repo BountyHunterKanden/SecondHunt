@@ -16,10 +16,40 @@ namespace MphRead.Entities
         private HudObject _targetCircleObj = null!;
         private HudObject _sniperCircleObj = null!;
         private HudObjectInstance _targetCircleInst = null!;
+
+        // host hook: no reticle (a replay watched from anywhere but the main player's own eyes). Default off.
+        public static bool HostHideReticle { get; set; }
+
+        // recomp host hook (a replay watching another seat, MatchReplay.cs; drawing only): whose HUD MphRead draws. That
+        // seat's HUD is set up the first time and updated after the main player's each frame (Renderer); the match never
+        // reads it. Default null = the main player's.
+        public static PlayerEntity? HostHudSeat { get; set; }
+        public static PlayerEntity HudOwner => HostHudSeat is PlayerEntity p && p != Main && p._hostHudReady
+            && p.LoadFlags.TestFlag(LoadFlags.Active) ? p : Main;
+        private bool _hostHudReady;
+        private BeamType _hostHudWeapon = BeamType.None;
+
+        internal void HostUpdateSeatHud()
+        {
+            if (!_hostHudReady)
+            {
+                SetUpHud();
+                _hostHudReady = true;
+            }
+            if (_hostHudWeapon != CurrentWeapon)
+            {
+                _hostHudWeapon = CurrentWeapon; // (the weapon icon / reticle follow the main player's switches only)
+                HudOnWeaponSwitch(CurrentWeapon);
+            }
+            BeamType selection = WeaponSelection; // UpdateHud sets it, and the weapon menu reads it: left as the match had it
+            UpdateHud();
+            WeaponSelection = selection;
+        }
         private HudObjectInstance _cloakInst = null!;
         private HudObjectInstance _doubleDamageInst = null!;
-        private readonly HudObjectInstance[] _weaponSelectInsts = new HudObjectInstance[6];
-        private readonly HudObjectInstance[] _selectBoxInsts = new HudObjectInstance[6];
+        // recomp: 6 -> 7 (slot 6 = the Pirate Blaster, only shown with WeaponSlotCount 7: PlayerPirateBlaster.cs)
+        private readonly HudObjectInstance[] _weaponSelectInsts = new HudObjectInstance[7];
+        private readonly HudObjectInstance[] _selectBoxInsts = new HudObjectInstance[7];
         private HudObjectInstance _textInst = null!;
 
         private HudMeter _healthbarMainMeter = null!;
@@ -139,18 +169,19 @@ namespace MphRead.Entities
                 new Vector2(77 / 256f, 32 / 192f)
             };
             HudObject iconInst = HudInfo.GetHudObject(_hudObjects.SelectIcon);
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++) // recomp: + slot 6, the Pirate Blaster (its own icon, PlayerPirateBlaster.cs)
             {
                 var weaponInst = new HudObjectInstance(weaponSelectObj.Width, weaponSelectObj.Height);
-                int frame = i == 0 ? 1 : i + 2;
-                weaponInst.SetCharacterData(weaponSelectObj.CharacterData, frame, _scene);
+                int frame = PirateBlaster.BaseIndex(WeaponSlotBeam(i)); // vanilla: i == 0 ? 1 : i + 2
+                weaponInst.SetCharacterData(i == 6 ? PirateBlasterSelectIcon(weaponSelectObj) : weaponSelectObj.CharacterData,
+                    i == 6 ? 0 : frame, _scene);
                 weaponInst.SetPaletteData(weaponSelectObj.PaletteData, _scene);
                 weaponInst.Alpha = 0.722f;
                 var boxInst = new HudObjectInstance(selectBoxObj.Width, selectBoxObj.Height);
                 boxInst.SetCharacterData(selectBoxObj.CharacterData, _scene);
                 boxInst.SetPaletteData(iconInst.PaletteData, _scene);
                 boxInst.Enabled = true;
-                Vector2 position = positions[i];
+                Vector2 position = i < 6 ? positions[i] : positions[5];
                 weaponInst.PositionX = position.X;
                 weaponInst.PositionY = position.Y;
                 boxInst.PositionX = position.X;
@@ -216,9 +247,7 @@ namespace MphRead.Entities
             _textPaletteData = ammoBar.PaletteData;
             HudObject weaponIcon = HudInfo.GetHudObject(_hudObjects.WeaponIcon);
             _weaponIconInst = new HudObjectInstance(weaponIcon.Width, weaponIcon.Height);
-            _weaponIconInst.SetCharacterData(weaponIcon.CharacterData, _scene);
-            _weaponIconInst.SetPaletteData(weaponIcon.PaletteData, _scene);
-            _weaponIconInst.SetAnimationFrames(weaponIcon.AnimParams);
+            SetUpWeaponIcon(weaponIcon); // recomp: + the Pirate Blaster's frame (PlayerPirateBlaster.cs)
             HudObject boost = HudInfo.GetHudObject(HudElements.Boost);
             _boostInst = new HudObjectInstance(boost.Width, boost.Height);
             _boostInst.SetCharacterData(boost.CharacterData, _scene);
@@ -583,6 +612,11 @@ namespace MphRead.Entities
                     _ammoBarMeter.BarInst.Enabled = true;
                     _weaponIconInst.Enabled = true;
                 }
+                else if (HostScoutDrone && IsAltForm && !IsMorphing && !_showScoreboard
+                    && GameState.MatchState == MatchState.InProgress)
+                {
+                    UpdateDroneReticle(); // recomp: the Trooper's drone aims its blasters (PlayerScoutDrone.cs)
+                }
                 _damageIndicator.Active = true;
             }
         }
@@ -694,7 +728,22 @@ namespace MphRead.Entities
             float ratioY = _scene.Size.Y / 192f;
             float distX = 224 * ratioX - x; // todo: invert for left-handed mode
             float distY = y - 38 * ratioY;
-            if (distX > 0 && distY > 0 && distX * distX + distY * distY > 20 * ratioY * 20 * ratioY)
+            if (WeaponSlotCount == 7)
+            {
+                // recomp: seven even sectors over the same quarter (Volt Driver straight down ... Pirate Blaster to the left)
+                if (distX > 0 && distY > 0 && distX * distX + distY * distY > 20 * ratioY * 20 * ratioY)
+                {
+                    float degrees = DetMathF.Atan2(distX / ratioX, distY / ratioY) * 180 / MathF.PI;
+                    int slot = Math.Clamp((int)(degrees * 7 / 90), 0, 6);
+                    BeamType beam = WeaponSlotBeam(slot);
+                    if (_availableWeapons[beam])
+                    {
+                        selection = slot;
+                        WeaponSelection = beam;
+                    }
+                }
+            }
+            else if (distX > 0 && distY > 0 && distX * distX + distY * distY > 20 * ratioY * 20 * ratioY)
             {
                 float div = distX / distY;
                 if (div >= Fixed.ToFloat(1060) * ratioX / (Fixed.ToFloat(3956) * ratioY))
@@ -743,10 +792,10 @@ namespace MphRead.Entities
                     WeaponSelection = BeamType.VoltDriver;
                 }
             }
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < WeaponSlotCount; i++)
             {
                 HudObjectInstance weaponInst = _weaponSelectInsts[i];
-                bool available = _availableWeapons[weaponInst.CurrentFrame];
+                bool available = _availableWeapons[WeaponSlotBeam(i)]; // recomp: was the icon's frame (= its beam)
                 weaponInst.Enabled = available;
                 HudObjectInstance boxInst = _selectBoxInsts[i];
                 boxInst.SetIndex(available ? (i == selection ? 2 : 1) : 0, _scene);
@@ -812,7 +861,8 @@ namespace MphRead.Entities
                     _smallReticle = false;
                 }
             }
-            Matrix.ProjectPosition(_aimPosition, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
+            Vector3 aimAt = HostFirstPersonView ? HostTurnAboutEye(_aimPosition) : _aimPosition; // recomp: a replay's turned view
+            Matrix.ProjectPosition(aimAt, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
             pos = Scene.HostWarpScreenPos(pos); // recomp: Panini view
             _targetCircleInst.PositionX = MathF.Round(pos.X, 5);
             _targetCircleInst.PositionY = MathF.Round(pos.Y, 5);
@@ -843,8 +893,18 @@ namespace MphRead.Entities
                         _sniperCircleObj.Height, _scene);
                 }
             }
-            _weaponIconInst.SetAnimation(start: 9, target: 27, frames: 19, afterAnim: (int)beam);
+            if (HostInstantWeaponIcon && _weaponIconInst.AnimFrames != null)
+            {
+                // recomp: the new weapon's icon at once, without the icon's spin (owner, 2026-10-08)
+                _weaponIconInst.SetIndex(_weaponIconInst.AnimFrames[WeaponIconAnim(beam)], _scene);
+                return;
+            }
+            // recomp: the Pirate Blaster's icon is a frame added after the file's (WeaponIconAnim)
+            _weaponIconInst.SetAnimation(start: 9, target: 27, frames: 19, afterAnim: WeaponIconAnim(beam));
         }
+
+        // recomp host hook: the HUD's weapon icon shows a new weapon at once instead of after its spin (drawing only)
+        public static bool HostInstantWeaponIcon { get; set; }
 
         private void HudOnZoom(bool zoom)
         {
@@ -1035,8 +1095,17 @@ namespace MphRead.Entities
             else if (CameraSequence.Current?.IsIntro == true)
             {
                 DrawModeRules();
+                DrawIntroBanner(); // recomp: Echoes arenas' middle line (PlayerIntroBanner.cs)
                 DrawQueuedHudMessages();
                 return;
+            }
+            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && HostWeaponRing)
+            {
+                DrawWeaponRing(); // recomp: the same six slots on a full ring in the middle (PlayerWeaponRing.cs)
+            }
+            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && WeaponSlotCount == 7)
+            {
+                DrawWeaponArc7(); // recomp: the corner arc with the Pirate Blaster's seventh slot (PlayerWeaponRing.cs)
             }
             else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen))
             {
@@ -1066,6 +1135,11 @@ namespace MphRead.Entities
                         if (IsAltForm || IsMorphing || IsUnmorphing)
                         {
                             DrawBoostBombs();
+                            if (HostScoutDrone && _targetCircleInst.Enabled) // recomp: the drone's reticle (PlayerScoutDrone.cs)
+                            {
+                                _targetCircleInst.Alpha = Features.ReticleOpacity;
+                                _scene.DrawHudObject(_targetCircleInst);
+                            }
                         }
                         else if (!ScanVisor)
                         {
@@ -1075,7 +1149,7 @@ namespace MphRead.Entities
                             _weaponIconInst.Alpha = Features.HudOpacity;
                             _scene.DrawHudObject(_weaponIconInst);
                             _targetCircleInst.Alpha = Features.ReticleOpacity;
-                            _scene.DrawHudObject(_targetCircleInst);
+                            if (!HostHideReticle) _scene.DrawHudObject(_targetCircleInst); // recomp: a replay's other views
                         }
                         DrawModeHud();
                         DrawDoubleDamageHud();
@@ -1089,6 +1163,7 @@ namespace MphRead.Entities
                         DrawHealthbars();
                     }
                 }
+                DrawIntroBannerInPlay(); // recomp: Echoes arenas' middle line with no intro (PlayerIntroBanner.cs)
                 DrawQueuedHudMessages();
                 DrawDialogs();
             }
@@ -1288,6 +1363,10 @@ namespace MphRead.Entities
 
         private float GetScoreboardHeight()
         {
+            if (MaxPlayers > VanillaMaxPlayers)
+            {
+                return GetScoreboardHeight8(); // recomp: 5-8 seats (PlayerScoreboard8.cs)
+            }
             float height = _scoreStartSpace;
             if (GameState.MatchState == MatchState.Ending)
             {
@@ -1322,6 +1401,11 @@ namespace MphRead.Entities
 
         private void DrawScoreboard()
         {
+            if (MaxPlayers > VanillaMaxPlayers)
+            {
+                DrawScoreboard8(); // recomp: 5-8 seats (PlayerScoreboard8.cs)
+                return;
+            }
             GameMode mode = GameState.Mode;
             float posY = 104 - GetScoreboardHeight() / 2;
             if (GameState.MatchState == MatchState.Ending)
@@ -1764,7 +1848,7 @@ namespace MphRead.Entities
             foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
             {
                 ColorRgb color;
-                if (defense.CurrentTeam == 4)
+                if (defense.CurrentTeam == NodeDefenseEntity.NoTeam)
                 {
                     color = new ColorRgb(31, 31, 31);
                 }
@@ -1787,7 +1871,7 @@ namespace MphRead.Entities
 
         private int _nodeBonusOpponent = -1;
         private bool _mainNodeBonus = false;
-        private readonly int[] _teamNodeCounts = new int[4];
+        private readonly int[] _teamNodeCounts = new int[PlayerEntity.SlotCapacity];
         public int _nodesHudState = 0;
         public int _nodesProgressAmount = 0;
 
@@ -1795,7 +1879,7 @@ namespace MphRead.Entities
         {
             _nodeBonusOpponent = -1;
             _mainNodeBonus = false;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < _teamNodeCounts.Length; i++)
             {
                 _teamNodeCounts[i] = 0;
             }
@@ -1803,7 +1887,7 @@ namespace MphRead.Entities
             foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
             {
                 ColorRgb color;
-                if (defense.CurrentTeam == 4)
+                if (defense.CurrentTeam == NodeDefenseEntity.NoTeam)
                 {
                     if (defense.Blinking)
                     {
@@ -1853,7 +1937,7 @@ namespace MphRead.Entities
                     }
                 }
                 AddLocatorInfo(defense.Position, _nodeLocator, color);
-                if (defense.CurrentTeam != 4 && defense.OccupyingTeam == 4)
+                if (defense.CurrentTeam != NodeDefenseEntity.NoTeam && defense.OccupyingTeam == NodeDefenseEntity.NoTeam)
                 {
                     int count = _teamNodeCounts[defense.CurrentTeam] + 1;
                     _teamNodeCounts[defense.CurrentTeam] = count;
@@ -2024,7 +2108,7 @@ namespace MphRead.Entities
             }
             if (mode == GameMode.Survival || mode == GameMode.SurvivalTeams)
             {
-                int lives = Math.Max(GameState.PointGoal - GameState.TeamDeaths[Players[slot].TeamIndex], 0);
+                int lives = Math.Max(GameState.TeamLives(Players[slot].TeamIndex) - GameState.TeamDeaths[Players[slot].TeamIndex], 0);
                 return lives.ToString();
             }
             if (mode == GameMode.Defender || mode == GameMode.DefenderTeams || mode == GameMode.PrimeHunter)
@@ -2169,7 +2253,7 @@ namespace MphRead.Entities
             foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
             {
                 int frame;
-                if (defense.CurrentTeam == 4)
+                if (defense.CurrentTeam == NodeDefenseEntity.NoTeam)
                 {
                     if (defense.Blinking)
                     {
@@ -2419,7 +2503,7 @@ namespace MphRead.Entities
                 var player = (PlayerEntity)target;
                 max = player.HealthMax;
                 current = player.Health;
-                text = _hunterNames[(int)player.Hunter];
+                text = player.HostCharacterName ?? _hunterNames[(int)player.Hunter];
                 lowHealth = 25;
             }
             else if (target.Type == EntityType.Halfturret)

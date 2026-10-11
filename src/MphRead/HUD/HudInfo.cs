@@ -85,6 +85,7 @@ namespace MphRead.Hud
         public ColorRgba? Color;
         public readonly ColorRgba[] Texture;
         public float Alpha = 1;
+        public float Scale = 1; // recomp: drawn size multiplier (PlayerIntroBanner); 1 = MphRead's own
         public int BindingId = -1;
         public int CurrentFrame;
         public int StartFrame;

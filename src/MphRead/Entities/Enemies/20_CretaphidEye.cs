@@ -406,7 +406,7 @@ namespace MphRead.Entities.Enemies
             _cretaphid.UpdateTransforms(rootPosition: false);
             var transform = Matrix4.CreateScale(1, 1, 20);
             float angle = MathHelper.DegreesToRadians(_cretaphid.Segments[SegmentIndex].BeamAngle);
-            transform *= Matrix4.CreateRotationX(angle);
+            transform *= DetMatrix.CreateRotationX(angle);
             transform *= _attachNode.Animation;
             transform.Row3.Xyz += _cretaphid.Position;
             Position = transform.Row3.Xyz;

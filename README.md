@@ -8,8 +8,9 @@ Second Hunt aims to modernize and add new features and content to the original H
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data from any Metroid game and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 1.3 (Android and Windows).** Playable start to finish, with some rough edges. See [Known issues](#known-issues) and
-> [What's planned](#whats-planned).
+> **Beta 2 (0.2.0-beta, Android and Windows).** Online play with crossplay between Android and Windows, up to 8
+> players, and new characters, suits and arenas imported from your own Metroid Prime discs. Playable start to finish,
+> with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
 > **AI tools were used in the making of this project.** 
 
@@ -18,12 +19,14 @@ Second Hunt is a fan project and a fork of MphRead. It contains no game data fro
 The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
 [MphRead](https://github.com/NoneGiven/MphRead), NoneGiven's C# recreation of the game, built from reverse engineering.
 Second Hunt adds everything else it takes to play it on Android and Windows: the title screen and menus, the gunship,
-star map and saves, the HUD, music and sound, cutscenes, controls, and LAN multiplayer. Both versions run the same game
+star map and saves, the HUD, music and sound, cutscenes, controls, and LAN and online multiplayer. Both versions run the same game
 code; only the window, the controls and the sound output are each platform's own.
 
 All the game's content comes from your ROM. The first time you launch the app you pick your copy of the game, and
-Second Hunt unpacks it into the app's own storage on your device or PC. Nothing gets downloaded or uploaded, except a
-new version of Second Hunt when you ask for one (RECOMP SETTINGS > UPDATES).
+Second Hunt unpacks it into the app's own storage on your device or PC. The extras (HD suits, new characters, Echoes
+arenas) are made the same way, in the app, from your own Metroid Prime discs (SECOND HUNT SETTINGS > IMPORT GAMES).
+Nothing gets downloaded or uploaded, except a new version of Second Hunt when you ask for one (SECOND HUNT SETTINGS >
+UPDATES), and online play, which talks to the Second Hunt server only while you use ONLINE PLAY.
 
 Since the game is drawn natively instead of through an emulated DS, the 3D runs in real widescreen at your screen's
 resolution, and at 60 fps instead of the DS's 30. The two DS screens become one: the HUD sits in the game view,
@@ -34,7 +37,7 @@ Android. On Windows the keyboard and mouse use MphRead's own PC controls.
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
 sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
-## What's in Beta 1.3
+## What's in Beta 2
 
 **Campaign**
 - The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
@@ -45,13 +48,54 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - Every cutscene, the HUD for every hunter, and the scan visor
 - A pause map on Select, showing either the game's own map or a Prime-style map of the rooms you've explored
 - The game's music and sound effects from your ROM, plus the title music and voices
+- Both endings, with the credits roll and the results screen
+- The MOVIES gallery: a movie opens once you've seen it
 
-**Multiplayer**
+**Multiplayer** (Main menu > MULTIPLAYER)
+- Up to 8 players in every mode, any mix of people and bots. Matches of 4 or fewer play exactly like the original.
 - Bot matches on one device in every mode and arena, with adjustable bot level and time limit
-- LAN matches between two devices on the same network, Android or Windows in any mix, Battle mode only for now
-  (experimental). It's under Main menu > MULTIPLAYER.
+- LAN matches between devices on the same network, Android or Windows in any mix, in every mode and with bots
+- The Hunter License: your name, rank and stats, kept like the original. Hunters and arenas unlock the original way,
+  or all at once with SECOND HUNT SETTINGS > UNLOCKS.
+- SELECT HUNTER has two new characters next to the seven hunters, TROOPER and DARK SAMUS (see Imports below)
+- A weapon ring: hold L2 and point with the right stick. It works while you move.
+- REPLAYS: your last ten matches are saved (favorites are kept). Watch them at any speed, skip back and forward,
+  follow any player, or fly a free camera.
+- EXTRA rules under ADVANCED: EXTRA PICKUPS (the Pirate Blaster), EXTRA CHARACTERS and EXTRA ARENAS, each of which
+  can be turned off to play like the original
 
-**Controls** (OPTIONS > CONTROLS, also RECOMP SETTINGS > CONTROLS and the gunship's OPTIONS)
+**Online play** (MULTIPLAYER > ONLINE PLAY)
+- Crossplay: Android and Windows players play together in the same games
+- FIND GAME: pick the modes you want and search. Players are grouped (up to 8), then everyone votes for an arena.
+- BROWSE GAMES: open games with their mode, arena, players and ping
+- CREATE: host your own game with your rules and bots, open to anyone, friends only or by invite
+- Friends: add people by name (NAME#tag), by trading friend codes like the original, or from your recent players.
+  Invite friends to your game, or into a party that searches together.
+- Voice chat: push to talk (hold R3, or the TALK button on touch), always on, or off. ONLINE SETTINGS has
+  VOICE CHAT, PUSH TO TALK and CHAT switches.
+- Text chat in the lobby and in a match: hold Select and point with the right stick for quick messages, or tap Select
+  to type
+- Tap any player's name for their license, your record against them, and MUTE, BLOCK or REPORT
+- If the host leaves, another player takes over the match. If your connection drops, you rejoin where you were.
+- Matches in LAN and online play are always in first person
+- Online play is for ages 13 and up. The rules and what the server keeps are in
+  [docs/PRIVACY_NOTICE.md](docs/PRIVACY_NOTICE.md) and [docs/CODE_OF_CONDUCT.md](docs/CODE_OF_CONDUCT.md), and in the
+  game (the line at the bottom of OPTIONS). ONLINE SETTINGS can delete your online profile.
+
+**Imports** (SECOND HUNT SETTINGS > IMPORT GAMES)
+- Second Hunt can make extra content from your own copies of _Metroid Prime_, _Metroid Prime 2: Echoes_ (GameCube),
+  _Metroid Prime 3: Corruption_ (Wii) or _Metroid Prime Trilogy_. The disc is read where it is and never copied, and
+  nothing from it is ever uploaded. Each import can be deleted again.
+- HD Samus suits and morph balls from each game you import, picked under SECOND HUNT SETTINGS > SAMUS SUIT (third
+  person and morph ball), plus an HD Samus behind the menus
+- TROOPER (from _Metroid Prime_): a Space Pirate trooper with four skins, a wall cling and a Scout Drone alt form
+- DARK SAMUS (from _Echoes_, or _Corruption_ on the _Metroid Prime Trilogy_ disc)
+- Six _Echoes_ multiplayer arenas with their music: Sidehopper Station, Spires, Crossfire Chaos, Pipeline, Spider
+  Complex and Shooting Gallery, with _Echoes_ movement (double jump, Gravity Boost)
+- Playing with someone who hasn't imported a character? They still see you, drawn as the closest hunter in matching
+  colors.
+
+**Controls** (OPTIONS > CONTROLS, also SECOND HUNT SETTINGS > CONTROLS and the gunship's OPTIONS)
 - Change which button does what: pick a function, then press its new button (X on a function adds a second button).
   For a controller on Android and Windows, and for the keyboard and mouse on Windows.
 - Sensitivity and look invert for the controller, and on Windows a separate sensitivity for the mouse
@@ -65,13 +109,15 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   - HQ+FIX: smoother
   - HQ+TONE: HQ+FIX with the DS's treble added back
 
-**Options** (Options > RECOMP SETTINGS, L / R to change pages)
-- First- or third-person camera
+**Options** (Options > SECOND HUNT SETTINGS, L / R to change pages)
+- IMPORT GAMES (see Imports above) and the Samus suit
+- First- or third-person camera (matches in LAN and online play are always first person)
 - Music quality, the same setting as QUALITY on OPTIONS > AUDIO. In the pause menu the paused music plays while MUSIC
   is selected, so a change can be heard.
 - Controls: the same page as OPTIONS > CONTROLS
 - Gyro aim (Android): off, on, or only while zoomed or scanning, with its own speed and axis settings
 - Touch controls (Android): auto (shown when no controller is connected), on or off
+- Record replays on or off, and UNLOCKS to open every hunter, arena and movie at once
 - Menus with both DS screens merged into one or side by side, crisp or smoothed pixel art, and the HUD's line art
   redrawn as clean lines or kept as DS pixels
 - Pause map look and mode
@@ -80,7 +126,7 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   goes online only when you press CHECK, never on its own, and it only installs a release signed with the project's
   update key. It works from the main menu, not from a paused campaign or match.
 - Lua mods, sandboxed so they can't touch your files or the network
-- MODS and RECOMP SETTINGS are on the game's OPTIONS page, where the Nintendo WFC stats option was
+- MODS and SECOND HUNT SETTINGS are on the game's OPTIONS page, where the Nintendo WFC stats option was
 
 ## Getting started
 
@@ -106,12 +152,12 @@ To install:
    click "More info", then "Run anyway".
 3. On first launch, pick your ROM file or drop it on the window. Saves and settings are kept in
    `%LOCALAPPDATA%\Second Hunt`.
-4. For LAN matches, Windows Firewall has to let Second Hunt through. Windows usually asks the first time you host or
+4. For LAN and online matches, Windows Firewall has to let Second Hunt through. Windows usually asks the first time you host or
    join, but the prompt can hide behind a full-screen window, and on a network set to Public nothing gets through until
    it's allowed. If other devices can't see your match or joining says no answer, go to Windows Security > Firewall &
    network protection > Allow an app through firewall, add `SecondHunt.exe`, and tick both Private and Public.
 
-**Updating.** From Beta 1.3 on, go to Options > RECOMP SETTINGS > UPDATES and press CHECK. If a newer version is out,
+**Updating.** From Beta 1.3 on, go to Options > SECOND HUNT SETTINGS > UPDATES and press CHECK. If a newer version is out,
 Second Hunt downloads it, checks its signature, and installs it over the old one, keeping your saves and settings.
 On Android, the first update asks you to allow Second Hunt to install apps, then Android asks you to confirm the
 update. On Windows the game restarts by itself when it's done (keep the Second Hunt folder somewhere you can write to,
@@ -131,14 +177,15 @@ buttons in menus and dialogs stay where they are.
 | R2 or B | Fire (lay bombs in morph ball) |
 | A or L1 | Jump (boost in morph ball) |
 | X | Morph ball |
-| L2 | Scan (with the scan visor on), otherwise zoom |
-| R3 | Zoom |
-| Hold Y + right stick | Weapon wheel: point at a weapon, let go of Y to equip it |
+| Y | Scan (with the scan visor on), otherwise zoom |
+| Tap L2 | Zoom |
+| Hold L2 + right stick | Weapon ring: point at a weapon (it stays picked when you let go of the stick), let go of L2 to equip it. Works while you move. |
+| R3 | Push to talk (online) |
 | R1 | Switch between missiles and the Power Beam |
 | D-pad left / right | Previous / next weapon (only weapons you have, with ammo) |
 | D-pad up | Scan visor on/off (in a match, where there's no visor: Power Beam) |
 | D-pad down | Missiles |
-| Select | Pause map (campaign only) |
+| Select | Pause map (campaign). In an online match: hold and point the right stick for quick messages, tap to type one. |
 | Start | Pause menu |
 | A / B in dialogs | OK or YES / NO (the press that closes a dialog doesn't also jump or fire) |
 | Android Back (button or gesture) | Pause menu. In a menu, the map or the ship it works like B. It never quits the game. |
@@ -161,6 +208,8 @@ buttons in menus and dialogs stay where they are.
 | 1 to 9 | Power Beam, missiles, then each weapon in turn |
 | Tab or Esc | Pause menu (Esc also backs out of menus, the map and the ship's screens) |
 | M | Pause map (campaign only) |
+| V | Push to talk (online) |
+| Enter or T | Type a chat message (online match) |
 | F3 | Status line: short, detailed or off |
 | F11 or Alt+Enter | Full screen |
 | Space, Enter or left click in dialogs | OK or YES (Backspace or right click is NO) |
@@ -170,7 +219,8 @@ the mouse clicks anything the DS touch screen would. A controller works on Windo
 
 **Touch:** the overlay has a move stick on the left half of the screen and an aim stick on the right, with buttons for
 fire, jump, morph, missile, weapon (hold it and drag toward a weapon, like the DS stylus) and pause, plus visor, scan
-and map in the campaign. When missiles are selected, the missile button says POWER BEAM and switches you back. In
+and map in the campaign, and TALK and CHAT online. The right half also works like the DS touch screen: double tap to
+jump, and in morph ball drag to roll and flick to boost. When missiles are selected, the missile button says POWER BEAM and switches you back. In
 dialogs, JUMP is OK/YES and FIRE is NO. The touch buttons keep these jobs whatever the controller's buttons are changed
 to.
 
@@ -182,22 +232,27 @@ to.
 
 Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pick it, closed with its check.
 
-- Beating Gorea ends on a plain "mission complete" screen. The real endings and the credits roll aren't in yet.
-- LAN play is two players and Battle mode only, and item pickups may not stay in sync between the two devices.
 - Only USA ROMs (1.0 and 1.1) work.
 - No rumble yet. The original supported the DS Rumble Pak, but controller and phone vibration aren't hooked up.
-- No multiplayer license. Your stats (kills, deaths, wins, play time) aren't recorded, and every hunter and arena is
-  open from the start instead of being unlocked through the adventure.
 - Some save details aren't kept yet: the game timer, boss records, a few stats and the artifact flags.
 - The speaker setting on OPTIONS > AUDIO is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
 - ERASE ALL DATA on OPTIONS isn't in yet.
-- The MOVIES gallery doesn't unlock movies yet, so every movie shows "?".
+- Arm cannons from the Prime games aren't imported yet, and _Metroid Prime 4: Beyond_ shows WORK IN PROGRESS on
+  IMPORT GAMES.
+
+**Multiplayer**
+- After you quit a LAN match from the pause menu you can't rejoin it. Closing and reopening the app does rejoin.
+- If a match ends early because players quit, only some devices may keep its replay.
+- Once a game is created, its rules can't be changed. Back out and create a new one.
+- The original's typed rules intro, with its sweeping camera, doesn't play at the start of a match yet.
+- Bots sometimes catch on grates for a moment, and can get stuck in a few spots (Pipeline, Shooting Gallery).
+- The Trooper's wall cling doesn't hold on curved walls.
+- The Pirate Blaster doesn't leave a mark on walls yet.
 
 **Controls**
-- The DS showed a weapon bar on the bottom screen, which isn't drawn yet, so there's no on-screen list of the weapons
-  you're carrying. A new weapon ring is planned.
-- The touch overlay has no buttons for stepping through weapons, so use the weapon button (hold and drag) instead. You
-  also can't steer the morph ball by touch the way you could with the DS stylus.
+- The DS showed a weapon bar on the bottom screen, which isn't drawn yet, so the only on-screen list of the weapons
+  you're carrying is the weapon ring (hold L2).
+- The touch overlay has no buttons for stepping through weapons, so use the weapon button (hold and drag) instead.
 - The volume and screenshot buttons may not work on the title and menu screens.
 
 **Looks and performance**
@@ -222,36 +277,30 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 **Devices:** so far Second Hunt has only been tested on Snapdragon 8 Gen 2 hardware (AYN Odin 2 Portal, Galaxy S23).
 Reports from other phones and handhelds are very welcome.
 
-**If it crashes:** go to RECOMP SETTINGS > crash log > SHARE to send the latest crash report (it doesn't contain any
+**If it crashes:** go to SECOND HUNT SETTINGS > crash log > SHARE to send the latest crash report (it doesn't contain any
 personal data). On Windows the same row says OPEN and shows the report's folder. Please attach it to a bug report on the [Issues](../../issues) page, with your device and what you were
 doing.
 
 ## What's planned
 
 **Next**
-- Beta 2: HD Samus suits (her body and morph ball), imported in the app from your own copy of _Metroid Prime_
-  (GameCube)
-- Both real endings and the credits roll
-- A new weapon selector: hold L2 for a full weapon ring, point with the right stick and let go to equip, even while
-  moving
-- Full touch controls, including the DS's touch-screen morph ball controls
+- The multiplayer known issues above: rejoining after quitting, changing rules in a created game, the rules intro,
+  bot pathing, wall cling and the blaster's wall mark
+- Step-through weapon buttons for touch
 - Sound timing like the original: what plays while paused and during escapes, and how music and sounds stop or fade
   when you die, go back to the ship or finish a match
 - The rest of the save data: game timer, boss records, stats and artifact flags
 - Fixes for the known issues above, each checked against the original game
 
 **Later**
-- More multiplayer: more than two LAN players, every mode over LAN, online play, the original's rules for sharing
-  damage, weapons and items between devices, the multiplayer license and stats, and unlocking hunters and arenas
-  through the adventure
 - Rumble on controllers and phones that support it
 - The original's SURROUND and HEADPHONES speaker modes, and HQ music that keeps more of the DS's treble
 - Unlocking the sound test the original way (after the true ending's results screen). For now it's always open.
-- An optional Prime-style HUD with a mini map and weapon indicators
+- An optional Prime-style HUD with a mini map and weapon indicators and a radar
 - European, Japanese and Korean ROMs
 - Dual-screen devices, with the DS's second screen on a handheld's second display
-- More HD content from games you own: each Prime game's arm cannon, the _Metroid Prime 2: Echoes_ multiplayer
-  arenas, and the other hunters
+- More HD content from games you own: each Prime game's arm cannon, _Metroid Prime 4: Beyond_, and the other
+  hunters
 - The rest of MphRead's to-do list (below)
 
 ## MphRead's to-do list
@@ -338,7 +387,8 @@ Gameplay values are the original's. What's different is how the game looks, soun
 - An optional third-person camera
 - The HUD's line art redrawn as clean lines at any resolution, or kept as DS pixels
 - Menus with both DS screens merged into one, or side by side
-- Bot matches on one device in every mode, and LAN matches over Wi-Fi without needing a second DS
+- Bot matches on one device in every mode, LAN matches over Wi-Fi without needing a second DS, and online play for up
+  to 8 players, now that Nintendo's Wi-Fi service is gone
 - A music quality setting that takes the clicks and clipping out of the DS music, or smooths it out, and switches
   mid-song
 - A fix for a version 1.1 bug: on 1.1 ROMs the file-select sounds (including the start-game sound) never play, because
@@ -376,11 +426,12 @@ it with its README and notices.
 | `src/SecondHunt.Desktop` | The Windows shell: window and GL contexts, keyboard, mouse and controllers, sound device, ROM setup, lobby, credits |
 | `src/MphRead.Tools` | MphRead's desktop viewer, plus Second Hunt's PC-side test harnesses |
 | `src/NcsfPlay` | The DS music player |
+| `src/SecondHunt.Server` | The online server: names, friends, lobbies, matchmaking and the match relay |
 
 ## Credits
 
 Second Hunt is built on **MphRead** by NoneGiven (MIT, see `LICENSE` and `NOTICE-fork.md`). Third-party libraries and
-their licenses are listed in `THIRD_PARTY_NOTICES.md`, which the app also shows under RECOMP SETTINGS > credits.
+their licenses are listed in `THIRD_PARTY_NOTICES.md`, which the app also shows under SECOND HUNT SETTINGS > credits.
 
 From MphRead's README:
 

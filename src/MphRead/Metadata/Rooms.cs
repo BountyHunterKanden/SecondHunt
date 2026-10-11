@@ -59,7 +59,7 @@ namespace MphRead
             uint timeLimit, short pointLimit, short nodeLayer, bool fogEnabled, bool clearFog, ColorRgb fogColor, int fogSlope,
             ushort fogOffset, ColorRgb light1Color, Vector3 light1Vector, ColorRgb light2Color, Vector3 light2Vector, int farClip,
             int killHeight, RoomSize size, Vector3 cameraMin = default, Vector3 cameraMax = default, Vector3 playerMin = default,
-            Vector3 playerMax = default, bool multiplayer = false, bool firstHunt = false, bool hybrid = false)
+            Vector3 playerMax = default, bool multiplayer = false, bool firstHunt = false, bool hybrid = false, string? hostFolder = null)
         {
             Id = id;
             Name = name;
@@ -71,6 +71,14 @@ namespace MphRead
                 AnimationPath = $@"levels\models\{animationPath}";
                 CollisionPath = $@"levels\collision\{collisionPath}";
             }
+            else if (hostFolder != null)
+            {
+                // recomp: a host room whose files sit in one folder of their own, outside the ROM's file system (an
+                // imported Echoes arena, MphRecomp.Core Arenas/EchoesArena): absolute paths, which Paths.Combine keeps
+                ModelPath = System.IO.Path.Combine(hostFolder, modelPath);
+                AnimationPath = System.IO.Path.Combine(hostFolder, animationPath);
+                CollisionPath = System.IO.Path.Combine(hostFolder, collisionPath);
+            }
             else
             {
                 ModelPath = $@"_archives\{archive}\{modelPath}";
@@ -79,8 +87,8 @@ namespace MphRead
             }
             TexturePath = texturePath == null ? null : $@"levels\textures\{texturePath}";
             EntityFilename = entityPath;
-            EntityPath = entityPath == null ? null : $@"levels\entities\{entityPath}";
-            NodePath = nodePath == null ? null : $@"levels\nodeData\{nodePath}";
+            EntityPath = entityPath == null ? null : hostFolder != null ? System.IO.Path.Combine(hostFolder, entityPath) : $@"levels\entities\{entityPath}";
+            NodePath = nodePath == null ? null : hostFolder != null ? System.IO.Path.Combine(hostFolder, nodePath) : $@"levels\nodeData\{nodePath}";
             RoomNodeName = roomNodeName;
             BattleTimeLimit = battleTimeLimit;
             TimeLimit = timeLimit;

@@ -15,7 +15,7 @@ namespace MphRecomp.App;
 // The player-facing multiplayer screen (Beta 1): the front end's MULTIPLAYER opens it (GameActivity,
 // FrontendRequestKind.Multiplayer). The choices and the rules are the shared MatchLobby (MphRecomp.App): a match against
 // bots on this device, or a LAN match between two devices on one Wi-Fi network (MatchLan.cs; Beta 1 scope, board S35:
-// host + one joiner, Battle only). Only the game's own arenas are listed. Works with a gamepad (D-pad / left stick move, left / right or A change a
+// host + one joiner, any mode, the host's bots). Only the game's own arenas are listed. Works with a gamepad (D-pad / left stick move, left / right or A change a
 // row, B / Back leave) and with touch (tap a row or its arrows). The last choices are kept in SharedPreferences.
 // Leaving a match goes back to the game's menus: CampaignActivity exits through MainActivity, which bounces to
 // GameActivity because AppNav.ReturnToGame is set here.
@@ -98,7 +98,7 @@ public class MatchLobbyActivity : Activity
         page.SetPadding(Dp(32), Dp(14), Dp(32), Dp(12));
 
         page.AddView(Text("MULTIPLAYER", 28f, Color.White, bold: true));
-        var subtitle = Text("LAN play is experimental: two players on the same Wi-Fi network, Battle mode only.",
+        var subtitle = Text("LAN play is experimental: two players on the same Wi-Fi network, any mode, with your bots.",
             14f, Color.ParseColor("#FFB74D"));
         subtitle.SetPadding(0, 0, 0, Dp(8));
         page.AddView(subtitle);
@@ -226,14 +226,10 @@ public class MatchLobbyActivity : Activity
         {
             return;
         }
-        // Beta 1: Battle only, the host plus one joiner (no bots)
-        MatchSettings? template = _lobby.LanTemplate(out bool modeChanged);
+        // the host plus one joiner, any mode, the host's bots (the joiner takes seat 1)
+        MatchSettings? template = _lobby.LanTemplate();
         Refresh();
-        if (modeChanged)
-        {
-            Save();
-            Toast.MakeText(this, "LAN matches are Battle only for now: mode set to Battle", ToastLength.Long)!.Show();
-        }
+        Save();
         if (template == null)
         {
             Toast.MakeText(this, "Can't read the game's files, so LAN play can't start: restart the app and try again", ToastLength.Long)!.Show();

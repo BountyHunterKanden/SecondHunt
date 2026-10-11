@@ -274,12 +274,12 @@ namespace MphRecomp.Import.Retro
             return set;
         }
 
-        static bool IsAnimName(string s)
+        static bool IsAnimName(string s, bool dash = false)
         {
             if (s.Length == 0) return false;
             foreach (char ch in s)
             {
-                if (!(ch is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or ' ')) return false;
+                if (!(ch is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or ' ' || dash && ch == '-')) return false;
             }
             return true;
         }
@@ -307,7 +307,10 @@ namespace MphRecomp.Import.Retro
             }
             if (echoes)
             {
-                // find the animation set: the first offset where it parses cleanly with plausible names
+                // find the animation set: the first offset where it parses cleanly with plausible names; a second pass also
+                // allows '-' (the Echoes commando ANCS 8169653a has "B-quick180turn_pirate"), so ANCSs found by the first
+                // pass resolve exactly as before
+                for (int pass = 0; pass < 2; pass++)
                 for (int o = r.O; o < b.Length - 8; o++)
                 {
                     if (b[o] != 0 || b[o + 1] is not (2 or 3 or 4 or 5)) continue;
@@ -320,7 +323,7 @@ namespace MphRecomp.Import.Retro
                     {
                         continue;
                     }
-                    if (set.Anims.Count > 0 && set.Anims.TrueForAll(a => IsAnimName(a.Name)))
+                    if (set.Anims.Count > 0 && set.Anims.TrueForAll(a => IsAnimName(a.Name, dash: pass == 1)))
                     {
                         ancs.Set = set;
                         return ancs;

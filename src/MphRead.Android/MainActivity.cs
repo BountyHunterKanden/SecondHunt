@@ -147,6 +147,7 @@ public class MainActivity : Activity
         if (_roomsShown) return;
         _roomsShown = true;
         _selectBtn.Text = "Re-extract from another ROM…";
+        AddSoloArena();
         AddHeader("Music");
         AddButton("Music A/B: original, original + fixes, HQ, HQ + tone (L2 / Select / Y next, L1 back)",
             () => StartActivity(new Intent(this, typeof(MusicTestActivity))));
@@ -154,13 +155,11 @@ public class MainActivity : Activity
         // drawn from MphRead's draw list -- starts a fresh game in a planet's landing room.
         AddHeader("Campaign (early -- MphRead game logic)");
         // which hunter plays the campaign (MphRead supports any; tap to cycle)
-        var hunterBtn = new Button(this) { Text = $"Play as: {CampaignHunters[_campaignHunter]}" };
-        hunterBtn.Click += (_, _) =>
+        AddSelector(d =>
         {
-            _campaignHunter = (_campaignHunter + 1) % CampaignHunters.Length;
-            hunterBtn.Text = $"Play as: {CampaignHunters[_campaignHunter]}";
-        };
-        _content.AddView(hunterBtn);
+            _campaignHunter = Wrap(_campaignHunter + d, CampaignHunters.Length);
+            return $"Play as: {CampaignHunters[_campaignHunter]}";
+        });
         // which first-person gun Samus holds: each exported Prime gun found on the device, then MPH's own (tap to cycle;
         // also switchable in game while paused)
         var guns = new List<string>();
@@ -182,13 +181,11 @@ public class MainActivity : Activity
         // first (the default): --es gun settings = Samus wears the suit RECOMP SETTINGS has, like the real game start
         guns.Insert(0, "settings");
         _campaignGun = Math.Min(_campaignGun, guns.Count - 1);
-        var gunBtn = new Button(this) { Text = $"First-person gun: {GunLabel(guns[_campaignGun])}" };
-        gunBtn.Click += (_, _) =>
+        AddSelector(d =>
         {
-            _campaignGun = (_campaignGun + 1) % guns.Count;
-            gunBtn.Text = $"First-person gun: {GunLabel(guns[_campaignGun])}";
-        };
-        _content.AddView(gunBtn);
+            _campaignGun = Wrap(_campaignGun + d, guns.Count);
+            return $"First-person gun: {GunLabel(guns[_campaignGun])}";
+        });
         foreach (var (label, roomName) in CampaignStarts)
             AddButton(label, () => StartActivity(new Intent(this, typeof(CampaignActivity))
                 .PutExtra("room", roomName).PutExtra("hunter", CampaignHunters[_campaignHunter])
@@ -208,6 +205,19 @@ public class MainActivity : Activity
             AddButton(label, () => StartActivity(new Intent(this, typeof(CampaignActivity))
                 .PutExtra("room", roomName).PutExtra("hunter", CampaignHunters[_campaignHunter])
                 .PutExtra("gun", guns[_campaignGun]).PutExtra("loadout", "all").PutExtra("boss", "down")));
+        // the endings (owner queue #36, docs/ENDINGS.md): Gorea beaten for you the same way (Core GoreaSkip.cs), then the
+        // ending movie and, in the menus, the credits and the results page; the campaign's exit opens the menus
+        // (AppNav.ReturnToGame), not this launcher. Gorea 2 comes out once you take the Omega Cannon and step into the arena
+        AddHeader("Endings (Gorea beaten for you, then the credits and results; nothing saved)");
+        foreach (var (label, roomName) in new[] { ("Bad ending -- Gorea 1 (Gorea_b1)", "Gorea_b1"),
+            ("Good ending -- Gorea 2 (Gorea_b2): take the Omega Cannon", "Gorea_b2") })
+            AddButton(label, () =>
+            {
+                AppNav.ReturnToGame = true;
+                StartActivity(new Intent(this, typeof(CampaignActivity))
+                    .PutExtra("room", roomName).PutExtra("hunter", CampaignHunters[_campaignHunter])
+                    .PutExtra("gun", guns[_campaignGun]).PutExtra("loadout", "all").PutExtra("boss", "down"));
+            });
         AddMultiplayer(() => guns[_campaignGun]);
         AddHdTrophies();
         AddHeader("Rooms");
@@ -234,6 +244,27 @@ public class MainActivity : Activity
     // Multiplayer (early): a local match against bots on MphRead's own match logic (CampaignActivity + MatchSession.cs),
     // as the hunter / gun picked above. Arenas cycle through those whose entity data supports the mode.
     int _mpMode, _mpArena, _mpBots = 3, _mpLevel = 1, _mpTime;
+    // Multiplayer characters and skins (dev, until the real pickers): your seat's skin and whether the bots wear the
+    // troopers too (CampaignActivity's "skins" arg; a trooper skin plays the Trooper, a Dark Samus skin Dark Samus)
+    int _mpSkin;
+    bool _mpBotSkins;
+    static readonly (string Label, string? Id)[] MpSkins =
+    {
+        ("off (Play as)", null), ("Wave Trooper", "MP1WaveTrooper"), ("Power Trooper", "MP1PowerTrooper"),
+        ("Ice Trooper", "MP1IceTrooper"), ("Plasma Trooper", "MP1PlasmaTrooper"),
+        ("Dark Samus (Echoes)", "MP2DarkSamus"), ("Dark Samus (Corruption)", "MP3DarkSamus"),
+    };
+    string? MpSkinsArg()
+    {
+        var seats = new List<string>();
+        if (MpSkins[_mpSkin].Id is string mine) seats.Add("0:" + mine);
+        if (_mpBotSkins)
+        {
+            string[] bots = { "MP1PowerTrooper", "MP1IceTrooper", "MP1PlasmaTrooper" };
+            for (int i = 0; i < _mpBots && i < bots.Length; i++) seats.Add($"{i + 1}:{bots[i]}");
+        }
+        return seats.Count > 0 ? string.Join(",", seats) : null;
+    }
     static readonly (string label, float? seconds)[] MatchTimes = { ("mode default", null), ("3 min", 180), ("1 min", 60) };
 
     void AddMultiplayer(System.Func<string> gun)
@@ -250,7 +281,9 @@ public class MainActivity : Activity
                 System.IO.Directory.SetCurrentDirectory(FilesDir!.AbsolutePath);
                 MphRead.Paths.UpdatePaths();
                 MphRead.Paths.ChooseMphPath();
-                // Echoes arenas imported on the PC and pushed to <external files>/arenas (Core/Arenas/EchoesArena)
+                // Echoes arenas imported in-app (IMPORT GAMES: <external files>/arenas/<Key>, music/), or on the PC and
+                // pushed to <external files>/arenas (Core/Arenas/EchoesArena)
+                MphRecomp.Arenas.EchoesArena.ImportRoot = GetExternalFilesDir(null)?.AbsolutePath;
                 MphRecomp.Arenas.EchoesArena.InstallStaged(System.IO.Path.Combine(GetExternalFilesDir(null)?.AbsolutePath ?? "", "arenas"));
                 // read the list again now the paths are set: imported (Echoes) arenas register then
                 var list = MphRecomp.Multiplayer.MatchArenas.All.Where(a => MphRecomp.Multiplayer.MatchArenas.Supports(a, mode, _mpBots + 1)).ToList();
@@ -262,29 +295,42 @@ public class MainActivity : Activity
             }
             return all.ToList();
         }
-        string ArenaName() { var a = Arenas(); return a[_mpArena % a.Count].InGameName ?? a[_mpArena % a.Count].Name; }
-        Button modeBtn = null!, arenaBtn = null!;
-        void Refresh()
+        Button arenaBtn = null!;
+        // the arena list depends on the mode and the player count: shown again when either changes
+        string ArenaStep(int d)
         {
-            modeBtn.Text = $"Mode: {modes[_mpMode]}";
-            arenaBtn.Text = $"Arena: {ArenaName()}";
+            var a = Arenas();
+            _mpArena = Wrap(_mpArena + d, a.Count);
+            return $"Arena: {ArenaLabel(a[_mpArena])}";
         }
-        modeBtn = new Button(this);
-        modeBtn.Click += (_, _) => { _mpMode = (_mpMode + 1) % modes.Count; _mpArena = 0; Refresh(); };
-        _content.AddView(modeBtn);
-        arenaBtn = new Button(this);
-        arenaBtn.Click += (_, _) => { _mpArena++; Refresh(); };
-        _content.AddView(arenaBtn);
-        var botsBtn = new Button(this) { Text = $"Bots: {_mpBots}" };
-        // 0 bots: a LAN match of just the players (a match on this device alone needs at least one)
-        botsBtn.Click += (_, _) => { _mpBots = (_mpBots + 1) % 4; botsBtn.Text = $"Bots: {_mpBots}"; Refresh(); };
-        _content.AddView(botsBtn);
-        var levelBtn = new Button(this) { Text = $"Bot level: {_mpLevel}" };
-        levelBtn.Click += (_, _) => { _mpLevel = (_mpLevel + 1) % 3; levelBtn.Text = $"Bot level: {_mpLevel}"; };
-        _content.AddView(levelBtn);
-        var timeBtn = new Button(this) { Text = $"Time limit: {MatchTimes[_mpTime].label}" };
-        timeBtn.Click += (_, _) => { _mpTime = (_mpTime + 1) % MatchTimes.Length; timeBtn.Text = $"Time limit: {MatchTimes[_mpTime].label}"; };
-        _content.AddView(timeBtn);
+        void Refresh() => arenaBtn.Text = ArenaStep(0);
+        AddSelector(d =>
+        {
+            if (d != 0)
+            {
+                _mpMode = Wrap(_mpMode + d, modes.Count);
+                _mpArena = 0;
+                Refresh();
+            }
+            return $"Mode: {modes[_mpMode]}";
+        });
+        arenaBtn = AddSelector(ArenaStep);
+        // 0 bots: a LAN match of just the players (a match on this device alone needs at least one); P8: up to 7 (8 seats)
+        AddSelector(d =>
+        {
+            if (d != 0)
+            {
+                _mpBots = Wrap(_mpBots + d, 8);
+                Refresh();
+            }
+            return $"Bots: {_mpBots}";
+        });
+        AddSelector(d => { _mpLevel = Wrap(_mpLevel + d, 3); return $"Bot level: {_mpLevel}"; });
+        AddSelector(d => { _mpTime = Wrap(_mpTime + d, MatchTimes.Length); return $"Time limit: {MatchTimes[_mpTime].label}"; });
+        AddSelector(d => { _mpSkin = Wrap(_mpSkin + d, MpSkins.Length); return $"Your skin: {MpSkins[_mpSkin].Label}"; });
+        var botSkinBtn = new Button(this) { Text = $"Bots as troopers: {(_mpBotSkins ? "on" : "off")}" };
+        botSkinBtn.Click += (_, _) => { _mpBotSkins = !_mpBotSkins; botSkinBtn.Text = $"Bots as troopers: {(_mpBotSkins ? "on" : "off")}"; };
+        _content.AddView(botSkinBtn);
         Refresh();
         AddButton("Start match", () =>
         {
@@ -302,6 +348,7 @@ public class MainActivity : Activity
                 .PutExtra("hunter", CampaignHunters[_campaignHunter])
                 .PutExtra("gun", gun());
             if (MatchTimes[_mpTime].seconds is float s) intent.PutExtra("time", s.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (MpSkinsArg() is string skins) intent.PutExtra("skins", skins);
             StartActivity(intent);
         });
         // two devices on one Wi-Fi network (MatchLan.cs): the host's settings above; the joiner plays as its own "Play as"
@@ -317,6 +364,144 @@ public class MainActivity : Activity
         {
             Arenas(); // sets up the ROM paths, so the ROM revision is known
             MatchLan.Join(this, MphRead.Paths.MphKey, CampaignHunters[_campaignHunter], gun());
+        });
+        // online through a SecondHunt server's relay (MatchOnline.cs, docs/ONLINE_PLAY.md O3): the host's settings above
+        AddButton("ONLINE TEST: HOST (public game on a server)", () =>
+        {
+            var a = Arenas();
+            var template = MphRecomp.Multiplayer.MatchSettings.Quick(modes[_mpMode], a[_mpArena % a.Count].Name,
+                Enum.Parse<MphRead.Hunter>(CampaignHunters[_campaignHunter]), _mpBots, _mpLevel);
+            template.TimeLimitSeconds = MatchTimes[_mpTime].seconds;
+            MatchOnline.Host(this, template, MphRead.Paths.MphKey, CampaignHunters[_campaignHunter], gun());
+        });
+        AddButton("ONLINE TEST: JOIN (first open game on a server)", () =>
+        {
+            Arenas(); // the ROM paths, so the ROM revision is known
+            MatchOnline.Join(this, MphRead.Paths.MphKey, CampaignHunters[_campaignHunter], gun());
+        });
+        // online voice chat (O8, VoiceAndroid): the settings the lobby's voice row will have, until it's built
+        AddButton("VOICE: mode (push to talk / open mic / off)", () =>
+        {
+            var v = MphRecomp.Online.Voice.VoiceSettings.Current;
+            v.SetMode(v.Mode switch
+            {
+                MphRecomp.Online.Voice.VoiceMode.PushToTalk => MphRecomp.Online.Voice.VoiceMode.OpenMic,
+                MphRecomp.Online.Voice.VoiceMode.OpenMic => MphRecomp.Online.Voice.VoiceMode.Off,
+                _ => MphRecomp.Online.Voice.VoiceMode.PushToTalk,
+            });
+            Toast.MakeText(this, $"Voice: {v.Mode} (push to talk = hold R3 / TALK)", ToastLength.Long)!.Show();
+        });
+        AddButton("VOICE: with strangers (on / off; friends stay on)", () =>
+        {
+            var v = MphRecomp.Online.Voice.VoiceSettings.Current;
+            v.SetStrangers(!v.Strangers);
+            Toast.MakeText(this, $"Voice with strangers: {(v.Strangers ? "ON" : "OFF")}, friends: {(v.Friends ? "ON" : "OFF")}", ToastLength.Long)!.Show();
+        });
+        // replays (docs/REPLAY_MODE.md R2; App Campaign/MatchReplay.cs): every match above is recorded (RECOMP SETTINGS
+        // record replays) and the last 10 kept in <external files>/replays; this plays the newest, checking every step
+        AddButton("Play newest replay", () =>
+        {
+            string data = GetExternalFilesDir(null)?.AbsolutePath ?? FilesDir!.AbsolutePath;
+            string? newest = MphRecomp.Replay.ReplayLibrary.Newest(data);
+            if (newest == null)
+            {
+                Toast.MakeText(this, "No replays yet: play a match against bots first", ToastLength.Long)!.Show();
+                return;
+            }
+            Arenas(); // the ROM paths, as for a match
+            StartActivity(new Intent(this, typeof(CampaignActivity)).PutExtra("replay", newest).PutExtra("gun", gun()));
+        });
+    }
+
+    // Solo arena (owner 2026-10-08; App Campaign/SoloArena.cs): any character alone in any multiplayer arena, full control,
+    // the third-person camera; R3 switches the right stick between aiming and orbiting the camera round the player.
+    // A character with a skin plays through CampaignActivity's "skins" arg (a trooper skin = the Trooper on Weavel, a Dark
+    // Samus skin = Dark Samus on Samus; "trooper" = the Trooper in Weavel's own DS model)
+    int _soloChar, _soloArena;
+    bool _soloFallback;
+    bool _soloPlace; // Solo arena: the pickup placement editor (--es place 1)
+    bool _soloSelfBody; // Solo arena: the Trooper's drone shots hit his own body (--es selfbody 1, T5)
+    static readonly (string Label, string Hunter, string? Skin)[] SoloCharacters =
+    {
+        ("Dark Samus (Echoes)", "Samus", "MP2DarkSamus"), ("Dark Samus (Corruption)", "Samus", "MP3DarkSamus"),
+        ("Wave Trooper", "Weavel", "MP1WaveTrooper"), ("Power Trooper", "Weavel", "MP1PowerTrooper"),
+        ("Ice Trooper", "Weavel", "MP1IceTrooper"), ("Plasma Trooper", "Weavel", "MP1PlasmaTrooper"),
+        ("Trooper (Weavel's DS model)", "Weavel", "trooper"),
+        ("Samus (RECOMP SETTINGS suit)", "Samus", null), ("Kanden", "Kanden", null), ("Spire", "Spire", null),
+        ("Trace", "Trace", null), ("Noxus", "Noxus", null), ("Sylux", "Sylux", null), ("Weavel", "Weavel", null),
+    };
+
+    void AddSoloArena()
+    {
+        AddHeader("Solo arena (third person; R3 = orbit camera / aim)");
+        List<MphRead.RoomMetadata> Arenas()
+        {
+            try
+            {
+                // as the Multiplayer section: the ROM paths, then imported (Echoes) arenas register
+                System.IO.Directory.SetCurrentDirectory(FilesDir!.AbsolutePath);
+                MphRead.Paths.UpdatePaths();
+                MphRead.Paths.ChooseMphPath();
+                MphRecomp.Arenas.EchoesArena.ImportRoot = GetExternalFilesDir(null)?.AbsolutePath;
+                MphRecomp.Arenas.EchoesArena.InstallStaged(System.IO.Path.Combine(GetExternalFilesDir(null)?.AbsolutePath ?? "", "arenas"));
+                var list = MphRecomp.Multiplayer.MatchArenas.All
+                    .Where(a => MphRecomp.Multiplayer.MatchArenas.Supports(a, MphRead.GameMode.Battle, 1)).ToList();
+                if (list.Count > 0) return list;
+            }
+            catch (Exception ex)
+            {
+                Log("solo arena census failed: " + ex.Message);
+            }
+            return MphRecomp.Multiplayer.MatchArenas.All.ToList();
+        }
+        AddSelector(d =>
+        {
+            _soloChar = Wrap(_soloChar + d, SoloCharacters.Length);
+            return $"Character: {SoloCharacters[_soloChar].Label}";
+        });
+        AddSelector(d =>
+        {
+            var a = Arenas();
+            _soloArena = Wrap(_soloArena + d, a.Count);
+            return $"Arena: {ArenaLabel(a[_soloArena])}";
+        });
+        // Pirate Blaster + Trooper abilities online: the no-import fallback (MatchSkins "lookalikes" arg): a trooper skin
+        // drawn as Weavel's DS model in that skin's colours, with the hand-posed wall-cling pose (owner 2026-10-09)
+        var fallbackBtn = new Button(this);
+        void FallbackText() => fallbackBtn.Text = $"Weavel fallback (look-alikes, no imports): {(_soloFallback ? "ON" : "OFF")}";
+        fallbackBtn.Click += (_, _) => { _soloFallback = !_soloFallback; FallbackText(); };
+        FallbackText();
+        _content.AddView(fallbackBtn);
+        // Pickup placement editor (owner 2026-10-10): place / delete pickups (and Echoes affinity crates) in the run, saved
+        // to <data>/placements (PickupPlacer.cs)
+        var placeBtn = new Button(this);
+        void PlaceText() => placeBtn.Text = $"Place pickups (D-pad + Select): {(_soloPlace ? "ON" : "OFF")}";
+        placeBtn.Click += (_, _) => { _soloPlace = !_soloPlace; PlaceText(); };
+        PlaceText();
+        _content.AddView(placeBtn);
+        // T5 (Trooper standing body hitbox, owner 2026-10-10): the drone's shots hit his own standing body (SoloArena.cs)
+        var selfBodyBtn = new Button(this);
+        void SelfBodyText() => selfBodyBtn.Text = $"Trooper: hit your own body (drone out): {(_soloSelfBody ? "ON" : "OFF")}";
+        selfBodyBtn.Click += (_, _) => { _soloSelfBody = !_soloSelfBody; SelfBodyText(); };
+        SelfBodyText();
+        _content.AddView(selfBodyBtn);
+        AddButton("Start solo", () =>
+        {
+            var a = Arenas();
+            var (_, hunter, skin) = SoloCharacters[_soloChar];
+            var intent = new Intent(this, typeof(CampaignActivity))
+                .PutExtra("match", "Battle")
+                .PutExtra("solo", "1")
+                .PutExtra("bots", "0")
+                .PutExtra("arena", a[_soloArena % a.Count].Name)
+                .PutExtra("hunter", hunter)
+                // Samus wears RECOMP SETTINGS' suit; Dark Samus is a skin on Samus's rig, so no suit of Samus's own
+                .PutExtra("gun", skin == null && hunter == "Samus" ? "settings" : "none");
+            if (skin != null) intent.PutExtra("skins", "0:" + skin);
+            if (_soloFallback) intent.PutExtra("lookalikes", "1");
+            if (_soloPlace) intent.PutExtra("place", "1");
+            if (_soloSelfBody) intent.PutExtra("selfbody", "1");
+            StartActivity(intent);
         });
     }
 
@@ -438,6 +623,36 @@ public class MainActivity : Activity
         var h = new TextView(this) { Text = text, TextSize = 16f };
         h.SetPadding(0, 24, 0, 8);
         _content.AddView(h);
+    }
+
+    // a selector: < [its value] > (owner 2026-10-10: arrows on every dev-menu selector). step(d) moves the choice by d
+    // (-1, +1; 0 = as it is) and returns the text to show; a tap on the value itself steps forward, as before
+    Button AddSelector(System.Func<int, string> step)
+    {
+        var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        var prev = new Button(this) { Text = "◀" };
+        var value = new Button(this) { Text = step(0) };
+        var next = new Button(this) { Text = "▶" };
+        prev.Click += (_, _) => value.Text = step(-1);
+        value.Click += (_, _) => value.Text = step(1);
+        next.Click += (_, _) => value.Text = step(1);
+        row.AddView(prev, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
+        row.AddView(value, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f));
+        row.AddView(next, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
+        _content.AddView(row);
+        return value;
+    }
+
+    // i wrapped into 0..n-1 (both ways)
+    static int Wrap(int i, int n) => n <= 0 ? 0 : ((i % n) + n) % n;
+
+    // an arena selector's text: the in-game name, plus "(Expanded)" on the ROM's larger versions of an arena (Transfer
+    // Lock's BT room, Fault Line, Elder Passage), so two rooms with one in-game name tell apart (owner 2026-10-10)
+    static string ArenaLabel(MphRead.RoomMetadata r)
+    {
+        string name = r.InGameName ?? r.Name;
+        bool expanded = r.Name.Contains("EXPANDED") || r.Name == "AD1 TRANSFER LOCK BT";
+        return expanded ? name + " (Expanded)" : name;
     }
 
     void AddButton(string label, System.Action onClick)

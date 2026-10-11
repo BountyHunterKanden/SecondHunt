@@ -42,6 +42,7 @@
   <ItemGroup>
     <!-- RECOMP SETTINGS > CREDITS (CreditsActivity, public beta audit S29): the third-party notices the APK must carry -->
     <EmbeddedResource Include="..\..\THIRD_PARTY_NOTICES.md" LogicalName="notices.md" />
+    <EmbeddedResource Include="..\..\docs\ONLINE_RULES_IN_APP.md" LogicalName="online.md" />
   </ItemGroup>
 
   <!-- Release signing for public builds (public beta audit S1; docs/RELEASE.md). OPT-IN: a normal build keeps the

@@ -47,12 +47,16 @@ public class GameActivity : Activity
         if (AppNav.ReturnedFromGame)
         {
             AppNav.ReturnedFromGame = false;
-            _renderer.StartPage = 18;
+            _renderer.StartPage = FrontendSession.ReturnPage(); // the main menu, or the multiplayer lobby after a match
         }
         if (Intent?.GetStringExtra("fedump") == "1") _renderer.DumpPath = System.IO.Path.Combine(ExternalDir, "frontend_dump.md");
         _renderer.RequestSink = r => RunOnUiThread(() => OnRequest(r));
+        MultiplayerMenu.MulticastLock = () => MenuLan.AcquireMulticast(this); // AVAILABLE GAMES hears LAN beacons (M3)
         _renderer.HdRoot = System.IO.Path.Combine(ExternalDir, "hd");
         _renderer.CacheDir = System.IO.Path.Combine(ExternalDir, "cache");
+        // IMPORT GAMES (RECOMP SETTINGS): the system's document picker, and its files read in place (never copied)
+        ImportHost.Pick = (request, picked) => RunOnUiThread(() => PickImportFile(request, picked));
+        ImportHost.Open = OpenImportFile;
         _view = new GLSurfaceView(this);
         _view.SetEGLContextClientVersion(3);
         _view.SetEGLConfigChooser(8, 8, 8, 8, 0, 0);
@@ -103,7 +107,7 @@ public class GameActivity : Activity
         if (AppNav.ReturnedFromGame)
         {
             AppNav.ReturnedFromGame = false;
-            _renderer?.Post(s => s.Menu.Enter(18));
+            _renderer?.Post(s => s.Start(FrontendSession.ReturnPage())); // the main menu, the lobby after a match, or an ending's credits
         }
     }
 
@@ -146,13 +150,127 @@ public class GameActivity : Activity
         case FrontendRequestKind.Multiplayer:
             StartActivity(new Intent(this, typeof(MatchLobbyActivity)));
             break;
+        case FrontendRequestKind.StartMatch:
+        {
+            // START GAME in the vanilla multiplayer menu: the match on the campaign screen; back here afterwards, where
+            // the menus open at FrontendSession.ReturnPage() (the lobby)
+            var intent = new Intent(this, typeof(CampaignActivity));
+            foreach ((string key, string value) in MatchSetupText.LaunchArgs(request.Arg!)) intent.PutExtra(key, value);
+            Log.Info("MPHFrontend", "StartMatch -> CampaignActivity " + request.Arg);
+            AppNav.ReturnToGame = true;
+            StartActivity(intent);
+            break;
+        }
+        case FrontendRequestKind.PlayReplay:
+        {
+            // a recorded match from the REPLAYS list, played back on the campaign screen (MatchReplay.cs); back here after
+            var intent = new Intent(this, typeof(CampaignActivity)).PutExtra("replay", request.Arg!);
+            Log.Info("MPHFrontend", "PlayReplay -> CampaignActivity " + request.Arg);
+            AppNav.ReturnToGame = true;
+            StartActivity(intent);
+            break;
+        }
         case FrontendRequestKind.Credits:
             StartActivity(new Intent(this, typeof(CreditsActivity)));
+            break;
+        case FrontendRequestKind.OnlineRules: // Options' privacy / code of conduct / 13+ line: the same viewer, that text
+            StartActivity(new Intent(this, typeof(CreditsActivity)).PutExtra("doc", "online"));
             break;
         case FrontendRequestKind.ShareCrashLog:
             ShareCrashLog(this);
             break;
         }
+    }
+
+    // ---- IMPORT GAMES: the player's own disc images and Wii key file ----
+
+    const int ImportPickRequest = 0x4d50;
+    Action<ImportPicked?>? _importPicked;
+
+    // the system's document picker (any file: disc images have no MIME type of their own); the pick keeps its read
+    // access across restarts (TakePersistableUriPermission), so importing again doesn't ask for the disc again
+    void PickImportFile(ImportPickRequest request, Action<ImportPicked?> picked)
+    {
+        _importPicked?.Invoke(null); // an earlier picker that never answered
+        _importPicked = picked;
+        var intent = new Intent(Intent.ActionOpenDocument);
+        intent.AddCategory(Intent.CategoryOpenable);
+        intent.SetType("*/*");
+        try
+        {
+            StartActivityForResult(intent, ImportPickRequest);
+        }
+        catch (ActivityNotFoundException)
+        {
+            _importPicked = null;
+            picked(null);
+        }
+    }
+
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode != ImportPickRequest) return;
+        Action<ImportPicked?>? picked = _importPicked;
+        _importPicked = null;
+        Android.Net.Uri? uri = resultCode == Result.Ok ? data?.Data : null;
+        if (uri == null)
+        {
+            picked?.Invoke(null);
+            return;
+        }
+        try
+        {
+            ContentResolver!.TakePersistableUriPermission(uri, ActivityFlags.GrantReadUriPermission);
+        }
+        catch (Java.Lang.SecurityException ex)
+        {
+            Log.Warn("MPHFrontend", "import: no lasting access to the picked file: " + ex.Message);
+        }
+        Log.Info("MPHFrontend", "import: picked " + uri);
+        picked?.Invoke(new ImportPicked(uri.ToString()!, DisplayName(uri)));
+    }
+
+    string DisplayName(Android.Net.Uri uri)
+    {
+        try
+        {
+            using Android.Database.ICursor? c = ContentResolver!.Query(uri, new[] { "_display_name" }, null, null, null);
+            if (c != null && c.MoveToFirst() && c.GetString(0) is string name && name.Length > 0) return name;
+        }
+        catch (Exception ex) when (ex is Java.Lang.Exception or InvalidOperationException)
+        {
+            Log.Warn("MPHFrontend", "import: no name for " + uri + ": " + ex.Message);
+        }
+        return uri.LastPathSegment ?? "disc image";
+    }
+
+    // a picked content:// file as a seekable stream over its own file descriptor (the disc image is read in place); a
+    // plain path as a file. null when it's gone or its access was withdrawn
+    static System.IO.Stream? OpenImportFile(string token)
+    {
+        if (!token.StartsWith("content://", StringComparison.Ordinal)) return ImportHost.OpenPath(token);
+        ParcelFileDescriptor? pfd;
+        try
+        {
+            pfd = Application.Context.ContentResolver!.OpenFileDescriptor(Android.Net.Uri.Parse(token)!, "r");
+        }
+        catch (Exception ex) when (ex is Java.IO.FileNotFoundException or Java.Lang.SecurityException or Java.Lang.IllegalArgumentException)
+        {
+            Log.Warn("MPHFrontend", $"import: can't open {token}: {ex.Message}");
+            return null;
+        }
+        if (pfd == null) return null;
+        int fd = pfd.DetachFd(); // ours now: the stream closes it
+        pfd.Close();
+        var stream = new System.IO.FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle((IntPtr)fd, ownsHandle: true),
+            System.IO.FileAccess.Read, 1 << 16);
+        if (!stream.CanSeek)
+        {
+            stream.Dispose();
+            throw new System.IO.IOException("this file can't be read in place (its app streams it); copy it to the device first");
+        }
+        return stream;
     }
 
     // RECOMP SETTINGS > CRASH LOG (S29): the newest crash report through the system share sheet
@@ -213,6 +331,8 @@ public class GameActivity : Activity
             return true;
         }
         if (keyCode == Keycode.ButtonSelect) _selectHeld = true;
+        // online voice chat (O8): R3 held = push to talk in an online game's lobby (the menus don't use R3)
+        if (keyCode == Keycode.ButtonThumbr && MphRecomp.Online.Voice.VoiceChat.HoldToTalk(true)) return true;
         if (keyCode == Keycode.ButtonStart && _selectHeld && !BuildFlags.Public)
         {
             OpenDeveloperMenu();
@@ -237,6 +357,7 @@ public class GameActivity : Activity
     public override bool OnKeyUp(Keycode keyCode, KeyEvent? e)
     {
         if (keyCode == Keycode.ButtonSelect) _selectHeld = false;
+        if (keyCode == Keycode.ButtonThumbr && MphRecomp.Online.Voice.VoiceChat.HoldToTalk(false)) return true;
         return KeyFor(keyCode) != MenuKeys.None || base.OnKeyUp(keyCode, e);
     }
 

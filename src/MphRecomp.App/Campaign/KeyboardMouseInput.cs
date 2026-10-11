@@ -64,6 +64,9 @@ public sealed class KeyboardMouseInput
         return Enum.TryParse(name, out Keys k) ? new Keybind(k) : null;
     }
 
+    // online voice chat's push to talk (V by default; CampaignRenderer.BuildInput passes it on with the pad's R3)
+    public bool TalkHeld => Held(ControlBinds.Talk, false, false);
+
     bool Held(string function, bool scrollUp, bool scrollDown)
     {
         foreach (Keybind bind in _functions[FunctionIndex[function]])
@@ -179,22 +182,29 @@ public sealed class KeyboardMouseInput
         }
     }
 
-    // the weapon keys' order (1-9)
+    // the cycling order: the weapon keys' (1-9), with the Pirate Blaster after the Shock Coil as in MphRead's own
+    // _weaponOrder (T4 N22: D-pad left / right never reached it)
     static readonly BeamType[] WeaponOrder =
     {
         BeamType.PowerBeam, BeamType.Missile, BeamType.VoltDriver, BeamType.Battlehammer, BeamType.Imperialist,
-        BeamType.Judicator, BeamType.Magmaul, BeamType.ShockCoil, BeamType.OmegaCannon,
+        BeamType.Judicator, BeamType.Magmaul, BeamType.ShockCoil, BeamType.PirateBlaster, BeamType.OmegaCannon,
     };
 
     // the next (+1) / previous (-1) weapon after the current one that the player has and can fire; also the pad's D-pad
-    // left / right (CampaignRenderer.BuildInput)
+    // left / right (CampaignRenderer.BuildInput). With the Omega Cannon in the third slot (T4 N15) only the Power Beam,
+    // missiles, the Omega Cannon and the Pirate Blaster (its own slot: PlayerEntity.UpdateAffinityWeaponSlot): as on the
+    // DS's touch screen, where those are the weapons you hold, and stepping onto another special weapon would take the
+    // Omega Cannon's slot and throw it away
     internal static BeamType CycleWeapon(PlayerEntity player, int step)
     {
+        bool omega = player.HostThirdSlotWeapon == BeamType.OmegaCannon && player.AvailableWeapons[BeamType.OmegaCannon];
         int n = WeaponOrder.Length;
         int at = Math.Max(0, Array.IndexOf(WeaponOrder, player.CurrentWeapon));
         for (int i = 1; i < n; i++)
         {
             BeamType beam = WeaponOrder[((at + step * i) % n + n) % n];
+            if (omega && beam != BeamType.PowerBeam && beam != BeamType.Missile && beam != BeamType.OmegaCannon
+                && beam != BeamType.PirateBlaster) continue;
             if (player.CanEquipWeapon(beam)) return beam;
         }
         return BeamType.None;

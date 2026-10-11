@@ -1,0 +1,33 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "paks": [
+    {
+      "name": "Metroid1.pak",
+      "sha1": "1ae13e2325ed8b57462f7a39d9d7fac035745598"
+    },
+    {
+      "name": "AudioGrp.pak",
+      "sha1": "157e0841155cc7b699176dd7afc746c7048dbc28"
+    }
+  ],
+  "ancs": "8169653a",
+  "char": "power_trooper",
+  "fx": {
+    "crsc": "f03bbf02",
+    "parts": [
+      "91f9a346",
+      "d4f701ff"
+    ],
+    "sounds": [
+      548
+    ],
+    "sfx": {
+      "lookup": "b7c1b3a7",
+      "group": [
+        "ea6360af",
+        "57fe7e67"
+      ]
+    }
+  }
+}

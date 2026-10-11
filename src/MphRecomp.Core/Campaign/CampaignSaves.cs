@@ -364,6 +364,8 @@ namespace MphRecomp.Campaign
             w.WriteNumber("Deaths", s.Stats.Deaths);
             w.WriteNumber("EnemyHunterDeaths", s.Stats.EnemyHunterDeaths);
             w.WriteNumber("EnemyKills", s.Stats.EnemyKills);
+            w.WriteNumber("Gorea1Time", s.Stats.Gorea1Time);
+            w.WriteNumber("Gorea2Time", s.Stats.Gorea2Time);
             w.WriteEndObject();
             w.WriteEndObject();
         }
@@ -439,6 +441,9 @@ namespace MphRecomp.Campaign
             s.Stats.Deaths = stats.GetProperty("Deaths").GetUInt32();
             s.Stats.EnemyHunterDeaths = stats.GetProperty("EnemyHunterDeaths").GetUInt32();
             s.Stats.EnemyKills = stats.GetProperty("EnemyKills").GetUInt32();
+            // the Gorea times (2026-10-07; absent from older saves)
+            s.Stats.Gorea1Time = stats.TryGetProperty("Gorea1Time", out JsonElement g1) ? g1.GetSingle() : 0;
+            s.Stats.Gorea2Time = stats.TryGetProperty("Gorea2Time", out JsonElement g2) ? g2.GetSingle() : 0;
         }
 
         private static void CheckLength(string name, JsonElement array, int length)

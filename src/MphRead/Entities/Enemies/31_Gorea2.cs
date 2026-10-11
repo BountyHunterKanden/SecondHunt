@@ -564,7 +564,7 @@ namespace MphRead.Entities.Enemies
                 _field240 -= 360;
             }
             float rand1 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;
-            var mtx = Matrix4.CreateFromAxisAngle(FacingVector, MathHelper.DegreesToRadians(_field240));
+            var mtx = DetMatrix.CreateFromAxisAngle(FacingVector, MathHelper.DegreesToRadians(_field240));
             Vector3 vec = Matrix.Vec3MultMtx3(Vector3.Cross(UpVector, FacingVector), mtx);
             Position = _field20C + vec * (v6 - 1.5f - rand1);
             float rand2 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;

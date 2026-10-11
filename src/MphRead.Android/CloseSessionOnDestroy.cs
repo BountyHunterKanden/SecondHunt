@@ -12,13 +12,13 @@ using MphRecomp.Multiplayer.Net;
 
 namespace MphRecomp.App;
 
-// closes a LAN session when the activity playing it is destroyed
+// closes a LAN session (or an online match) when the activity playing it is destroyed
 internal sealed class CloseSessionOnDestroy : Java.Lang.Object, Android.App.Application.IActivityLifecycleCallbacks
 {
     readonly Android.App.Activity _activity;
-    readonly LanSession _session;
+    readonly IDisposable _session;
 
-    public CloseSessionOnDestroy(Android.App.Activity activity, LanSession session)
+    public CloseSessionOnDestroy(Android.App.Activity activity, IDisposable session)
     {
         _activity = activity;
         _session = session;

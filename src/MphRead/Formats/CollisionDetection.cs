@@ -874,11 +874,16 @@ namespace MphRead.Formats
             return _activeItems;
         }
 
+        // Host (recomp): enemy-typed entities whose entity collision joins the platforms' and objects' (Echoes arenas'
+        // breakables); null = vanilla
+        public static Func<EntityBase, bool>? HostEntityCollision { get; set; }
+
         private static void GetEntityCandidates(Vector3 limitMin, Vector3 limitMax, Scene scene)
         {
             foreach (EntityBase entity in scene.Entities)
             {
-                if (entity.Type != EntityType.Object && entity.Type != EntityType.Platform)
+                if (entity.Type != EntityType.Object && entity.Type != EntityType.Platform
+                    && (entity.Type != EntityType.EnemyInstance || HostEntityCollision == null || !HostEntityCollision(entity)))
                 {
                     continue;
                 }

@@ -35,9 +35,14 @@ namespace MphRead.Entities
         public ItemSpawnEntity? Owner { get; set; }
         public NodeData3? ClosestNode { get; set; } = null;
 
-        private static readonly IReadOnlyList<int> _scanIds = new int[22]
+        // recomp: the model an item draws with, by the host (dev pictures: each Pirate Blaster pickup in a lineup in its own
+        // look, MphRecomp.Core BlasterPickup.cs); null = MPH's item table
+        public static Func<ItemType, Vector3, string?>? HostItemModel;
+
+        private static readonly IReadOnlyList<int> _scanIds = new int[24]
         {
-            9, 11, 12, 0, 10, 21, 13, 23, 22, 18, 20, 19, 28, 14, 15, 16, 17, 0, 24, 463, 0, 0
+            9, 11, 12, 0, 10, 21, 13, 23, 22, 18, 20, 19, 28, 14, 15, 16, 17, 0, 24, 463, 0, 0,
+            0, 0 // recomp: PickWpnMissile (unused), PirateBlaster
         };
 
         public ItemInstanceEntity(ItemInstanceEntityData data, NodeRef nodeRef, Scene scene)
@@ -52,7 +57,7 @@ namespace MphRead.Entities
             {
                 ItemType = ItemType.AffinityWeapon;
             }
-            SetUpModel(Metadata.Items[(int)ItemType]);
+            SetUpModel(HostItemModel?.Invoke(ItemType, Position) ?? Metadata.Items[(int)ItemType]); // recomp: HostItemModel
             if (data.DespawnTimer > 0)
             {
                 DespawnTimer = data.DespawnTimer;
@@ -132,7 +137,8 @@ namespace MphRead.Entities
                 }
                 return false;
             }
-            int sfx = _sfxIds[(int)ItemType];
+            // recomp: the Pirate Blaster (item 23) is past the table -- no hum, as the other weapons
+            int sfx = (int)ItemType < _sfxIds.Count ? _sfxIds[(int)ItemType] : -1;
             if (sfx != -1)
             {
                 _soundSource.PlaySfx(sfx, loop: true);

@@ -42,6 +42,10 @@ internal sealed class FrontendRenderer : IGlScreen
     public string? HdRoot { get; set; }
     public string? CacheDir { get; set; }
     MenuSamusRender? _menuSamus;
+    // IMPORT GAMES' pictures of imported models (ImportItemRender.cs; Importer menu visual design's, reached in 2026-10-08)
+    readonly ImportItemRender _importRender = new();
+    // the character + skin picker's pictures (CharacterPictureRender.cs; Character + skin picker (D9)'s, reached in 2026-10-08)
+    readonly CharacterPictureRender _characterRender = new();
 
     // settingsPath: the recomp settings (RECOMP SETTINGS under Options); modsDir: the installed mods (MODS);
     // savesDir: the campaign's saves (the file select's files A/B/C)
@@ -50,6 +54,8 @@ internal sealed class FrontendRenderer : IGlScreen
         _filesDir = filesDir;
         _settingsPath = settingsPath;
         _modsDir = modsDir;
+        ImportRenders.HostRenders = true;
+        CharacterPictures.HostRenders = true;
         _savesDir = savesDir;
     }
 
@@ -127,8 +133,8 @@ internal sealed class FrontendRenderer : IGlScreen
     // RECOMP SETTINGS "menu art" HD: the backdrop's picture, made once (a few frames of warm-up, then one draw)
     void StepMenuSamus(FrontendSession session)
     {
-        // a public build (Beta 1, imports held) keeps the DS picture
-        if (MphRecomp.Config.RecompSettings.PublicBuild || HdRoot == null || CacheDir == null || session.HasHdBackdrop || !session.Settings.MenuArtHd) return;
+        // public builds too since 2026-10-07 (owner: "include that"; the Beta 1 hold kept the DS picture)
+        if (HdRoot == null || CacheDir == null || session.HasHdBackdrop || !session.Settings.MenuArtHd) return;
         _menuSamus ??= new MenuSamusRender(HdRoot, CacheDir, System.Math.Max(_width, _height));
         if (_menuSamus.Done) return;
         if (_menuSamus.Step() is { } pic) session.SetHdBackdrop(pic.W, pic.H, pic.Rgba);
@@ -172,6 +178,8 @@ internal sealed class FrontendRenderer : IGlScreen
             }
         }
         StepMenuSamus(session);
+        _importRender.Step(_width, _height);
+        _characterRender.Step(_width, _height);
         try
         {
             session.Update(dt);
@@ -216,6 +224,15 @@ internal sealed class FrontendRenderer : IGlScreen
 
     IReadOnlyList<MusicTrack>? _musicInfo;
 
+    // a MusicId (InterMusicInfo: a SEQ and the tracks it plays) as a tune
+    PageTune MusicIdTune(int musicId, int serial = 0)
+    {
+        _musicInfo ??= SoundRead.ReadInterMusicInfo();
+        return musicId >= 0 && musicId < _musicInfo.Count
+            ? new PageTune((int)_musicInfo[musicId].SeqId, false, _musicInfo[musicId].Tracks, serial)
+            : new PageTune((int)SeqId.CREDITS, false, Test: serial);
+    }
+
     // OPTIONS > AUDIO's music test: a BGMSELECTLIST entry as a tune (kind 0 a SEQ, 1 a MusicId = a SEQ + tracks, 2 a STRM)
     PageTune TestTune(SoundTestEntry e, int serial)
     {
@@ -223,7 +240,7 @@ internal sealed class FrontendRenderer : IGlScreen
         if (e.Kind == 1)
         {
             _musicInfo ??= SoundRead.ReadInterMusicInfo();
-            if (e.Id >= 0 && e.Id < _musicInfo.Count) return new PageTune((int)_musicInfo[e.Id].SeqId, false, _musicInfo[e.Id].Tracks, serial);
+            if (e.Id >= 0 && e.Id < _musicInfo.Count) return MusicIdTune(e.Id, serial);
         }
         return new PageTune(e.Id, false, Test: serial);
     }
@@ -284,13 +301,28 @@ internal sealed class FrontendRenderer : IGlScreen
         {
             _musicPage = index;
             (int id, _, int flags) = session.Menu.Sounds.PageMusic(index);
-            if (id != 0)
+            if (id == 0 && index == GameEnding.CreditsPage && session.Ending.Current is { } ending)
+            {
+                // after an ending the front end opens on the credits with the ending's own music (Reports R6: there was
+                // none): ov0 0x2125354, as it enters page 6 from the game, plays MusicId 66 SEQ_CREDITS_M66 after the good
+                // ending, 65 SEQ_CREDITS_M65 after the bad one (0x206e078); pages 7-12 keep it, the results page (49 / 50)
+                // has its own (SEQ 6 RESULTS). Options' CREDITS keep the menu theme, as vanilla's.
+                _pageTune = MusicIdTune(ending.Good ? 66 : 65);
+            }
+            else if (id != 0)
             {
                 _pageTune = new PageTune(id, (flags & 2) != 0);
             }
             else if (_pageTune == null && index >= 13)
             {
                 // started mid-menus on a page that keeps the music, with none chosen yet: the menu theme
+                _pageTune = new PageTune((int)SeqId.CHUTNEY, false);
+            }
+            else if (_pageTune is { Id: (int)SeqId.RESULTS, Stream: false } && MphRecomp.Frontend.RecompMenus.IsOnlinePageIndex(index))
+            {
+                // the ONLINE PLAY pages (not in the ROM's table: they keep what plays) after an online match's RESULTS
+                // (QUIT, or a license or chat page opened from there and back to the hub): the menu theme again, not the
+                // results music for good (release test N2)
                 _pageTune = new PageTune((int)SeqId.CHUTNEY, false);
             }
         }
@@ -470,6 +502,7 @@ internal sealed class FrontendRenderer : IGlScreen
             _movie = null;
             _clock.Restart(); // the menus pick up where they were, without catching up
             _last = 0;
+            if (_session is { } s) s.Movies.OnMovieDone(s.Menu); // a MOVIES tile's movie: its page comes in again
         }
     }
 }

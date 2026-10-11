@@ -19,6 +19,16 @@ namespace MphRead.Entities
 
         public NodeData3? ClosestNode { get; set; } = null;
 
+        // host hook (Echoes arenas): pads whose Unused28 has this bit fly every form on the biped's arc (PlayerProcess
+        // ActivateJumpPad, PlayerInput gravity); 0 = off. Vanilla pads hold 0 or 2 there, never the host's bit
+        public static uint HostSameArcBit { get; set; }
+        // host hook: on a same-arc flight the stick's left/right drifts across the push without eating it, forward/back stay
+        // MPH's rule, and the stick comes back after the minimum (PlayerInput SameArcSteer/SameArcCut, PlayerProcess); false
+        // = MPH's own steering on those flights too. Owner 10-08 ~01:10 picked this Echoes-only left/right rule for the long
+        // Echoes jumps (MPH's rule: a 0.25 s sideways tap fell ~20 short); Tools env PAD_MPHSTEER=1 turns it off to compare
+        public static bool HostSameArcSteer { get; set; } = true;
+        public bool SameArc => HostSameArcBit != 0 && (_data.Unused28 & HostSameArcBit) != 0;
+
         public JumpPadEntity(JumpPadEntityData data, string nodeName, Scene scene)
             : base(EntityType.JumpPad, nodeName, scene)
         {

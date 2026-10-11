@@ -205,14 +205,16 @@ namespace MphRead
             HudMaskBindingId = -1;
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
-                PlayerEntity.Main.DrawHudModels();
+                PlayerEntity.HudOwner.DrawHudModels(); // recomp: HudOwner (PlayerHud.cs)
                 DrawHudLayer(Layer4Info); // ice layer
                 DrawHudLayer(Layer3Info); // helmet back
                 DrawHudLayer(Layer1Info); // visor
                 DrawHudLayer(Layer2Info); // helmet front
+                _hudDialogBox = HostHudDialogBox;
                 DrawHudLayer(Layer5Info); // dialog overlay
+                _hudDialogBox = false;
                 HudMaskBindingId = Layer1Info.MaskId;
-                PlayerEntity.Main.DrawHudObjects();
+                PlayerEntity.HudOwner.DrawHudObjects(); // recomp: HudOwner (PlayerHud.cs)
             }
         }
 
@@ -570,6 +572,12 @@ namespace MphRead
         public NodeRef GetNodeRefByPosition(Vector3 position)
         {
             return Room?.GetNodeRefByPosition(position) ?? NodeRef.None;
+        }
+
+        // recomp: see RoomEntity.GetNodeRefContaining
+        public NodeRef GetNodeRefContaining(Vector3 position)
+        {
+            return Room?.GetNodeRefContaining(position) ?? NodeRef.None;
         }
 
         public bool IsNodeRefVisible(NodeRef nodeRef)
@@ -1468,6 +1476,11 @@ namespace MphRead
             if (ProcessFrame && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && !GameState.DialogPause)
             {
                 PlayerEntity.Main.UpdateHud();
+                if (PlayerEntity.HostHudSeat is PlayerEntity hudSeat && hudSeat != PlayerEntity.Main
+                    && hudSeat.LoadFlags.TestFlag(LoadFlags.Active))
+                {
+                    hudSeat.HostUpdateSeatHud(); // recomp: a replay watching another seat (PlayerHud.cs)
+                }
             }
             if (Headless)
             {
@@ -1475,6 +1488,17 @@ namespace MphRead
                 if (ProcessFrame)
                 {
                     UpdateFade();
+                }
+            }
+            if (HostDrawFreeSim)
+            {
+                // recomp: the play state Draw would update, updated here whether or not this frame draws
+                foreach (PlayerEntity player in GetPlayerEntities())
+                {
+                    if (player.Initialized && player.LoadFlags.TestFlag(LoadFlags.Active))
+                    {
+                        player.UpdateDrawFreeSim();
+                    }
                 }
             }
             if (!Headless || CollectDrawItems)
@@ -1488,6 +1512,11 @@ namespace MphRead
             else
             {
                 _room?.UpdateVisibility();
+                // recomp: HostDrawFreeSim ages effects on frames without a draw list too (GetDrawItems' own condition)
+                if (HostDrawFreeSim && ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
+                {
+                    ProcessEffects();
+                }
             }
             if (ProcessFrame)
             {
@@ -1562,7 +1591,9 @@ namespace MphRead
                 GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref _perspectiveMatrix);
             }
             // update frustum info
-            Vector3 camPos = PlayerEntity.Main.CameraInfo.Position + HostCameraOffset;
+            Vector3 camPos = HostView is { } view && _cameraMode == CameraMode.Player
+                ? view.Position // recomp: HostView
+                : PlayerEntity.Main.CameraInfo.Position + HostCameraOffset;
             var camRight = new Vector3(_viewMatrix.Row0.X, _viewMatrix.Row0.Y, -_viewMatrix.Row0.Z);
             var camUp = new Vector3(_viewMatrix.Row1.X, _viewMatrix.Row1.Y, -_viewMatrix.Row1.Z);
             var camFacing = new Vector3(_viewMatrix.Row2.X, _viewMatrix.Row2.Y, -_viewMatrix.Row2.Z);
@@ -1664,7 +1695,7 @@ namespace MphRead
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
                 SetHudLayerUniforms();
-                PlayerEntity.Main.DrawHudModels();
+                PlayerEntity.HudOwner.DrawHudModels(); // recomp: HudOwner (PlayerHud.cs)
                 UnsetHudLayerUniforms();
             }
 
@@ -1672,13 +1703,13 @@ namespace MphRead
             GL.Uniform1(_shaderLocations.LayerAlpha, 1f);
             GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
 
-            if (PlayerEntity.Main.HudDisruptedState != 0 || PlayerEntity.Main.HudWhiteoutState != -1)
+            if (PlayerEntity.HudOwner.HudDisruptedState != 0 || PlayerEntity.HudOwner.HudWhiteoutState != -1)
             {
                 float div = _elapsedTime / (1 / 30f);
                 int index = (int)div;
                 float factor = div % 1;
                 GL.UseProgram(_shiftShaderProgramId);
-                GL.Uniform1(_shaderLocations.ShiftFactor, PlayerEntity.Main.HudDisruptionFactor);
+                GL.Uniform1(_shaderLocations.ShiftFactor, PlayerEntity.HudOwner.HudDisruptionFactor);
                 GL.Uniform1(_shaderLocations.ShiftIndex, index);
                 GL.Uniform1(_shaderLocations.LerpFactor, factor);
                 GL.Uniform1(_shaderLocations.WhiteoutFactor, PlayerEntity.Main.HudWhiteoutFactor);
@@ -1711,7 +1742,7 @@ namespace MphRead
 
             GL.BindTexture(TextureTarget.Texture2D, 0);
 
-            if (PlayerEntity.Main.HudDisruptedState != 0 || PlayerEntity.Main.HudWhiteoutState != -1)
+            if (PlayerEntity.HudOwner.HudDisruptedState != 0 || PlayerEntity.HudOwner.HudWhiteoutState != -1)
             {
                 GL.UseProgram(_rttShaderProgramId);
             }
@@ -1732,7 +1763,7 @@ namespace MphRead
                     GL.Uniform1(_shaderLocations.ViewWidth, (float)Size.X);
                     GL.Uniform1(_shaderLocations.ViewHeight, (float)Size.Y);
                 }
-                PlayerEntity.Main.DrawHudObjects();
+                PlayerEntity.HudOwner.DrawHudObjects(); // recomp: HudOwner (PlayerHud.cs)
                 GL.Uniform1(_shaderLocations.UseMask, 0);
                 if (Layer1Info.MaskId != -1)
                 {
@@ -1860,10 +1891,10 @@ namespace MphRead
             if (_cameraMode == CameraMode.Pivot)
             {
                 _viewMatrix.Row3.Xyz = new Vector3(0, 0, _pivotDistance * -1);
-                _viewMatrix = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_pivotAngleX)) * _viewMatrix;
-                _viewMatrix = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_pivotAngleY)) * _viewMatrix;
-                _viewInvRotMatrix = _viewInvRotYMatrix = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(-1 * _pivotAngleY));
-                _viewInvRotMatrix = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(-1 * _pivotAngleX)) * _viewInvRotMatrix;
+                _viewMatrix = DetMatrix.CreateRotationX(MathHelper.DegreesToRadians(_pivotAngleX)) * _viewMatrix;
+                _viewMatrix = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(_pivotAngleY)) * _viewMatrix;
+                _viewInvRotMatrix = _viewInvRotYMatrix = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(-1 * _pivotAngleY));
+                _viewInvRotMatrix = DetMatrix.CreateRotationX(MathHelper.DegreesToRadians(-1 * _pivotAngleX)) * _viewInvRotMatrix;
             }
             else if (_cameraMode == CameraMode.Roam || _cameraMode == CameraMode.Player)
             {
@@ -1875,6 +1906,14 @@ namespace MphRead
                         _viewMatrix = Matrix4.CreateTranslation(-HostCameraOffset) * _viewMatrix;
                     }
                     float fov = PlayerEntity.Main.CameraInfo.Fov > 0 ? PlayerEntity.Main.CameraInfo.Fov : 78;
+                    if (HostView is { } view) // recomp: HostView
+                    {
+                        _viewMatrix = Matrix4.LookAt(view.Position, view.Target, view.Up);
+                        if (view.FovY > 0)
+                        {
+                            fov = view.FovY;
+                        }
+                    }
                     _cameraFov = MathHelper.DegreesToRadians(fov);
                 }
                 else
@@ -1917,7 +1956,9 @@ namespace MphRead
             }
             else if (_cameraMode == CameraMode.Player)
             {
-                _cameraPosition = PlayerEntity.Main.CameraInfo.Position + HostCameraOffset;
+                _cameraPosition = HostView is { } view
+                    ? view.Position // recomp: HostView
+                    : PlayerEntity.Main.CameraInfo.Position + HostCameraOffset;
             }
         }
 
@@ -2109,6 +2150,7 @@ namespace MphRead
             }
             EffectEntry entry = _inactiveEffects.Dequeue();
             entry.EffectId = 0;
+            entry.HostColor = null;
             Debug.Assert(entry.Elements.Count == 0);
             return entry;
         }
@@ -2198,6 +2240,7 @@ namespace MphRead
             entry.ParticleAmount = 0;
             entry.Expired = false;
             entry.ChildEffectId = (int)element.ChildEffectId;
+            entry.HostHidden = HostSpawnHidden;
             entry.Acceleration = element.Acceleration;
             entry.ParticleDefinitions.AddRange(element.Particles);
             entry.Parity = (int)(_frameCount % 2);
@@ -2274,6 +2317,11 @@ namespace MphRead
                 GenerateLists(model, isRoom: false);
             }
         }
+
+        // recomp: effects spawned while this is set run exactly as always (their particles, the random numbers they take)
+        // but aren't drawn: a host draws its own look in their place (BeamProjectileEntity.HostOwnLook: the Scout Drone's
+        // shots in Prime 1's look). Draw-only, so the simulation is the same with or without the host's look.
+        public bool HostSpawnHidden { get; set; }
 
         public EffectEntry? SpawnEffectGetEntry(int effectId, Vector3 facing, Vector3 up, Vector3 position, EntityCollision? entCol = null)
         {
@@ -2725,7 +2773,10 @@ namespace MphRead
                             }
                             vec2 = Vector3.Cross(vec1, vec2).Normalized();
                             Matrix4 transform = Matrix.GetTransform4(vec2, vec1, particle.Position);
+                            bool hidden = HostSpawnHidden;
+                            HostSpawnHidden = element.HostHidden; // recomp: a hidden effect's children stay hidden
                             SpawnEffect(element.ChildEffectId, transform);
+                            HostSpawnHidden = hidden;
                         }
                         element.Particles.Remove(particle);
                         UnlinkEffectParticle(particle);
@@ -3137,7 +3188,7 @@ namespace MphRead
                         }
                         particle.InvokeSetVecsFunc(matrix);
                         particle.InvokeDrawFunc(1);
-                        if (particle.ShouldDraw)
+                        if (particle.ShouldDraw && !element.HostHidden) // recomp: HostSpawnHidden
                         {
                             particle.AddRenderItem(this);
                         }
@@ -3794,9 +3845,11 @@ namespace MphRead
                     w = info.ScaleX;
                     h = info.ScaleY;
                 }
+                float boxScale = HudLayoutWidth / Size.X; // 1, or the dialogs' 4:3 box (HostHudDialogBox)
+                w *= boxScale;
                 HostHudItem item = NextHudItem();
-                item.Left = -w + info.ShiftX;
-                item.Right = w + info.ShiftX;
+                item.Left = -w + info.ShiftX * boxScale;
+                item.Right = w + info.ShiftX * boxScale;
                 item.Top = h + info.ShiftY;
                 item.Bottom = -h + info.ShiftY;
                 item.Alpha = info.Alpha;
@@ -3891,6 +3944,7 @@ namespace MphRead
                 width = width / 256 * viewWidth;
                 height = width / aspect;
             }
+            width *= inst.Scale; height *= inst.Scale; // recomp: HudObjectInstance.Scale (PlayerIntroBanner)
             float viewLeft = -viewWidth / 2;
             float viewTop = viewHeight / 2;
             float leftPos = viewLeft + x * viewWidth - (center ? (width / 2) : 0);
@@ -3934,7 +3988,7 @@ namespace MphRead
             }
             float scale = Size.Y / 192f;
             var position3d = new Vector3(position.X * Size.X - Size.X / 2, (1 - position.Y) * Size.Y - (Size.Y / 2), -1f);
-            Matrix4 transform = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(angle))
+            Matrix4 transform = DetMatrix.CreateRotationZ(MathHelper.DegreesToRadians(angle))
                 * Matrix4.CreateScale(scale, scale, 1) * Matrix4.CreateTranslation(position3d);
             GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref transform);
             Model model = inst.Model;
@@ -3956,10 +4010,24 @@ namespace MphRead
             GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref identity);
         }
 
+        // Headless hosts: the dialogs (PlayerDialog.DrawDialogs: message boxes, pickups, questions, scan results, and their
+        // overlay layer) placed in a centred 4:3 box instead of across the whole view. The HUD sizes its pieces from the
+        // view's height but places them at fractions of its width, so on a wide screen a box's four mirrored quarters drew
+        // apart, the pickup frame slid off its box and the overlay stretched edge to edge (Reports R16, 2026-10-07). The
+        // rest of the HUD keeps the whole width.
+        public static bool HostHudDialogBox { get; set; } = true;
+        private bool _hudDialogBox;
+
+        public void HostHudDialog(bool on) => _hudDialogBox = on && HostHudDialogBox && Headless;
+
+        // the width the HUD lays out across: the whole view, or the dialogs' 4:3 box
+        private float HudLayoutWidth => _hudDialogBox ? MathF.Min(Size.X, Size.Y * 4 / 3f) : Size.X;
+
         // DrawHudObject's placement maths, recorded as an NDC quad
         private void RecordHudObject(HudObjectInstance inst, int mode)
         {
-            float viewWidth = Size.X;
+            float screenWidth = Size.X;
+            float viewWidth = HudLayoutWidth; // (the layout's width; NDC from the whole screen's)
             float viewHeight = Size.Y;
             float width = inst.Width;
             float height = inst.Height;
@@ -3980,11 +4048,12 @@ namespace MphRead
                 width = width / 256 * viewWidth;
                 height = width / aspect;
             }
+            width *= inst.Scale; height *= inst.Scale; // recomp: HudObjectInstance.Scale (PlayerIntroBanner)
             float leftPos = -viewWidth / 2 + inst.PositionX * viewWidth - (inst.Center ? width / 2 : 0);
             float topPos = viewHeight / 2 - inst.PositionY * viewHeight + (inst.Center ? height / 2 : 0);
-            float rightPos = (leftPos + width) / (viewWidth / 2);
+            float rightPos = (leftPos + width) / (screenWidth / 2);
             float bottomPos = (topPos - height) / (viewHeight / 2);
-            leftPos /= viewWidth / 2;
+            leftPos /= screenWidth / 2;
             topPos /= viewHeight / 2;
             if (inst.FlipHorizontal)
             {

@@ -42,7 +42,8 @@ namespace MphRecomp.Import
             var r = new ImportRecipe
             {
                 Kind = kind, Name = name, Text = text, Root = doc.RootElement.Clone(),
-                Sha1 = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant(),
+                // line endings don't count: a CRLF checkout (git autocrlf) must not make every import stale (2026-10-11)
+                Sha1 = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(text.Replace("\r\n", "\n")))).ToLowerInvariant(),
             };
             r.Game = r.Str("game");
             return r;

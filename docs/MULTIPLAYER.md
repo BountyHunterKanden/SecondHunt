@@ -27,7 +27,7 @@ are two ways of connecting to one shared netcode, not two projects.
 |---|---|---|
 | 1 | Offline match host with bots: 7 modes + team variants, 26 retail arenas, MphRead's own rules and bot AI | **Built, PC-verified** (245/245 playable pairs). Not yet on the Odin |
 | 2 | Netcode: host + clients over UDP (section 4) | **N0 done (PC):** remote seats on the host, snapshots, client puppets; two-process `-netloop` match over UDP works (section 4.1). Next: N1 on devices |
-| 3 | Local wireless: same Wi-Fi (UDP broadcast / NSD discovery), Wi-Fi Direct, local-only hotspot | **Same Wi-Fi WORKS on devices (2026-09-30):** Odin hosted, Samsung S23 joined, full Battle start to end (`Net/LanSession`, `MatchNetDriver`, launcher Host/Join LAN match). Wi-Fi Direct / hotspot not started |
+| 3 | Local wireless: same Wi-Fi (UDP broadcast / NSD discovery), Wi-Fi Direct, local-only hotspot | **Same Wi-Fi WORKS on devices (2026-09-30):** Odin hosted, Samsung S23 joined, full Battle start to end (`Net/LanSession`, `MatchNetDriver`, launcher Host/Join LAN match). **2026-10-09: every mode + teams + bots alongside joiners, objective state from the host (`Net/NetObjective`, MphRead `OctolithFlagNet`/`NodeDefenseNet`), LAN protocol 8; host takes up to 3 joiners (vanilla menu MULTIPLAYER > LAN; the beta MULTIPLAYER screen stays host + 1 joiner, any mode, the host's bots). PC PASS (`-lantest players=2..4`, `-onlinetest` all 9 objective modes); no device test yet.** Wi-Fi Direct / hotspot not started |
 | 4 | Online: our own small server (friend codes, presence, game list, relay) | Needs the owner's hosting decision |
 | opt | Split-screen on one device (2-4 Bluetooth controllers, TV out) | Idea only |
 | friends | Friend system (section 5) | Researched, not started |
@@ -126,10 +126,62 @@ differences across ARM64/x64).
   changes (alt form, death, teleport, jump pad). Tier 2 (rewind-replay) needs a generated copier of ~200 player fields
   and muted side effects; jump pads/teleporters trigger from their own entities.
 - Lag compensation: ~32-tick pose history per player on the host; rewind around the player loop in beam collision,
-  splash, ice wave and homing target selection; capped at ~150 ms, only for fast/continuous beams.
+  splash, ice wave and homing target selection; capped at 200 ms (12 frames, owner 2026-10-09), only for fast/continuous beams.
 - `Rng2` is one shared static stream (spread, sway, camera shake for every player). Camera shake feeds alt-form roll
   direction (PlayerCamera.cs ~884 -> PlayerInput.cs ~1184), so a predicting client drifts in alt form. Timers are
   frame-counted: clients step whole 60 Hz ticks only.
+
+### 4.9 8 players (P8, PC-DONE 2026-10-10)
+
+- `PlayerEntity.SlotCapacity` = 8 sizes every per-player table (`PlayerSlots.cs`); `PlayerEntity.MaxPlayers` is 4
+  unless the match has 5-8 seats (`MaxPlayersFor`, `MatchStart`). Every 5-8 path is guarded by
+  `MaxPlayers > VanillaMaxPlayers`: 1-4 player matches stay byte-identical (`-replaygolden` 9/9).
+- Rules for 5-8 follow the 4-player values. FFA Nodes' "no team" = `NodeDefenseEntity.NoTeam` (4, or 8 with 8 slots).
+  Team Survival lives scale with team size (`GameState.TeamLives`).
+- Net: LAN protocol 11, online match protocol 10 (`SeatLimit`, beacon); `NetObjective` seat count; whole snapshots
+  trimmed per joiner when they pass the payload limit (`NetMatchSession` `Joiner.Trimmed`).
+- Screens: RESULTS scrolling (`MultiplayerMenu.ResultsRows.cs`), HUD scoreboard 5-8 compact (`PlayerScoreboard8.cs`, owner
+  pick 2026-10-10), license seat ranks x8, ONLINE PLAY lobby 8 cards (`OnlineMenus.Seats8.cs`); vanilla LAN lobby 5-8 =
+  two rows of smaller seats once a 5th seat is used (owner pick B, `MultiplayerMenu.Seats8.cs`).
+- Tests: `-matchsweep bots=7` 275/275, `-replaytest bots=7` (+ `mode=BattleTeams`), `-lantest players=8`,
+  `-onlinecreatetest seats=8 bots=6`, `-p8scoreboard`, `MP_SEATS=8 -mpmenu results`.
+- Recommended max per arena (`MatchArenas.RecommendedMaxPlayers`: the mode's spawn points clamped 4-8; advice, not a
+  limit, not owner-approved):
+
+| Arena (ROM / name) | Max | Lower in |
+|---|---|---|
+| SANCTORUS / Data Shrine | 8 | - |
+| HARVESTER / Harvester | 4 | - |
+| PROVING GROUND / Combat Hall | 6 | 5: Nodes, NodesTeams |
+| HIGHGROUND - EXPANDED / Elder Passage | 8 | 4: Capture, Bounty, BountyTeams, Defender, DefenderTeams |
+| HIGHGROUND / High Ground | 8 | 4: Defender, DefenderTeams |
+| FUEL SLUICE / Compression Chamber | 6 | - |
+| HEADSHOT / Head Shot | 4 | 4: Battle, BattleTeams, Capture, Nodes, NodesTeams, PrimeHunter |
+| PROCESSOR CORE / Processor Core | 5 | - |
+| FIRE CONTROL / Weapons Complex | 8 | 4: Capture |
+| CRYOCHASM / Ice Hive | 4 | - |
+| OVERLOAD / Incubation Vault | 8 | 5: Nodes, NodesTeams |
+| BREAKTHROUGH / Sanctorus | 7 | 4: Nodes, NodesTeams, Defender, DefenderTeams |
+| SIC TRANSIT / Sic Transit | 8 | 4: Capture |
+| ACCELERATOR / Fuel Stack | 5 | 4: Bounty, BountyTeams, Nodes, NodesTeams |
+| OUTER REACH / Outer Reach | 4 | - |
+| FAULT LINE - EXPANDED / Fault Line | 8 | 6: Bounty, BountyTeams |
+| LINE / Subterranean | 8 | 6: Defender, DefenderTeams |
+| TRANSFER LOCK BT / Transfer Lock | 4 | 4: Battle, BattleTeams, Survival, SurvivalTeams, Bounty, BountyTeams, Defender, DefenderTeams, PrimeHunter |
+| TRANSFER LOCK DM / Transfer Lock | 8 | 4: Nodes, NodesTeams |
+| MAGMA VENTS / Council Chamber | 8 | 6: Bounty, BountyTeams |
+| ALINOS PERCH / Alinos Perch | 6 | 6: Battle, BattleTeams, Survival, SurvivalTeams, Nodes, NodesTeams, Defender, DefenderTeams, PrimeHunter |
+| ALINOS LANDFALL / Alinos Gateway | 8 | 6: Bounty, BountyTeams |
+| LANDING BAY / Celestial Gateway | 4 | - |
+| 3 VESPER STARPORT / VDO Gateway | 4 | - |
+| 4 ARCTERRA BASE / Arcterra Gateway | 6 | 4: Capture |
+| Prison / Oubliette | 8 | - |
+| SIDEHOPPER STATION / Sidehopper Station | 4 | - |
+| SPIRES / Spires | 8 | - |
+| CROSSFIRE CHAOS / Crossfire Chaos | 4 | - |
+| PIPELINE / Pipeline | 8 | - |
+| SPIDER COMPLEX / Spider Complex | 8 | - |
+| SHOOTING GALLERY / Shooting Gallery | 4 | - |
 
 ### Milestones
 - **N0:** Core `Net/` (state structs, serializer, host/client stubs), `PlayerNet.cs` Capture/Apply, a two-process
@@ -138,6 +190,11 @@ differences across ARM64/x64).
   client (or a second Android device).
 - **N2:** items, bombs, Halfturret, 4 seats, bots on the host, disconnects, all modes.
 - **N3:** prediction. **N4:** lag compensation. **N5:** delta compression, Wi-Fi Direct/hotspot UI, internet.
+  **2026-10-09 (Netcode O5, online path, PC-verified):** N3 DONE (`Net/ClientPrediction.cs`, reconcile at the acked
+  input), N4 DONE (`Net/LagCompensation.cs`, 32-frame host pose ring, cap 12 frames = 200 ms, owner 2026-10-09), N5's delta compression
+  + internet DONE (`Net/SnapshotDelta.cs` 30/20 Hz, input redundancy, seat extras, rejoin, Cloudflare TURN with the
+  relay as fallback). The LAN path is unchanged (`-lantest`, `-replaygolden` 9/9). Wi-Fi Direct/hotspot UI not
+  started. Details: docs/ONLINE_PLAY.md section 9.
 - Transport: UDP with unreliable + reliable-ordered channels (e.g. LiteNetLib, MIT, runs on Android).
 
 ### Open questions

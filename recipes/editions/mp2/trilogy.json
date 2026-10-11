@@ -1,0 +1,33 @@
+{
+  "game": "mp2",
+  "title": "Metroid Prime Trilogy",
+  "platform": "Wii",
+  "discPrefixes": [ "R3M" ],
+  "discFolder": "MP2/",
+  "recipeFolder": "",
+  "extensions": [ ".rvz", ".wia", ".iso", ".wbfs" ],
+  "files": [
+    { "name": "LogBook.pak", "sha1": "590207df97d73575c7c3c59a821d908438214616", "editionSha1": "5c7d93b0e61593c1354d521411517aea5fa354f0" },
+    { "name": "Metroid1.pak", "sha1": "6b9a47578f41b2c64a12f1a0bf4e5cd783692124", "editionSha1": "f2fa484833f6031d9641e2ca4d635c3738c567fd" },
+    { "name": "Metroid4.pak", "sha1": "c215ec11904d67ff9d239f154a8fafaaeea84568", "editionSha1": "fde784795517f8d03953c4be525140975b0555da" },
+    { "name": "SamusGun.pak", "sha1": "1712cadada7be9658ca81156027352caed2e93f9", "editionSha1": "e6dd5656ec7a9b7acdbecfac38100247266dffe1" },
+    { "name": "TestAnim.pak", "sha1": "e258890ddd904ce38a0680e2e02795775851914d", "editionSha1": "e258890ddd904ce38a0680e2e02795775851914d" }
+  ],
+  "items": [
+    "guns/MP2DarkSuit",
+    "guns/MP2LightSuit",
+    "guns/MP2VariaSuit",
+    "hd/MP2DarkCommando",
+    "hd/MP2DarkPirateTrooper",
+    "hd/MP2DarkSamus",
+    "hd/MP2DarkSamusBall",
+    "hd/MP2DarkSuit",
+    "hd/MP2DarkSuitBall",
+    "hd/MP2LightSuit",
+    "hd/MP2LightSuitBall",
+    "hd/MP2PirateCommando",
+    "hd/MP2PirateTrooper",
+    "hd/MP2VariaSuit",
+    "hd/MP2VariaSuitBall"
+  ]
+}

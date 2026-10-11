@@ -214,7 +214,7 @@ namespace MphRead.Entities
         private PlayerEntity? SpawnHunter()
         {
             PlayerEntity? player = null;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
             {
                 player = PlayerEntity.Players[i];
                 if (player.Health == 0 && player.EnemySpawner == this)

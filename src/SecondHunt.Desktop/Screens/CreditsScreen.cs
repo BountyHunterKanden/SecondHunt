@@ -12,10 +12,11 @@ internal sealed class CreditsScreen : PageScreen
     readonly Action _close;
     float _top; // first line shown
 
-    public CreditsScreen(Action close)
+    // doc: another embedded text instead (OnlineRules: "online.md", docs/ONLINE_RULES_IN_APP.md)
+    public CreditsScreen(Action close, string? doc = null)
     {
         _close = close;
-        _lines = (Header() + Notices()).Replace("\r\n", "\n").Split('\n');
+        _lines = (doc != null ? Notices(doc) : Header() + Notices()).Replace("\r\n", "\n").Split('\n');
     }
 
     static string Header() =>
@@ -25,9 +26,9 @@ internal sealed class CreditsScreen : PageScreen
         + "you provide. It is not affiliated with or endorsed by Nintendo.\n\n"
         + "----------------------------------------------------------------------------------------------\n\n";
 
-    static string Notices()
+    static string Notices(string name = "notices.md")
     {
-        using Stream? s = typeof(CreditsScreen).Assembly.GetManifestResourceStream("notices.md");
+        using Stream? s = typeof(CreditsScreen).Assembly.GetManifestResourceStream(name);
         if (s == null) return "(notices missing from this build)";
         using var r = new StreamReader(s);
         return r.ReadToEnd();

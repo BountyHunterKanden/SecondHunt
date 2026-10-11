@@ -133,6 +133,14 @@ per-frame units and is halved where it is applied.
 - **Logbook off-by-one -- FIXED 2026-10-01** (reported by the UI session): new-game setup marked table positions 0-6,
   26, 28 instead of scan ids 1-7, 27, 29; counting read positions instead of record numbers (the table skips L030/L031).
   `StorySave.CheckLogbook(StringTableEntry)`; `-accuracy logbook` 4/4 (fresh game EQUIPMENT 9/27 = 33%, as on a DS).
+- **Jump pad steering, measured 2026-10-07 (BizHawk, Echoes arenas thread; details in
+  `docs/MP2_MULTIPLAYER_IMPORT.md` section 10) -- LEFT AS IS (owner 2026-10-08: "document but leave them for now"):**
+  (1) the pad's control lock and its 5-tick minimum end 1 tick (33 ms) later in MphRead than in vanilla
+  (`PlayerProcess.ActivateJumpPad`: `_jumpPadControlLock` / `_jumpPadControlLockMin`); (2) holding sideways after the
+  lock, MphRead keeps more speed while turning (up to 0.32 vs vanilla 0.30 falling to 0.24; reaches 0.24 at tick 7 vs
+  4), and back reverses in slightly different steps (`PlayerInput.cs` stick speed cap + `ProcessMovement` push cut).
+  Applies to every pad (MPH and Echoes). Route `tools/accuracy/routes/probe_jumppad.lua`, Tools
+  `-echoesarena padvanilla`.
 - Not applicable to our controls (record only): touch roll/boost, left-handed mode, touch-alpha.
 
 Each needs the vanilla code path: from the ROM's ARM9/overlay code (a PC-only disassembler, never in the app) plus

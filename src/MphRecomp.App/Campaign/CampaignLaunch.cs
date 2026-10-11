@@ -29,15 +29,16 @@ internal sealed partial class CampaignRenderer
         Hunter hunter = Enum.TryParse(args.Get("hunter"), out Hunter h) ? h : Hunter.Samus;
         string gunsRoot = Path.Combine(dataDir, "guns");
         string settingsPath = Path.Combine(dataDir, "recomp_settings.json");
+        // Echoes arenas and their music imported in-app (IMPORT GAMES) are read from <data>/arenas and <data>/music
+        MphRecomp.Arenas.EchoesArena.ImportRoot = dataDir;
         // gun mp1: the first-person Prime arm cannon from <data>/guns/mp1 in place of MPH's (an explicit arg wins at
         // launch, dev-launcher style); gun none keeps MPH's own. With no arg (or gun settings, the dev launcher's
         // default): Samus takes whatever suit RECOMP SETTINGS has (default MP1PowerSuit, "original" = MPH's own); other
         // hunters keep MP1PowerSuit.
         string? explicitGun = args.Get("gun") is string g && g != "settings" ? g : null;
         string gunId = explicitGun ?? (hunter == Hunter.Samus ? RecompSettings.Load(settingsPath).SamusSuit : "MP1PowerSuit");
-        // a public build (Beta 1: imports and arm cannons held, owner 2026-10-04) has no HD gear at all: MPH's own gun and
-        // Samus, whatever the settings file or the guns/ and hd/ folders hold
-        if (RecompSettings.PublicBuild) gunId = "original";
+        // a public build wears the picked suit's body and morph ball but keeps MPH's own arm cannon (owner 2026-10-07: the
+        // Prime arm cannons are held, the suits are public; was no HD gear at all, Beta 1): CampaignRenderer.StartGearLoad
         string? gunDir = gunId is "none" or "original" ? null : Path.Combine(gunsRoot, gunId);
         // RECOMP SETTINGS -> pause -> resume hot-swaps Samus's suit whenever the player changes it there, even over an
         // explicit arg (cheap: a small file load, no GL work until the next draw); see ReloadGunFromSettings
@@ -63,8 +64,12 @@ internal sealed partial class CampaignRenderer
         if (args.Get("boss") == "down" && !RecompSettings.PublicBuild) renderer.UseBossSkip();
         // in-game cutscenes (CampaignMovie.cs); movies off skips them
         ConfigureMovies(args);
+        renderer.PlacementDir = Path.Combine(dataDir, "placements"); // dev pickup placement editor (PickupPlacer.cs)
         // a multiplayer match with bots instead of the campaign (MatchSession.cs)
         renderer.ConfigureMatch(args);
+        if (explicitGun == null) renderer.DropSettingsSuitInMatch(); // matches don't wear RECOMP SETTINGS' suit
+        // its seats' multiplayer skins (MatchSkins.cs; dev: --es skins)
+        renderer.ConfigureSkins(args);
         // view framing: WIDE (CampaignView.cs; dev only: view wide|ds|prime|panini)
         ConfigureView(args);
         return renderer;

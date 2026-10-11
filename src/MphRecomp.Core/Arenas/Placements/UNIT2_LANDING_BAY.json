@@ -1,0 +1,20 @@
+{
+  "Room": "UNIT2 LANDING BAY",
+  "RoomId": 115,
+  "Arena": "Celestial Gateway",
+  "Saved": "2026-10-10 12:58:41",
+  "Pickups": [
+    {
+      "Item": "PirateBlaster",
+      "Pos": [
+        -0.22,
+        -10.5,
+        -9.831
+      ],
+      "RespawnSeconds": 5
+    }
+  ],
+  "Crates": [],
+  "RemovedItems": [],
+  "RemovedCrates": []
+}

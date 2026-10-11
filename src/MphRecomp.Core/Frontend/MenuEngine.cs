@@ -60,6 +60,9 @@ namespace MphRecomp.Frontend
         // the host can send a page change somewhere else (the pause menu sends "back to Options" to itself)
         public Func<int, int>? Redirect { get; set; }
         public int PageFrame { get; private set; }
+        // ticks since the page settled (vanilla page state 2), -1 before: the page's timers count from there (ov0
+        // 0x2141214 runs them only in state 2), so a credits page holds its 140 ticks after its 191-tick logo is in
+        public int SettledFrame { get; private set; } = -1;
         private ItemRuntime[] _items = Array.Empty<ItemRuntime>();
         private int _pendingPage = -1;
         private int _exitFrames;
@@ -104,9 +107,11 @@ namespace MphRecomp.Frontend
         {
             Page = File.Pages[page];
             PageFrame = 0;
+            SettledFrame = -1;
             _pendingPage = -1;
             _exitFrames = 0;
             _focus = -1;
+            _transforms.Clear();
             _items = new ItemRuntime[Page.Items.Count];
             for (int i = 0; i < _items.Length; i++)
             {
@@ -130,6 +135,28 @@ namespace MphRecomp.Frontend
             for (int i = 0; i < _items.Length; i++)
             {
                 SetState(i, MenuState.Hidden);
+            }
+        }
+
+        // Every item straight to the end of its way in, no animation: a page shown again just as it was left (the license
+        // card back from its name keyboard). Arrivals still fire their links and actions; one that leaves the page stops it.
+        public void Settle()
+        {
+            if (Page == null) return;
+            foreach (ItemRuntime rt in _items) rt.Delay = 0;
+            StartItems();
+            for (int pass = 0; pass < 8 && _pendingPage == -1; pass++)
+            {
+                bool any = false;
+                for (int i = 0; i < _items.Length && _pendingPage == -1; i++)
+                {
+                    if (_items[i].Started && MenuStateCode.IsTransition(_items[i].Code))
+                    {
+                        Arrive(i);
+                        any = true;
+                    }
+                }
+                if (!any) break;
             }
         }
 
@@ -166,9 +193,17 @@ namespace MphRecomp.Frontend
             if (_pendingPage == -1)
             {
                 StartItems();
+                if (SettledFrame >= 0)
+                {
+                    SettledFrame++;
+                }
+                else if (Settled)
+                {
+                    SettledFrame = 0;
+                }
                 foreach (MenuTimer timer in Page.Timers)
                 {
-                    if (PageFrame == (int)MathF.Ceiling(timer.Delay))
+                    if (SettledFrame == (int)MathF.Ceiling(timer.Delay))
                     {
                         Run(timer.Action, item: -1);
                     }
@@ -285,11 +320,15 @@ namespace MphRecomp.Frontend
             }
         }
 
+        // An item's link to itself fires only on arriving in a steady state that the link then leaves (the ROM's only four,
+        // all multiplayer: RESULTS' win-condition box "on Selected -> itself to Idle", the lobby's ADD BOT "on Focused ->
+        // itself to Idle"; BizHawk USA rev 1: the box shows Idle, ADD BOT's focus drops by itself), never on a transition.
         private void Fire(int item, int evt)
         {
             foreach (MenuLink link in Page!.Items[item].Links)
             {
-                if (link.Event == evt && link.Target < _items.Length && link.Target != item)
+                if (link.Event == evt && link.Target < _items.Length
+                    && (link.Target != item || !MenuStateCode.IsTransition(evt) && link.State != (MenuState)evt))
                 {
                     SetState(link.Target, link.State);
                 }
@@ -341,6 +380,42 @@ namespace MphRecomp.Frontend
                 y0 = Math.Min(a.RectY, a.RectH); y1 = Math.Max(a.RectY, a.RectH);
             }
             x0 += ox; x1 += ox; y0 += oy; y1 += oy;
+            return true;
+        }
+
+        // Ours, not the game's (P8, MultiplayerMenu's lobby with 5-8 seats: the ROM's seats smaller, in two rows): an
+        // item drawn scaled about a pivot and moved, in menu space (y up, the touch screen -192..0): x' = PivotX +
+        // (x - PivotX) * Scale + Dx. Its touch rectangles follow. Cleared when a page is entered.
+        private readonly Dictionary<int, (float Scale, float Px, float Py, float Dx, float Dy)> _transforms = new();
+
+        public void SetItemTransform(int item, float scale, float pivotX, float pivotY, float dx, float dy)
+            => _transforms[item] = (scale, pivotX, pivotY, dx, dy);
+
+        public void ClearItemTransform(int item) => _transforms.Remove(item);
+
+        // an item's triangles (from `start` on) placed as Collect places them
+        public void TransformTris(int item, List<WidgetTri> tris, int start)
+        {
+            if (!_transforms.TryGetValue(item, out var m)) return;
+            for (int t = start; t < tris.Count; t++)
+            {
+                WidgetTri tri = tris[t];
+                tri.A.X = m.Px + (tri.A.X - m.Px) * m.Scale + m.Dx; tri.A.Y = m.Py + (tri.A.Y - m.Py) * m.Scale + m.Dy;
+                tri.B.X = m.Px + (tri.B.X - m.Px) * m.Scale + m.Dx; tri.B.Y = m.Py + (tri.B.Y - m.Py) * m.Scale + m.Dy;
+                tri.C.X = m.Px + (tri.C.X - m.Px) * m.Scale + m.Dx; tri.C.Y = m.Py + (tri.C.Y - m.Py) * m.Scale + m.Dy;
+                tris[t] = tri;
+            }
+        }
+
+        // TryRect for one of the page's items, with its transform (text coordinates: menu y + 192)
+        private bool ItemRect(int item, MenuAction a, out float x0, out float y0, out float x1, out float y1)
+        {
+            if (!TryRect(a, Page!.Items[item], out x0, out y0, out x1, out y1)) return false;
+            if (_transforms.TryGetValue(item, out var m))
+            {
+                x0 = m.Px + (x0 - m.Px) * m.Scale + m.Dx; x1 = m.Px + (x1 - m.Px) * m.Scale + m.Dx;
+                y0 = m.Py + (y0 - 192 - m.Py) * m.Scale + m.Dy + 192; y1 = m.Py + (y1 - 192 - m.Py) * m.Scale + m.Dy + 192;
+            }
             return true;
         }
 
@@ -568,7 +643,7 @@ namespace MphRecomp.Frontend
             }
             foreach (MenuAction a in it.Actions)
             {
-                if (TryRect(a, it, out x0, out y0, out x1, out y1))
+                if (ItemRect(focused, a, out x0, out y0, out x1, out y1))
                 {
                     y0 -= 192;
                     y1 -= 192;
@@ -583,7 +658,7 @@ namespace MphRecomp.Frontend
             MenuItem it = Page!.Items[item];
             foreach (MenuAction a in it.Actions)
             {
-                if (TryRect(a, it, out float x0, out float y0, out float x1, out float y1))
+                if (ItemRect(item, a, out float x0, out float y0, out float x1, out float y1))
                 {
                     return ((x0 + x1) / 2, (y0 + y1) / 2);
                 }
@@ -608,16 +683,19 @@ namespace MphRecomp.Frontend
                 MenuItem it = Page.Items[i];
                 foreach (MenuAction a in it.Actions)
                 {
-                    if (TryRect(a, it, out float x0, out float y0, out float x1, out float y1)
+                    if (ItemRect(i, a, out float x0, out float y0, out float x1, out float y1)
                         && x >= x0 && x <= x1 && y >= y0 && y <= y1) return i;
                 }
             }
             return -1;
         }
 
-        public void Touch(float x, float y)
+        // Ours (FrontendSession's layout regions): `accept` says whether a hit item rectangle (text coordinates) may take
+        // this touch, a rectangle it turns down is passed over as if missed (a tap in one region on a button drawn in
+        // another); `pageActions` false leaves the page's own actions out. True when something took the touch.
+        public bool Touch(float x, float y, Func<float, float, float, float, bool>? accept = null, bool pageActions = true)
         {
-            if (Page == null || _pendingPage != -1) return;
+            if (Page == null || _pendingPage != -1) return false;
             for (int i = _items.Length - 1; i >= 0; i--)
             {
                 // hidden, and disabled (State5, 0x2140d50 skips state 5 and moves to/from it), items take no touch
@@ -625,8 +703,8 @@ namespace MphRecomp.Frontend
                 MenuItem it = Page.Items[i];
                 foreach (MenuAction a in it.Actions)
                 {
-                    if (!TryRect(a, it, out float x0, out float y0, out float x1, out float y1)) continue;
-                    if (x >= x0 && x <= x1 && y >= y0 && y <= y1)
+                    if (!ItemRect(i, a, out float x0, out float y0, out float x1, out float y1)) continue;
+                    if (x >= x0 && x <= x1 && y >= y0 && y <= y1 && (accept == null || accept(x0, y0, x1, y1)))
                     {
                         bool focusable = it.GetState((int)MenuState.Focused) != null && HasAction(i, MenuKeys.A);
                         // settled BEFORE this touch focuses it (EngTouch focuses, then EngAction tests the item's state:
@@ -639,14 +717,15 @@ namespace MphRecomp.Frontend
                         {
                             // an item that can never be focused can't run it at all: TOUCH_NEGATIVE
                             if (!focusable) Sound(MenuSounds.Negative, $"item {i} not focusable");
-                            return;
+                            return true;
                         }
                         ActionSound(a, i);
                         Run(a, i);
-                        return;
+                        return true;
                     }
                 }
             }
+            if (!pageActions) return false;
             foreach (MenuAction a in Page.Actions)
             {
                 if (TryRect(a, null, out float x0, out float y0, out float x1, out float y1)
@@ -654,9 +733,10 @@ namespace MphRecomp.Frontend
                 {
                     Host?.OnAction(this, a, -1);
                     Run(a, -1);
-                    return;
+                    return true;
                 }
             }
+            return false;
         }
 
         // ---- drawing ----
@@ -684,6 +764,7 @@ namespace MphRecomp.Frontend
                     int before = output.Count;
                     Widgets.Evaluate(visual.WidgetIndex, rt.Frame, loop: steady, alpha: 1, output);
                     if (item.StretchX != 0 || item.StretchDown != 0) Stretch(output, before, item.StretchX, item.StretchDown);
+                    if (SideBorders) AddSideBorders(output, before);
                     if (item.X != 0 || item.Y != 0)
                     {
                         for (int t = before; t < output.Count; t++)
@@ -694,7 +775,19 @@ namespace MphRecomp.Frontend
                             output[t] = tri;
                         }
                     }
+                    // the item's depth moves its widget nearer, as it does a text (TextZ + Depth): vanilla draws the multi-card
+                    // door's wireless icon (depth 20, model z 0) over the door (z 4.91) (BizHawk USA rev 1, page 25)
+                    if (item.Depth != 0)
+                    {
+                        for (int t = before; t < output.Count; t++)
+                        {
+                            WidgetTri tri = output[t];
+                            tri.Z += item.Depth;
+                            output[t] = tri;
+                        }
+                    }
                 }
+                TransformTris(i, output, first);
                 for (int t = first; t < output.Count; t++)
                 {
                     WidgetTri tri = output[t];
@@ -710,9 +803,75 @@ namespace MphRecomp.Frontend
             for (int i = 0; i < order.Length; i++) output[start + i] = slice[order[i]];
         }
 
+        // Reports R11 (owner 2026-10-07: "orange lines around the boxes that are the width of the ds screen on the vertical
+        // borders in addition to the existing horizontal ones"): a box drawn across the whole DS screen (the menus'
+        // blackdrop panel) is a nine-patch texture whose model stretches only the MIDDLE column (u 1/3..2/3) from edge to
+        // edge -- on the DS its sides were the screen's edges. On a wider screen the box floats, so this adds the texture's
+        // own left and right columns (its corners and vertical edges), square texels, and narrows the middle to match.
+        // On every menu with such a box (owner 2026-10-07 ~22:35: "yes, every such box"); the tools' FE_SIDEBORDERS=0
+        // shows them as before.
+        public static bool SideBorders { get; set; } = true;
+
+        private static void AddSideBorders(List<WidgetTri> tris, int start)
+        {
+            int count = tris.Count - start;
+            if (count < 2) return;
+            const float U0 = 0.332f, U1 = 0.668f, Eps = 0.01f;
+            float minX = float.MaxValue, maxX = float.MinValue, pxPerV = 0;
+            int texture = tris[start].TextureId;
+            for (int t = start; t < tris.Count; t++)
+            {
+                WidgetTri tri = tris[t];
+                if (tri.TextureId != texture || texture < 0) return;
+                foreach (UiVertex v in new[] { tri.A, tri.B, tri.C })
+                {
+                    if (v.U < U0 - Eps || v.U > U1 + Eps) return; // not a middle-column box
+                    minX = MathF.Min(minX, v.X);
+                    maxX = MathF.Max(maxX, v.X);
+                }
+                // its texel size from a band's height against its v span
+                float y0 = MathF.Min(tri.A.Y, MathF.Min(tri.B.Y, tri.C.Y)), y1 = MathF.Max(tri.A.Y, MathF.Max(tri.B.Y, tri.C.Y));
+                float v0 = MathF.Min(tri.A.V, MathF.Min(tri.B.V, tri.C.V)), v1 = MathF.Max(tri.A.V, MathF.Max(tri.B.V, tri.C.V));
+                if (v1 - v0 > Eps && pxPerV == 0) pxPerV = (y1 - y0) / (v1 - v0);
+            }
+            if (maxX - minX < 250 || pxPerV <= 0) return; // only the screen-wide boxes
+            float w = U0 * pxPerV;
+            UiVertex Side(UiVertex v, bool left)
+            {
+                bool atLeft = MathF.Abs(v.X - minX) < Eps;
+                if (left)
+                {
+                    v.X = atLeft ? minX : minX + w;
+                    v.U = atLeft ? 0 : U0;
+                }
+                else
+                {
+                    v.X = atLeft ? maxX - w : maxX;
+                    v.U = atLeft ? U1 : 1;
+                }
+                return v;
+            }
+            UiVertex Middle(UiVertex v)
+            {
+                v.X = MathF.Abs(v.X - minX) < Eps ? minX + w : maxX - w;
+                return v;
+            }
+            for (int t = start; t < start + count; t++)
+            {
+                WidgetTri tri = tris[t];
+                WidgetTri l = tri, r = tri;
+                l.A = Side(tri.A, true); l.B = Side(tri.B, true); l.C = Side(tri.C, true);
+                r.A = Side(tri.A, false); r.B = Side(tri.B, false); r.C = Side(tri.C, false);
+                tri.A = Middle(tri.A); tri.B = Middle(tri.B); tri.C = Middle(tri.C);
+                tris[t] = tri;
+                tris.Add(l);
+                tris.Add(r);
+            }
+        }
+
         // An item's resize (MenuItem.StretchX / StretchDown, set by RecompMenus): its widget's vertices move away from
         // the centre of the widget as drawn this frame, so end caps and borders keep their size and the middle grows.
-        private static void Stretch(List<WidgetTri> tris, int start, float stretchX, float stretchDown)
+        internal static void Stretch(List<WidgetTri> tris, int start, float stretchX, float stretchDown)
         {
             if (start >= tris.Count) return;
             float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
@@ -745,6 +904,14 @@ namespace MphRecomp.Frontend
         // (?) text sits above the widgets
         private const float TextZ = 1000;
 
+        // ...except a text the data puts BEHIND (negative depth: 14 in the whole file, e.g. file select's "create new game"
+        // labels at -20, the wifi pages' "client b" at -100): above the backdrops, the file circles (model z <= 4.91) and a
+        // focused file's ring (big_highlight, up to 20.41 with its depth 10), under the boxes that open over it (the create
+        // dialog's dialog_yesno z 30, its small_highlight 35-37), as vanilla's create dialog hides the label (BizHawk USA
+        // rev 1, 2026-10-04 copy/delete captures). Owner 2026-10-07 (Reports R15): the slot's label showed through the
+        // create dialog. A whole-file survey (every page settled, rev 0) found no other text that this puts under a widget.
+        internal static float TextDepthZ(float depth) => depth < 0 ? 28 + depth / 5 : TextZ + depth;
+
         private void EmitText(MenuItem item, MenuTextStyle style, int frame, bool steady, List<WidgetTri> output)
         {
             float t = 0; // no duration: the start colour (checked against the game: an unfocused label keeps its start colour)
@@ -761,7 +928,7 @@ namespace MphRecomp.Frontend
             if (a <= 0) return;
             string text = Strings[style.StringId];
             Font.Emit(text, item.X, item.Y, style.Align, style.WrapWidth, lineHeight: style.Size == 0 ? 8 : style.Size,
-                Lerp(sr, er), Lerp(sg, eg), Lerp(sb, eb), a, TextZ + item.Depth, output);
+                Lerp(sr, er), Lerp(sg, eg), Lerp(sb, eb), a, TextDepthZ(item.Depth), output);
         }
     }
 }

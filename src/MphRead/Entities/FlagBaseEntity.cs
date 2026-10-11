@@ -54,7 +54,10 @@ namespace MphRead.Entities
                         }
                         continue;
                     }
-                    player.OctolithFlag.OnCaptured();
+                    if (!PlayerEntity.NetClient) // (network client: the host's capture event, OctolithFlagNet)
+                    {
+                        player.OctolithFlag.OnCaptured();
+                    }
                 }
             }
             return true;

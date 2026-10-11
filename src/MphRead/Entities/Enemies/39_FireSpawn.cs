@@ -293,7 +293,7 @@ namespace MphRead.Entities.Enemies
             var vec = new Vector3(distance, 0, 0);
             _surfaceDirection *= -1;
             float angle = Rng.GetRandomInt2(0xB4000) / 4096f; // [0-180)
-            vec = Matrix.Vec3MultMtx3(vec, Matrix4.CreateRotationY(MathHelper.DegreesToRadians(angle * _surfaceDirection)));
+            vec = Matrix.Vec3MultMtx3(vec, DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(angle * _surfaceDirection)));
             Vector3 position = Vector3.Zero;
             if (_locationVolume.Type == VolumeType.Cylinder)
             {

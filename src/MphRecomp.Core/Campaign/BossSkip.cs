@@ -30,18 +30,28 @@ namespace MphRecomp.Campaign
         public bool Done { get; private set; }
 
         // the intro is over and the hits are landing (the host may run the sim fast meanwhile)
-        public bool Fighting => _movieSerial >= 0 && !Done;
+        public bool Fighting => _gorea?.Fighting ?? (_movieSerial >= 0 && !Done);
+
+        // Gorea_b1 / Gorea_b2: GoreaSkip.cs (owner queue #36, the endings)
+        GoreaSkip? _gorea;
 
         // every hit, for the log (part, health before -> after)
         public System.Action<string>? Trace { get; set; }
 
         // how the fight went, for the log
-        public string Report => $"{_hits} hits over {_frames} frames";
+        public string Report => _gorea?.Report ?? $"{_hits} hits over {_frames} frames";
 
         public void Step(Scene scene)
         {
             if (Done)
             {
+                return;
+            }
+            if (_gorea != null || GoreaSkip.IsGoreaRoom(scene.RoomId))
+            {
+                _gorea ??= new GoreaSkip { Trace = Trace };
+                _gorea.Step(scene);
+                Done = _gorea.Done;
                 return;
             }
             Enemy41Entity? slench = null;

@@ -7,7 +7,7 @@ namespace MphRecomp.Import.Retro
     // An Echoes area (MREA v0x19): the section table unpacked from its LZO clusters, the area collision (triangles +
     // 64-bit material flags) and the script layers (objects with their property trees). Ported from the research
     // prototypes in extract_out/multiplayer/mp2 (mp2geo/mp2_mrea.py, mp2/scly.py), as PrimeWorldEditor's CAreaLoader /
-    // CCollisionLoader / CScriptLoader read them (MIT). World geometry and lights come later (docs/MP2_MULTIPLAYER_IMPORT.md).
+    // CCollisionLoader / CScriptLoader read them (MIT). World geometry: ReadGeometry; lights: ReadLights.
     public sealed class Mrea
     {
         public const uint Magic = 0xDEADBEEF, EchoesVersion = 0x19;
@@ -279,6 +279,53 @@ namespace MphRecomp.Import.Retro
                     return v;
                 }
             }
+        }
+
+        // ---- lights ----
+
+        public enum LightType { LocalAmbient = 0, Directional = 1, Custom = 2, Spot = 3 }
+
+        // one of the area's world lights (area space, metres), 65 bytes as PrimeWorldEditor's CAreaLoader::ReadLightsPrime
+        // reads them (Echoes keeps Prime's layout): type, colour, position, direction, brightness q, spot cutoff
+        // (degrees), 4 unknown bytes, casts shadows, 4 unknown, falloff (0 constant, 1 linear, 2 quadratic), 4 unknown
+        public sealed class Light
+        {
+            public LightType Type;
+            public float[] Color = new float[3], Position = new float[3], Direction = new float[3];
+            public float Multiplier, SpotCutoff;
+            public bool CastShadows;
+            public int Falloff;
+        }
+
+        // the area's two light layers (actors are lit from these; the world itself is lightmapped): empty lists when the
+        // area has none. Every multiplayer arena fills layer 0 only (one local ambient + 13-102 custom/spot lights)
+        public List<Light>[] ReadLights()
+        {
+            var layers = new[] { new List<Light>(), new List<Light>() };
+            if (LightSection < 0 || LightSection >= Sections.Length) return layers;
+            byte[] s = Sections[LightSection];
+            if (s.Length < 4 || Be.U32(s, 0) != 0xBABEDEAD) return layers;
+            int o = 4;
+            for (int l = 0; l < 2; l++)
+            {
+                int n = (int)Be.U32(s, o); o += 4;
+                for (int i = 0; i < n; i++, o += 65)
+                {
+                    var light = new Light
+                    {
+                        Type = (LightType)Be.U32(s, o), Multiplier = Be.F32(s, o + 40), SpotCutoff = Be.F32(s, o + 44),
+                        CastShadows = s[o + 52] != 0, Falloff = (int)Be.U32(s, o + 57),
+                    };
+                    for (int k = 0; k < 3; k++)
+                    {
+                        light.Color[k] = Be.F32(s, o + 4 + 4 * k);
+                        light.Position[k] = Be.F32(s, o + 16 + 4 * k);
+                        light.Direction[k] = Be.F32(s, o + 28 + 4 * k);
+                    }
+                    layers[l].Add(light);
+                }
+            }
+            return layers;
         }
 
         public List<ScriptObject> ReadScripts(bool includeGenerated = false)

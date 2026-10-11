@@ -14,9 +14,9 @@ namespace MphRead.Entities
         private readonly Vector3 _exitEventColor;
 
         public new bool Active { get; set; }
-        private readonly int[] _cooldownSlots = new int[4];
-        private readonly bool[] _triggeredSlots = new bool[4];
-        private readonly uint[] _prioritySlots = new uint[4];
+        private readonly int[] _cooldownSlots = new int[PlayerEntity.SlotCapacity];
+        private readonly bool[] _triggeredSlots = new bool[PlayerEntity.SlotCapacity];
+        private readonly uint[] _prioritySlots = new uint[PlayerEntity.SlotCapacity];
         private int _cooldownTime = 0;
 
         protected override Vector4? OverrideColor { get; } = new ColorRgb(0xFF, 0xFF, 0x00).AsVector4();
@@ -32,7 +32,7 @@ namespace MphRead.Entities
             SetTransform(data.Header.FacingVector, data.Header.UpVector, data.Header.Position);
             _volume = CollisionVolume.Move(_data.Volume, Position);
             AddPlaceholderModel();
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 _prioritySlots[i] = _data.Priority;
             }

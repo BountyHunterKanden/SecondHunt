@@ -18,10 +18,30 @@ namespace MphRecomp.Multiplayer.Net
         public short[] Deaths = Array.Empty<short>();
         // the arena's items, every few frames and whenever they change (null = not in this snapshot)
         public NetItem[]? Items;
+        // the mode's state (timers, octoliths, nodes, mode stats) in every mode but Battle (null = none)
+        public NetObjective? Objective;
+        // online only (SnapshotDelta, per joiner): the newest input of the receiving device's seat the host had applied when
+        // it took this snapshot (-1 = none yet), and the frames it has stepped since on that input held (it hadn't come yet)
+        public int InputAck = -1;
+        public int InputHeld;
+        // online only: afflictions, power-ups, turrets and detail stats (SeatExtras; sent by SnapshotDelta beside the bytes
+        // Write writes, so the LAN wire is unchanged)
+        public SeatExtras? Extras;
+        // online only (O5b): the item spawners and drop timers, for a client that becomes the host (HostHandoff)
+        public HostHandoff? Handoff;
+        // the Trooper's cling + drone per seat (SeatAbilities: LAN protocol 9 / online 8; null = no seat has an ability).
+        // The last block of Write's bytes, so online's SnapshotDelta carries it inside the mode block (which runs to the end)
+        public SeatAbilities? Abilities;
+        // LAN only (14): the detail stats as the host counts them (online sends them in Extras); null = not this snapshot
+        public SeatExtras.SeatStats[]? Stats;
+        // the Echoes arenas' crates + breakables (NetWorld: LAN protocol 16 / online 15; null = the arena has none)
+        public NetWorld? World;
 
         public const int HeaderSize = 10;
         public const int SeatSize = 62;
-        public int Size => HeaderSize + Seats.Length * SeatSize + 1 + (Items == null ? 0 : 1 + Items.Length * NetItem.Size);
+        public int Size => HeaderSize + Seats.Length * SeatSize + 1 + (Items == null ? 0 : 1 + Items.Length * NetItem.Size)
+            + 1 + (Objective?.Size ?? 0) + 1 + (Abilities?.Size ?? 0) + 1 + (Stats == null ? 0 : 1 + Stats.Length * SeatExtras.StatsSize)
+            + 1 + (World?.Size ?? 0);
 
         public int Write(Span<byte> dest)
         {
@@ -32,28 +52,7 @@ namespace MphRecomp.Multiplayer.Net
             int o = HeaderSize;
             for (int i = 0; i < Seats.Length; i++)
             {
-                ref PlayerNetState s = ref Seats[i];
-                Span<byte> d = dest[o..];
-                d[0] = s.Flags;
-                WriteVec(d[1..], s.Position);
-                WriteVec(d[13..], s.Speed);
-                WriteUnit(d[25..], s.Facing);
-                WriteUnit(d[31..], s.Up);
-                BinaryPrimitives.WriteInt16LittleEndian(d[37..], (short)Math.Clamp(MathF.Round(Wrap(s.Yaw) * 65536f / 360f), -32768, 32767));
-                BinaryPrimitives.WriteInt16LittleEndian(d[39..], (short)Math.Clamp(MathF.Round(s.Pitch * 100), -18000, 18000));
-                d[41] = s.AimEpoch;
-                BinaryPrimitives.WriteUInt16LittleEndian(d[42..], s.Health);
-                d[44] = (byte)s.Weapon;
-                BinaryPrimitives.WriteUInt16LittleEndian(d[45..], s.Weapons);
-                BinaryPrimitives.WriteInt16LittleEndian(d[47..], s.Ammo0);
-                BinaryPrimitives.WriteInt16LittleEndian(d[49..], s.Ammo1);
-                BinaryPrimitives.WriteUInt16LittleEndian(d[51..], s.Controls);
-                BinaryPrimitives.WriteInt16LittleEndian(d[53..], Points[i]);
-                BinaryPrimitives.WriteInt16LittleEndian(d[55..], Kills[i]);
-                BinaryPrimitives.WriteInt16LittleEndian(d[57..], Deaths[i]);
-                d[59] = (byte)s.LastAttacker;
-                d[60] = (byte)s.LastBeam;
-                d[61] = s.LastFlags;
+                WriteSeat(dest[o..], Seats[i], Points[i], Kills[i], Deaths[i]);
                 o += SeatSize;
             }
             if (Items == null)
@@ -70,6 +69,47 @@ namespace MphRecomp.Multiplayer.Net
                     Items[i].Write(dest[o..]);
                     o += NetItem.Size;
                 }
+            }
+            if (Objective == null)
+            {
+                dest[o++] = 0;
+            }
+            else
+            {
+                dest[o++] = 1;
+                o += Objective.Write(dest[o..]);
+            }
+            if (Abilities == null)
+            {
+                dest[o++] = 0;
+            }
+            else
+            {
+                dest[o++] = 1;
+                o += Abilities.Write(dest[o..]);
+            }
+            if (Stats == null)
+            {
+                dest[o++] = 0;
+            }
+            else
+            {
+                dest[o++] = 1;
+                dest[o++] = (byte)Stats.Length;
+                for (int i = 0; i < Stats.Length; i++)
+                {
+                    SeatExtras.WriteStats(dest[o..], Stats[i]);
+                    o += SeatExtras.StatsSize;
+                }
+            }
+            if (World == null)
+            {
+                dest[o++] = 0;
+            }
+            else
+            {
+                dest[o++] = 1;
+                o += World.Write(dest[o..]);
             }
             return o;
         }
@@ -90,30 +130,7 @@ namespace MphRecomp.Multiplayer.Net
             int o = HeaderSize;
             for (int i = 0; i < count; i++)
             {
-                ReadOnlySpan<byte> d = src[o..];
-                snap.Seats[i] = new PlayerNetState
-                {
-                    Flags = d[0],
-                    Position = ReadVec(d[1..]),
-                    Speed = ReadVec(d[13..]),
-                    Facing = ReadUnit(d[25..]),
-                    Up = ReadUnit(d[31..]),
-                    Yaw = BinaryPrimitives.ReadInt16LittleEndian(d[37..]) * 360f / 65536f,
-                    Pitch = BinaryPrimitives.ReadInt16LittleEndian(d[39..]) / 100f,
-                    AimEpoch = d[41],
-                    Health = BinaryPrimitives.ReadUInt16LittleEndian(d[42..]),
-                    Weapon = (sbyte)d[44],
-                    Weapons = BinaryPrimitives.ReadUInt16LittleEndian(d[45..]),
-                    Ammo0 = BinaryPrimitives.ReadInt16LittleEndian(d[47..]),
-                    Ammo1 = BinaryPrimitives.ReadInt16LittleEndian(d[49..]),
-                    Controls = BinaryPrimitives.ReadUInt16LittleEndian(d[51..]),
-                    LastAttacker = (sbyte)d[59],
-                    LastBeam = (sbyte)d[60],
-                    LastFlags = d[61]
-                };
-                snap.Points[i] = BinaryPrimitives.ReadInt16LittleEndian(d[53..]);
-                snap.Kills[i] = BinaryPrimitives.ReadInt16LittleEndian(d[55..]);
-                snap.Deaths[i] = BinaryPrimitives.ReadInt16LittleEndian(d[57..]);
+                snap.Seats[i] = ReadSeat(src[o..], out snap.Points[i], out snap.Kills[i], out snap.Deaths[i]);
                 o += SeatSize;
             }
             if (o < src.Length && src[o++] == 1)
@@ -126,7 +143,87 @@ namespace MphRecomp.Multiplayer.Net
                     o += NetItem.Size;
                 }
             }
+            if (o < src.Length && src[o++] == 1)
+            {
+                snap.Objective = NetObjective.Read(src[o..], out int size);
+                o += size;
+            }
+            if (o < src.Length && src[o++] == 1)
+            {
+                snap.Abilities = SeatAbilities.Read(src[o..], out int size);
+                o += size;
+            }
+            if (o < src.Length && src[o++] == 1 && o < src.Length)
+            {
+                int stats = src[o++];
+                if (src.Length - o >= stats * SeatExtras.StatsSize)
+                {
+                    snap.Stats = new SeatExtras.SeatStats[stats];
+                    for (int i = 0; i < stats; i++)
+                    {
+                        snap.Stats[i] = SeatExtras.ReadStats(src[o..]);
+                        o += SeatExtras.StatsSize;
+                    }
+                }
+            }
+            if (o < src.Length && src[o++] == 1)
+            {
+                snap.World = NetWorld.Read(src[o..], out int size);
+                o += size;
+            }
             return snap;
+        }
+
+        // one seat's SeatSize bytes (the online delta compares these byte ranges: SnapshotDelta.SeatGroups)
+        public static void WriteSeat(Span<byte> d, in PlayerNetState s, short points, short kills, short deaths)
+        {
+            d[0] = s.Flags;
+            WriteVec(d[1..], s.Position);
+            WriteVec(d[13..], s.Speed);
+            WriteUnit(d[25..], s.Facing);
+            WriteUnit(d[31..], s.Up);
+            BinaryPrimitives.WriteInt16LittleEndian(d[37..], (short)Math.Clamp(MathF.Round(Wrap(s.Yaw) * 65536f / 360f), -32768, 32767));
+            BinaryPrimitives.WriteInt16LittleEndian(d[39..], (short)Math.Clamp(MathF.Round(s.Pitch * 100), -18000, 18000));
+            d[41] = s.AimEpoch;
+            BinaryPrimitives.WriteUInt16LittleEndian(d[42..], s.Health);
+            d[44] = (byte)s.Weapon;
+            BinaryPrimitives.WriteUInt16LittleEndian(d[45..], s.Weapons);
+            BinaryPrimitives.WriteInt16LittleEndian(d[47..], s.Ammo0);
+            BinaryPrimitives.WriteInt16LittleEndian(d[49..], s.Ammo1);
+            BinaryPrimitives.WriteUInt16LittleEndian(d[51..], s.Controls);
+            BinaryPrimitives.WriteInt16LittleEndian(d[53..], points);
+            BinaryPrimitives.WriteInt16LittleEndian(d[55..], kills);
+            BinaryPrimitives.WriteInt16LittleEndian(d[57..], deaths);
+            d[59] = (byte)s.LastAttacker;
+            d[60] = (byte)s.LastBeam;
+            d[61] = s.LastFlags;
+        }
+
+        public static PlayerNetState ReadSeat(ReadOnlySpan<byte> d, out short points, out short kills, out short deaths)
+        {
+            points = BinaryPrimitives.ReadInt16LittleEndian(d[53..]);
+            kills = BinaryPrimitives.ReadInt16LittleEndian(d[55..]);
+            deaths = BinaryPrimitives.ReadInt16LittleEndian(d[57..]);
+            return new PlayerNetState
+            {
+                Flags = d[0],
+                Position = ReadVec(d[1..]),
+                Speed = ReadVec(d[13..]),
+                Facing = ReadUnit(d[25..]),
+                Up = ReadUnit(d[31..]),
+                Yaw = BinaryPrimitives.ReadInt16LittleEndian(d[37..]) * 360f / 65536f,
+                Pitch = BinaryPrimitives.ReadInt16LittleEndian(d[39..]) / 100f,
+                AimEpoch = d[41],
+                Health = BinaryPrimitives.ReadUInt16LittleEndian(d[42..]),
+                Weapon = (sbyte)d[44],
+                Weapons = BinaryPrimitives.ReadUInt16LittleEndian(d[45..]),
+                Ammo0 = BinaryPrimitives.ReadInt16LittleEndian(d[47..]),
+                Ammo1 = BinaryPrimitives.ReadInt16LittleEndian(d[49..]),
+                Controls = BinaryPrimitives.ReadUInt16LittleEndian(d[51..]),
+                LastAttacker = (sbyte)d[59],
+                LastBeam = (sbyte)d[60],
+                LastFlags = d[61]
+            };
         }
 
         private static void WriteVec(Span<byte> d, Vector3 v)

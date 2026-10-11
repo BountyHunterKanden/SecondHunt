@@ -19,7 +19,7 @@ namespace MphRead.Entities
         public new bool Active { get; set; }
         private bool _bool3 = false; // todo: names
         private bool _bool4 = false;
-        private readonly bool[] _triggeredSlots = new bool[4] { true, true, true, true };
+        private readonly bool[] _triggeredSlots = new bool[PlayerEntity.SlotCapacity] { true, true, true, true, true, true, true, true };
         private readonly int _targetRoomId = -1;
         private NodeRef _targetNodeRef = NodeRef.None;
 
@@ -92,13 +92,13 @@ namespace MphRead.Entities
                 inst.SetAnimation(-1);
                 float angleY = MathHelper.DegreesToRadians(337 * (360 / 4096f));
                 float angleZ = MathHelper.DegreesToRadians(360 * (360 / 4096f));
-                Matrix4 transform = Matrix4.CreateRotationY(angleY) * Matrix4.CreateRotationZ(angleZ);
+                Matrix4 transform = DetMatrix.CreateRotationY(angleY) * DetMatrix.CreateRotationZ(angleZ);
                 transform.Row3.Xyz = new Vector3(Fixed.ToFloat(7208), Fixed.ToFloat(2375), 0);
                 _artifact1Transform = transform;
                 angleY = MathHelper.DegreesToRadians(1365 * (360 / 4096f));
-                _artifact2Transform = _artifact1Transform * Matrix4.CreateRotationY(angleY);
+                _artifact2Transform = _artifact1Transform * DetMatrix.CreateRotationY(angleY);
                 angleY = MathHelper.DegreesToRadians(2730 * (360 / 4096f));
-                _artifact3Transform = _artifact1Transform * Matrix4.CreateRotationY(angleY);
+                _artifact3Transform = _artifact1Transform * DetMatrix.CreateRotationY(angleY);
             }
             if (multiplayer)
             {

@@ -34,6 +34,7 @@ namespace MphRecomp.Frontend
             Scene.Headless = true;
             Scene.CollectDrawItems = true;
             Menu.SaveSlot = 0; // GameState.Reset reads no save file
+            MphRead.Entities.PlayerEntity.MaxPlayers = MphRead.Entities.PlayerEntity.VanillaMaxPlayers; // (a match may have set 8: P8)
             var scene = new Scene(new Vector2i(width, height), null!, null!, _ => { }, () => { });
             EntityBase model = scene.AddModel("deepspace");
             scene.OnLoad();

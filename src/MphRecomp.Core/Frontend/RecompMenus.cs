@@ -7,7 +7,8 @@ using MphRecomp.Mods;
 // The recomp's own screens, built INTO the game's menu graph out of the game's own menu pieces so they look and move
 // exactly like the vanilla ones:
 //   - Options (page 21): MODS and RECOMP SETTINGS in SHOW MY STATS ON NINTENDOWIFI.COM's place (clones of its label,
-//     box and value; the stats row is hidden: there's no Nintendo WFC)
+//     box and value; the stats row is hidden: there's no Nintendo WFC), and IMPORT GAMES' own button; the panel widened
+//     to hold them (a 4 x 2 grid, see AddOptionsButtons)
 //   - no SAVE on Options, OPTIONS > AUDIO or OPTIONS > CONTROLS (owner 2026-10-05): every change is saved at once
 //   - RECOMP SETTINGS, MODS and MOD SETTINGS: the Controls page's frame (backdrop, logo, back button) plus rows cloned
 //     from its SENSITIVITY row (arrows, value box, label, value, touch arrows, a description in the top band while
@@ -15,20 +16,28 @@ using MphRecomp.Mods;
 //     "n/m" after the title show it); rows that run something (credits, ...) have no arrows
 //   - PAUSED (the in-game pause menu, see FrontendSession.OpenPause): the Controls page's control-type boxes as a list
 //     -- resume, recomp settings, mod settings, quit to the main menu
+//   - IMPORT GAMES (RECOMP SETTINGS > IMPORT GAMES, owner 2026-10-07): RECOMP SETTINGS' rows again, a game a row, then
+//     one game's page (its disc, IMPORT ALL, each item with its status); the game code is ImportGames.cs
 // Everything new is appended (items at the end of a page, pages after the ROM's), so every ROM index stays valid.
 // Values change with A / Start / D-pad left-right / the touch arrows and are saved at once. On the MODS page, X on a
 // mod opens that mod's own settings (the ones it declares in its mod.json).
 namespace MphRecomp.Frontend
 {
-    public sealed class RecompMenus
+    public sealed partial class RecompMenus // + RecompMenus.Replays.cs (REPLAYS, Replay mode)
     {
         // our callback ids (the game's are below 1000)
         private const int OpenMods = 1000, OpenSettings = 1001;
         private const int PauseResume = 1010, PauseSettings = 1011, PauseModSettings = 1012, PauseQuit = 1013;
+        private const int DeleteAllCall = 1020; // a rows page's DELETE ALL button (RowsPage.DeleteAll)
         // RowNext / RowPrev: A / Start and the touch arrows; RowRight / RowLeft: the D-pad (a value row steps, an
-        // action row ignores it); RowTap: a tap on the value box (an action row runs; a value row ignores it)
+        // action row ignores it); RowTap: a tap on the value box (an action row runs; a value row ignores it); RowDelete:
+        // a tap on the X box beside it (RowModel.Delete)
         private const int RowNext = 1100, RowPrev = 1200, RowAlt = 1300, PageNext = 1400, PagePrev = 1401;
-        private const int RowRight = 1500, RowLeft = 1600, RowTap = 1700;
+        private const int RowRight = 1500, RowLeft = 1600, RowTap = 1700, RowDelete = 1800;
+        // D-pad down on a page with DELETE ALL: the next live row, from the last one DELETE ALL; up from DELETE ALL: the
+        // last live row (the engine's own D-pad finds neither: the rows' boxes have no rectangle, so it compares their
+        // item offsets with the button's touch rectangle)
+        private const int RowDown = 1900, DeleteAllUp = 1021, DeleteAllStay = 1022; // Stay: down / left / right there
         private const int RowsPerPage = 6;
         private const float RowPitch = 22;
         // the resize (menu units): value box wider (SENSITIVITY's fits 30px of text, "DETAILED" is 49), the rows' panel
@@ -39,6 +48,8 @@ namespace MphRecomp.Frontend
         // page's own callbacks (the ROM's: SAVE, SENSITIVITY right / left, LOOK INVERT), which nothing answered before
         private const int OpenPadControls = 1002, OpenKeyControls = 1003, ControlsBack = 1004, ControlsNoop = 1005;
         private const int MouseSensUp = 1006, MouseSensDown = 1007; // the mouse's SENSITIVITY row (PC)
+        // Options' IMPORT GAMES button; IMPORT GAMES' back (to where it was opened from: Options or RECOMP SETTINGS)
+        private const int OpenImport = 1008, ImportBack = 1009;
         private const int ControlsSave = 72, SensUp = 73, SensDown = 74, InvertToggle = 75;
         // the game's SAVE callbacks: Options, OPTIONS > AUDIO (AudioOptions), OPTIONS > CONTROLS
         private const int OptionsSave = 44, AudioSave = 49;
@@ -55,8 +66,16 @@ namespace MphRecomp.Frontend
         public int ModsPage => _modsRows?.Page ?? -1;
         public int ModSettingsPage => _modSettingRows?.Page ?? -1;
         public int PausePage { get; private set; } = -1;
+        public int ImportPage => _importRows?.Page ?? -1;
 
         private RowsPage? _settingsRows, _modsRows, _modSettingRows, _controlRows;
+        // IMPORT GAMES: the games, and the game open on the second page
+        private RowsPage? _importRows, _importGameRows;
+        private string _importGame = "mp1";
+        private int _importBackPage = -1; // where IMPORT GAMES' back goes (-1 = RECOMP SETTINGS)
+        private bool _inPause; // the call being answered came from the in-game pause menu
+        // set by the in-game pause of a LAN / online match: rows that can't apply there (camera) are greyed
+        public bool InNetMatch { get; set; }
         // the control customizer: the keyboard & mouse (else the controller); opened by the game (the ship's OPTIONS),
         // so its back closes it; the function waiting for a button, as its first or (add) second, since when
         private bool _controlsKeys, _controlsFromHost, _captureAdd;
@@ -84,6 +103,9 @@ namespace MphRecomp.Frontend
 
         public event Action<FrontendRequestKind>? Requested;
 
+        // IMPORT GAMES' game code (pickers, the import worker, its answers in the game's box)
+        public ImportGames Import { get; }
+
         private sealed class RowModel
         {
             public string Label = "";
@@ -92,6 +114,11 @@ namespace MphRecomp.Frontend
             public Action<int> Step = _ => { };
             public Action? Alt; // X
             public bool Action; // runs something (credits, ...) instead of cycling a value: no arrows, D-pad ignored
+            // greyed (the game's own State5 look, its rumble row without a Rumble Pak): no focus, no touch, no press
+            public Func<bool>? Disabled;
+            // deletes what the row made (IMPORT GAMES' imported entries): an X in a small orange box beside the value box
+            // (owner 2026-10-07), and X on the controller when the row has no Alt; null = no X
+            public Action? Delete;
         }
 
         // a page of up to six rows fed from a list that may be longer (L / R page through it)
@@ -99,12 +126,17 @@ namespace MphRecomp.Frontend
         {
             public int Page;
             public int[] Box = Array.Empty<int>(), Label = Array.Empty<int>(), Value = Array.Empty<int>(), Desc = Array.Empty<int>();
+            public int[] Del = Array.Empty<int>(), DelX = Array.Empty<int>(); // each row's X box and its "X" (items)
+            // the DELETE ALL button and its text (items, -1 = none), and what it runs now (null = nothing: hidden)
+            public int DelAll = -1, DelAllText = -1;
+            public Func<Action?> DeleteAll = () => null;
             public int EmptyItem = -1;
             public string Title = "";
             public int Header = -1, Pager = -1; // the title's string; the L / R icons item (-1: the ROM has none)
             public Func<List<RowModel>> Source = () => new();
             public List<RowModel> Rows = new();
             public int Offset;
+            public Action? Entered; // runs as its page comes in, before the rows are read (REPLAYS reads its folder then)
         }
 
         public RecompMenus(MenuFile file, MenuStrings strings, RecompSettings settings, string? settingsPath, string? modsDir)
@@ -119,12 +151,24 @@ namespace MphRecomp.Frontend
                 manager.Discover(modsDir);
                 _mods.AddRange(manager.Available);
             }
+            // imports go beside the settings file too: hd/ and guns/ are read from there (below, CampaignSuit, HdGun)
+            Import = new ImportGames(settingsPath != null ? System.IO.Path.GetDirectoryName(settingsPath) : null);
+            Import.Changed = OnImportChanged;
+            ScanSuits();
+        }
+
+        // the suit row's list: what's in guns/ and hd/ now (again after an import)
+        private void ScanSuits()
+        {
+            _suits.Clear();
+            string? settingsPath = _settingsPath;
             // guns/ sits beside the settings file (both under the external files dir; see CampaignActivity, MainActivity)
             string? gunsRoot = settingsPath != null
                 ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(settingsPath) ?? "", "guns") : null;
             // an unreadable folder is skipped, not fatal: on Android, once the app may install its own updates (the "install
             // unknown apps" switch) it can't read folders it didn't create itself (adb-pushed hd/ and guns/; 2026-10-06)
-            if (gunsRoot != null && System.IO.Directory.Exists(gunsRoot))
+            // a public build holds the arm cannons: a suit is listed for its body (hd/ below), never for a gun alone
+            if (gunsRoot != null && System.IO.Directory.Exists(gunsRoot) && !RecompSettings.PublicBuild)
             {
                 try
                 {
@@ -150,6 +194,8 @@ namespace MphRecomp.Frontend
                     if (_suits.Contains(id, StringComparer.OrdinalIgnoreCase) || id.EndsWith("Rest", StringComparison.OrdinalIgnoreCase)
                         || id.EndsWith("Tpose", StringComparison.OrdinalIgnoreCase) || NotSuits.Contains(id)) continue;
                     if (!MphRecomp.Anim.TrophyRigs.TryHunterFor(id, out MphRead.Hunter rig) || rig != MphRead.Hunter.Samus) continue;
+                    // only imported, up-to-date models (a public build lists nothing hand-dropped: no Brawl trophies)
+                    if (!MphRecomp.Import.ImportedContent.Usable(hdRoot, id)) continue;
                     try
                     {
                         if (System.IO.Directory.EnumerateFiles(d, "*.dae").Any()) _suits.Add(id);
@@ -160,6 +206,12 @@ namespace MphRecomp.Frontend
             _suits.Sort((x, y) => string.Compare(SuitLabel(x), SuitLabel(y), StringComparison.OrdinalIgnoreCase));
             _suits.Add("original"); // MPH's own DS gun, no HD
         }
+
+        // the suit the campaign will wear: the picked one when it's imported, else MPH's own (the default MP1PowerSuit on a
+        // fresh install showed "P1 PWR" with nothing imported; the campaign wore MPH's Samus). The setting itself is kept, so
+        // importing that suit later puts it on.
+        private string ShownSuit() =>
+            _suits.FirstOrDefault(x => x.Equals(_settings.SamusSuit, StringComparison.OrdinalIgnoreCase)) ?? "original";
 
         // a folder's subfolders, or none when it can't be read (see the guns/ note above)
         private static string[] SafeDirectories(string dir)
@@ -257,6 +309,7 @@ namespace MphRecomp.Frontend
             public MenuItem[] ChoiceBoxes = Array.Empty<MenuItem>(), ChoiceTexts = Array.Empty<MenuItem>();
             public MenuItem OptBox = null!, OptLabel = null!, OptValue = null!, OptDesc = null!, OptHeader = null!;
             public MenuItem? LrIcons; // the hunter license's L / R shoulder icons (one widget, both icons)
+            public MenuItem? EraseAll, EraseAllText; // Options' ERASE ALL DATA button and its text
         }
 
         private Pieces _p = null!;
@@ -294,6 +347,9 @@ namespace MphRecomp.Frontend
                 OptDesc = Find(options, "Options description", it => TextAt(it, 128, 227)),
                 OptHeader = Find(options, "Options header", it => TextAt(it, 128, 172)),
                 LrIcons = _file.Pages.SelectMany(p => p.Items).FirstOrDefault(it => HasWidget(it, "lricons")),
+                EraseAll = options.Items.FirstOrDefault(it => HasWidget(it, "eraseall")),
+                // (217, 147) on USA rev 0, (217, 148) on rev 1
+                EraseAllText = options.Items.FirstOrDefault(it => it.IsText && MathF.Abs(it.X - 217) < 1 && MathF.Abs(it.Y - 147.5f) < 2),
             };
         }
 
@@ -308,7 +364,7 @@ namespace MphRecomp.Frontend
             if (_p.ChoiceBoxes.Length < 4 || _p.ChoiceTexts.Length < 4) throw new InvalidOperationException("Controls page: no control-type boxes");
 
             // 7 rows now that "samus suit" joined the other six -- L / R page through them like MODS / MOD SETTINGS
-            _settingsRows = BuildRowsPage(controls, "RECOMP SETTINGS", OptionsPage, PagingActions(), null);
+            _settingsRows = BuildRowsPage(controls, "SECOND HUNT SETTINGS", OptionsPage, PagingActions(), null);
             _settingsRows.Source = SettingRows;
 
             _modsRows = BuildRowsPage(controls, "MANAGE MODS", OptionsPage, PagingActions(),
@@ -321,6 +377,26 @@ namespace MphRecomp.Frontend
                 "no settings.\n\nturn on a mod that has settings (see its mod.json) to change them here.");
             _modSettingRows.Source = ModSettingRows;
 
+            // IMPORT GAMES (owner 2026-10-07): the games, then one game's page; its back is the games
+            // DELETE ALL (owner 2026-10-07: "a delete all button somewhere that looks nice for the import games screen and
+            // the first page of every game"): everything, or everything from the game open; shown while there's some
+            _importRows = BuildRowsPage(controls, "IMPORT GAMES", SettingsPage, PagingActions(), null, backCall: ImportBack,
+                deleteAll: "deletes everything you imported from every game. your discs can import it again.");
+            _importRows.Source = ImportRows;
+            _importRows.DeleteAll = () => Import.AnyImported() ? Import.ClearEverything : null;
+            _importGameRows = BuildRowsPage(controls, "IMPORT", _importRows.Page, PagingActions().Concat(ImportGamePageActions()), null,
+                deleteAll: "deletes everything you imported from this game. your disc can import it again.");
+            _importGameRows.Source = ImportGameRows;
+            _importGameRows.DeleteAll = () =>
+            {
+                string id = _importGame;
+                if (_importGameRows.Offset != 0 || !Import.AnyImported(id) || Import.Game(id) is not { } g) return null;
+                List<MphRecomp.Import.ImportItemInfo> all = g.Items.ToList();
+                string everything = $"everything from {ImportGames.Row(id).Title.ToLowerInvariant()}";
+                return () => Import.Clear(id, all, everything);
+            };
+            InstallImportCards(); // IMPORT GAMES' page as five game cards (RecompMenus.ImportCards.cs)
+
             PausePage = BuildPausePage(controls, options);
             AddOptionsButtons(options);
 
@@ -329,13 +405,16 @@ namespace MphRecomp.Frontend
             _controlRows = BuildRowsPage(controls, "CONTROLLER", ControlsPage, PagingActions(), null, backCall: ControlsBack,
                 valueGrow: 66);
             _controlRows.Source = ControlRows;
+            InstallReplays(); // REPLAYS (RecompMenus.Replays.cs; the multiplayer menu's REPLAYS button)
+            InstallOnline(); // ONLINE PLAY (OnlineMenus.cs; the multiplayer menu's ONLINE PLAY door)
             AddControlsButtons(controls); // last: the pages above are cloned from the Controls page as the ROM has it
             InstallControlsCopy(controls);
             HideSaveButtons();
             foreach (RowsPage p in AllRowPages()) Refresh(p);
         }
 
-        private IEnumerable<RowsPage> AllRowPages() => new[] { _settingsRows, _modsRows, _modSettingRows, _controlRows }.Where(p => p != null)!;
+        private IEnumerable<RowsPage> AllRowPages() => new[] { _settingsRows, _modsRows, _modSettingRows, _controlRows, _importRows, _importGameRows }
+            .Where(p => p != null)!;
 
         private static IEnumerable<MenuAction> PagingActions()
             => new[] { Call(MenuKeys.R, PageNext), Call(MenuKeys.L, PagePrev) };
@@ -415,26 +494,54 @@ namespace MphRecomp.Frontend
                 },
                 new()
                 {
+                    Label = "status\ntext",
+                    Description = "the upper-left text in gameplay: fps, timings, the scoreboard. l3 cycles it.",
+                    Value = () => _settings.StatusText ? "ON" : "OFF",
+                    Step = _ => _settings.StatusText = !_settings.StatusText
+                },
+                new()
+                {
                     Label = "dev\ntools",
                     Description = "the developer launcher: trophy viewers, rooms, animations, music a/b.",
                     Value = () => "OPEN",
                     Step = _ => Requested?.Invoke(FrontendRequestKind.OpenDeveloperMenu),
                     Action = true
                 },
+                // IMPORT GAMES (owner 2026-10-07): the player's own Prime discs -> the suits, balls and arm cannons below
+                new()
+                {
+                    Label = "import\ngames",
+                    Description = RecompSettings.PublicBuild
+                        ? "make hd suits and morph balls from your own metroid prime game discs."
+                        : "make hd suits, morph balls and arm cannons from your own metroid prime game discs.",
+                    Value = () => "OPEN",
+                    Step = _ =>
+                    {
+                        if (_inPause) Import.Popup?.Inform("games are imported from the main menu. quit to it first.");
+                        else if (_importRows != null)
+                        {
+                            _importBackPage = SettingsPage;
+                            _stepMenu?.GoTo(_importRows.Page);
+                        }
+                    },
+                    Action = true
+                },
                 new()
                 {
                     Label = "samus\nsuit",
-                    Description = $"samus's suit in the campaign: {SuitLabel(_settings.SamusSuit).ToLowerInvariant()}. "
-                        + "her model (third person and morph ball) and arm cannon; original is mph's own.",
-                    Value = () => SuitValue(_settings.SamusSuit),
-                    Step = s => _settings.SamusSuit = Next(_suits.ToArray(), _settings.SamusSuit, s)
+                    Description = $"samus's suit in the campaign: {SuitLabel(ShownSuit()).ToLowerInvariant()}. "
+                        + (RecompSettings.PublicBuild ? "her model (third person and morph ball), mph's arm cannon; original is mph's own."
+                            : "her model (third person and morph ball) and arm cannon; original is mph's own."),
+                    Value = () => SuitValue(ShownSuit()),
+                    Step = s => _settings.SamusSuit = Next(_suits.ToArray(), ShownSuit(), s)
                 },
                 new()
                 {
                     Label = "camera",
-                    Description = "first person is the game's own view. third person follows samus from behind, wearing her suit's body.",
-                    Value = () => _settings.ThirdPerson ? "THIRD" : "FIRST",
-                    Step = _ => _settings.ThirdPerson = !_settings.ThirdPerson
+                    Description = "first person is the game's own view. third person follows samus from behind, wearing her suit's body. lan and online matches are always first person.",
+                    Value = () => _settings.ThirdPerson && !InNetMatch ? "THIRD" : "FIRST",
+                    Step = _ => _settings.ThirdPerson = !_settings.ThirdPerson,
+                    Disabled = () => InNetMatch // a LAN / online match's pause: first person only, nothing to change
                 },
                 // the pause map (Select in the campaign; Core Frontend/PauseMap.cs)
                 new()
@@ -493,6 +600,24 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.TouchControls.ToUpperInvariant(),
                     Step = s => _settings.TouchControls = Next(RecompSettings.TouchModes, _settings.TouchControls, s)
                 },
+                // replays (added by the replay session, board rule 2; docs/REPLAY_MODE.md R2): every local match against
+                // bots recorded, the last ten kept (App Campaign/MatchReplay.cs)
+                new()
+                {
+                    Label = "record\nreplays",
+                    Description = "on records every match against bots and keeps the last ten. off records nothing.",
+                    Value = () => _settings.RecordReplays ? "ON" : "OFF",
+                    Step = _ => _settings.RecordReplays = !_settings.RecordReplays
+                },
+                // multiplayer unlocks (added by the vanilla multiplayer menu session, board rule 2; owner 2026-10-07: vanilla
+                // by default, ALL after a confirmation; MultiplayerMenu reads it as its pages open)
+                new()
+                {
+                    Label = "unlocks",
+                    Description = "multiplayer hunters and arenas. vanilla: earned as in the original game. all: every one open.",
+                    Value = () => _settings.UnlockEverything ? "ALL" : "VANILLA",
+                    Step = _ => AskUnlockEverything()
+                },
                 new()
                 {
                     Label = "credits",
@@ -526,13 +651,15 @@ namespace MphRecomp.Frontend
             // developer tools (the music quality row stays: owner 2026-10-05, all four modes are the game's own music)
             if (RecompSettings.PublicBuild) rows.RemoveAll(r => HiddenInPublic.Contains(r.Label));
             if (RecompSettings.DesktopHost) rows.RemoveAll(r => HiddenOnDesktop.Contains(r.Label));
-            if (!_settings.DeveloperMode) rows.RemoveAll(r => r.Label == "dev\ntools");
+            if (!_settings.DeveloperMode) rows.RemoveAll(r => r.Label == "dev\ntools" || r.Label == "status\ntext");
             return rows;
         }
 
+        // (owner 2026-10-07: IMPORT GAMES, the samus suit and the hd menu art are public now; the arm cannons stay held,
+        // out of the importers in every build since Reports R8: see ImportGames.Offered and CampaignRenderer.StartGearLoad)
         private static readonly HashSet<string> HiddenInPublic = new(StringComparer.Ordinal)
         {
-            "menu\nart", "developer", "dev\ntools", "samus\nsuit", "controls\npage",
+            "developer", "dev\ntools", "controls\npage",
         };
 
         // a PC has no gyroscope, and its mouse is the pointer (no on-screen controls)
@@ -541,6 +668,29 @@ namespace MphRecomp.Frontend
             "gyro\naim", "gyro\nspeed", "gyro\naxis", "touch\ncontrols",
         };
 
+
+        // UNLOCKS: back to VANILLA at once (what was earned stays earned); to ALL only after the game's yes/no box (owner
+        // 2026-10-07), its answer saving and showing the row itself (the row's own step has already saved by then)
+        private void AskUnlockEverything()
+        {
+            if (_settings.UnlockEverything)
+            {
+                _settings.UnlockEverything = false;
+                return;
+            }
+            if (Import.Popup == null)
+            {
+                _settings.UnlockEverything = true;
+                return;
+            }
+            Import.Popup.Ask("open every multiplayer hunter and arena without earning them?\n\nvanilla's unlocks come back if you switch to vanilla again.", yes =>
+            {
+                if (!yes) return;
+                _settings.UnlockEverything = true;
+                _settings.Save(_settingsPath);
+                if (_settingsRows != null) Refresh(_settingsRows);
+            });
+        }
 
         private List<RowModel> ModRows() => _mods.Select(m => new RowModel
         {
@@ -585,12 +735,159 @@ namespace MphRecomp.Frontend
 
         private static string Short(string s) => (s.Length > 22 ? s[..22] : s).ToLowerInvariant();
 
+        // ---- IMPORT GAMES ----
+
+        // a game a row: how many of its items are imported, what its disc makes; A opens its page
+        private List<RowModel> ImportRows()
+        {
+            var rows = new List<RowModel>();
+            foreach (ImportGames.GameRow row in ImportGames.GameRows)
+            {
+                string id = row.Id;
+                if (id == ImportGames.TrilogyId)
+                {
+                    // one disc, every game on it: A = the picker, then the ask box (ImportGames.ImportTrilogy)
+                    (int tDone, int tTotal) = Import.TrilogyCount();
+                    rows.Add(new RowModel
+                    {
+                        Label = row.Label,
+                        Description = $"everything from one metroid prime trilogy disc: prime 1, echoes and corruption. {tDone} of {tTotal} imported.",
+                        Value = () => $"{tDone}/{tTotal}",
+                        Step = _ => Import.ImportTrilogy(),
+                        Action = true
+                    });
+                    continue;
+                }
+                MphRecomp.Import.ImportGameInfo? g = row.Available ? Import.Game(id) : null;
+                if (g == null)
+                {
+                    rows.Add(new RowModel
+                    {
+                        Label = row.Label,
+                        Description = $"{row.Title.ToLowerInvariant()} can't be imported yet.",
+                        Value = () => "SOON",
+                        Step = _ => Import.Popup?.Inform(FrontendSession.WorkInProgressText),
+                        Action = true
+                    });
+                    continue;
+                }
+                int done = g.Items.Count(i => i.Status == MphRecomp.Import.ItemImportStatus.Complete);
+                int suits = g.Items.Count(ImportGames.IsSuit);
+                int balls = g.Items.Count(ImportGames.IsBall);
+                int others = g.Items.Count(i => i.Kind == "hd" && !ImportGames.IsSuit(i) && !ImportGames.IsBall(i));
+                int cannons = g.Items.Count(i => i.Kind == "guns");
+                int arenas = g.Items.Count(i => i.Kind == "arenas");   // Echoes' multiplayer arenas + music (CR2)
+                var makes = new List<string>();
+                if (suits > 0) makes.Add($"{suits} suit{(suits == 1 ? "" : "s")}");
+                if (balls > 0) makes.Add($"{balls} morph ball{(balls == 1 ? "" : "s")}");
+                if (others > 0) makes.Add($"{others} character{(others == 1 ? "" : "s")}");
+                if (cannons > 0) makes.Add($"{cannons} arm cannon{(cannons == 1 ? "" : "s")}");
+                if (arenas > 0) makes.Add($"{arenas} multiplayer arena{(arenas == 1 ? "" : "s")}");
+                if (g.Items.Any(i => i.Kind == "music")) makes.Add("their music");
+                string list = makes.Count > 1 ? String.Join(", ", makes.Take(makes.Count - 1)) + " and " + makes[^1] : makes.FirstOrDefault() ?? "nothing yet";
+                rows.Add(new RowModel
+                {
+                    Label = row.Label,
+                    Description = $"makes {list} from your {row.Platform} disc. {done} of {g.Items.Count} imported.",
+                    Value = () => $"{done}/{g.Items.Count}",
+                    Step = _ =>
+                    {
+                        _importGame = id;
+                        if (_importGameRows == null) return;
+                        _importGameRows.Title = row.Title;
+                        _stepMenu?.GoTo(_importGameRows.Page);
+                    },
+                    Action = true
+                });
+            }
+            return rows;
+        }
+
+        // one game: its disc, IMPORT ALL, (a game taking Wii discs) the Wii key file, then every item with its status
+        private List<RowModel> ImportGameRows()
+        {
+            string id = _importGame;
+            var rows = new List<RowModel>();
+            MphRecomp.Import.ImportGameInfo? g = Import.Game(id);
+            if (g == null) return rows;
+            ImportGames.GameRow game = ImportGames.Row(id);
+            ImportPicked? src = Import.Source(id);
+            int done = g.Items.Count(i => i.Status == MphRecomp.Import.ItemImportStatus.Complete);
+            rows.Add(new RowModel
+            {
+                Label = "your\ndisc",
+                Description = src == null
+                    ? $"pick your {(game.Discs.Length > 0 ? game.Discs : game.Title.ToLowerInvariant())} disc image ({Import.Extensions(id)}). it's read where it is, never copied."
+                    : $"{src.Name.ToLowerInvariant()}. a: pick another disc image.",
+                Value = () => src == null ? "PICK" : "CHANGE",
+                Step = _ => Import.PickDisc(id),
+                Action = true
+            });
+            rows.Add(new RowModel
+            {
+                Label = "import\nall",
+                Description = $"makes all {g.Items.Count} from your disc. {done} of {g.Items.Count} imported now."
+                    + (g.Items.Any(i => i.Kind == "hd") ? " the suits take a few minutes." : ""),
+                Value = () => "START",
+                Step = _ => Import.ImportAll(id),
+                Action = true
+            });
+            if (Import.TakesWiiDiscs(id))   // Prime 3, and Prime 1 / Echoes from a Trilogy disc
+            {
+                // greyed while the picked disc needs no key (owner 2026-10-07: a GameCube disc; an .rvz / .wia neither)
+                bool keyNeeded = Import.WiiKeyNeeded(id);
+                rows.Add(new RowModel
+                {
+                    Label = "wii key\nfile",
+                    Description = keyNeeded
+                        ? "only a plain .iso or .wbfs needs it (.rvz and .wia don't): your own wii's keys.bin, or a text file with its 32-digit key."
+                        : "your disc needs no wii key: only a plain wii .iso or .wbfs does.",
+                    Value = () => Import.HasWiiKey ? "SET" : "NONE",
+                    Step = _ => Import.PickWiiKey(),
+                    Action = true,
+                    Disabled = () => !keyNeeded
+                });
+            }
+            // each entry: its X (only once imported: nothing to delete, no X) deletes it after the ask box (owner 2026-10-07:
+            // "an X in a small orange box next to each entry", in place of the clear rows)
+            foreach (MphRecomp.Import.ImportItemInfo item in g.Items)
+            {
+                bool made = ImportGames.Imported(item);
+                string desc = Import.ItemDescription(id, item);
+                string x = made ? " x: delete." : "";
+                int room = 130 - x.Length;
+                rows.Add(new RowModel
+                {
+                    Label = ImportGames.ItemLabel(item),
+                    Description = (desc.Length > room ? desc[..(room - 3)] + "..." : desc) + x,
+                    Value = () => ImportGames.ItemValue(id, item),
+                    Step = _ => Import.ImportOne(id, item),
+                    Action = true,
+                    Delete = made ? () => Import.Clear(id, new[] { item }, ImportGames.ItemName(item)) : null
+                });
+            }
+            return rows;
+        }
+
+        // an import ended or a pick changed: the suit row's list and the import pages read things again
+        private void OnImportChanged()
+        {
+            ScanSuits();
+            foreach (RowsPage? p in new[] { _settingsRows, _importRows, _importGameRows })
+            {
+                if (p == null) continue;
+                Refresh(p);
+                // a delete or a new disc changes which rows are greyed (the wii key file) and which have an X
+                if (_stepMenu?.Page?.Index == p.Page) ShowDisabled(_stepMenu, p);
+            }
+        }
+
         // A page made from the Controls page's frame and six copies of its SENSITIVITY row. `back` = the page its back
         // button and B return to (-1 = MODS); `empty` = text shown when the page has no rows; `backCall` (>= 0): the back
         // button and B run that callback instead of going to `back` (it decides where back is); `valueGrow`: how much wider
         // than SENSITIVITY's the value boxes are.
         private RowsPage BuildRowsPage(MenuPage controls, string title, int back, IEnumerable<MenuAction> extraActions, string? empty,
-            int backCall = -1, float valueGrow = ValueGrow)
+            int backCall = -1, float valueGrow = ValueGrow, string? deleteAll = null)
         {
             int BackItem = _p.Frame.Length + 1; // after the frame items and the header
             int backPage = back == -1 ? ModsPage : back;
@@ -632,6 +929,9 @@ namespace MphRecomp.Frontend
             result.Label = new int[RowsPerPage];
             result.Value = new int[RowsPerPage];
             result.Desc = new int[RowsPerPage];
+            result.Del = new int[RowsPerPage];
+            result.DelX = new int[RowsPerPage];
+            int delString = _strings.Add("X");
             for (int r = 0; r < RowsPerPage; r++)
             {
                 float dx = -60, dy = 74 - RowPitch * r;
@@ -640,27 +940,57 @@ namespace MphRecomp.Frontend
                 page.AddItem(i => Clone(_p.Arrows, i, dx, dy, stretchX: valueGrow));
                 int row = r;
                 // the first row starts focused, so its description shows and the D-pad has somewhere to start
-                int box = page.AddItem(i => Clone(_p.Box, i, dx, dy, init: row == 0 ? MenuState.Focused : null, stretchX: valueGrow,
+                int box = page.AddItem(i => Clone(_p.Box, i, dx, dy, init: row == 0 ? MenuState.Focused : null, stretchX: valueGrow, greyed: 0,
                     links: new[] { new MenuLink(39, MenuState.Idle, descItem), new MenuLink(60, MenuState.Hidden, descItem) },
                     actions: new[]
                     {
                         Call(MenuKeys.A, RowNext + row), Call(MenuKeys.Start, RowPrev + row),
                         Call(MenuKeys.Right, RowRight + row), Call(MenuKeys.Left, RowLeft + row), Call(MenuKeys.X, RowAlt + row)
-                    })).Index;
-                page.AddItem(i => Clone(_p.Label, i, dx - valueGrow / 2, dy, stringId: label));
+                    }.Concat(deleteAll != null ? new[] { Call(MenuKeys.Down, RowDown + row) } : Array.Empty<MenuAction>()).ToArray())).Index;
+                page.AddItem(i => Clone(_p.Label, i, dx - valueGrow / 2, dy, stringId: label, greyed: GreyLabel));
                 // a tap on the value box (what an action row has instead of arrows): a touch-only rect (kind 0, the
                 // ROM's own "on arrive None" + rect) on the value text, not on the box -- a box with a rect would get
                 // the host's focus frame. The box as drawn is x 134..190 y 147..163 (-fecanvas FE_TRIS), the value
                 // item sits at (163, 151); the touch arrows come later in the list, so they win where they overlap it.
                 float wider = (valueGrow - ValueGrow) / 2; // a wider box: a wider tap area
-                page.AddItem(i => Clone(_p.Value, i, dx, dy, stringId: value, wrapGrow: (int)valueGrow,
+                page.AddItem(i => Clone(_p.Value, i, dx, dy, stringId: value, wrapGrow: (int)valueGrow, greyed: GreyValue,
                     actions: new[] { TouchRect(-31 - wider, -6, 29 + wider, 14, RowTap + row) }));
                 page.AddItem(i => Clone(_p.Right, i, dx + valueGrow / 2, dy, actions: _p.Right.Actions.Select(a => WithCall(a, RowNext + row)).ToList()));
                 page.AddItem(i => Clone(_p.Left, i, dx - valueGrow / 2, dy, actions: _p.Left.Actions.Select(a => WithCall(a, RowPrev + row)).ToList()));
+                // the X box (RowModel.Delete): the value box's own orange outline narrowed to a 16 x 16 square, 4 px right
+                // of it (SENSITIVITY's box is 32 wide), and an "X" in it with the tap -- on the text, as for the value. No
+                // A action on either, so neither takes the D-pad's focus: the row's box answers X instead (RowAlt).
+                float delDx = 16 + valueGrow / 2 + 4 + 8;
+                result.Del[r] = page.AddItem(i => Clone(_p.Box, i, dx + delDx, dy, init: MenuState.Hidden, stretchX: -16)).Index;
+                result.DelX[r] = page.AddItem(i => Clone(_p.Value, i, dx + delDx, dy, stringId: delString, init: MenuState.Hidden,
+                    actions: new[] { TouchRect(-10, -7, 10, 15, RowDelete + row) })).Index;
                 result.Box[r] = box;
                 result.Label[r] = label;
                 result.Value[r] = value;
                 result.Desc[r] = desc;
+            }
+            if (deleteAll != null && _p.EraseAll is MenuItem ea && _p.EraseAllText is MenuItem et)
+            {
+                // DELETE ALL (`deleteAll` = its description; RowsPage.DeleteAll): Options' ERASE ALL DATA button (touch x
+                // 185..249 y 129..161) moved to the footer's right corner, where the game's other pages have SAVE
+                // (MenuLayout's footer-right pins it to the canvas corner), and narrowed from 64 to 48 so a 4:3 canvas's
+                // description band clears it: x 204..252 y 4..36, level with back's 4..36. Its A + touch action keeps the
+                // ROM's rectangle (two corners), narrowed the same; its focused look stays the idle one (the ROM's hides the
+                // button, and without a highlight of its own the host draws the focus frame round it).
+                const float narrow = 16, edx = 3 + narrow / 2, edy = -125;
+                int text = _strings.Add("DELETE ALL"), desc = _strings.Add(deleteAll);
+                int descItem = page.AddItem(i => Clone(_p.Desc, i, 0, 0, stringId: desc, init: MenuState.Hidden)).Index;
+                MenuAction Press(MenuAction a) => new()
+                {
+                    Kind = a.Kind, Field2 = a.Field2, Flags = a.Flags, Field4 = a.Field4, RectX = (short)(a.RectX + narrow / 2),
+                    RectY = a.RectY, RectW = (short)(a.RectW - narrow / 2), RectH = a.RectH,
+                    Calls = new[] { (0, DeleteAllCall) }, TargetPage = 0xFF, Item = 0xFFFF
+                };
+                result.DelAll = page.AddItem(i => Clone(ea, i, edx, edy, init: MenuState.Hidden, steadyFocus: true, stretchX: -narrow,
+                    links: new[] { new MenuLink(39, MenuState.Idle, descItem), new MenuLink(60, MenuState.Hidden, descItem) },
+                    actions: ea.Actions.Select(Press).Append(Call(MenuKeys.Up, DeleteAllUp))
+                        .Append(Call(MenuKeys.Down | MenuKeys.Left | MenuKeys.Right, DeleteAllStay)).ToList())).Index;
+                result.DelAllText = page.AddItem(i => Clone(et, i, edx, edy, stringId: text, init: MenuState.Hidden)).Index;
             }
             if (empty != null)
             {
@@ -706,7 +1036,7 @@ namespace MphRecomp.Frontend
             page.AddItem(i => Clone(_p.OptHeader, i, 0, 0, stringId: title));
             (string Text, int Call)[] choices =
             {
-                ("resume", PauseResume), ("recomp\nsettings", PauseSettings), ("mod\nsettings", PauseModSettings), ("quit to\nmain menu", PauseQuit)
+                ("resume", PauseResume), ("second hunt\nsettings", PauseSettings), ("mod\nsettings", PauseModSettings), ("quit to\nmain menu", PauseQuit)
             };
             const float dx = 66; // the boxes span x 8..116 on the Controls page; centred on the touch screen
             for (int k = 0; k < choices.Length; k++)
@@ -723,9 +1053,22 @@ namespace MphRecomp.Frontend
         }
 
         // Options: MODS and RECOMP SETTINGS in SHOW MY STATS ON NINTENDOWIFI.COM's place (owner 2026-10-05; there's no
-        // Nintendo WFC to show stats on), hidden as the page comes in: two columns in its spot (x 160..250), each a clone
-        // of its label over a clone of its box + value -- the labels' last lines level with RUMBLE PAK's (y 76), the
-        // boxes on its row (y 55)
+        // Nintendo WFC to show stats on), hidden as the page comes in, each a clone of its label over a clone of its box +
+        // value -- the labels' last lines level with RUMBLE PAK's (y 76), the boxes on its row (y 55); and IMPORT GAMES'
+        // own button (owner 2026-10-08: "make the options menu box bigger and add a dedicated importer button"): the
+        // CONTROLS pill and label cloned, drawing ImportPillPicture's texture (DrawOptions). The panel is widened to
+        // x -52..308 as REPLAYS' (MenuLayout.Options shows the wider touch screen) and its pieces go on a 4 x 2 grid:
+        // AUDIO, CONTROLS, IMPORT GAMES, ERASE ALL DATA over CREDITS, RUMBLE PAK, MODS, RECOMP SETTINGS.
+        private const float OptionsPanelStretchX = 97.6f, OptionsPanelDx = 1.1f;
+        private static readonly float[] OptionsColumns = { -7, 83, 173, 263 }; // the grid's column centres
+        // the ROM's pieces' centres (x, -fecanvas 21 FE_BOUNDS, both revs): the AUDIO / CONTROLS pills, the CREDITS
+        // icon, the RUMBLE PAK box, the ERASE ALL DATA button
+        private const float RomAudioX = 36, RomControlsX = 105, RomCreditsX = 33.4f, RomRumbleX = 106, RomEraseX = 217;
+        private int _importPill = -1;
+
+        // the Options page has the widened panel (MenuLayout.For)
+        public static bool OptionsWidened { get; private set; }
+
         private void AddOptionsButtons(MenuPage options)
         {
             MenuItem box = _p.OptBox, label = _p.OptLabel, value = _p.OptValue;
@@ -740,9 +1083,84 @@ namespace MphRecomp.Frontend
                 options.AddItem(i => Clone(label, i, dx, labelY - label.Y, stringId: labelString));
                 options.AddItem(i => Clone(value, i, dx, 0, stringId: vs));
             }
-            Button("mods", "", 175, 76, OpenMods, out _modsValueString);
-            Button("recomp\nsettings", "open", 225, 84, OpenSettings, out _);
+
+            // the game's pieces, by what they are (never by index: rev 1 inserts items)
+            MenuItem? Widget(string name) => options.Items.FirstOrDefault(it => HasWidget(it, name));
+            MenuItem? Text(string text) => options.Items.FirstOrDefault(it => it.IsText && it.States[0].Text is MenuTextStyle t
+                && string.Equals(_strings[t.StringId], text, StringComparison.OrdinalIgnoreCase));
+            MenuItem? audio = Widget("audio"), audioText = Text("audio"), controls = Widget("controls"), controlsText = Text("controls"),
+                credits = Widget("credits"), creditsText = Text("credits"), divider = Widget("divider"), panel = Widget("blackdrop"),
+                rumbleText = Text("rumble\npak"), rumbleValue = options.Items.FirstOrDefault(it => TextAt(it, 106, 55)), // ("rumb")
+                rumble = options.Items.FirstOrDefault(it => HasWidget(it, "box_arrows") && HasCall(it, 48));
+            MenuItem?[] pieces = { audio, audioText, controls, controlsText, credits, creditsText, divider, panel, rumbleText, rumbleValue, rumble,
+                _p.EraseAll, _p.EraseAllText };
+            if (pieces.Any(it => it == null))
+            {
+                // not the expected page: the vanilla places, MODS and RECOMP SETTINGS in the stats row's, no IMPORT GAMES
+                Button("mods", "", 175, 76, OpenMods, out _modsValueString);
+                Button("second hunt\nsettings", "open",225, 84, OpenSettings, out _);
+                UpdateModsCount();
+                return;
+            }
+            void Move(MenuItem it, float dx, float stretchX = 0)
+                => options.ReplaceItem(it.Index, i => Clone(it, i, dx, 0, links: it.Links, actions: it.Actions, stretchX: stretchX));
+            Move(panel!, OptionsPanelDx, OptionsPanelStretchX);
+            float[] c = OptionsColumns;
+            foreach (MenuItem it in new[] { audio!, audioText! }) Move(it, c[0] - RomAudioX);
+            foreach (MenuItem it in new[] { controls!, controlsText! }) Move(it, c[1] - RomControlsX);
+            foreach (MenuItem it in new[] { _p.EraseAll!, _p.EraseAllText!, divider! }) Move(it, c[3] - RomEraseX);
+            foreach (MenuItem it in new[] { credits!, creditsText! }) Move(it, c[0] - RomCreditsX);
+            foreach (MenuItem it in new[] { rumble!, rumbleText!, rumbleValue! }) Move(it, c[1] - RomRumbleX);
+
+            // IMPORT GAMES: the CONTROLS pill and label in the third column, A or a tap opening IMPORT GAMES the way
+            // CONTROLS opens its page (the page change is the action's own, so it makes CONTROLS' sound: the copy's Index is
+            // CONTROLS' entry in the page's sound list, MenuSounds); OpenImport only notes where back goes
+            float importDx = c[2] - RomControlsX;
+            MenuItem pill = controls!, pillText = controlsText!;
+            int importPage = ImportPage;
+            _importPill = options.Items.Count;
+            options.AddItem(_ => Clone(pill, pill.Index, importDx, 0, links: pill.Links,
+                actions: pill.Actions.Select(a => WithCall(a, OpenImport, importPage)).ToList()));
+            int importString = _strings.Add("import games");
+            options.AddItem(i => Clone(pillText, i, importDx, 0, stringId: importString));
+
+            // MODS and RECOMP SETTINGS under IMPORT GAMES and ERASE ALL DATA (a button's box is centred 1 left of its cx)
+            Button("mods", "", c[2] + 1, 76, OpenMods, out _modsValueString);
+            Button("second hunt\nsettings", "open",c[3] + 1, 84, OpenSettings, out _);
             UpdateModsCount();
+            AddRulesLink(options); // the privacy / code of conduct / 13+ line (RecompMenus.OnlineRules.cs)
+            OptionsWidened = true;
+        }
+
+        // The recomp pages' sounds, borrowed from the ROM pages they're built from (MenuSounds): every rows page's back
+        // button sounds like the Controls page's back arrow (a tap on it was silent: owner 2026-10-08, "the back button
+        // from the importer doesnt make any noise"); RECOMP SETTINGS' copy of CONTROLS sounds like CONTROLS, item for item.
+        public void ApplySounds(MenuSounds sounds)
+        {
+            if (_settingsRows == null) return; // not installed
+            int backItem = _p.Frame.Length + 1; // (BuildRowsPage's)
+            foreach (RowsPage? rows in new[] { _settingsRows, _modsRows, _modSettingRows, _controlRows, _importRows, _importGameRows })
+            {
+                if (rows != null) sounds.ItemLike(rows.Page, backItem, ControlsPage, _p.Back.Index);
+            }
+            if (_controlsCopyPage >= 0) sounds.PageLike(_controlsCopyPage, ControlsPage);
+        }
+
+        // Options' IMPORT GAMES pill: the cloned CONTROLS pill keeps its triangles, UVs and focus animation, and draws
+        // ImportPillPicture's texture (made from the pill it was cloned from) instead of the CONTROLS picture
+        public void DrawOptions(MenuEngine menu, List<WidgetTri> tris)
+        {
+            DrawRulesLink(menu, tris); // (RecompMenus.OnlineRules.cs)
+            if (_importPill < 0 || menu.Page?.Index != OptionsPage) return;
+            UiTextureCache textures = menu.Widgets.Textures;
+            for (int t = 0; t < tris.Count; t++)
+            {
+                if (tris[t].Item != _importPill || tris[t].TextureId < 0) continue;
+                WidgetTri tri = tris[t];
+                UiTexture pill = textures[tri.TextureId];
+                tri.TextureId = textures.GetOrAdd(ImportPillPicture.Key + "|" + pill.Key, () => ImportPillPicture.Draw(pill)).Id;
+                tris[t] = tri;
+            }
         }
 
         private List<int> HiddenOn(int page)
@@ -1040,7 +1458,10 @@ namespace MphRecomp.Frontend
         public void CaptureInput(string button)
         {
             if (_captureId == null || !ControlBinds.Allowed(_controlsKeys, button)) return;
-            ControlBinds.Assign(_settings, _controlsKeys, _captureId, button, _captureAdd);
+            if (!ControlBinds.Assign(_settings, _controlsKeys, _captureId, button, _captureAdd, out string? only))
+            {
+                Import.Popup?.Inform($"that's {only}'s only button.\n\ngive {only} another button first."); // (Voice O8: zoom has none to swap)
+            }
             _settings.Save(_settingsPath);
             EndCapture();
         }
@@ -1059,6 +1480,9 @@ namespace MphRecomp.Frontend
         // every menu frame
         public void Tick()
         {
+            Import.Tick();
+            TickReplays(); // REPLAYS: PLAY's launch waits for the file-start sound (RecompMenus.Replays.cs)
+            TickOnline(); // ONLINE PLAY: the network's results and the server's pushes (OnlineMenus.cs)
             if (_captureId != null && Environment.TickCount64 - _captureStart > CaptureMs) EndCapture();
         }
 
@@ -1089,10 +1513,14 @@ namespace MphRecomp.Frontend
             if (rows != null)
             {
                 // back from the customizer to RECOMP SETTINGS: the same page of rows as before
-                if (!(rows == _settingsRows && _lastPage == _controlRows?.Page)) rows.Offset = 0;
+                if (!(rows == _settingsRows && (_lastPage == _controlRows?.Page || _lastPage == _importRows?.Page))) rows.Offset = 0;
+                rows.Entered?.Invoke();
                 Refresh(rows);
                 ShowRows(menu, rows);
             }
+            EnterReplays(menu, page); // REPLAYS' list and details pages (RecompMenus.Replays.cs)
+            EnterOnline(menu, page); // ONLINE PLAY's pages (OnlineMenus.cs)
+            EnterImportCards(menu, page); // IMPORT GAMES' cards (RecompMenus.ImportCards.cs)
             if (IsControlsPage(page) && _controlsButtonItems.Count > 0) EnterControls(menu);
             if (_hiddenItems.TryGetValue(page, out List<int>? hide))
             {
@@ -1109,6 +1537,10 @@ namespace MphRecomp.Frontend
             if (menu.Page != null && IsControlsPage(menu.Page.Index) && _controlsButtonItems.Count > 0 && ControlsCall(menu, call)) return true;
             if (call < 1000) return false;
             _stepMenu = menu;
+            _inPause = inPause;
+            if (ReplayCall(menu, call)) return true; // REPLAYS (RecompMenus.Replays.cs)
+            if (OnlineCall(menu, call)) return true; // ONLINE PLAY (OnlineMenus.cs)
+            if (ImportCardsCall(menu, call)) return true; // IMPORT GAMES' cards (RecompMenus.ImportCards.cs)
             switch (call)
             {
             case OpenPadControls:
@@ -1131,6 +1563,15 @@ namespace MphRecomp.Frontend
             case OpenMods:
                 menu.GoTo(ModsPage);
                 return true;
+            case OpenImport:
+                _importBackPage = OptionsPage; // (the action itself goes to IMPORT GAMES)
+                return true;
+            case ImportBack:
+                menu.GoTo(_importBackPage >= 0 ? _importBackPage : SettingsPage);
+                return true;
+            case OpenRulesCall:
+                Requested?.Invoke(FrontendRequestKind.OnlineRules); // (RecompMenus.OnlineRules.cs)
+                return true;
             case OpenSettings:
             case PauseSettings:
                 menu.GoTo(SettingsPage);
@@ -1144,6 +1585,19 @@ namespace MphRecomp.Frontend
                 return true;
             case PauseQuit:
                 Requested?.Invoke(FrontendRequestKind.QuitToMenu);
+                return true;
+            case DeleteAllCall:
+                // its ask box; the page updates on Import.Changed
+                if (menu.Page != null) RowsFor(menu.Page.Index)?.DeleteAll()?.Invoke();
+                return true;
+            case DeleteAllStay:
+                return true;
+            case DeleteAllUp:
+                if (menu.Page != null && RowsFor(menu.Page.Index) is RowsPage up)
+                {
+                    int last = LiveRows(up).LastOrDefault(-1);
+                    if (last >= 0) menu.SetState(up.Box[last], MenuState.Focused);
+                }
                 return true;
             case PageNext:
             case PagePrev:
@@ -1162,10 +1616,23 @@ namespace MphRecomp.Frontend
             if (row < 0 || row >= RowsPerPage || menu.Page == null) return false;
             RowsPage? rows = RowsFor(menu.Page.Index);
             if (rows == null || rows.Offset + row >= rows.Rows.Count) return true;
+            if (kind == RowDown)
+            {
+                int next = LiveRows(rows).FirstOrDefault(r => r > row, -1);
+                if (next >= 0) menu.SetState(rows.Box[next], MenuState.Focused);
+                else if (rows.DelAll >= 0 && menu.ItemState(rows.DelAll) != MenuState.Hidden) menu.SetState(rows.DelAll, MenuState.Focused);
+                return true;
+            }
             RowModel model = rows.Rows[rows.Offset + row];
+            if (model.Disabled?.Invoke() == true) return true; // greyed: nothing to do
+            // the X box, or X on a row without an Alt: the row's Delete (its ask box; the page updates on Import.Changed)
+            if (kind == RowDelete || (kind == RowAlt && model.Alt == null))
+            {
+                model.Delete?.Invoke();
+                return true;
+            }
             if (kind == RowAlt)
             {
-                if (model.Alt == null) return true;
                 model.Alt();
                 if (rows == _modsRows) menu.GoTo(ModSettingsPage); // a mod's own settings
                 else Refresh(rows);
@@ -1179,6 +1646,7 @@ namespace MphRecomp.Frontend
             _settings.Save(_settingsPath);
             Refresh(rows);
             if (rows.Rows.Count != count) ShowRows(menu, rows); // DEVELOPER on/off adds/removes the dev tools row
+            else ShowDisabled(menu, rows);
             UpdateModsCount();
             return true;
         }
@@ -1206,9 +1674,58 @@ namespace MphRecomp.Frontend
             }
             if (p.EmptyItem >= 0) menu.SetState(p.EmptyItem, p.Rows.Count == 0 ? MenuState.Idle : MenuState.Hidden);
             if (p.Pager >= 0) menu.SetState(p.Pager, PageCount(p) > 1 ? MenuState.Idle : MenuState.Hidden);
+            ShowDisabled(menu, p);
+        }
+
+        // the rumble row's State5 text colours (Options, page 21), for rows the cloned SENSITIVITY row greys
+        private const uint GreyLabel = 0x1F101317, GreyValue = 0x1F0E0E0E;
+
+        // a disabled row's box, label and value in their State5 (greyed) look, and back once it isn't; when the first row
+        // is greyed the focus moves to the first one that isn't; the X boxes of the rows that have one; DELETE ALL
+        private static void ShowDisabled(MenuEngine menu, RowsPage p)
+        {
+            int shown = Math.Max(0, Math.Min(RowsPerPage, p.Rows.Count - p.Offset));
+            int firstOn = -1;
+            for (int r = 0; r < shown; r++)
+            {
+                int box = p.Box[r];
+                bool off = p.Rows[p.Offset + r].Disabled?.Invoke() ?? false;
+                if (!off && firstOn < 0) firstOn = r;
+                for (int k = box; k <= box + 2; k++)
+                {
+                    if (off) menu.SetState(k, MenuState.State5);
+                    else if (menu.ItemState(k) == MenuState.State5) menu.SetState(k, MenuState.Idle);
+                }
+            }
+            if (firstOn > 0 && !Enumerable.Range(0, shown).Any(r => menu.ItemState(p.Box[r]) == MenuState.Focused))
+            {
+                menu.SetState(p.Box[firstOn], MenuState.Focused);
+            }
+            // the X boxes: beside a shown row with something to delete (always through SetState, as in ShowRows)
+            for (int r = 0; r < p.Del.Length; r++)
+            {
+                RowModel? m = r < shown ? p.Rows[p.Offset + r] : null;
+                MenuState x = m?.Delete != null && m.Disabled?.Invoke() != true ? MenuState.Idle : MenuState.Hidden;
+                menu.SetState(p.Del[r], x);
+                menu.SetState(p.DelX[r], x);
+            }
+            // DELETE ALL while there's something to delete (a focused button stays focused; hidden, its focus goes to the
+            // first live row)
+            if (p.DelAll >= 0)
+            {
+                bool on = p.DeleteAll() != null, focused = menu.ItemState(p.DelAll) == MenuState.Focused;
+                if (!on || menu.ItemState(p.DelAll) == MenuState.Hidden) menu.SetState(p.DelAll, on ? MenuState.Idle : MenuState.Hidden);
+                menu.SetState(p.DelAllText, on ? MenuState.Idle : MenuState.Hidden);
+                if (!on) menu.SetState(p.DelAll - 1, MenuState.Hidden); // its description
+                if (!on && focused && firstOn >= 0) menu.SetState(p.Box[firstOn], MenuState.Focused);
+            }
         }
 
         private static int PageCount(RowsPage p) => Math.Max(1, (p.Rows.Count + RowsPerPage - 1) / RowsPerPage);
+
+        // the shown rows that aren't greyed, top to bottom
+        private static IEnumerable<int> LiveRows(RowsPage p) => Enumerable.Range(0, Math.Max(0, Math.Min(RowsPerPage, p.Rows.Count - p.Offset)))
+            .Where(r => p.Rows[p.Offset + r].Disabled?.Invoke() != true);
 
         private void Refresh(RowsPage p)
         {
@@ -1249,11 +1766,12 @@ namespace MphRecomp.Frontend
             Calls = new[] { (0, call) }, TargetPage = 0xFF, Item = 0xFFFF
         };
 
-        internal static MenuAction WithCall(MenuAction a, int call) => new()
+        // `page` (>= 0): the action also goes there, after the callback (MenuEngine.Run)
+        internal static MenuAction WithCall(MenuAction a, int call, int page = -1) => new()
         {
             Kind = a.Kind, Field2 = a.Field2, Flags = a.Flags, Field4 = a.Field4,
             RectX = a.RectX, RectY = a.RectY, RectW = a.RectW, RectH = a.RectH,
-            Calls = new[] { (0, call) }, TargetPage = 0xFF, Item = 0xFFFF
+            Calls = new[] { (0, call) }, TargetPage = page >= 0 ? (byte)page : (byte)0xFF, Item = 0xFFFF
         };
 
         private static MenuAction WithTarget(MenuAction a, int page) => new()
@@ -1264,9 +1782,12 @@ namespace MphRecomp.Frontend
         };
 
         // stretchX / stretchDown: resize the widget (MenuItem.StretchX / StretchDown); wrapGrow: a wider text wrap
+        // greyed: a source without a State5 look gets one copied from its Idle look, in that colour for a text (the rumble
+        // row's: label 1F101317, value 1F0E0E0E; a widget keeps its Idle frame, as the rumble row's box does)
+        // steadyFocus: the Focused look and every transition to or from Focused are the Idle look
         internal static MenuItem Clone(MenuItem src, int index, float dx, float dy, int stringId = -1, MenuState? init = null,
             IReadOnlyList<MenuLink>? links = null, IReadOnlyList<MenuAction>? actions = null, float stretchX = 0,
-            float stretchDown = 0, int wrapGrow = 0)
+            float stretchDown = 0, int wrapGrow = 0, uint? greyed = null, bool steadyFocus = false)
         {
             var states = new List<MenuItemState>();
             foreach (MenuItemState s in src.States)
@@ -1288,6 +1809,35 @@ namespace MphRecomp.Frontend
                 else
                 {
                     states.Add(s);
+                }
+            }
+            if (greyed is uint grey && states.All(s => s.Code != (int)MenuState.State5)
+                && states.FirstOrDefault(s => s.Code == (int)MenuState.Idle) is MenuItemState idle)
+            {
+                MenuTextStyle? t = idle.Text;
+                states.Add(new MenuItemState
+                {
+                    Code = (int)MenuState.State5, Kind = idle.Kind, Field2 = idle.Field2, WidgetIndex = idle.WidgetIndex, WidgetFlags = idle.WidgetFlags,
+                    Text = t == null ? null : new MenuTextStyle
+                    {
+                        StringId = t.StringId, StringField = t.StringField, StartColor = grey, EndColor = 0x1F1F1F1F,
+                        WrapWidth = t.WrapWidth, Duration = 0, Size = t.Size, Format1 = t.Format1,
+                        Format2 = t.Format2, Align = t.Align, Flags = t.Flags, Field15 = t.Field15, Field16 = t.Field16
+                    }
+                });
+            }
+            if (steadyFocus && states.FirstOrDefault(s => s.Code == (int)MenuState.Idle) is MenuItemState still)
+            {
+                const int f = (int)MenuState.Focused; // transitions are to * 8 + from
+                for (int k = 0; k < states.Count; k++)
+                {
+                    int c = states[k].Code;
+                    if (c != f && !(c >= 8 && (c / 8 == f || c % 8 == f))) continue;
+                    states[k] = new MenuItemState
+                    {
+                        Code = c, Kind = still.Kind, Field2 = still.Field2, WidgetIndex = still.WidgetIndex,
+                        WidgetFlags = still.WidgetFlags, Text = still.Text
+                    };
                 }
             }
             return new MenuItem

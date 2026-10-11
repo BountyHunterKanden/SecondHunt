@@ -106,7 +106,7 @@ namespace MphRead.Entities.Enemies
             if (MathF.Abs(cos - dot) > Fixed.ToFloat(7))
             {
                 var cross = Vector3.Cross(target, facing);
-                var rotY = Matrix4.CreateRotationY(angle * (cross.Y > 0 ? -1 : 1));
+                var rotY = DetMatrix.CreateRotationY(angle * (cross.Y > 0 ? -1 : 1));
                 facing = Matrix.Vec3MultMtx4(facing, rotY).Normalized();
                 SetTransform(facing, UpVector, Position);
                 return false;

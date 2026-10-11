@@ -101,22 +101,76 @@ namespace MphRecomp.Arenas
     // ((run length, next node) pairs, as PlayerAi.Func213A1A8 reads it). The neighbour list (Offset2) is left empty.
     public static class ArenaNav
     {
+        // 2 (2026-10-09, owner: bots "stuck rapidly moving back and forth"): one strongly connected graph (every pair has a
+        // route), lips crossed, ledges up to JumpRise linked; arena.json NavVersion, which also turns on PlayerAiUnstick
+        // (2026-10-10, still 2: long drops, slides down steep slopes, no way across a pad, pockets retried with longer
+        // links; the files differ but say the same thing to the game)
+        // 3 (2026-10-10, T7, owner: "Do bots know they have double jump and gravity boost in echoes maps"): links a bot
+        // takes with Echoes' double jump (a ledge up to DoubleRise, a gap up to GapMax across) or the Gravity Boost (up
+        // out of water), listed by kind in arena.json NavLinks for the bots' link following (PlayerAiUnstick)
+        public const int Version = 3;
         public const float Spacing = 4.5f;     // MPH graphs: edges 3-16 units, median 4-6
         const float Height = 1.6f;             // a hunter, -0.5..1.1 around its position
-        const float StepUp = 0.6f, MaxDrop = 4f, Sample = 0.5f;
+        const float StepUp = 0.6f, MaxDrop = 4f, Sample = 0.5f, LongDrop = 40f;
+        // a hunter's jump rises ~2.4 (Samus: speed 1228 / gravity 77, fx32 per DS frame); links may climb one ledge this
+        // high, walked into: MPH's bot jumps when it is held against a wall on the ground (PlayerAi _horizColTimer)
+        const float JumpRise = 1.9f, JumpCost = 3f;
+        // measured (Tools -echoesarena jumpreach, every hunter alike): a jump rises 2.54, Echoes' double jump (second press
+        // at the top) 4.75; running (0.24 a step) a double jump carries ~10 across before it is back down to its take-off
+        // height (9.7 landing 2 higher); the Gravity Boost held 60 steps lifts 5.6 out of Pipeline's cave (9.5 held long)
+        const float DoubleRise = 3.9f, GapMax = 4.5f, GapRise = 1.5f, GapDrop = 3f, BoostRise = 7f, MoveCost = 6f;
+        // a pad's trigger (ArenaCannons.PadRadius 1.5) plus a hunter's body
+        const float PadKeepOut = 2f;
+
+        // how a link is taken (arena.json NavLinks; walking links aren't listed)
+        public const int LinkJump = 1, LinkDouble = 2, LinkGap = 3, LinkBoost = 4;
+
+        static readonly Dictionary<int, int> _versions = new();
+
+        // an arena registered (info) or gone (null)
+        internal static void SetRoom(int roomId, EchoesArena.Info? info)
+        {
+            lock (_versions)
+            {
+                if (info == null) _versions.Remove(roomId);
+                else _versions[roomId] = info.NavVersion;
+                if (info?.NavLinks is { Count: > 0 } list) _links[roomId] = list.Where(l => l.Length >= 3).ToDictionary(l => (l[0], l[1]), l => l[2]);
+                else _links.Remove(roomId);
+            }
+        }
+
+        // this room's bots get MphRead's unstick rule: an Echoes arena whose nav file this version (or later) made
+        public static bool Unstick(int roomId)
+        {
+            lock (_versions) return _versions.TryGetValue(roomId, out int v) && v >= 2;
+        }
 
         public sealed class Graph
         {
             public List<Vector3> Nodes = new();
             public List<List<(int To, float Cost)>> Edges = new();
             public int[,] Next = new int[0, 0];
+            // the links taken with a jump, double jump, gap jump or boost: [from, to, kind] (node ids of the written file)
+            public List<int[]> Links = new();
+            internal Dictionary<(int, int), int> Kinds = new();
         }
 
-        // jumps: one-way flights (jump pads: pad -> landing); the pad's node leaves only by its flight
+        // the bots' link kinds per room (arena.json NavLinks): (from, to) -> kind; null = none listed
+        static readonly Dictionary<int, Dictionary<(int, int), int>> _links = new();
+
+        public static IReadOnlyDictionary<(int, int), int>? Links(int roomId)
+        {
+            lock (_versions) return _links.TryGetValue(roomId, out Dictionary<(int, int), int>? l) ? l : null;
+        }
+
+        // jumps: one-way flights (jump pads: pad -> landing); the pad's node leaves only by its flight. water: boxes (min,
+        // max) whose floors a bot leaves with the Gravity Boost (Pipeline's flooded cave)
         public static Graph Build(ArenaRaycaster ray, IReadOnlyList<Vector3> anchors, float killHeight,
-            IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null)
+            IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null)
         {
             var g = new Graph();
+            bool Wet(Vector3 p) => water?.Any(w => p.X >= w.Min.X && p.X <= w.Max.X && p.Z >= w.Min.Z && p.Z <= w.Max.Z
+                && p.Y >= w.Min.Y - 0.5f && p.Y + 0.5f < w.Max.Y) == true;
             // 1. floor samples on an XZ grid, every walkable level of each column, with headroom
             for (float x = ray.Min.X + Spacing / 2; x < ray.Max.X; x += Spacing)
             {
@@ -145,7 +199,7 @@ namespace MphRecomp.Arenas
                 g.Nodes.Add(to);
                 pads.Add((g.Nodes.Count - 2, g.Nodes.Count - 1));
             }
-            // 2. walk links to nearby nodes (one-way where it's a drop)
+            // 2. walk links to nearby nodes (one-way where it's a drop), and jumps up a ledge
             int n = g.Nodes.Count;
             for (int i = 0; i < n; i++) g.Edges.Add(new List<(int, float)>());
             float reach = Spacing * 1.5f;
@@ -156,7 +210,40 @@ namespace MphRecomp.Arenas
                     if (i == j) continue;
                     Vector3 a = g.Nodes[i], b = g.Nodes[j];
                     if ((a.Xz - b.Xz).LengthSquared > reach * reach || b.Y - a.Y > reach || a.Y - b.Y > MaxDrop) continue;
-                    if (Walkable(ray, a, b)) g.Edges[i].Add((j, (b - a).Length));
+                    if (Walkable(ray, a, b) is bool jump)
+                    {
+                        g.Edges[i].Add((j, (b - a).Length + (jump ? JumpCost : 0)));
+                        if (jump) g.Kinds[(i, j)] = LinkJump;
+                    }
+                    // Echoes' moves (version 3): a ledge too high for one jump, out of water with the boost, a gap
+                    else if (Walkable(ray, a, b, rise: DoubleRise) == true)
+                    {
+                        g.Edges[i].Add((j, (b - a).Length + MoveCost));
+                        g.Kinds[(i, j)] = LinkDouble;
+                    }
+                    else if (Wet(a) && Walkable(ray, a, b, rise: BoostRise) == true)
+                    {
+                        g.Edges[i].Add((j, (b - a).Length + MoveCost));
+                        g.Kinds[(i, j)] = LinkBoost;
+                    }
+                    else if (Walkable(ray, a, b, gap: true) == true)
+                    {
+                        g.Edges[i].Add((j, (b - a).Length + MoveCost));
+                        g.Kinds[(i, j)] = LinkGap;
+                    }
+                }
+            }
+            // long drops: stepping off a ledge to any floor further below (MPH has no fall damage). Without these, a ledge or
+            // pad landing left only by a drop over MaxDrop was a pocket the component step threw away (Spider Complex: both
+            // pads and their y 23.5 top, the y 5.1 east ledge: 33 of 144 nodes, and bots up there gave up, [dca6ae])
+            for (int i = 0; i < n; i++)
+            {
+                for (int j = 0; j < n; j++)
+                {
+                    if (i == j) continue;
+                    Vector3 a = g.Nodes[i], b = g.Nodes[j];
+                    if ((a.Xz - b.Xz).LengthSquared > reach * reach || a.Y - b.Y <= MaxDrop) continue;
+                    if (Walkable(ray, a, b, LongDrop) == false) g.Edges[i].Add((j, (b - a).Length));
                 }
             }
             foreach ((int from, int to) in pads)
@@ -164,8 +251,43 @@ namespace MphRecomp.Arenas
                 g.Edges[from].Clear();   // stepping on a pad launches you
                 g.Edges[from].Add((to, (g.Nodes[to] - g.Nodes[from]).Length * 0.5f));
             }
+            // nor does any other way cross a pad: a floor node 0.6 from Spider Complex's centre pad had bots launched on the
+            // way to it, steering back to it in the air and landing on the pad again, over and over ([dca6ae])
+            bool OnPad(Vector3 p, int pad) => (p.Xz - g.Nodes[pad].Xz).Length < PadKeepOut && p.Y > g.Nodes[pad].Y - 0.5f && p.Y < g.Nodes[pad].Y + 1.5f;
+            bool Crosses(Vector3 a, Vector3 b, int pad)
+            {
+                Vector2 d = b.Xz - a.Xz;
+                float t = d.LengthSquared > 0 ? Math.Clamp(Vector2.Dot(g.Nodes[pad].Xz - a.Xz, d) / d.LengthSquared, 0, 1) : 0;
+                return OnPad(Vector3.Lerp(a, b, t), pad);
+            }
+            // i -> j would walk over a pad that isn't j (pads themselves leave only by their flight)
+            bool PadInWay(int i, int j) => pads.Any(q => q.From != j && (q.From == i || OnPad(g.Nodes[i], q.From) || Crosses(g.Nodes[i], g.Nodes[j], q.From)));
+            for (int i = 0; i < n; i++)
+            {
+                if (pads.Any(q => q.From == i)) continue;
+                g.Edges[i].RemoveAll(e => PadInWay(i, e.To));
+            }
             // 3. keep what the spawns' component can reach and come back from
-            var keep = StrongComponentOf(g, anchors.Select(p => Nearest(g.Nodes, p)).Where(k => k >= 0).Distinct().ToList());
+            var starts = anchors.Select(p => Nearest(g.Nodes, p)).Where(k => k >= 0).Distinct().ToList();
+            var keep = StrongComponentOf(g, starts);
+            // pockets left out: try longer ways down out of them and into them (Spider Complex's east ledge is left only down
+            // a narrow ramp, with no floor node in reach on a straight line past the void beside it), then keep again
+            if (keep.Contains(false))
+            {
+                float far = reach * 2.5f;
+                bool added = false;
+                for (int i = 0; i < n; i++)
+                {
+                    for (int j = 0; j < n; j++)
+                    {
+                        if (i == j || keep[i] && keep[j] || pads.Any(q => q.From == i) || PadInWay(i, j)) continue;
+                        Vector3 a = g.Nodes[i], b = g.Nodes[j];
+                        if ((a.Xz - b.Xz).LengthSquared <= reach * reach || (a.Xz - b.Xz).LengthSquared > far * far || a.Y - b.Y < StepUp) continue;
+                        if (Walkable(ray, a, b, LongDrop) == false) { g.Edges[i].Add((j, (b - a).Length)); added = true; }
+                    }
+                }
+                if (added) keep = StrongComponentOf(g, starts);
+            }
             Compact(g, keep);
             // 4. next hops: shortest paths to each destination over the reversed graph
             n = g.Nodes.Count;
@@ -205,21 +327,106 @@ namespace MphRecomp.Arenas
             return g;
         }
 
-        // feet stay on walkable floor along the way, rising at most a step per sample, with room for the body
-        static bool Walkable(ArenaRaycaster ray, Vector3 a, Vector3 b)
+        // feet stay on walkable floor along the way, rising at most a step per sample (or once, up to JumpRise: a ledge
+        // MPH's bot jumps onto when it walks into it), with room for the body. Null = no way; else whether it jumps.
+        // rise: the one ledge's limit (JumpRise; DoubleRise / BoostRise for Echoes' moves). gap: one stretch with no floor
+        // under it (GapMax across, landing at most GapRise up or GapDrop down, room for the arc), jumped from its edge
+        static bool? Walkable(ArenaRaycaster ray, Vector3 a, Vector3 b, float maxDrop = MaxDrop, float rise = JumpRise, bool gap = false)
         {
             int steps = Math.Max(1, (int)MathF.Ceiling((b.Xz - a.Xz).Length / Sample));
             Vector3 prev = a;
+            bool jumped = false, lip = false;
+            Vector3 chest = Vector3.UnitY * 0.8f;
             for (int s = 1; s <= steps; s++)
             {
                 Vector3 p = Vector3.Lerp(a, b, s / (float)steps);
-                Vector3? floor = ray.FloorBelow(new Vector3(p.X, prev.Y + StepUp + 0.05f, p.Z), StepUp + MaxDrop + 0.1f);
-                if (floor is not { } f || f.Y - prev.Y > StepUp) return false;
-                Vector3 chest = Vector3.UnitY * 0.8f;
-                if (ray.Cast(prev + chest, f + chest) != null) return false;
+                if (gap && !jumped && FloorAt(ray, p, prev.Y + StepUp, maxDrop) == null && SlideAt(ray, p, prev.Y, maxDrop) == null)
+                {
+                    // no floor here: the first floor further along, within GapMax of the edge and the arc's heights
+                    int land = -1;
+                    Vector3 lf = default;
+                    for (int t = s + 1; t <= steps; t++)
+                    {
+                        Vector3 q = Vector3.Lerp(a, b, t / (float)steps);
+                        if ((q.Xz - prev.Xz).Length > GapMax + Sample) break;
+                        if (FloorAt(ray, q, prev.Y + GapRise, GapDrop) is { Lip: false } gf && gf.F.Y - prev.Y <= GapRise)
+                        {
+                            land = t;
+                            lf = gf.F;
+                            break;
+                        }
+                    }
+                    Vector3 head = Vector3.UnitY * 2.6f;
+                    if (land < 0 || ray.Cast(prev + chest, lf + chest) != null || ray.Cast(prev + head, lf + head) != null
+                        || ray.Cast(prev + chest, prev + head) != null)
+                    {
+                        return null;
+                    }
+                    jumped = true;
+                    prev = lf;
+                    s = land;
+                    continue;
+                }
+                (Vector3 F, bool Lip)? floor = FloorAt(ray, p, prev.Y + StepUp, maxDrop);
+                Vector3 f;
+                if (floor is { } fl && fl.F.Y - prev.Y <= StepUp && !(fl.Lip && (lip || s == steps)))
+                {
+                    f = fl.F;
+                    lip = fl.Lip;
+                    if (prev.Y - f.Y > MaxDrop)
+                    {
+                        // a long fall: off the edge level, then straight down (a slanted ray would clip the ledge's corner)
+                        var over = new Vector3(f.X, prev.Y, f.Z);
+                        if (ray.Cast(prev + chest, over + chest) != null || ray.Cast(over + chest, f + chest) != null) return null;
+                    }
+                    else if (ray.Cast(prev + chest, f + chest) != null) return null;
+                }
+                else if (!jumped && SlideAt(ray, p, prev.Y, maxDrop) is { } down)
+                {
+                    // down a slope too steep to walk: she slides (Spider Complex's east ledge is left only down a ramp of
+                    // normal 0.3, and entered down one from the deck; the centre top's rim is a 0.64 bevel)
+                    f = down;
+                    lip = false;
+                    if (ray.Cast(prev + chest, f + chest) != null) return null;
+                }
+                else if (!jumped && !lip && !gap && FloorAt(ray, p, prev.Y + rise) is { Lip: false } up && up.F.Y - prev.Y > StepUp
+                    && ray.Cast(prev + chest, new Vector3(prev.X, up.F.Y + Height + 0.3f, prev.Z)) == null   // room to jump
+                    && ray.Cast(new Vector3(prev.X, up.F.Y, prev.Z) + chest, up.F + chest) == null)           // and over
+                {
+                    jumped = true;
+                    f = up.F;
+                }
+                else
+                {
+                    return null;
+                }
                 prev = f;
             }
-            return MathF.Abs(prev.Y - b.Y) < 0.3f;
+            return MathF.Abs(prev.Y - b.Y) < 0.3f ? jumped : null;
+        }
+
+        // the walkable floor under p from at most `top` down (a step + MaxDrop); Lip = no floor there but a steep strip
+        // with nothing under it, crossed as one sample between floors (a step's bevelled edge: Spires' return pad stands
+        // behind a 0.25 step whose bevel reads 0.44 up and cut the north island off). Steep slopes give lips in a row.
+        static (Vector3 F, bool Lip)? FloorAt(ArenaRaycaster ray, Vector3 p, float top, float maxDrop = MaxDrop)
+        {
+            float from = top + 0.05f, bottom = top - StepUp - maxDrop - 0.1f;
+            (float T, Vector3 Normal)? hit = ray.Cast(new Vector3(p.X, from, p.Z), new Vector3(p.X, bottom, p.Z));
+            if (hit is not { } h) return null;
+            float y = from - (from - bottom) * h.T;
+            if (h.Normal.Y >= 0.7f) return (new Vector3(p.X, y, p.Z), false);
+            if (h.Normal.Y < 0.25f || ray.Cast(new Vector3(p.X, y - 0.02f, p.Z), new Vector3(p.X, y - StepUp, p.Z)) != null) return null;
+            return (new Vector3(p.X, y, p.Z), true);
+        }
+
+        // a steep slope (not a wall) under p, below the feet at y: slid down, never climbed
+        static Vector3? SlideAt(ArenaRaycaster ray, Vector3 p, float y, float maxDrop)
+        {
+            float from = y + StepUp + 0.05f, bottom = y - StepUp - maxDrop - 0.1f;
+            (float T, Vector3 Normal)? hit = ray.Cast(new Vector3(p.X, from, p.Z), new Vector3(p.X, bottom, p.Z));
+            if (hit is not { } h || h.Normal.Y < 0.25f || h.Normal.Y >= 0.7f) return null;
+            float fy = from - (from - bottom) * h.T;
+            return fy < y - 0.1f ? new Vector3(p.X, fy, p.Z) : null;
         }
 
         static int Nearest(List<Vector3> nodes, Vector3 p)
@@ -233,17 +440,34 @@ namespace MphRecomp.Arenas
             return best;
         }
 
-        // nodes reachable from the anchors AND able to reach an anchor
+        // one strongly connected component: every kept node can reach every other, so every route-table entry has a
+        // real next hop. (Was: reachable from ANY anchor and reaching ANY anchor, which kept one-way pockets, e.g. a ledge
+        // you can only drop off or an island you only leave by pad: up to 36% of pairs had no route, and MPH's bot then
+        // gets its own node as the next hop and dithers on it forever, owner 10-09 "rapidly moving back and forth".)
+        // The component with the most anchors wins (ties: the bigger one); bots spawned outside it walk or drop into it.
         static bool[] StrongComponentOf(Graph g, List<int> anchors)
         {
             int n = g.Nodes.Count;
-            bool[] fwd = Flood(n, anchors, i => g.Edges[i].Select(e => e.To));
+            var keep = new bool[n];
             var rev = new List<int>[n];
             for (int i = 0; i < n; i++) rev[i] = new List<int>();
             for (int i = 0; i < n; i++) foreach ((int j, _) in g.Edges[i]) rev[j].Add(i);
-            bool[] back = Flood(n, anchors, i => rev[i]);
-            var keep = new bool[n];
-            for (int i = 0; i < n; i++) keep[i] = fwd[i] && back[i];
+            int bestAnchors = 0, bestSize = 0;
+            var done = new bool[n];
+            foreach (int a in anchors)
+            {
+                if (done[a]) continue;
+                bool[] fwd = Flood(n, new List<int> { a }, i => g.Edges[i].Select(e => e.To));
+                bool[] back = Flood(n, new List<int> { a }, i => rev[i]);
+                var comp = new bool[n];
+                int size = 0;
+                for (int i = 0; i < n; i++) if (comp[i] = fwd[i] && back[i]) { size++; done[i] = true; }
+                int count = anchors.Count(k => comp[k]);
+                if (count > bestAnchors || count == bestAnchors && size > bestSize)
+                {
+                    bestAnchors = count; bestSize = size; keep = comp;
+                }
+            }
             return keep;
         }
 
@@ -272,13 +496,19 @@ namespace MphRecomp.Arenas
                 if (keep[i]) nodes.Add(g.Nodes[i]);
             }
             var edges = new List<List<(int, float)>>();
+            var links = new List<int[]>();
             for (int i = 0; i < g.Nodes.Count; i++)
             {
                 if (!keep[i]) continue;
                 edges.Add(g.Edges[i].Where(e => keep[e.To]).Select(e => (map[e.To], e.Cost)).ToList());
+                foreach ((int to, _) in g.Edges[i])
+                {
+                    if (keep[to] && g.Kinds.TryGetValue((i, to), out int kind)) links.Add(new[] { map[i], map[to], kind });
+                }
             }
             g.Nodes = nodes;
             g.Edges = edges;
+            g.Links = links;
         }
 
         public static byte[] Write(Graph g, float maxDistance = 1.2f)

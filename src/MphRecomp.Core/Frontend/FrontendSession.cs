@@ -13,8 +13,12 @@ using MphRead; // SfxId (Metadata/SoundMeta.cs) -- not MphRead.Formats.Sound or 
 // comes out through Request.
 namespace MphRecomp.Frontend
 {
+    // StartMatch: the vanilla multiplayer menu's START GAME (Arg = MatchSetupText); the shell plays the match, then opens
+    // the menus at FrontendSession.ReturnPage(). PlayReplay: watch a recorded match (Arg = the replay file's path, from
+    // MphRecomp.Replay.ReplayLibrary.List; docs/REPLAY_MODE.md R3); the shell plays it the same way, then the menus open
+    // at ReturnPage() (the REPLAYS list)
     public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, Credits, ShareCrashLog, Multiplayer, ControlsDone,
-        CheckUpdates }
+        CheckUpdates, StartMatch, PlayReplay, OnlineRules /* Options' privacy / code of conduct / 13+ line (RecompMenus.OnlineRules.cs) */ }
 
     public readonly record struct FrontendRequest(FrontendRequestKind Kind, int Slot = -1, string? Arg = null);
 
@@ -39,7 +43,6 @@ namespace MphRecomp.Frontend
         // this ROM's own data rather than assumed -- USA rev 1 is confirmed to renumber file select's callbacks
         // relative to USA rev 0, so this one isn't hardcoded as a literal switch case either
         private readonly int _beginGameCall;
-        private readonly int[] _background = { -1, -1 }; // main1 (top) / main2 (bottom) texture ids
 
         // the recomp's own screens under Options (RECOMP SETTINGS, MODS) and the settings they edit
         public RecompMenus Recomp { get; }
@@ -47,6 +50,20 @@ namespace MphRecomp.Frontend
 
         // the vanilla file select's game code (files A/B/C from the campaign's saves)
         public FileSelect Files { get; }
+
+        // the vanilla multiplayer menu's game code (pages 25-38; Vanilla multiplayer menu thread). Not Bound on a ROM whose
+        // pages it doesn't recognise: MULTIPLAYER then raises FrontendRequestKind.Multiplayer (the old lobby) as before.
+        public MultiplayerMenu Multiplayer { get; }
+
+        // the page the menus open at when a shell comes back from a game: the multiplayer lobby after a match the menu
+        // started, else the main menu
+        public static int ReturnPage()
+        {
+            if (GameEnding.Pending != null) return GameEnding.CreditsPage; // an ending: the credits, then the results (Start)
+            int page = MultiplayerMenu.PendingReturn;
+            MultiplayerMenu.PendingReturn = -1;
+            return page >= 0 ? page : 18;
+        }
 
         // OPTIONS > AUDIO's game code (volumes, speakers, the sound test, our music quality row); null if this ROM's page
         // 22 isn't the layout it knows
@@ -56,11 +73,40 @@ namespace MphRecomp.Frontend
         // While it's up it takes every key and touch.
         public MenuPopup? Popup { get; }
 
+        // the game's ending after the ending movie: credits, results page, save (GameEnding.cs, docs/ENDINGS.md)
+        public GameEnding Ending { get; }
+
+        // MOVIES (pages 19, 20): the movies played so far, the tiles' calls, back to the page after one (MovieGallery.cs)
+        public MovieGallery Movies { get; } = new();
+
         private FrontendSession(string root, MenuEngine menu, UiTextureCache textures, RecompMenus recomp, FileSelect files, int beginGameCall,
-            MenuPopup? popup, AudioOptions? audio)
+            MenuPopup? popup, AudioOptions? audio, MultiplayerMenu multiplayer, GameEnding ending)
         {
             _root = root;
+            Ending = ending;
             Files = files;
+            Multiplayer = multiplayer;
+            multiplayer.Popup = popup;
+            multiplayer.Log = message => Log?.Invoke(message);
+            multiplayer.Request = request => Request?.Invoke(request);
+            multiplayer.WorkInProgress = what => ShowWorkInProgress(what);
+            multiplayer.OverGame = () => Paused; // (the in-match pause menu doesn't end the match's LAN session)
+            multiplayer.OpenReplays = recomp.OpenReplays; // REPLAYS (Replay mode)
+            // ONLINE PLAY (Online play menus, OnlineMenus.cs): who this player is, and the joined match played as START GAME's
+            multiplayer.OpenOnline = recomp.OpenOnline;
+            recomp.Multiplayer = multiplayer; // (CREATE's setup pages, the lobby's "change hunter")
+            multiplayer.OnlineResultsDone = recomp.OnlineAfterResults; // (RESULTS after an online match: PLAY AGAIN = its lobby)
+            recomp.OnlineMe = () => new RecompMenus.OnlinePlayer(multiplayer.License.Name, multiplayer.License.RankLevel,
+                MultiplayerMenu.MyLook.Hunter, MultiplayerMenu.MyLook.Skin, MultiplayerMenu.MyLook.Character);
+            recomp.StartOnlineMatch = setup => Request?.Invoke(new FrontendRequest(FrontendRequestKind.StartMatch, Arg: setup));
+            recomp.EditText = multiplayer.EditText; // RENAME: the name keyboard (MultiplayerMenu.EditText)
+            recomp.PlayReplay = path => Request?.Invoke(new FrontendRequest(FrontendRequestKind.PlayReplay, Arg: path));
+            Action? imported = recomp.Import.Changed;
+            recomp.Import.Changed = () =>
+            {
+                imported?.Invoke();
+                CharacterPictures.Invalidate(); // an import ended: the picker's pictures drawn now (MultiplayerMenu.WarmPictures)
+            };
             Audio = audio;
             if (audio != null) audio.Log = message => Log?.Invoke(message);
             if (audio != null) audio.WorkInProgress = () => ShowWorkInProgress("speakers");
@@ -79,7 +125,11 @@ namespace MphRecomp.Frontend
             menu.Redirect = page => Paused && (page == 21 || page == Recomp.ModsPage) ? Recomp.PausePage : page;
             files.Popup = popup;
             files.Log = message => Log?.Invoke(message);
+            recomp.Import.Popup = popup; // IMPORT GAMES answers in the game's box too
+            recomp.Import.Log = message => Log?.Invoke(message);
             if (popup != null) popup.Sound = (id, why) => OnSound(Menu, id, why);
+            Movies.Log = message => Log?.Invoke(message);
+            Movies.Play = name => Request?.Invoke(new FrontendRequest(FrontendRequestKind.PlayMovie, Arg: name));
         }
 
         private bool PopupOpen => Popup != null && Popup.IsOpen;
@@ -128,6 +178,7 @@ namespace MphRecomp.Frontend
                 }
             }
             var recomp = new RecompMenus(file, strings, Config.RecompSettings.Load(settingsPath), settingsPath, modsDir);
+            if (settingsPath != null) MphRecomp.Arenas.EchoesArena.ImportRoot ??= Path.GetDirectoryName(settingsPath); // the in-app imports' folder (IMPORT GAMES' root): imported Echoes arenas list in the multiplayer menu
             try
             {
                 recomp.Install();
@@ -140,13 +191,26 @@ namespace MphRecomp.Frontend
             AudioOptions? audio = AudioOptions.Install(file, strings, fileSystemRoot, recomp.Settings, recomp.SaveSettings);
             var engine = new MenuEngine(file, strings, new MenuWidgets(file, textures), new MenuFont(textures));
             engine.Sounds = MenuSounds.Load(fileSystemRoot); // the button sounds, per page and item, from this ROM
+            recomp.ApplySounds(engine.Sounds); // the recomp pages' back buttons etc. sound like the ROM's
             // USA rev 1's file select list is out of step with its page: give it rev 0's sounds (owner, 2026-10-03)
             if (engine.Sounds.RealignFileSelect(file)) Console.WriteLine("menu sounds: file select list realigned (rev 1 order)");
             var files = new FileSelect(savesDir);
             if (!files.Bind(file, strings)) Console.Error.WriteLine("file select: this ROM's page 24 isn't the expected layout");
             else if (files.CopyCall < 0) Console.Error.WriteLine("file select: no COPY / DELETE buttons found on page 24");
-            return new FrontendSession(fileSystemRoot, engine, textures, recomp, files, FindBeginGameCall(file, strings),
-                MenuPopup.Load(fileSystemRoot, textures), audio);
+            var multiplayer = new MultiplayerMenu();
+            if (!multiplayer.Bind(file, strings)) Console.Error.WriteLine("multiplayer menu: this ROM's pages 25-38 aren't the expected layout (old lobby)");
+            if (settingsPath != null) multiplayer.ProfileDir = Path.GetDirectoryName(settingsPath); // the Hunter License (hunter_license.json) beside recomp_settings.json
+            multiplayer.SavesDir = savesDir; // vanilla's unlocks from the campaign's files (defeated hunters, gateways)
+            multiplayer.UnlockEverything = () => recomp.Settings.UnlockEverything; // RECOMP SETTINGS > UNLOCKS
+            var ending = new GameEnding();
+            multiplayer.EndingPercent = () => ending.Current?.CompletePercent; // the license card's octolith (100%)
+            if (!ending.Bind(file)) Console.Error.WriteLine("ending: this ROM's results page (49) isn't the expected layout");
+            var session = new FrontendSession(fileSystemRoot, engine, textures, recomp, files, FindBeginGameCall(file, strings),
+                MenuPopup.Load(fileSystemRoot, textures), audio, multiplayer, ending);
+            if (settingsPath != null) session.Movies.ProfileDir = Path.GetDirectoryName(settingsPath); // movies_seen.json beside recomp_settings.json
+            session.Movies.UnlockEverything = () => recomp.Settings.UnlockEverything; // RECOMP SETTINGS > UNLOCKS opens every movie
+            MphRecomp.Media.MoviePlayer.Opened = session.Movies.MarkPlayed; // every movie the app plays from now on opens its tile
+            return session;
         }
 
         private static int IndexOf(MenuStrings strings, string text)
@@ -203,6 +267,13 @@ namespace MphRecomp.Frontend
 
         public void Start(int page = 0)
         {
+            // back from an ending (ReturnPage): these credits are the ending's, not Options'
+            if (page == GameEnding.CreditsPage && GameEnding.Pending != null)
+            {
+                Ending.Current = GameEnding.Pending;
+                GameEnding.Pending = null;
+                Log?.Invoke($"ending: {(Ending.Current.Good ? "good" : "bad")}, credits then the results page");
+            }
             if (page == 0)
             {
                 _bootTicks = 0;
@@ -246,7 +317,9 @@ namespace MphRecomp.Frontend
             Menu.Tick();
             Popup?.Tick();
             TickUpdateCheck();
+            TickStaleImports();
             Recomp.Tick();
+            Multiplayer.Tick(Menu);
             TickGrooves();
             if (_hostGoTo != -1 && --_hostDelay <= 0)
             {
@@ -276,6 +349,7 @@ namespace MphRecomp.Frontend
                 Popup!.Press(keys);
                 return;
             }
+            if (SkipBootPage()) return;
             // "create a new game in this slot?": its check / cross are touch buttons in the data; A takes the check
             if (keys == MenuKeys.A && Menu.Page == Menu.File.Pages[FileSelect.Page] && Files.DialogOpen(Menu))
             {
@@ -288,6 +362,9 @@ namespace MphRecomp.Frontend
                 }
                 return;
             }
+            // (the results page after an ending: its OK is touch only, as vanilla's -- A does nothing there, BizHawk USA
+            // rev 1 2026-10-07: A held on page 49 for 100 frames, no call 206; a tap on OK makes it)
+            if (Multiplayer.CapturePress(Menu, keys)) return; // (the skin chooser, D9)
             Menu.Press(keys);
         }
 
@@ -300,12 +377,14 @@ namespace MphRecomp.Frontend
                 Popup!.Navigate(dx);
                 return;
             }
+            if (Multiplayer.CaptureNavigate(Menu, dx, dy)) return;
             Menu.Direction(dx, dy);
         }
 
         // a touch at canvas pixel (x, y) for the canvas last passed to Build
         public void TouchCanvas(float x, float y)
         {
+            if (SkipBootPage()) return;
             if (_placements == null) return;
             if (Recomp.CaptureDevice != null)
             {
@@ -322,50 +401,152 @@ namespace MphRecomp.Frontend
                 }
                 return;
             }
-            for (int i = 0; i < _placements.Length; i++)
+            // The boot logos and the credits (Overlay) draw both DS screens in one spot, and their taps in the data (skip
+            // the logos, end a credits page) cover the whole touch screen: a tap anywhere on the canvas is a touch-screen
+            // tap there, clamped onto it (owner 2026-10-07: NINTENDO PRESENTS "responds to a but not taps" -- the top
+            // screen's region, first in the list, took the tap as a top-screen point)
+            if (_layout.Kind == LayoutKind.Overlay)
             {
-                (float mx, float my) = _placements[i].ToMenu(x, y);
-                if (_layout.Regions[i].Contains(mx, my))
+                int touch = -1;
+                for (int i = 0; i < _placements.Length; i++)
                 {
+                    if (_layout.Regions[i].Y1 > MenuLayout.BottomY1) continue; // (a top-screen region)
+                    (float mx, float my) = _placements[i].ToMenu(x, y);
+                    bool inside = _layout.Regions[i].Contains(mx, my);
+                    if (touch < 0 || inside) touch = i;
+                    if (inside) break;
+                }
+                if (touch >= 0)
+                {
+                    LayoutRegion r = _layout.Regions[touch];
+                    (float mx, float my) = _placements[touch].ToMenu(x, y);
                     _showFocus = false;
-                    TouchMenu(mx, my + 192);
+                    TouchMenu(Math.Clamp(mx, r.X0, r.X1), Math.Clamp(my, r.Y0, r.Y1) + 192);
                     return;
                 }
             }
+            // each region the tap falls in, in order: the first with a button of its own there takes it; else the page's
+            // own actions in the first, as before (TouchInRegion)
+            int first = -1;
+            float fx = 0, fy = 0;
+            for (int i = 0; i < _placements.Length; i++)
+            {
+                (float mx, float my) = _placements[i].ToMenu(x, y);
+                if (!_layout.Regions[i].Contains(mx, my)) continue;
+                _showFocus = false;
+                if (first < 0) (first, fx, fy) = (i, mx, my);
+                if (!TouchRegionCheck) break;
+                if (TouchMenu(mx, my + 192, i, pageActions: false)) return;
+            }
+            if (first >= 0) TouchMenu(fx, fy + 192, first, pageActions: true);
+        }
+
+        // A tap through region `region` doesn't take a button whose touch rectangle (text coordinates) sits wholly in
+        // another region: that button is drawn there, elsewhere on the canvas, and the tap only maps onto its menu
+        // coordinates because the regions overlap (owner 2026-10-10: ONLINE PLAY's back arrow took taps on the panel
+        // above it, the REPLAYS layout's rows region covering the back corner's menu space). Rectangles spanning regions
+        // (a whole screen's "touch to start") take a tap from anywhere, as before.
+        internal static bool TouchRegionCheck = true; // (off: as before 2026-10-10, for the tools)
+
+        private bool TouchInRegion(int region, float x0, float y0, float x1, float y1)
+        {
+            const float slack = 4;
+            if (!TouchRegionCheck) return true;
+            y0 -= 192; y1 -= 192;
+            int home = _layout.RegionOf((x0 + x1) / 2, (y0 + y1) / 2);
+            if (home < 0 || home == region) return true;
+            LayoutRegion r = _layout.Regions[home];
+            return !(x0 >= r.X0 - slack && x1 <= r.X1 + slack && y0 >= r.Y0 - slack && y1 <= r.Y1 + slack);
         }
 
         // a touch at DS touch-screen pixel (x, y), y down, as the DS reads it (tools and tests: no layout involved)
         public void TouchDs(float x, float y)
         {
+            if (SkipBootPage()) return;
             _showFocus = false;
             if (PopupOpen) Popup!.Touch(x, y);
             else TouchMenu(x, 192 - y);
         }
 
+        // Skipping the first boot screens (owner 2026-10-07, Reports R17: "I want to be able to skip through the act imagine
+        // logo and the esrb notice"): vanilla waits out the white NINTENDO / ACTIMAGINE screen (page 0, ~5 s) and the ESRB
+        // notice (page 1, a 90-tick timer); here any key or touch moves on to the next, as each page's own end does (call
+        // 7, the ESRB timer), and a press in the white before page 0 goes straight to the ESRB notice. From page 2 on the
+        // data's own skip takes over (any key or touch: call 8, the intro movie, which skips too).
+        private bool SkipBootPage()
+        {
+            if (Paused || Menu.PendingPage >= 0) return false;
+            if (_bootTicks >= 0 && Menu.Page == null)
+            {
+                _bootTicks = -1;
+                Menu.Enter(0);
+            }
+            else if (Menu.Page?.Index is not (0 or 1))
+            {
+                return false;
+            }
+            int page = Menu.Page!.Index;
+            _bootTicks = -1; // (the boot's white, if a press comes while it fades)
+            Log?.Invoke($"boot: page {page} skipped");
+            Menu.GoTo(page + 1);
+            return true;
+        }
+
         // a touch in the engine's text space; Options' greyed RUMBLE PAK (State5, no touch in the game) answers with the
         // WORK IN PROGRESS box instead of nothing
-        private void TouchMenu(float x, float y)
+        // `region`: the layout region the tap landed in (TouchInRegion), -1 = no layout; true when something took it
+        private bool TouchMenu(float x, float y, int region = -1, bool pageActions = true)
         {
+            if (Multiplayer.CaptureTouch(Menu, x, y)) return true; // (the skin chooser and lobby badges, D9)
             if (Menu.Page?.Index == OptionsPage && Menu.DisabledItemAt(x, y) >= 0)
             {
                 ShowWorkInProgress("rumble pak");
-                return;
+                return true;
             }
-            Menu.Touch(x, y);
+            return Menu.Touch(x, y, region < 0 ? null : (x0, y0, x1, y1) => TouchInRegion(region, x0, y0, x1, y1), pageActions);
         }
 
         // ---- WORK IN PROGRESS: a press with nothing behind it yet gets the game's message box with one check ----
 
         public const string WorkInProgressText = "work in progress.";
 
-        // pages whose presses with no handler are features still to come: Options (ERASE ALL DATA) and both MOVIES pages
-        // (every tile: movie unlocks aren't kept yet, so all of them show "?")
-        private static readonly int[] WorkInProgressPages = { OptionsPage, 19, 20 };
+        // pages whose presses with no handler are features still to come: Options (ERASE ALL DATA)
+        private static readonly int[] WorkInProgressPages = { OptionsPage };
 
         private void ShowWorkInProgress(string what)
         {
             Log?.Invoke($"work in progress: {what}");
             Popup?.Inform(WorkInProgressText);
+        }
+
+        // ---- MR1 V1 (docs/MULTIPLAYER_RELIABILITY.md section 2): once per run, the first time the main menu is up, the
+        //      game's box says when an update changed how some imported items are made (IMPORT GAMES marks them UPDATE;
+        //      they aren't used until imported again: Import/ImportedContent.cs) ----
+
+        private const int MainMenuPage = 18;
+        public const string StaleImportsText = "an update changed some imported items. import them again on import games (marked update).";
+        private bool _staleImportsChecked;
+
+        private void TickStaleImports()
+        {
+            if (_staleImportsChecked || Popup == null || PopupOpen || Paused || Menu.PendingPage >= 0 || Menu.Page?.Index != MainMenuPage) return;
+            _staleImportsChecked = true;
+            int stale;
+            try
+            {
+                stale = 0;
+                foreach (MphRecomp.Import.ImportGameInfo g in Recomp.Import.Service?.Games ?? Array.Empty<MphRecomp.Import.ImportGameInfo>())
+                {
+                    foreach (MphRecomp.Import.ImportItemInfo i in g.Items) if (i.Status == MphRecomp.Import.ItemImportStatus.Stale) stale++;
+                }
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                return;
+            }
+            if (stale == 0) return;
+            Log?.Invoke($"imports: {stale} stale item(s) -- asked to import again");
+            Popup.Inform(StaleImportsText);
         }
 
         // ---- RECOMP SETTINGS > UPDATES: a check per press (never on its own); YES downloads, verifies and installs the
@@ -503,6 +684,8 @@ namespace MphRecomp.Frontend
         {
             if (menu.Page?.Index == AudioOptions.Page && Audio != null && Audio.OnCall(menu, b)) return true;
             if (Recomp.OnCall(menu, b, Paused)) return true;
+            if (Multiplayer.OnCall(menu, action, b, item)) return true; // pages 25-48 (the vanilla multiplayer menu)
+            if (Movies.OnCall(menu, b)) return true; // a MOVIES tile (pages 19, 20)
             // file select: a slot's highlight was started or took focus. Checked ahead of the switch below because
             // these ids are read per-ROM in FileSelect.Bind, not fixed literals a switch case could name (USA rev 1
             // renumbers them relative to USA rev 0 -- confirmed on device: rev 1 sends 76/77 where rev 0 sends 78/79).
@@ -548,8 +731,17 @@ namespace MphRecomp.Frontend
             case 9: // (logo texts: their item/state change is the generic one every action has)
             case 10:
                 return true;
-            case 11: // credits skipped
-            case 12: // credits over
+            case GameEnding.CreditsSkippedCall: // credits skipped: after an ending they can't be (ov0 0x2128afc)
+                if (Ending.Current != null) return true;
+                Menu.GoTo(21);
+                return true;
+            case GameEnding.CreditsOverCall: // credits over: Options, or after an ending its results page (0x2133168)
+                if (Ending.Current is EndingResults ended)
+                {
+                    Ending.Fill(menu.Strings);
+                    Menu.GoTo(ended.Good ? GameEnding.GoodPage : GameEnding.BadPage);
+                    return true;
+                }
                 Menu.GoTo(21);
                 return true;
             case 13: // touch to start / back to the title: the page change is in the data
@@ -563,9 +755,17 @@ namespace MphRecomp.Frontend
             case 46: // Options' CREDITS: the credits pages (6..12 run themselves; the end goes back to Options)
                 Menu.GoTo(6);
                 return true;
-            case 16: // Multiplayer picked: the app's own lobby (MatchLobbyActivity) for now, in place of the ROM's
-                     // multiplayer pages (page 25 on); its sound is the item's own, played with the action
-                Request?.Invoke(new FrontendRequest(FrontendRequestKind.Multiplayer));
+            case 16: // Multiplayer picked: the game's own multiplayer menu (page 25 on; the data has no page change here),
+                     // or, on a ROM it can't run on, the app's own lobby (MatchLobbyActivity); its sound is the item's own,
+                     // played with the action
+                if (Multiplayer.Bound && !Paused) Menu.GoTo(MultiplayerMenu.TypePage);
+                else Request?.Invoke(new FrontendRequest(FrontendRequestKind.Multiplayer));
+                return true;
+            case GameEnding.OkCall when Ending.Current != null && menu.Page?.Index is GameEnding.GoodPage or GameEnding.BadPage:
+                // the results page's OK (0x212ef00): "saving to the game card" (the campaign saved the file as the ending
+                // movie ended), then the boot logos, the intro movie and the title
+                Ending.Current = null;
+                Files.ShowSaving(() => Menu.GoTo(GameEnding.AfterPage));
                 return true;
             case 78: // file select: a file's highlight was chosen (the companion call alongside start/focus above)
                 return true;
@@ -606,6 +806,7 @@ namespace MphRecomp.Frontend
             }
             if (page != FileSelect.Page) Popup?.Close();
             if (page == FileSelect.Page) Files.OnEnter(menu, menu.Strings);
+            Movies.OnPageEntered(menu, page);
             if (page == OptionsPage)
             {
                 // no Rumble Pak here: the rumble row in its greyed State5 look, as the game sets it when its slot-2 check
@@ -618,6 +819,7 @@ namespace MphRecomp.Frontend
             }
             HideTrademarkText(menu);
             Recomp.OnPageEntered(menu, page);
+            Multiplayer.OnPageEntered(menu, page); // its pages, and START GAME's way out (pages 15 / 17)
         }
 
         // USA rev 1 moved the logo's "®" out of the logo texture into its own item (toplogoR) and added a "TM" text item
@@ -710,6 +912,7 @@ namespace MphRecomp.Frontend
 
         public void Build(float width, float height)
         {
+            if (Multiplayer.TakeCardSnapshot()) KeepCard(); // (EDIT NAME was just pressed: the list still holds the card)
             DrawList.Clear();
             MenuPage? page = Menu.Page;
             if (page == null)
@@ -728,9 +931,16 @@ namespace MphRecomp.Frontend
             _placements = _layout.Resolve(width, height);
             DrawBackground(page.Index, width, height);
             DrawGrooves(page.Index, width, height);
+            if (Multiplayer.KeyboardOverCard(page.Index)) DrawCard(width, height);
+            int pageFrom = DrawList.Vertices.Count;
 
             _tris.Clear();
             Menu.Collect(_tris);
+            Multiplayer.ReplacePreview(Menu, _tris, 0); // the rules pages' arena picture
+            Recomp.DrawReplays(Menu, _tris); // REPLAYS' rows, pictures and texts (RecompMenus.Replays.cs)
+            Recomp.DrawOnline(Menu, _tris); // ONLINE PLAY's pages (OnlineMenus.cs)
+            Recomp.DrawOptions(Menu, _tris); // Options' IMPORT GAMES pill (RecompMenus.cs)
+            Recomp.DrawImportCards(Menu, _tris); // IMPORT GAMES' cards (RecompMenus.ImportCards.cs)
             AddFocusFrame();
             // Each item goes wholly to the region holding the centre of its bounds, so no widget or label is cut in two
             // -- except a model drawn across BOTH screens (the boot logos' oval-on-top + swirl-below), whose triangles
@@ -757,7 +967,11 @@ namespace MphRecomp.Frontend
                 itemRegion[item] = Hidden(item) ? -1
                     : flatItems.Contains(item) && IsFullScreen(b) ? FullScreenItem
                     : b.Y1 - b.Y0 > 200 ? PerTriangle
-                    : _layout.RegionOf((b.X0 + b.X1) / 2, (b.Y0 + b.Y1) / 2);
+                    // the multiplayer setup pages split the top screen into its left and right boxes: one model drawing
+                    // frames on both sides (topstatus) goes per triangle
+                    : _layout.Kind == LayoutKind.Setup && b.Y0 >= -1 && b.X0 < MenuLayout.SetupSplitX && b.X1 > MenuLayout.SetupSplitX
+                        && b.X1 - b.X0 > 200 ? PerTriangle
+                    : _layout.RegionOf((b.X0 + b.X1) / 2, (b.Y0 + b.Y1) / 2, IsTextItem(item));
             }
             // the title's TOUCH TO START bar end to end across the canvas, as it spans the DS touch screen (always, owner
             // 2026-10-04: no "touch bar" setting any more); the side-by-side layout draws whole DS screens, where it
@@ -798,12 +1012,13 @@ namespace MphRecomp.Frontend
                         Stretch(screen, t.A, width, height), Stretch(screen, t.B, width, height), Stretch(screen, t.C, width, height));
                     continue;
                 }
-                if (region == PerTriangle) region = _layout.RegionOf((tb.X0 + tb.X1) / 2, (tb.Y0 + tb.Y1) / 2);
+                if (region == PerTriangle) region = _layout.RegionOf((tb.X0 + tb.X1) / 2, (tb.Y0 + tb.Y1) / 2, IsTextItem(t.Item));
                 if (region < 0) continue;
                 Placement p = _placements[region];
                 if (wideBars.Contains(t.Item) && EmitWideBar(t, p, width)) continue;
                 DrawList.Triangle(t.TextureId, t.WrapS, t.WrapT, UiBlend.Alpha, Place(p, t.A), Place(p, t.B), Place(p, t.C));
             }
+            (_pageFrom, _pageTo, _drawnWidth, _drawnHeight) = (pageFrom, DrawList.Vertices.Count, width, height);
             if (PopupOpen) DrawPopup(width, height);
             if (_bootTicks >= 0)
             {
@@ -811,6 +1026,52 @@ namespace MphRecomp.Frontend
                 DrawList.Quad(-1, 0, 0, width, height, 0, 0, 0, 0, 1, 1, 1, white);
             }
         }
+
+        // The name keyboard over the license (MultiplayerMenu.KeyboardOverCard, owner 2026-10-08: "the keyboard floating over
+        // the license"): the page's own triangles of the last frame drawn (after the backdrop, before the box), kept when
+        // EDIT NAME is pressed and drawn under the keyboard, dimmed as under the game's box.
+        private int _pageFrom, _pageTo;
+        private float _drawnWidth, _drawnHeight, _cardWidth, _cardHeight;
+        private readonly List<(int TextureId, UiWrap WrapS, UiWrap WrapT, UiBlend Blend, UiRect Clip, int Count)> _cardBatches = new();
+        private readonly List<UiVertex> _cardVertices = new();
+
+        private void KeepCard()
+        {
+            _cardBatches.Clear();
+            _cardVertices.Clear();
+            (_cardWidth, _cardHeight) = (_drawnWidth, _drawnHeight);
+            foreach (UiBatch b in DrawList.Batches)
+            {
+                int from = Math.Max(b.Start, _pageFrom), to = Math.Min(b.Start + b.Count, _pageTo);
+                if (to <= from) continue;
+                _cardBatches.Add((b.TextureId, b.WrapS, b.WrapT, b.Blend, b.Clip, to - from));
+                for (int v = from; v < to; v++) _cardVertices.Add(DrawList.Vertices[v]);
+            }
+        }
+
+        private void DrawCard(float width, float height)
+        {
+            // (the same canvas shape at another size scales; another shape drops it)
+            if (_cardVertices.Count == 0 || MathF.Abs(width * _cardHeight - height * _cardWidth) > 0.01f * width * _cardHeight) return;
+            float sx = width / _cardWidth, sy = height / _cardHeight;
+            UiVertex At(UiVertex p) => new(p.X * sx, p.Y * sy, p.U, p.V, p.R, p.G, p.B, p.A);
+            UiRect clip = DrawList.Clip;
+            int v = 0;
+            foreach (var b in _cardBatches)
+            {
+                DrawList.Clip = b.Clip.IsNone ? b.Clip : new UiRect(b.Clip.X * sx, b.Clip.Y * sy, b.Clip.W * sx, b.Clip.H * sy);
+                for (int end = v + b.Count; v < end; v += 3)
+                {
+                    DrawList.Triangle(b.TextureId, b.WrapS, b.WrapT, b.Blend, At(_cardVertices[v]), At(_cardVertices[v + 1]), At(_cardVertices[v + 2]));
+                }
+            }
+            DrawList.Clip = clip;
+            // (the dim comes in with the keyboard's keys, over its first 8 ticks: the card itself never goes)
+            DrawList.Quad(-1, 0, 0, width, height, 0, 0, 0, 0, 0, 0, 0, 0.5f * Math.Min(1, (Menu.PageFrame + 1) / 8f));
+        }
+
+        // whether a triangle's item is a text (layout regions can take only texts or only widgets: MenuLayout.Credits)
+        private bool IsTextItem(int item) => Menu.Page is { } page && item >= 0 && item < page.Items.Count && page.Items[item].IsText;
 
         // The message box sits where the touch screen's controls go (its centre picks the region, so it stays whole). The
         // game's 2box layer stipples the rest of the touch screen at 50%; on the one combined screen that's an even
@@ -983,13 +1244,29 @@ namespace MphRecomp.Frontend
             }
         }
 
-        private int BackgroundTexture(int which)
+        // Each page's own two pictures (its header's image ids, page +0x16 / +0x18): the ending's results have theirs, with
+        // the boxes its numbers sit in drawn in (49 good: good1 / good2, Gorea over Samus unmasked; 50 bad: bad1 / bad2),
+        // as do the multiplayer RESULTS pages (47 / 48: results1 / results2); every other page the menus' Samus (main1 /
+        // main2), which the HD backdrop replaces. Owner 2026-10-07 (Reports R6): the results page looked "suspiciously
+        // bare" -- it had main1 / main2 (vanilla capture: handoffs/start-menu-ui-rebuild_2026-10-07-endings-files/screens).
+        private const double EndingHold = 5, EndingFade = 1.5; // seconds
+
+        private static string BackgroundName(int page) => page switch
         {
-            if (Settings.MenuArtHd && _hdBackground[which] != -1) return _hdBackground[which];
-            if (_background[which] != -1) return _background[which];
-            string name = which == 0 ? "main1" : "main2";
-            _background[which] = Textures.GetOrAdd("bg/" + name, () => LoadBitmap(Path.Combine(_root, "sourceimages", "bg", name + ".bin"))).Id;
-            return _background[which];
+            MultiplayerMenu.ResultsPage or 48 => "results",
+            GameEnding.GoodPage => "good",
+            GameEnding.BadPage => "bad",
+            _ => "main",
+        };
+
+        private int BackgroundTexture(int page, int which)
+        {
+            string name = BackgroundName(page);
+            if (name == "main" && Settings.MenuArtHd && _hdBackground[which] != -1) return _hdBackground[which];
+            name += which + 1;
+            string path = Path.Combine(_root, "sourceimages", "bg", name + ".bin");
+            if (!File.Exists(path)) path = Path.Combine(_root, "sourceimages", "bg", "main" + (which + 1) + ".bin");
+            return Textures.GetOrAdd("bg/" + name, () => LoadBitmap(path)).Id;
         }
 
         // sourceimages/bg: a 256-colour RGB555 palette followed by a 256x192 8-bit image
@@ -1016,8 +1293,21 @@ namespace MphRecomp.Frontend
                 return;
             }
             if (page <= 12) return; // logos and credits are on black (the white Nintendo screen is its own backdrop)
-            int top = BackgroundTexture(0), bottom = BackgroundTexture(1);
-            if (_layout.Kind == LayoutKind.MainFamily)
+            int top = BackgroundTexture(page, 0), bottom = BackgroundTexture(page, 1);
+            if (_layout.Kind == LayoutKind.Ending && _placements != null)
+            {
+                // the ending's results on one screen: its two pictures take turns at the touch screen's place, each held
+                // EndingHold then cross-faded over EndingFade (owner: five seconds, a one and a half second fade)
+                (float ax, float ay) = _placements[0].ToCanvas(0, MenuLayout.BottomY1);
+                (float bx, float by) = _placements[0].ToCanvas(256, MenuLayout.BottomY0);
+                double t = Menu.PageFrame * TickSeconds % (2 * (EndingHold + EndingFade));
+                float second = t < EndingHold ? 0 : t < EndingHold + EndingFade ? (float)((t - EndingHold) / EndingFade)
+                    : t < 2 * EndingHold + EndingFade ? 1 : 1 - (float)((t - 2 * EndingHold - EndingFade) / EndingFade);
+                DrawList.Quad(top, ax, ay, bx, by, 0, 0, 1, 1, 1, 1, 1, 1);
+                if (second > 0) DrawList.Quad(bottom, ax, ay, bx, by, 0, 0, 1, 1, 1, 1, 1, second);
+                return;
+            }
+            if (_layout.Kind is LayoutKind.MainFamily or LayoutKind.Setup)
             {
                 // the two images are one continuous picture (helmet above chest): cover the canvas with it, top-aligned
                 float scale = MathF.Max(width / 256, height / 384);
@@ -1036,6 +1326,7 @@ namespace MphRecomp.Frontend
                     DrawList.Quad(r.Y0 >= 0 ? top : bottom, ax, ay, bx, by, 0, 0, 1, 1, 1, 1, 1, 1);
                 }
             }
+            if (page is GameEnding.GoodPage or GameEnding.BadPage) return; // the ending's pictures are shown as they are (vanilla capture)
             var (tr, tg, tb) = Tint();
             DrawList.Quad(-1, 0, 0, width, height, 0, 0, 0, 0, tr, tg, tb, TintWeight);
         }
@@ -1080,7 +1371,7 @@ namespace MphRecomp.Frontend
                 Log?.Invoke("menu grooves unavailable: " + ex.Message);
                 return;
             }
-            if (_layout.Kind == LayoutKind.MainFamily)
+            if (_layout.Kind is LayoutKind.MainFamily or LayoutKind.Setup)
             {
                 // placed like the backdrop art (DrawBackground): one continuous picture over the canvas, top-aligned
                 float scale = MathF.Max(width / 256, height / 384);

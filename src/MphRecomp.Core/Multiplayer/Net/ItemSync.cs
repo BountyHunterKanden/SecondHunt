@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using MphRead;
 using MphRead.Entities;
+using MphRead.Formats.Culling;
 using OpenTK.Mathematics;
 
 namespace MphRecomp.Multiplayer.Net
@@ -148,13 +149,18 @@ namespace MphRecomp.Multiplayer.Net
                 {
                     continue;
                 }
-                ItemInstanceEntity? item = ItemSpawnEntity.SpawnItem((ItemType)n.Type, n.Position,
-                    scene.GetNodeRefByPosition(n.Position), despawnTime: 0, scene);
+                // the room part it's drawn with: its spawner's own (as the host's item has), else the part whose geometry
+                // is there (GetNodeRefByPosition's portal planes give far parts in rooms like Council Chamber, hiding it)
+                ItemSpawnEntity? spawner = n.Spawner >= 0 && scene.TryGetEntity(n.Spawner, out EntityBase? owner)
+                    ? owner as ItemSpawnEntity : null;
+                NodeRef nodeRef = spawner != null && spawner.NodeRef.PartIndex != -1
+                    ? spawner.NodeRef : scene.GetNodeRefContaining(n.Position);
+                ItemInstanceEntity? item = ItemSpawnEntity.SpawnItem((ItemType)n.Type, n.Position, nodeRef, despawnTime: 0, scene);
                 if (item == null)
                 {
                     continue;
                 }
-                if (n.Spawner >= 0 && scene.TryGetEntity(n.Spawner, out EntityBase? owner) && owner is ItemSpawnEntity spawner)
+                if (spawner != null)
                 {
                     item.Owner = spawner;
                     item.ParentId = spawner.Data.ParentId;
@@ -181,5 +187,44 @@ namespace MphRecomp.Multiplayer.Net
 
         // for tests: the items this client shows, keyed like the host's
         public int LocalCount => _local.Count;
+
+        // ---- O5b host migration (HostHandoff) ----
+
+        // host: the despawn timers of the items it numbered (the last Capture's)
+        public (ushort Id, short Timer)[] HostTimers()
+        {
+            var list = new List<(ushort, short)>(_ids.Count);
+            foreach ((ItemInstanceEntity item, ushort id) in _ids)
+            {
+                if (item.DespawnTimer != 0)
+                {
+                    list.Add((id, (short)Math.Clamp(item.DespawnTimer, -1, short.MaxValue)));
+                }
+            }
+            return list.ToArray();
+        }
+
+        // client: the item it shows for the host's id, if any
+        public ItemInstanceEntity? LocalItem(ushort id) => _local.TryGetValue(id, out ItemInstanceEntity? item) ? item : null;
+
+        // a client promoted to host: the items it shows keep the old host's numbers (the other devices know them by those),
+        // new ones count on from the highest
+        public void TakeOver()
+        {
+            _ids.Clear();
+            int highest = 0;
+            foreach ((ushort id, ItemInstanceEntity item) in _local)
+            {
+                if (item.DespawnTimer != 0)
+                {
+                    _ids[item] = id;
+                    highest = Math.Max(highest, id);
+                }
+            }
+            _next = (ushort)(highest + 1 == 65536 ? 1 : highest + 1);
+            _local.Clear();
+            _takenHere.Clear();
+            _lastSignature = 0;
+        }
     }
 }

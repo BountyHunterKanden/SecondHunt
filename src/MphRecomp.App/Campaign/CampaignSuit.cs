@@ -21,6 +21,9 @@ namespace MphRecomp.App;
 // trophy viewer's light. A part with no GX program (no .brres / .gx.json entry) is left out, not drawn the old way.
 // Each material on its own TEV program (GunPrograms.SuitFrag) where ArenaGxSpec can write it, else the interpreter.
 // DepthRebuild: CampaignActivity's pass 4 (colour masked by the caller): the opaque parts' depth only.
+// Multiplayer skins (docs/CHARACTERS_AND_SKINS.md, MatchSkins.cs): the same class draws any hunter's rig (Samus's suits,
+// the troopers on Weavel's) on any player -- one loaded skin serves every seat wearing it (each seat's ball roll is its
+// own), with MphRead's red damage flash.
 internal enum SuitPass { Opaque, Translucent, Additive, DepthRebuild }
 
 internal sealed class CampaignSuit
@@ -56,7 +59,11 @@ internal sealed class CampaignSuit
     float[]? _vertBuf;
     Task<(Dictionary<string, (int[] Px, int W, int H)?> Pixels, float[] Verts)>? _reprep;
 
-    // the body: the DS skeleton MphRead's clips pose, and the rig the HD mesh is bound to
+    // the body: the DS skeleton MphRead's clips pose, and the rig the HD mesh is bound to; _hunter = whose rig (Samus for
+    // her suits, Weavel for the Space Pirates); _offArm = the pirates' blade arm, which keeps the legs layer's clip while
+    // the torso fires (TrophyRigs.OffHandStaysDown), null for everyone else
+    Hunter _hunter = Hunter.Samus;
+    bool[]? _offArm;
     Model _dsModel = null!;
     DsSkeleton _skel = null!;
     TrophyRig _rig = null!;
@@ -65,11 +72,20 @@ internal sealed class CampaignSuit
     bool[] _legs = Array.Empty<bool>(), _torso = Array.Empty<bool>();
     readonly float[] _pal = new float[MaxBones * 16];
 
-    // the ball: its model's own centre and width, and the roll so far
+    // the ball: its model's own centre and width, and each player's roll so far
     Vector3 _ballCenter;
-    float _ballWidth = 1f, _heading, _spin;
-    Vector3? _ballLast;
+    float _ballWidth = 1f;
+    sealed class Roll
+    {
+        public float Heading, Spin;
+        public Vector3? Last;
+    }
+    readonly Dictionary<PlayerEntity, Roll> _rolls = new();
+    Roll RollOf(PlayerEntity p) => _rolls.TryGetValue(p, out Roll? r) ? r : _rolls[p] = new Roll();
     readonly float[] _ballPal = new float[16];
+    // GxShader's uTint for this draw (the interpreter only): w = 1 recolours it (MphRead's red damage flash)
+    Vector4 _tint;
+    static readonly Vector4 DamageTint = new(1f, 0.28f, 0.22f, 1f);
 
     // _prog = the interpreter (GunPrograms.SuitInterpFrag), _depthProg = depth only, _specProg = the materials' own
     // programs (_specSrc, one Warm step each). Every one on GunPrograms.Vert: the depth pass and the colour pass must
@@ -125,15 +141,26 @@ internal sealed class CampaignSuit
 
     // MphRead's Samus model (the DS rig the suit's body is posed on); the GL thread's lookup for TryLoad on a worker
     public static Model SamusModel() => Read.GetModelInstance(Metadata.HunterModels[Hunter.Samus][0]).Model;
+    // any hunter's (the rig a skin is on: RigHunter); GL thread only, as SamusModel
+    public static Model HunterModel(Hunter h) => Read.GetModelInstance(Metadata.HunterModels[h][0]).Model;
+    // the hunter whose rig hd/<id> is on (Samus when it isn't one: a morph ball alone)
+    public static Hunter RigHunter(string id) => TrophyRigs.TryHunterFor(id, out Hunter h) ? h : Hunter.Samus;
 
-    // hd/<id>/ (the body, only when that model is on Samus's rig) and hd/<id>Ball; null when neither is there, or for
+    // hd/<id>/ (the body, on its hunter's rig: RigHunter) and hd/<id>Ball; null when neither is there, or for
     // "original" / "none". CPU work only, safe on a worker thread (GL objects are made by Warm / the first draw); samus =
-    // MphRead's Samus model, looked up by the caller on the GL thread (else read here). Never fits a rig: the body comes
-    // from the model's cached rig files or not at all.
+    // that hunter's MphRead model (Samus's for her suits, despite the name), looked up by the caller on the GL thread
+    // (HunterModel; else read here). Never fits a rig: the body comes from the model's cached rig files or not at all.
     public static CampaignSuit? TryLoad(string hdRoot, string id, Model? samus = null, bool asBuilt = false)
     {
         if (string.IsNullOrEmpty(id) || id.Equals("original", StringComparison.OrdinalIgnoreCase) || id.Equals("none", StringComparison.OrdinalIgnoreCase))
         {
+            return null;
+        }
+        // only imported, up-to-date models (ImportedContent: a stale import waits for IMPORT AGAIN; a public build wears
+        // nothing hand-dropped, e.g. no Brawl trophies)
+        if (!MphRecomp.Import.ImportedContent.Usable(hdRoot, id))
+        {
+            Log.Info(Tag, $"suit {id}: not imported (or out of date) here -- MPH's own Samus");
             return null;
         }
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -182,19 +209,22 @@ internal sealed class CampaignSuit
 
     string LoadBody(string hdRoot, Model? samus)
     {
-        if (!TrophyRigs.TryHunterFor(Id, out Hunter h) || h != Hunter.Samus) return "none (not a model on Samus's rig)";
+        if (!TrophyRigs.TryHunterFor(Id, out Hunter h)) return "none (not a model on a hunter's rig)";
         string dir = Path.Combine(hdRoot, Id);
         string[] daes = Directory.Exists(dir) ? Directory.GetFiles(dir, "*.dae") : Array.Empty<string>();
         if (daes.Length == 0) return $"none (no .dae in hd/{Id})";
         string daePath = daes[0];
-        Model rm = samus ?? SamusModel();
+        _hunter = h;
+        string want = Metadata.HunterModels[h][0];
+        Model rm = samus != null && samus.Name == want ? samus : HunterModel(h);
         if (MathF.Abs(rm.Scale.X - 1f) > 1e-6f) Log.Warn(Tag, $"suit {Id}: {rm.Name} model scale {rm.Scale.X} != 1 (rigs assume 1)");
         var sk = new DsSkeleton(rm);
+        if (TrophyRigs.OffHandStaysDown(Id)) _offArm = sk.Subtree("L_shoulder");
         TrophyRig? rig = PickRig(daePath, rm, sk, out string label);
         if (rig == null) return $"none (no rig cached for {Path.GetFileName(daePath)}: prepare one on the PC, it is never fitted here)";
         if (sk.Count > MaxBones || rig.InvBind.Length < sk.Count || rig.Lengths.Length < sk.Count || rig.Offsets.Length < sk.Count)
         {
-            return $"none (the {label} rig has {rig.InvBind.Length} bones, Samus's skeleton {sk.Count})";
+            return $"none (the {label} rig has {rig.InvBind.Length} bones, {h}'s skeleton {sk.Count})";
         }
         // feet on the floor where the game model's are (the hip height the sculpt gave can sink them in or lift them)
         try { TrophyFeet.Settle(rig, rm, sk, m => Log.Info(Tag, $"suit {Id} [{label}]:" + m)); }
@@ -281,10 +311,13 @@ internal sealed class CampaignSuit
     TrophyRig? PickRig(string dae, Model rm, DsSkeleton sk, out string label)
     {
         Action<string> log = m => Log.Info(Tag, $"suit {Id}: " + m);
+        // a public build plays the rigs the import makes (retro, rigid) only: the pose file and the PIECES rig are
+        // hand-made on the PC (Pose Studio, rig work) and never come from an import
+        bool handMade = !MphRecomp.Config.RecompSettings.PublicBuild;
         try
         {
             string posedPath = TrophyRigIO.PosedPathFor(dae);
-            if (File.Exists(posedPath))
+            if (handMade && File.Exists(posedPath))
             {
                 string? baseKey = TrophyRigIO.LoadPosed(posedPath)?.Base;
                 TrophyRig? posed = TrophyRigIO.LoadPosedRig(dae, sk.Names);
@@ -297,7 +330,7 @@ internal sealed class CampaignSuit
             }
         }
         catch (Exception ex) { log("rig: posed failed: " + ex.Message); }
-        foreach (string key in new[] { "pieces", "retro", "rigid" })
+        foreach (string key in handMade ? new[] { "pieces", "retro", "rigid" } : new[] { "retro", "rigid" })
         {
             TrophyRigIO.RigVariant? v = Array.Find(TrophyRigIO.Variants, x => x.Key == key);
             if (v == null || !File.Exists(TrophyRigIO.VariantPathFor(dae, v))) continue;
@@ -337,6 +370,7 @@ internal sealed class CampaignSuit
     {
         HdBall? info = HdBall.For(hdRoot, Id);
         if (info == null) return $"none (no hd/{HdBall.IdFor(Id)})";
+        if (!MphRecomp.Import.ImportedContent.Usable(hdRoot, info.Id)) return $"none ({info.Id} isn't imported)"; // ship-safe audit
         DaeModel dae = DaeModel.Load(info.DaePath);
         Dictionary<string, GxMaterial> gx = ReadGx(info.Folder, info.DaePath, out Dictionary<string, int> formats);
         System.Numerics.Vector3 mn = dae.Min, mx = dae.Max;
@@ -467,27 +501,28 @@ internal sealed class CampaignSuit
     public void Tick(PlayerEntity player)
     {
         if (!HasBall) return;
+        Roll r = RollOf(player);
         if (!player.IsAltForm)
         {
-            _ballLast = null; // morphing again starts from where the ball is then, not where it last rolled
+            r.Last = null; // morphing again starts from where the ball is then, not where it last rolled
             return;
         }
         Vector3 now = player.Position;
-        if (_ballLast is Vector3 last)
+        if (r.Last is Vector3 last)
         {
             float dx = now.X - last.X, dz = now.Z - last.Z, dist = MathF.Sqrt(dx * dx + dz * dz);
             // (a jump of several units in one step is a teleport, not a roll)
             if (dist > 1e-4f && dist < 5f)
             {
-                _heading = LerpAngle(_heading, MathF.Atan2(dx, -dz), 0.35f);   // facing = (sin, 0, -cos)
-                _spin = (_spin + dist / BallRadius(player)) % (2f * MathF.PI);
+                r.Heading = LerpAngle(r.Heading, MathF.Atan2(dx, -dz), 0.35f);   // facing = (sin, 0, -cos)
+                r.Spin = (r.Spin + dist / BallRadius(player)) % (2f * MathF.PI);
             }
         }
         else
         {
-            _heading = MathF.Atan2(player.Field70, -player.Field74);
+            r.Heading = MathF.Atan2(player.Field70, -player.Field74);
         }
-        _ballLast = now;
+        r.Last = now;
     }
 
     static float LerpAngle(float a, float b, float t)
@@ -512,20 +547,31 @@ internal sealed class CampaignSuit
     // <=, so a body filling the screen many layers deep (a cutscene camera passing through her, owner queue #37) shades
     // each pixel once. DepthRebuild (pass 4): their depth only; alpha-tested parts through their colour programs (their
     // holes come from the TEV alpha; the caller masks colour).
-    public void DrawBody(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, float alpha)
+    // lift: drawn this far (world units) above the player (a native body's hover kept while this suit stands in for it)
+    public void DrawBody(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, float alpha, bool flash = false, float lift = 0) =>
+        DrawBodyAt(player.HostBipedModel1.AnimInfo, player.BipedModel2.AnimInfo, player.FacingVector.Y, player.Position + new Vector3(0, lift, 0),
+            new Vector3(player.Field70, 0, player.Field74), view, proj, pass, alpha, flash);
+
+    // a body with no player of its own (the Trooper's standing body while his Scout Drone flies, HalfturretEntity's
+    // HostBodyModel): one clip on both layers, level, where a player at `position` facing `facing` would stand
+    public void DrawStanding(AnimationInfo anim, Vector3 position, Vector3 facing, Matrix4 view, Matrix4 proj, SuitPass pass,
+        bool flash = false) => DrawBodyAt(anim, anim, 0f, position, facing, view, proj, pass, 1f, flash);
+
+    void DrawBodyAt(AnimationInfo legs, AnimationInfo torso, float pitch, Vector3 position, Vector3 facing, Matrix4 view,
+        Matrix4 proj, SuitPass pass, float alpha, bool flash)
     {
         if (!HasBody || alpha <= 0f || !EnsureGl()) return;
         try
         {
+            Flash(flash);
             bool rebuild = pass == SuitPass.DepthRebuild;
             int p = rebuild ? 0 : (int)pass;
             bool fade = alpha < 0.999f && _fadeOk;
             bool own = !(fade && p == 0);
             bool moved = fade && p == 1;
             if (!(own && Has(_body, p)) && !(moved && Has(_body, 0))) return;
-            Pose(player);
-            Matrix4 model = HunterRig.ModelMatrix(_dsModel,
-                HunterRig.Placement(Hunter.Samus, player.Position, new Vector3(player.Field70, 0, player.Field74)));
+            Pose(legs, torso, pitch);
+            Matrix4 model = HunterRig.ModelMatrix(_dsModel, HunterRig.Placement(_hunter, position, facing));
             Begin(view, proj, model, _pal, _skel.Count);
             double s = Environment.TickCount64 / 1000.0;
             if (moved) DrawFaded(alpha, s);
@@ -545,8 +591,17 @@ internal sealed class CampaignSuit
         }
         finally
         {
+            Flash(false);
             End();
         }
+    }
+
+    // MphRead's damage flash (PlayerEntity.HostDamageFlash: it draws its own model in its red palette): the whole draw
+    // through the interpreter, recoloured red (the materials' own programs have no tint)
+    void Flash(bool on)
+    {
+        _interpOnly = on;
+        _tint = on ? DamageTint : Vector4.Zero;
     }
 
     // The body in one still pose with no player (the menus' HD Samus backdrop, MenuSamusRender -- UI's, reached in
@@ -609,15 +664,30 @@ internal sealed class CampaignSuit
         }
     }
 
+    // DrawStill(clip, frame)'s head: its middle, facing and size in the rig's space, from the skin's head landmarks (the
+    // character pictures' head framing, CharacterPictureRender -- reached in 2026-10-09); null without a head joint
+    public (Vector3 Center, Vector3 Facing, float Radius)? StillHead(int clip, int frame, (Vector3 Center, Vector3 Joint, Vector3? Ahead) head)
+    {
+        if (!HasBody) return null;
+        Matrix4[] world = _rig.BindWorld; // clip < 0: no pose (DrawStill's identity skin)
+        if (clip >= 0)
+        {
+            if (clip < _dsModel.AnimationGroups.Node.Count) DsSkeleton.Sample(_dsModel, clip, frame, _pose);
+            _skel.Fk(_pose, _world, 0f, _rig.Lengths, _rig.Offsets);
+            world = _world;
+        }
+        return MphRecomp.Frontend.CharacterPictures.PosedHead(_rig, _skel, world, head);
+    }
+
     // MphRead's own biped pose (PlayerDraw): the legs layer up to Spine_1, the torso layer above it, the spine tilted by
     // the aim -- on the rig's bone lengths / rest offsets; skin matrix = inverse bind * pose (RenderActivity's HdPalette)
-    void Pose(PlayerEntity player)
+    void Pose(AnimationInfo legs, AnimationInfo torso, float pitch)
     {
-        var legs = player.HostBipedModel1.AnimInfo;
-        var torso = player.BipedModel2.AnimInfo;
         Sample(legs.Index[0], legs.Frame[0], _legs);
         Sample(torso.Index[0], torso.Frame[0], _torso);
-        _skel.Fk(_pose, _world, player.FacingVector.Y, _rig.Lengths, _rig.Offsets);
+        // a Space Pirate fires one-handed: the blade arm stays on the legs layer's clip (RenderActivity's custom players)
+        if (_offArm != null && TrophyRigs.IsFiringClip(torso.Index[0])) Sample(legs.Index[0], legs.Frame[0], _offArm);
+        _skel.Fk(_pose, _world, pitch, _rig.Lengths, _rig.Offsets);
         for (int i = 0; i < _skel.Count; i++) HunterRig.ToArray(_rig.InvBind[i] * _world[i], _pal, i * 16);
     }
 
@@ -629,14 +699,16 @@ internal sealed class CampaignSuit
     // the morph ball where MphRead's own ball is: its centre at the player's position + AltColYPos, as wide as MPH's
     // (2 x AltColRadius). HdBall.Placement rests the ball on y = 0, so it is dropped by its radius first.
     // (small on screen: no depth prepass; pass 4 is its depth only, as the body's)
-    public void DrawBall(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass)
+    public void DrawBall(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, bool flash = false)
     {
         bool rebuild = pass == SuitPass.DepthRebuild;
         int p = rebuild ? 0 : (int)pass;
         if (!HasBall || !Has(_ball, p) || !EnsureGl()) return;
         try
         {
-            HunterRig.ToArray(HdBall.Placement(_ballCenter, _ballWidth, _spin, _heading), _ballPal);
+            Flash(flash && !rebuild);
+            Roll r = RollOf(player);
+            HunterRig.ToArray(HdBall.Placement(_ballCenter, _ballWidth, r.Spin, r.Heading), _ballPal);
             float half = HdBall.GameDiameter / 2f;
             Vector3 centre = player.Position;
             centre.Y += Fixed.ToFloat(player.Values.AltColYPos);
@@ -658,6 +730,97 @@ internal sealed class CampaignSuit
         }
         finally
         {
+            Flash(false);
+            End();
+        }
+    }
+
+    // An imported model drawn still, as it was built (IMPORT GAMES' tile and card pictures, ImportItemRender -- Importer
+    // menu visual design's, reached in 2026-10-08): any hd/<name> folder (a suit, a morph ball, a character), loaded the way
+    // LoadBall loads a ball -- every corner on bone 0, no rig needed -- into the ball's batches. StillMin / StillMax: the
+    // model's own box (DAE space: Y up, feet on y = 0, facing +Z). CPU work only, safe on a worker thread.
+    public Vector3 StillMin { get; private set; }
+    public Vector3 StillMax { get; private set; }
+
+    public static CampaignSuit? TryLoadStill(string folder, string id)
+    {
+        try
+        {
+            string[] daes = Directory.Exists(folder) ? Directory.GetFiles(folder, "*.dae") : Array.Empty<string>();
+            if (daes.Length == 0) return null;
+            var suit = new CampaignSuit(id) { _asBuilt = true };
+            DaeModel dae = DaeModel.Load(daes[0]);
+            Dictionary<string, GxMaterial> gx = ReadGx(folder, daes[0], out Dictionary<string, int> formats);
+            suit.StillMin = new Vector3(dae.Min.X, dae.Min.Y, dae.Min.Z);
+            suit.StillMax = new Vector3(dae.Max.X, dae.Max.Y, dae.Max.Z);
+            foreach (DaeMesh part in dae.Meshes)
+            {
+                if (!gx.TryGetValue(part.Material, out GxMaterial? m)) continue;
+                int start = suit._build.Count / Floats;
+                for (int i = 0; i < part.Positions.Count; i++)
+                {
+                    System.Numerics.Vector3 q = part.Positions[i];
+                    suit.Corner(new Vector3(q.X, q.Y, q.Z), Normal(part, i), part, i);
+                    suit.Rigid(0);
+                }
+                suit._ball.Add(suit.MakeBatch(start, part.Positions.Count, m, folder, formats));
+            }
+            if (suit._ball.Count == 0) return null;
+            suit.HasBall = true;
+            suit.PlanPrograms();
+            suit.DecodeAll();
+            suit._verts = suit._build.ToArray();
+            suit._build.Clear();
+            suit._build.TrimExcess();
+            suit._vertBuf = suit._verts;
+            return suit;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(Tag, $"still {id}: load failed: {ex}");
+            return null;
+        }
+    }
+
+    // TryLoadStill's model, every pass, model = identity, on the interpreter (as DrawStill); hide / opaque as DrawStill's
+    // (MenuSamus' per-suit face and visor pane). The caller binds its framebuffer and enables the depth test.
+    public bool DrawStillModel(Matrix4 view, Matrix4 proj, ICollection<string>? hide = null, ICollection<string>? opaque = null)
+    {
+        if (!HasBall || !EnsureGl()) return false;
+        try
+        {
+            _interpOnly = true;
+            HunterRig.ToArray(Matrix4.Identity, _ballPal);
+            Begin(view, proj, Matrix4.Identity, _ballPal, 1);
+            for (int p = 0; p < 3; p++)
+            {
+                for (int k = 0; k < (p == 2 ? 2 : 1); k++) // DrawPass's doubled additive sheets
+                {
+                    foreach (Batch b in _ball)
+                    {
+                        if (hide != null && hide.Contains(b.Gx.Name)) continue;
+                        bool solid = opaque != null && opaque.Contains(b.Gx.Name);
+                        if ((solid ? 0 : b.Pass) != p || (solid && k > 0)) continue;
+                        if (!solid) { Emit(b, 1f, 0); continue; }
+                        Material(b, 1f, 0);
+                        GLES30.GlUniform1i(U(_prog, "uBlendAlpha"), 0);
+                        GLES30.GlDisable(GLES30.GlBlend);
+                        GLES30.GlDepthMask(true);
+                        GLES30.GlDepthFunc(DepthFunc(b.P.DepthFunc));
+                        GLES30.GlDrawArrays(GLES30.GlTriangles, b.Start, b.Count);
+                    }
+                }
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(Tag, $"still {Id}: draw failed: {ex}");
+            return false;
+        }
+        finally
+        {
+            _interpOnly = false;
             End();
         }
     }
@@ -797,7 +960,7 @@ internal sealed class CampaignSuit
         GlUniforms.Uniform3fv(U(prog, "uLightSpecK"), 4, LightSpecK, 0);
         GLES30.GlUniform1f(U(prog, "uExposure"), 1f);
         GLES30.GlUniform1i(U(prog, "uRawEnvNormal"), 0);
-        GLES30.GlUniform4f(U(prog, "uTint"), 0, 0, 0, 0);
+        GLES30.GlUniform4f(U(prog, "uTint"), _tint.X, _tint.Y, _tint.Z, _tint.W);
         for (int t = 0; t < 8; t++)
         {
             GLES30.GlUniform1i(U(prog, TexUniform[t]), t);

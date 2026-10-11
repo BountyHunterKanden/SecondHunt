@@ -168,7 +168,7 @@ namespace MphRead.Entities.Enemies
                 var vec = new Vector3(dist, 0, 0);
                 _dropAngleSign *= -1;
                 float randAngle = Fixed.ToFloat(Rng.GetRandomInt2(0xB4000)) * _dropAngleSign; // [0-180)
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(randAngle));
+                var rotY = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(randAngle));
                 vec = Matrix.Vec3MultMtx3(vec, rotY);
                 moveTarget = new Vector3(
                     pos.X + vec.X,
@@ -634,7 +634,7 @@ namespace MphRead.Entities.Enemies
             var vec = new Vector3(-facing.X * factor, 0, -facing.Z * factor);
             _recoilAngleSign *= -1;
             float randAngle = (Fixed.ToFloat(Rng.GetRandomInt2(0x1E000)) + 30) * _recoilAngleSign; // [30-60)
-            var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(randAngle));
+            var rotY = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(randAngle));
             vec = Matrix.Vec3MultMtx3(vec, rotY);
             _speed = new Vector3(vec.X, Fixed.ToFloat(1000), vec.Z);
             _speed /= 2; // todo: FPS stuff

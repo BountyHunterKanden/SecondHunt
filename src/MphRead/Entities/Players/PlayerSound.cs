@@ -73,7 +73,7 @@ namespace MphRead.Entities
 
         private void PlayBeamEmptySfx(BeamType beam)
         {
-            int sfx = Metadata.BeamSfx[(int)beam, (int)BeamSfx.Empty];
+            int sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(beam), (int)BeamSfx.Empty];
             if (sfx != -1)
             {
                 _soundSource.PlaySfx(sfx, noUpdate: true);
@@ -83,22 +83,26 @@ namespace MphRead.Entities
         private void PlayBeamShotSfx(BeamType beam, bool charged, bool continuous, bool homing, float amountA)
         {
             StopBeamChargeSfx(beam);
+            if (beam == BeamType.PirateBlaster && HostOwnPirateBlasterSfx)
+            {
+                return; // recomp: the app plays Prime's shot per bolt (CampaignRenderer.BlasterFx.cs)
+            }
             if (continuous)
             {
                 amountA = homing ? amountA + 0x3FFF : 0;
-                _soundSource.PlaySfx(Metadata.BeamSfx[(int)beam, (int)BeamSfx.Shot], loop: true, amountA: amountA);
+                _soundSource.PlaySfx(Metadata.BeamSfx[PirateBlaster.BaseIndex(beam), (int)BeamSfx.Shot], loop: true, amountA: amountA);
                 return;
             }
             BeamSfx sfx;
             if (charged)
             {
-                sfx = beam == Weapons.AffinityWeapons[(int)Hunter] ? BeamSfx.AffinityChargeShot : BeamSfx.ChargeShot;
+                sfx = beam == (HostAffinityBeam ?? Weapons.AffinityWeapons[(int)Hunter]) ? BeamSfx.AffinityChargeShot : BeamSfx.ChargeShot;
             }
             else
             {
                 sfx = Hunter == Hunter.Weavel && beam == BeamType.Battlehammer ? BeamSfx.AffinityChargeShot : BeamSfx.Shot;
             }
-            int id = Metadata.BeamSfx[(int)beam, (int)sfx];
+            int id = Metadata.BeamSfx[PirateBlaster.BaseIndex(beam), (int)sfx];
             if (id != -1)
             {
                 _soundSource.PlaySfx(id);
@@ -115,7 +119,7 @@ namespace MphRead.Entities
             {
                 return (int)SfxId.SHOTGUN_CHARGE1_NOX;
             }
-            return Metadata.BeamSfx[(int)beam, (int)BeamSfx.Charge];
+            return Metadata.BeamSfx[PirateBlaster.BaseIndex(beam), (int)BeamSfx.Charge];
         }
 
         private void PlayBeamChargeSfx(BeamType beam)
@@ -138,9 +142,9 @@ namespace MphRead.Entities
 
         public void StopContinuousBeamSfx(BeamType beam)
         {
-            int sfx = Metadata.BeamSfx[(int)beam, (int)BeamSfx.Shot];
+            int sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(beam), (int)BeamSfx.Shot];
             _soundSource.StopSfx(sfx);
-            sfx = Metadata.BeamSfx[(int)beam, (int)BeamSfx.AffinityChargeShot];
+            sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(beam), (int)BeamSfx.AffinityChargeShot];
             _soundSource.StopSfx(sfx);
         }
 
@@ -196,7 +200,7 @@ namespace MphRead.Entities
                 sfxId = -1;
             }
             float amountB = Rng.GetRandomInt1(0x7FFF) * 2;
-            if (sfxId != -1)
+            if (sfxId != -1 && !HostHoverWalk) // recomp: Dark Samus hovers, no footsteps (PlayerHoverWalk.cs)
             {
                 _soundSource.PlaySfx(sfxId, amountA: 0xFFFF, amountB: amountB);
             }
@@ -578,7 +582,7 @@ namespace MphRead.Entities
 
         public void UpdateTimedSounds()
         {
-            _timedSfxSource.Update(Position, rangeIndex: -1);
+            _timedSfxSource.Update(Position, rangeIndex: HostMainSoundsPlaced ? 1 : -1);
             if (_sfxStopTimer > 0)
             {
                 _sfxStopTimer -= _scene.FrameTime;

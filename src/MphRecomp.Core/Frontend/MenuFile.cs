@@ -182,6 +182,15 @@ namespace MphRecomp.Frontend
             _items.Add(item);
             return item;
         }
+
+        // A recomp stand-in for a ROM item at the same index, so the page's links and actions still reach it. `make` gets
+        // the index. (MultiplayerMenu: the HUNTER LICENSE door's icon on page 25.)
+        public MenuItem ReplaceItem(int index, Func<int, MenuItem> make)
+        {
+            MenuItem item = make(index);
+            _items[index] = item;
+            return item;
+        }
     }
 
     public sealed class MenuFile
@@ -200,6 +209,16 @@ namespace MphRecomp.Frontend
         {
             MenuPage page = make(_pages.Count);
             _pages.Add(page);
+            return page;
+        }
+
+        // A recomp stand-in for a ROM page at the same index, so its music and item sounds (looked up by page index) stay
+        // the ROM page's. `make` gets the index. (MultiplayerMenu: ENTER NEW CODE as the join-by-address keypad.)
+        public MenuPage ReplacePage(int index, Func<int, MenuPage> make)
+        {
+            if (index < 0 || index >= _pages.Count) throw new ArgumentOutOfRangeException(nameof(index), $"no page {index}");
+            MenuPage page = make(index);
+            _pages[index] = page;
             return page;
         }
 

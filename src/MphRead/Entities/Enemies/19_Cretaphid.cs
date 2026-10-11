@@ -703,7 +703,7 @@ namespace MphRead.Entities.Enemies
             {
                 SegmentInfo segment = Segments[i];
                 float angle = MathHelper.DegreesToRadians(segment.Angle);
-                segment.JointNode.AfterTransform = Matrix4.CreateRotationX(angle);
+                segment.JointNode.AfterTransform = DetMatrix.CreateRotationX(angle);
             }
             _model.Model.AnimateNodes2(index: 0, false, Matrix4.Identity, Vector3.One, _model.AnimInfo);
             if (rootPosition)

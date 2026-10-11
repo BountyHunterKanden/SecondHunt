@@ -1,0 +1,13 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "paks": [
+    {
+      "name": "LogBook.pak",
+      "sha1": "590207df97d73575c7c3c59a821d908438214616"
+    }
+  ],
+  "ancs": "87c199c9",
+  "char": "lightcommando",
+  "height": 17.5
+}

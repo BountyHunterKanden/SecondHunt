@@ -26,6 +26,8 @@ internal sealed class PauseOverlay
     double _last;
 
     public bool IsOpen { get; private set; }
+    // a LAN / online match: set by the match (MatchSession.ConfigureMatch); first person only there
+    public bool NetMatch { get; set; }
     public event Action? Resumed, QuitToMenu, DevTools;
     // RECOMP SETTINGS > CREDITS / CRASH LOG: the host opens the same screens as the front end does (GameActivity)
     public event Action? Credits, ShareCrashLog;
@@ -71,6 +73,7 @@ internal sealed class PauseOverlay
                 // the ship's OPTIONS saves the file too: start from it, so a save here doesn't put old values back
                 _session.Settings.ReloadFrom(_settingsPath);
             }
+            _session.Recomp.InNetMatch = NetMatch; // the camera row greys out (RecompMenus)
             open(_session);
             IsOpen = true;
             _clock.Restart();

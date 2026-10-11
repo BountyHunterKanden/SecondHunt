@@ -41,9 +41,11 @@ internal sealed partial class CampaignRenderer
         _sfx.SfxMasterVolume = GameMusicPlayer.MasterGain(settings?.SfxVolume ?? 9);
         _sfx.StreamMasterVolume = musicGain;
         Log.Info("MPHCampaign", $"audio host installed (music {music ?? "original"})");
-        _sfx.ListenerPosition = () => _host?.Player.CameraInfo.Position ?? Vector3.Zero;
-        _sfx.ListenerUp = () => _host?.Player.CameraInfo.TrueUp ?? Vector3.UnitY;
-        _sfx.ListenerFacing = () => _host?.Player.CameraInfo.Facing ?? -Vector3.UnitZ;
+        // a host-placed view (a replay's other players / free cam, MatchReplay.cs; the solo orbit cam) is heard from there
+        _sfx.ListenerPosition = () => _host?.Scene.HostView?.Position ?? _host?.Player.CameraInfo.Position ?? Vector3.Zero;
+        _sfx.ListenerUp = () => _host?.Scene.HostView is HostView v ? v.Up : _host?.Player.CameraInfo.TrueUp ?? Vector3.UnitY;
+        _sfx.ListenerFacing = () => _host?.Scene.HostView is HostView v ? (v.Target - v.Position).Normalized()
+            : _host?.Player.CameraInfo.Facing ?? -Vector3.UnitZ;
     }
 
     // Re-asserted every frame: Sfx.Load (called from inside CampaignHost.Start and every room transition) always

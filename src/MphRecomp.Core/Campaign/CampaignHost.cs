@@ -39,6 +39,10 @@ namespace MphRecomp.Campaign
         // Nullable on purpose: HostDialogButton.Okay is 0, so a plain field left unset tapped OK on every frame, which
         // closed the scan dialog of anything already in the logbook (its OK is live at once) the frame it opened
         public HostDialogButton? DialogButton;
+        // T11: the stylus on the touch controls' touch area (MatchTouchOverlay.cs) and the whole DS touch-screen pixels it
+        // moved since the last step: vanilla's touch roll, flick boost and double-tap jump (PlayerEntity PlayerTouch.cs)
+        public bool TouchDown;
+        public sbyte TouchDx, TouchDy;
 
         public const float MoveDeadZone = 0.35f;
     }
@@ -93,6 +97,7 @@ namespace MphRecomp.Campaign
             Menu.SaveSlot = 0;
             // MphRead's default hands out any weapon on its direct key (a desktop testing convenience)
             Cheats.FreeWeaponSelect = false;
+            MphRead.Entities.PlayerEntity.MaxPlayers = MphRead.Entities.PlayerEntity.VanillaMaxPlayers; // (a match may have set 8: P8)
             CampaignHost? host = null;
             var scene = new Scene(new Vector2i(viewWidth, viewHeight), null!, null!, _ => { }, () =>
             {
@@ -159,12 +164,17 @@ namespace MphRecomp.Campaign
             c.Magmaul.HostDown = input.SelectWeapon == BeamType.Magmaul;
             c.ShockCoil.HostDown = input.SelectWeapon == BeamType.ShockCoil;
             c.OmegaCannon.HostDown = input.SelectWeapon == BeamType.OmegaCannon;
+            c.PirateBlaster.HostDown = input.SelectWeapon == BeamType.PirateBlaster;
             PlayerEntity.HostAimX = input.AimDelta.X;
             PlayerEntity.HostAimY = input.AimDelta.Y;
+            Player.HostTouchDown = input.TouchDown; // T11: the touch controls' stylus (PlayerTouch.cs)
+            Player.HostTouchDx = input.TouchDx;
+            Player.HostTouchDy = input.TouchDy;
             PlayerEntity.HostDialogPress = input.DialogButton ?? HostDialogButton.None;
             SetWheelPointer(input.WeaponWheel);
             // the desktop window applies pending dialog/menu pauses right before each update frame
             GameState.ApplyPause();
+            LagFrame(); // a match host's N4 lag compensation (Multiplayer/MatchRemote.cs)
             Scene.OnUpdateFrame();
             CarryWeapon();
             // Renderer.OnUpdateFrame only calls these `if (!Headless)` (they drive the desktop OpenAL/SoundFlow
@@ -225,14 +235,39 @@ namespace MphRecomp.Campaign
             float px = 224, py = 38; // neutral: on the anchor, which selects nothing
             if (stick.LengthSquared() > 0.25f)
             {
-                float clockwiseFromUp = MathF.Atan2(stick.X, stick.Y) * 180 / MathF.PI;
-                int sector = (int)(((clockwiseFromUp + 390) % 360) / 60); // 0 = up, centred
-                float q = (sector * 15 + 7.5f) * MathF.PI / 180;
-                px = 224 - 40 * MathF.Sin(q);
-                py = 38 + 40 * MathF.Cos(q);
+                int sector = WheelSector(stick);
+                // seven slots (the Pirate Blaster, PlayerEntity.WeaponSlotCount): the quarter in seven
+                float width = 90f / PlayerEntity.WeaponSlotCount;
+                float q = (sector * width + width / 2) * MathF.PI / 180;
+                px = 224 - 40 * DetMathF.Sin(q);
+                py = 38 + 40 * DetMathF.Cos(q);
             }
             PlayerEntity.HostPointerX = px * ratioX;
             PlayerEntity.HostPointerY = py * ratioY;
+        }
+
+        // the weapon wheel's six 60-degree sectors of a stick direction, clockwise from straight up (0 = up, centred);
+        // DetMathF: the same sector on every device (replays; MphRead/Utility/DetMath.cs)
+        // With the Pirate Blaster on (PlayerEntity.WeaponSlotCount 7, owner 2026-10-09): seven ~51-degree sectors from
+        // straight up (0 = just right of up: the Volt Driver ... 6 = just left of up: the blaster; the Judicator straight down)
+        public static int WheelSector(System.Numerics.Vector2 stick)
+        {
+            float clockwiseFromUp = DetMathF.Atan2(stick.X, stick.Y) * 180 / MathF.PI;
+            if (PlayerEntity.WeaponSlotCount == 7)
+            {
+                return Math.Min(6, (int)(((clockwiseFromUp + 360) % 360) * 7 / 360));
+            }
+            return (int)(((clockwiseFromUp + 390) % 360) / 60);
+        }
+
+        // the weapon in a sector: MphRead's weapon select slot i (PlayerHud: frame 1 for slot 0, i + 2 after; 6 = the blaster)
+        public static BeamType WheelWeapon(int sector) => PlayerEntity.WeaponSlotBeam(sector);
+
+        // a sector's middle as a full-lean stick direction (the weapon ring's remembered pick, WeaponRingInput)
+        public static System.Numerics.Vector2 WheelDirection(int sector)
+        {
+            float a = PlayerEntity.WeaponSlotCount == 7 ? (sector + 0.5f) * 2 * MathF.PI / 7 : sector * MathF.PI / 3;
+            return new System.Numerics.Vector2(DetMathF.Sin(a), DetMathF.Cos(a));
         }
 
         public DoorEntity? FindDoor(int entityId)
@@ -250,7 +285,7 @@ namespace MphRecomp.Campaign
         // test/debug placement (same call the game's in-room teleporters use)
         public void PlacePlayer(Vector3 position, Vector3 facing)
         {
-            Player.Teleport(position, facing, Scene.GetNodeRefByPosition(position));
+            Player.Teleport(position, facing, Scene.GetNodeRefContaining(position));
         }
 
         // the held main player spawns on its next step (at the room's respawn point, as on any arrival)

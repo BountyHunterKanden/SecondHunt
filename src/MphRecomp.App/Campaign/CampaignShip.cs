@@ -218,7 +218,17 @@ internal sealed partial class CampaignRenderer
                 _shipPlanet = ShipNavigation.ByLandingRoom(roomId)?.Id ?? _shipPlanet;
             }
             _shipNote = "";
-            // the ending keeps the stand-in save prompt; boarding at a landing site opens the game's in-ship menu
+            // an ending goes to the menus as vanilla's does (docs/ENDINGS.md): the file is saved (vanilla's results page
+            // shows "saving to the game card" on OK), then the credits and the results page; a host with no menus to go
+            // to keeps the stand-in save prompt. Boarding at a landing site opens the game's in-ship menu.
+            if (_shipEnding && ExitSink != null)
+            {
+                SaveShip();
+                MphRecomp.Frontend.GameEnding.Pending = MphRecomp.Frontend.GameEnding.From(story, roomId, PlaySeconds);
+                Log.Info("MPHCampaign", $"ending in room {roomId}: to the menus' credits ({MphRecomp.Frontend.GameEnding.Pending})");
+                ExitSink();
+                return;
+            }
             _shipAskSave = !_shipEnding;
             if (_shipEnding) OpenShip(ShipPage.SavePrompt);
             else VeilThen(() => OpenShip(ShipPage.Menu), VeilHatchIn); // the game faded out to white already

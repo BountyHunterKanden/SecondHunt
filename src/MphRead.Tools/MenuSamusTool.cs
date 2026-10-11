@@ -23,6 +23,8 @@ namespace MphRead
     // camera, CampaignSuit's lights, the GX program -- from brawl_extract/Converted/<suit>. Writes menu_samus.png (the
     // picture) and menu_samus_cmp.png (the DS art | ours | ours under the menus' green tint) to extract_out/frontend.
     // --eye/--target/--fov override the recipe, to tune it; the posed body's bounds are printed to frame by.
+    // --hunter <name> [--clipid n] [--frame n]: another rig hunter's DS skeleton and clip (a trooper on Weavel's; the
+    // multiplayer skins' mockups); default Samus with the recipe's clip and frame.
     internal static class MenuSamusTool
     {
         public static void Run(string[] args)
@@ -45,7 +47,10 @@ namespace MphRead
 
             string dir = Path.Combine(converted, suit);
             string dae = Directory.GetFiles(dir, "*.dae").First();
-            Model dsModel = Read.GetModelInstance(Metadata.HunterModels[Hunter.Samus][0]).Model;
+            Hunter dsHunter = Enum.TryParse(Arg("--hunter", "Samus"), out Hunter hh) ? hh : Hunter.Samus;
+            int clipId = int.Parse(Arg("--clipid", recipe.Clip.ToString(ci)), ci);
+            int clipFrame = int.Parse(Arg("--frame", recipe.Frame.ToString(ci)), ci);
+            Model dsModel = Read.GetModelInstance(Metadata.HunterModels[dsHunter][0]).Model;
             var sk = new DsSkeleton(dsModel);
             // the rig the Odin picks (CampaignSuit.PickRig): the pose file's, else pieces / retro / rigid, else sculpted
             string rigLabel = "sculpted";
@@ -93,7 +98,7 @@ namespace MphRead
             var world = new Matrix4[sk.Count];
             var skin = new Matrix4[sk.Count];
             var posed = new Vector3[bind.Length];
-            DsSkeleton.Sample(dsModel, recipe.Clip, recipe.Frame, pose);
+            DsSkeleton.Sample(dsModel, clipId, clipFrame, pose);
             sk.Fk(pose, world, 0f, rig.Lengths, rig.Offsets);
             HdRigTool.Deform(rig, bind, world, posed);
             for (int i = 0; i < sk.Count; i++) skin[i] = rig.InvBind[i] * world[i];
@@ -106,6 +111,13 @@ namespace MphRead
                 Vector3 acc = Vector3.Zero;
                 for (int k = 0; k < 4; k++) { float wt = rig.Weights[v * 4 + k]; if (wt > 0) acc += Vector3.TransformVector(n, skin[rig.Bones[v * 4 + k]]) * wt; }
                 return acc.LengthSquared > 1e-12f ? acc.Normalized() : n;
+            }
+            // --headpic: the character picker's head close-up camera (CharacterPictures.HeadCamera, as the Odin frames it)
+            if (args.Contains("--headpic") && CharacterPictures.HeadLandmarks(dir) is { } marks
+                && CharacterPictures.PosedHead(rig, sk, world, marks) is { } hd)
+            {
+                (eye, target) = CharacterPictures.HeadCamera(hd.Center, hd.Facing, hd.Radius, fov);
+                Console.WriteLine($"{suit}: head {hd.Center} facing {hd.Facing} radius {hd.Radius:0.000}");
             }
             Vector3 lo = new(posed.Min(p => p.X), posed.Min(p => p.Y), posed.Min(p => p.Z));
             Vector3 hi = new(posed.Max(p => p.X), posed.Max(p => p.Y), posed.Max(p => p.Z));

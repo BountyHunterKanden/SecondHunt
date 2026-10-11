@@ -13,7 +13,8 @@ namespace MphRecomp.Arenas
     // the way the arenas' own script objects play it, under MPH's match flow: MphRead's Music offers the room
     // (Music.IRoomMusicHost) when the match starts, its last-minute tempo-up becomes Echoes' one-minute warning, and
     // its stops (time out, quit, the match end) stop the stream. The app's stream player is the output (IOutput).
-    // The files are copied from the user's disc into <MPH file system>/_archives/echoes_music/ by the import.
+    // The files are copied from the user's disc into <MPH file system>/_archives/echoes_music/ by the PC import, or into
+    // <import root>/music/EchoesArenaMusic/ by the in-app one (ImportService kind "music"); that one is played when there.
     public sealed class ArenaMusic : Music.IRoomMusicHost
     {
         // one StreamedAudio object of the arenas (all six carry the same ones): the file, the object's name, its volume
@@ -42,6 +43,11 @@ namespace MphRecomp.Arenas
         public const string Archive = "echoes_music";
 
         public static string Folder(string fsRoot) => Path.Combine(fsRoot, "_archives", Archive);
+
+        // the in-app import's item (recipes/music/EchoesArenaMusic.json) under EchoesArena.ImportRoot
+        public const string ImportKind = "music", ImportName = "EchoesArenaMusic";
+
+        public static string ImportedFolder(string importRoot) => Path.Combine(importRoot, ImportKind, ImportName);
 
         public static IEnumerable<string> Files => Selection.Select(t => t.File).Append(OneMinute.File).Distinct();
 
@@ -145,7 +151,13 @@ namespace MphRecomp.Arenas
             string path;
             try
             {
-                path = Path.Combine(Folder(Paths.FileSystem), file);
+                // the import's copy when it's imported and up to date (ImportedContent); a dev build falls back to a copy
+                // staged into the file system by a PC tool, a public build doesn't
+                string? imported = EchoesArena.ImportRoot is string root && MphRecomp.Import.ImportedContent.Usable(root, ImportKind, ImportName)
+                    ? Path.Combine(ImportedFolder(root), file) : null;
+                path = imported != null && File.Exists(imported) ? imported
+                    : MphRecomp.Config.RecompSettings.PublicBuild ? throw new FileNotFoundException("not imported", file)
+                    : Path.Combine(Folder(Paths.FileSystem), file);
             }
             catch
             {

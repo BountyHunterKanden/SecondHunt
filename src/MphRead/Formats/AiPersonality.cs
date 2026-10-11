@@ -24,11 +24,18 @@ namespace MphRead.Formats
         {
             for (int i = 0; i < PlayerEntity.Players.Count; i++)
             {
-                PlayerEntity player = PlayerEntity.Players[i];
+                Load(PlayerEntity.Players[i], mode, i);
+            }
+        }
+
+        // one player's AI (recomp: also a seat that becomes a bot mid-match, MphRecomp online host migration)
+        public static void Load(PlayerEntity player, GameMode mode, int i)
+        {
+            {
                 player.AiData.Reset();
                 if (!player.IsBot)
                 {
-                    continue;
+                    return;
                 }
                 int aiOffset = 32896; // default, Battle, BattleTeams
                 if (mode == GameMode.SinglePlayer)

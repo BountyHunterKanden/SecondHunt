@@ -36,12 +36,13 @@ internal sealed class DesktopInput
         _app = app;
         _w = window;
         KeyboardMouse.KeyDown = key => _captured && _w.KeyboardState.IsKeyDown(key);
-        KeyboardMouse.MouseDown = button => _captured && _w.MouseState.IsButtonDown(button);
+        KeyboardMouse.MouseDown = button => button == MouseButton.Left && _scriptFire > 0 || _captured && _w.MouseState.IsButtonDown(button);
         _w.KeyDown += OnKeyDown;
         _w.KeyUp += OnKeyUp;
         _w.TextInput += e =>
         {
             if (_app.TopScreen is PageScreen page) page.Text((char)e.Unicode);
+            else if (_app.TopScreen is CampaignRenderer game && game.ChatLineOpen) game.ChatLineChar((char)e.Unicode); // MatchChat.cs
         };
         _w.MouseDown += OnMouseDown;
         _w.MouseUp += OnMouseUp;
@@ -101,6 +102,7 @@ internal sealed class DesktopInput
     readonly List<(int Frame, string Action)> _script = new();
     readonly List<Keys> _scriptHeld = new();
     int _frame;
+    int _scriptFire; // "fire": the game's left click held this many more frames (a replay test's "press FIRE to begin")
 
     public void SetScript(string spec)
     {
@@ -116,6 +118,7 @@ internal sealed class DesktopInput
         _frame++;
         foreach (Keys held in _scriptHeld) OnKeyUp(new KeyboardKeyEventArgs(held, 0, 0, false));
         _scriptHeld.Clear();
+        if (_scriptFire > 0) _scriptFire--;
         foreach ((int frame, string action) in _script)
         {
             if (frame != _frame) continue;
@@ -126,6 +129,10 @@ internal sealed class DesktopInput
                 float x = float.Parse(xy[0], System.Globalization.CultureInfo.InvariantCulture);
                 float y = float.Parse(xy[1], System.Globalization.CultureInfo.InvariantCulture);
                 ScriptClick(x, y);
+            }
+            else if (action == "fire")
+            {
+                _scriptFire = 3;
             }
             else if (action is "wheelup" or "wheeldown")
             {
@@ -237,9 +244,25 @@ internal sealed class DesktopInput
         if (_app.TopScreen is CampaignRenderer game)
         {
             if (e.Key == Keys.F3) game.Pad.Set(PadButton.ThumbL, false);
+            if (e.Key == Keys.F4) game.Pad.Set(PadButton.ThumbR, false);
             if (PadKey(e.Key) is PadButton b) game.Pad.Set(b, false);
+            if (ReplayKey(game, e.Key) is PadButton rb) game.Pad.Set(rb, false);
         }
     }
+
+    // a replay's bar (MatchReplay.cs) from the keyboard: Enter A (press the picked button), Space X (pause / play),
+    // Q / E L1 / R1 (10 s back / forward), Z / C L2 / R2 (slower / faster), Y the camera; the arrows are the D-pad
+    static PadButton? ReplayKey(CampaignRenderer game, Keys key) => !game.ReplayPlaying ? null : key switch
+    {
+        Keys.Enter or Keys.KeyPadEnter => PadButton.A,
+        Keys.Space => PadButton.X,
+        Keys.Q => PadButton.L1,
+        Keys.E => PadButton.R1,
+        Keys.Z => PadButton.L2,
+        Keys.C => PadButton.R2,
+        Keys.Y => PadButton.Y,
+        _ => null,
+    };
 
     // the menus' keys: a press once, moves on every repeat (as a held D-pad on Android)
     static void MenuKey(KeyboardKeyEventArgs e, Action<MenuKeys> press, Action<int, int> navigate)
@@ -292,6 +315,19 @@ internal sealed class DesktopInput
 
     void GameKeyDown(CampaignRenderer game, KeyboardKeyEventArgs e)
     {
+        game.KeyboardHints = true; // a replay bar names the keys (MatchReplay.cs)
+        // an online match's typed chat (MatchChat.cs): Enter / T opens a line on the HUD; while it's open the keys are its
+        if (game.ChatLineOpen)
+        {
+            if (e.Key is Keys.Enter or Keys.KeyPadEnter or Keys.Escape or Keys.Backspace)
+                game.ChatLineKey(enter: e.Key is Keys.Enter or Keys.KeyPadEnter, escape: e.Key == Keys.Escape);
+            return;
+        }
+        if (e.Key is Keys.Enter or Keys.KeyPadEnter or Keys.T && game.TouchChat && !game.PauseMenuOpen)
+        {
+            if (!e.IsRepeat) game.OpenMatchChat();
+            return;
+        }
         if (e.Key == Keys.Escape)
         {
             if (!e.IsRepeat) game.BackPressed(); // Android's Back: B on the game's screens, else the pause menu
@@ -315,6 +351,16 @@ internal sealed class DesktopInput
         if (e.Key == Keys.F3)
         {
             game.Pad.Set(PadButton.ThumbL, true); // the status line cycles on the release (as L3)
+            return;
+        }
+        if (e.Key == Keys.F4)
+        {
+            game.Pad.Set(PadButton.ThumbR, true); // R3: a replay's free cam toggle (MatchReplay.cs; no desktop R3 key otherwise)
+            return;
+        }
+        if (ReplayKey(game, e.Key) is PadButton rb)
+        {
+            game.Pad.Set(rb, true);
             return;
         }
         if (PadKey(e.Key) is PadButton b)
@@ -343,6 +389,7 @@ internal sealed class DesktopInput
             else if (e.Button == MouseButton.Right) front.Post(s => s.Press(MenuKeys.B));
             break;
         case CampaignRenderer game:
+            game.KeyboardHints = true;
             if (_captured) break; // playing: KeyboardMouseInput reads the buttons
             if (e.Button != MouseButton.Left)
             {
@@ -350,6 +397,7 @@ internal sealed class DesktopInput
                 break;
             }
             if (game.PauseMenuOpen) game.PauseMenuInput(p => p.Touch(x, y));
+            else if (game.ReplayPlaying && !game.MatchOver) game.ReplayTouch(x, y, 0); // the replay bar (MatchReplay.cs)
             else if (game.MapOpen) game.MapTouch(x, y, 0);
             else if (game.ShipMenuOpen) game.ShipTouch(x, y, 0);
             else game.Pad.Set(PadButton.A, true); // a cutscene or a ship page: a click is A (skips, next)
@@ -367,6 +415,7 @@ internal sealed class DesktopInput
         float x = _w.MouseState.X, y = _w.MouseState.Y;
         if (game.MapOpen) game.MapTouch(x, y, 2);
         else if (game.ShipMenuOpen) game.ShipTouch(x, y, 2);
+        else if (game.ReplayPlaying) game.ReplayTouch(x, y, 2);
         game.Pad.Set(PadButton.A, false);
     }
 
@@ -383,6 +432,7 @@ internal sealed class DesktopInput
             {
                 if (game.MapOpen) game.MapTouch(e.X, e.Y, 1); // drags turn the map
                 else if (game.ShipMenuOpen) game.ShipTouch(e.X, e.Y, 1); // the ship's slider and weapon drags
+                else if (game.ReplayPlaying) game.ReplayTouch(e.X, e.Y, 1); // the replay bar's scrub drag
             }
             break;
         case PageScreen page:
@@ -537,6 +587,7 @@ internal sealed class DesktopInput
     {
         if (pressed(GamepadButton.Start)) game.StartPressed();
         if (pressed(GamepadButton.Back)) game.SelectPressed();
+        game.Pad.Set(PadButton.Select, now[(int)GamepadButton.Back]); // held: an online match's quick-message wheel (MatchChat.cs)
         bool l3 = now[(int)GamepadButton.LeftThumb], r3 = now[(int)GamepadButton.RightThumb];
         if ((pressed(GamepadButton.LeftThumb) && r3) || (pressed(GamepadButton.RightThumb) && l3)) game.ToggleGunMenu();
         if (game.PauseMenuOpen)
@@ -566,6 +617,8 @@ internal sealed class DesktopInput
         {
             bool down = now[(int)b];
             if (down != _padPrev[(int)b]) pad.Set(p, down);
+            if (down && !_padPrev[(int)b]) game.KeyboardHints = false; // a replay bar names the pad's buttons
         }
+        if (hx != 0 || hy != 0) game.KeyboardHints = false;
     }
 }

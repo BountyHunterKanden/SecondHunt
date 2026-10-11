@@ -221,7 +221,7 @@ namespace MphRead.Entities
                 && (Beam != BeamType.Missile || Flags.TestFlag(BeamFlags.Homing)))
             {
                 // only relevant for the affinity missile beeping sound in practice
-                int sfx = Metadata.BeamSfx[(int)Beam, (int)BeamSfx.Homing];
+                int sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(Beam), (int)BeamSfx.Homing];
                 if (sfx != -1)
                 {
                     _soundSource.PlaySfx(sfx, loop: true);
@@ -233,7 +233,7 @@ namespace MphRead.Entities
             }
             else if (Effect != null)
             {
-                Effect.Transform(Position, Transform.ClearScale());
+                Effect.Transform(HostShifted(Position), Transform.ClearScale()); // recomp: HostDrawShift (draw only)
             }
             if (Lifespan <= 0)
             {
@@ -392,28 +392,36 @@ namespace MphRead.Entities
                     continue;
                 }
                 bool hasHalfturret = player.Hunter == Hunter.Weavel && player.Flags2.TestFlag(PlayerFlags2.Halfturret);
+                // recomp dev (Solo arena, T5): the Trooper's drone's shots can hit his own standing body (PlayerTrooperDev.cs)
+                bool selfBody = PlayerEntity.HostSelfBodyHits && hasHalfturret && player.HostScoutDrone && Owner == player;
                 if ((Owner == player || hasHalfturret && Owner == player.Halfturret)
-                    && (!Flags.TestFlag(BeamFlags.SelfDamage) || Age < 1 / 30f * 4))
+                    && (!Flags.TestFlag(BeamFlags.SelfDamage) || Age < 1 / 30f * 4) && !selfBody)
                 {
                     continue;
                 }
                 bool hitPlayer = false;
                 CollisionResult playerRes = default;
                 float radii = player.Volume.SphereRadius + CylinderRadius;
+                // recomp: an online match host tests a remote shooter's beam against where that player saw the target (lag
+                // compensation: the beam moves by the target's offset since then, so the hit lands on the target as it
+                // stands now); zero everywhere else, the same test as before
+                Vector3 lagShift = PlayerEntity.NetLagShift(Owner, player);
+                Vector3 back = BackPosition - lagShift;
+                Vector3 front = Position - lagShift;
                 if (player.IsAltForm)
                 {
                     if (player.Hunter == Hunter.Kanden)
                     {
-                        if (CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position,
+                        if (CollisionDetection.CheckCylinderOverlapSphere(back, front,
                             player.KandenSegPos[2], 1.6f, ref playerRes))
                         {
-                            if (CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position,
+                            if (CollisionDetection.CheckCylinderOverlapSphere(back, front,
                                 player.Volume.SpherePosition, radii, ref playerRes)
-                                || CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position,
+                                || CollisionDetection.CheckCylinderOverlapSphere(back, front,
                                     player.KandenSegPos[1], radii, ref playerRes)
-                                || CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position,
+                                || CollisionDetection.CheckCylinderOverlapSphere(back, front,
                                     player.KandenSegPos[2], radii, ref playerRes)
-                                || CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position,
+                                || CollisionDetection.CheckCylinderOverlapSphere(back, front,
                                     player.KandenSegPos[3], radii, ref playerRes))
                             {
                                 hitPlayer = true;
@@ -422,7 +430,7 @@ namespace MphRead.Entities
                     }
                     else
                     {
-                        if (CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position,
+                        if (CollisionDetection.CheckCylinderOverlapSphere(back, front,
                             player.Volume.SpherePosition, radii, ref playerRes))
                         {
                             hitPlayer = true;
@@ -434,13 +442,13 @@ namespace MphRead.Entities
                     float minY = Fixed.ToFloat(player.Values.MinPickupHeight);
                     Vector3 playerBottom = player.Position.AddY(minY);
                     float dot = Fixed.ToFloat(player.Values.MaxPickupHeight) - minY;
-                    if (CollisionDetection.CheckCylindersOverlap(BackPosition, Position, playerBottom, Vector3.UnitY,
+                    if (CollisionDetection.CheckCylindersOverlap(back, front, playerBottom, Vector3.UnitY,
                         dot, radii, ref playerRes))
                     {
                         hitPlayer = true;
                     }
                 }
-                if (hitPlayer && playerRes.Distance < minDist)
+                if (hitPlayer && playerRes.Distance < minDist && !selfBody)
                 {
                     minDist = playerRes.Distance;
                     anyRes = playerRes;
@@ -453,8 +461,10 @@ namespace MphRead.Entities
                 {
                     CollisionResult turretRes = default;
                     float radius = CylinderRadius + 0.45f;
-                    if (CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position, player.Halfturret.Position,
-                        radius, ref turretRes) && turretRes.Distance < minDist)
+                    if ((player.HostScoutDrone // recomp: the Trooper's standing body is hit as a whole biped (HalfturretEntity)
+                        ? player.Halfturret.HostBodyHit(BackPosition, Position, CylinderRadius, ref turretRes)
+                        : CollisionDetection.CheckCylinderOverlapSphere(BackPosition, Position, player.Halfturret.Position,
+                        radius, ref turretRes)) && turretRes.Distance < minDist)
                     {
                         minDist = turretRes.Distance;
                         anyRes = turretRes;
@@ -512,8 +522,9 @@ namespace MphRead.Entities
                         {
                             player = ((HalfturretEntity)colWith).Owner;
                         }
+                        PlayerEntity.NetCountBeamHit(Owner, player); // recomp: per-shooter hit count (network PC tests)
                         DamageFlags damageFlags = DamageFlags.NoDmgInvuln;
-                        if (player.BeamEffectiveness[(int)Beam] == Effectiveness.Zero)
+                        if (player.BeamEffectiveness[PirateBlaster.BaseIndex(Beam)] == Effectiveness.Zero) // recomp: the blaster = Power Beam's row
                         {
                             if (GameState.SinglePlayer && Owner == PlayerEntity.Main)
                             {
@@ -531,6 +542,10 @@ namespace MphRead.Entities
                             if (hitHalfturret)
                             {
                                 damageFlags |= DamageFlags.Halfturret;
+                                if (PlayerEntity.HostSelfBodyHits)
+                                {
+                                    player.HostBodyHitNote(anyRes.Position, Beam); // recomp dev (PlayerTrooperDev.cs)
+                                }
                             }
                             Vector3 damageDir = GetDamageDirection(anyRes.Position, player.Position);
                             float damage = 0;
@@ -786,6 +801,9 @@ namespace MphRead.Entities
 
         private void ProcessRicochet(CollisionResult colRes)
         {
+            // recomp: the host's drawn path ends at the first bounce (it met the real path there), draw only
+            HostDrawShift = null;
+            HostDrawHide = 0;
             float dot1 = Vector3.Dot(Velocity, colRes.Plane.Xyz);
             Velocity = new Vector3(
                 (Velocity.X - 2 * colRes.Plane.X * dot1) * RicochetLossH,
@@ -831,7 +849,7 @@ namespace MphRead.Entities
                 PlayBeamHitSfx();
                 return;
             }
-            int sfx = Metadata.BeamSfx[(int)Beam, (int)BeamSfx.Ricochet];
+            int sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(Beam), (int)BeamSfx.Ricochet];
             if (sfx != -1)
             {
                 float amountA;
@@ -849,7 +867,7 @@ namespace MphRead.Entities
 
         private void StopHomingSfx()
         {
-            int sfx = Metadata.BeamSfx[(int)Beam, (int)BeamSfx.Homing];
+            int sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(Beam), (int)BeamSfx.Homing];
             if (sfx != -1)
             {
                 _soundSource.StopSfx(sfx);
@@ -859,8 +877,13 @@ namespace MphRead.Entities
         private void PlayBeamHitSfx()
         {
             StopHomingSfx();
+            if (HostOwnSfx)
+            {
+                HostHitSfx?.Invoke(this);
+                return;
+            }
             BeamSfx type = Flags.TestFlag(BeamFlags.Charged) ? BeamSfx.ChargeHit : BeamSfx.Hit;
-            int sfx = Metadata.BeamSfx[(int)Beam, (int)type];
+            int sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(Beam), (int)type];
             if (sfx != -1)
             {
                 _soundSource.PlaySfx(sfx, noUpdate: true);
@@ -958,16 +981,18 @@ namespace MphRead.Entities
                     if (!player.Flags2.TestFlag(PlayerFlags2.Halfturret) || Owner != player.Halfturret)
                     {
                         CollisionResult discard = default;
-                        float dist = Vector3.Distance(player.Position, Position);
+                        // recomp: where a remote shooter saw this player (online host lag compensation; else where it is)
+                        Vector3 playerPos = player.Position + PlayerEntity.NetLagShift(Owner, player);
+                        float dist = Vector3.Distance(playerPos, Position);
                         // todo?: wifi conditions
                         if (dist >= SplashRadius
-                            || CollisionDetection.CheckBetweenPoints(Position, player.Position, TestFlags.Beams, _scene, ref discard))
+                            || CollisionDetection.CheckBetweenPoints(Position, playerPos, TestFlags.Beams, _scene, ref discard))
                         {
                             OmegaCannonFlash();
                         }
                         else
                         {
-                            Vector3 damageDir = GetDamageDirection(Position, player.Position);
+                            Vector3 damageDir = GetDamageDirection(Position, playerPos);
                             float ratio = dist / SplashRadius;
                             int damage = (int)GetInterpolatedValue(SplashDamageType, SplashDamage, 0, ratio);
                             player.TakeDamage(damage, DamageFlags.NoDmgInvuln, damageDir, this);
@@ -1032,7 +1057,77 @@ namespace MphRead.Entities
             return 0;
         }
 
+        // recomp: a host draws this shot its own way (the Scout Drone's shots in Prime 1's look): MphRead's trail, muzzle
+        // flash and hit effect aren't drawn (they still run: Scene.HostSpawnHidden), HostImpact reports each hit (expired:
+        // its lifespan ran out in the air). Set on a whole pool (EquipInfo.Beams); draw-only, the simulation is the same.
+        public bool HostOwnLook { get; set; }
+        // recomp: the host plays this shot's hit sound itself (Prime's): MphRead's isn't played; HostHitSfx is called instead
+        // wherever MphRead would play it (PlayBeamHitSfx: walls, players, doors, ...), the shot at its hit position
+        public bool HostOwnSfx { get; set; }
+        public static Action<BeamProjectileEntity>? HostHitSfx { get; set; }
+        public static Action<BeamProjectileEntity, CollisionResult, bool>? HostImpact { get; set; }
+        // recomp: this shot is a Pirate Blaster bolt in the app's own look (PlayerEntity.HostOwnPirateBlasterLook, set per
+        // shot in Spawn: a pool slot it had goes back to MphRead's look for the next weapon's shot)
+        public bool HostBlasterLook { get; private set; }
+        // recomp: a host draws this shot moved by HostDrawShift at its spawn point (a body holding its cannon away from
+        // the sim's muzzle), easing to nothing HostDrawFade units along its path: trail, model and in-flight effect.
+        // Draw only: Position, every hit and the hit effects are the sim's. Set per shot from HostSpawned (end of Spawn).
+        public Vector3? HostDrawShift { get; set; }
+        public static float HostDrawFade { get; set; } = 2;
+        // recomp: per shot, the shift eases to nothing this far along instead (0 = HostDrawFade); and nothing of the shot
+        // is drawn until it is HostDrawHide units from its spawn (a host's drawn path blocked by a wall: the shot shows
+        // only past it). Draw only; reset per shot in Spawn.
+        public float HostDrawFadeAt { get; set; }
+        public float HostDrawHide { get; set; }
+        public static Action<BeamProjectileEntity>? HostSpawned { get; set; }
+        private readonly Vector3[] _hostPast = new Vector3[10];
+
+        public Vector3 HostShifted(Vector3 point)
+        {
+            if (HostDrawHide > 0 && Vector3.Distance(point, SpawnPosition) < HostDrawHide)
+            {
+                return SpawnPosition + Direction.Normalized() * HostDrawHide;
+            }
+            if (HostDrawShift is not Vector3 shift)
+            {
+                return point;
+            }
+            float ease = 1 - Vector3.Distance(point, SpawnPosition) / (HostDrawFadeAt > 0 ? HostDrawFadeAt : HostDrawFade);
+            return ease > 0 ? point + shift * ease : point;
+        }
+
         public override void GetDrawInfo()
+        {
+            if (HostOwnLook)
+            {
+                return;
+            }
+            if (HostDrawShift == null && HostDrawHide <= 0)
+            {
+                DrawFunc();
+                return;
+            }
+            if (HostDrawHide > 0 && Vector3.Distance(Position, SpawnPosition) < HostDrawHide)
+            {
+                return;
+            }
+            // recomp: HostDrawShift: drawn from moved positions, then the sim's put back exactly
+            Vector3 position = Position;
+            Vector3 back = BackPosition;
+            Array.Copy(PastPositions, _hostPast, PastPositions.Length);
+            Position = HostShifted(position);
+            BackPosition = HostShifted(back);
+            for (int i = 0; i < PastPositions.Length; i++)
+            {
+                PastPositions[i] = HostShifted(_hostPast[i]);
+            }
+            DrawFunc();
+            Position = position;
+            BackPosition = back;
+            Array.Copy(_hostPast, PastPositions, PastPositions.Length);
+        }
+
+        private void DrawFunc()
         {
             if (DrawFuncId == 0)
             {
@@ -1433,6 +1528,8 @@ namespace MphRead.Entities
                     Vector3 effFacing = GetCrossVector(effUp);
                     Matrix4 transform = GetTransformMatrix(effFacing, effUp);
                     transform.Row3.Xyz = position;
+                    // recomp: HostOwnLook's pool: its muzzle flash runs but isn't drawn
+                    scene.HostSpawnHidden = equip.Beams.Length > 0 && equip.Beams[0].HostOwnLook && !equip.Beams[0].HostBlasterLook;
                     // the game does this by spawning a CBeamEffect, but that's unncessary for muzzle effects
                     if (spawnFlags.TestFlag(BeamSpawnFlags.DestroyMuzzle))
                     {
@@ -1442,6 +1539,7 @@ namespace MphRead.Entities
                     {
                         scene.SpawnEffect(effectId - 3, transform);
                     }
+                    scene.HostSpawnHidden = false;
                 }
             }
             int projectiles = (int)GetAmount(weapon.Projectiles, weapon.MinChargeProjectiles, weapon.ChargedProjectiles);
@@ -1621,6 +1719,13 @@ namespace MphRead.Entities
                 }
                 beam.Owner = owner;
                 beam.Beam = weapon.Beam;
+                // recomp: a Pirate Blaster bolt in the app's look (draw / sound only)
+                bool blasterLook = weapon.Beam == BeamType.PirateBlaster && PlayerEntity.HostOwnPirateBlasterLook;
+                if (blasterLook || beam.HostBlasterLook)
+                {
+                    beam.HostOwnLook = beam.HostBlasterLook = blasterLook;
+                    beam.HostOwnSfx = blasterLook && PlayerEntity.HostOwnPirateBlasterHitSfx;
+                }
                 beam.BeamKind = weapon.BeamKind;
                 beam.Flags = flags;
                 beam.NodeRef = nodeRef;
@@ -1713,7 +1818,10 @@ namespace MphRead.Entities
                         Vector3 effFacing = GetCrossVector(effUp);
                         Matrix4 transform = GetTransformMatrix(effFacing, effUp);
                         transform.Row3.Xyz = beam.Position;
+                        // recomp: HostOwnLook's in-flight effect runs but isn't drawn
+                        scene.HostSpawnHidden = beam.HostOwnLook;
                         beam.Effect = scene.SpawnEffectGetEntry(effectId, transform);
+                        scene.HostSpawnHidden = false;
                         beam.Effect?.SetElementExtension(true);
                     }
                 }
@@ -1753,6 +1861,16 @@ namespace MphRead.Entities
                     }
                 }
                 beam._soundSource.Update(beam.Position, rangeIndex: 0);
+                // recomp: the host may draw this shot moved (HostDrawShift), draw only
+                beam.HostDrawShift = null;
+                beam.HostDrawFadeAt = 0;
+                beam.HostDrawHide = 0;
+                HostSpawned?.Invoke(beam);
+                if (beam.HostDrawShift != null || beam.HostDrawHide > 0)
+                {
+                    beam.Effect?.Transform(beam.HostShifted(beam.Position),
+                        GetTransformMatrix(GetCrossVector(beam.Direction), beam.Direction));
+                }
                 scene.AddEntity(beam);
             }
             return result;
@@ -1928,7 +2046,9 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
-                CheckIceWaveCollision(player, player.Position, angleCos, halfturret: false);
+                // recomp: where a remote shooter saw this player (online host lag compensation; else where it is)
+                CheckIceWaveCollision(player, player.Position + PlayerEntity.NetLagShift(Owner, player), angleCos,
+                    halfturret: false);
                 if (player.Flags2.TestFlag(PlayerFlags2.Halfturret))
                 {
                     CheckIceWaveCollision(player, player.Halfturret.Position, angleCos, halfturret: true);
@@ -2015,6 +2135,25 @@ namespace MphRead.Entities
 
         private void SpawnCollisionEffect(CollisionResult colRes, bool noSplat)
         {
+            if (!HostOwnLook)
+            {
+                SpawnCollisionEffectBase(colRes, noSplat);
+                return;
+            }
+            HostImpact?.Invoke(this, colRes, Lifespan <= 0);
+            _scene.HostSpawnHidden = true;
+            try
+            {
+                SpawnCollisionEffectBase(colRes, noSplat);
+            }
+            finally
+            {
+                _scene.HostSpawnHidden = false;
+            }
+        }
+
+        private void SpawnCollisionEffectBase(CollisionResult colRes, bool noSplat)
+        {
             if (CollisionEffect != 255)
             {
                 if (PlayerEntity.PlayerCount > 2 && CollisionEffect == 4)
@@ -2051,7 +2190,7 @@ namespace MphRead.Entities
                     }
                 }
                 // there are actually effect IDs to cover platform/enemy beams in these arrays (although most are 255)
-                byte splatEffect = _terSplat1P[(int)BeamKind][(int)colRes.Terrain];
+                byte splatEffect = _terSplat1P[PirateBlaster.BaseIndex(BeamKind)][(int)colRes.Terrain]; // recomp: BaseIndex (the Pirate Blaster)
                 if (GameState.SinglePlayer && splatEffect != 255)
                 {
                     splatEffect += 3;
@@ -2085,7 +2224,7 @@ namespace MphRead.Entities
                 // 26 - sprEffectiveMortar
                 // 27 - sprEffectiveGhost
                 // 28 - sniperCol (unintended)
-                effectId = (int)Beam + 20;
+                effectId = PirateBlaster.BaseIndex(Beam) + 20; // recomp: the Pirate Blaster uses the Power Beam's
             }
             else if (GameState.SinglePlayer)
             {
@@ -2098,7 +2237,7 @@ namespace MphRead.Entities
                 // 18 - effectiveHitMortar
                 // 19 - effectiveHitGhost
                 // 20 - sprEffectivePB (unintended)
-                effectId = (int)Beam + 12;
+                effectId = PirateBlaster.BaseIndex(Beam) + 12;
             }
             else
             {
@@ -2111,7 +2250,7 @@ namespace MphRead.Entities
                 // 160 - mpEffectiveMortar
                 // 161 - mpEffectiveGhost
                 // 162 - pipeTricity (unintended)
-                effectId = (int)Beam + 154;
+                effectId = PirateBlaster.BaseIndex(Beam) + 154;
             }
             if (effectId > 0)
             {
@@ -2139,8 +2278,9 @@ namespace MphRead.Entities
         private void SpawnSniperBeam()
         {
             // following what the game does, but this should always be the same as SpawnPosition
-            Vector3 spawnPos = PastPositions[8];
-            Vector3 up = Position - spawnPos;
+            // recomp: HostShifted = the host's drawn path (HostDrawShift/HostDrawHide), draw only; unchanged when unset
+            Vector3 spawnPos = HostShifted(PastPositions[8]);
+            Vector3 up = HostShifted(Position) - spawnPos;
             float magnitude = up.Length;
             if (magnitude > 0)
             {

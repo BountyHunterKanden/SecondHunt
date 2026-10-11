@@ -14,7 +14,7 @@ namespace MphRead.Entities
         public NodeData3? ClosestNode { get; set; } = null;
         public int BotLevel { get; set; } = 0;
 
-        public class PlayerAiData
+        public partial class PlayerAiData
         {
             private readonly PlayerEntity _player;
             private readonly Scene _scene;
@@ -37,8 +37,8 @@ namespace MphRead.Entities
             // todo: member name -- set by teleporter
             public int Field118 { get; set; }
 
-            private readonly int[] _slotHits = new int[4];
-            private readonly int[] _slotDamage = new int[4];
+            private readonly int[] _slotHits = new int[SlotCapacity];
+            private readonly int[] _slotDamage = new int[SlotCapacity];
 
             // todo: member names
             private NodeData3? _node3C = null;
@@ -51,6 +51,7 @@ namespace MphRead.Entities
 
             // todo: member names
             private PlayerEntity? _targetPlayer = null;
+            public PlayerEntity? HostTargetPlayer => _targetPlayer; // recomp: read by the Trooper's Shield Wall (PlayerShield.cs)
             private HalfturretEntity? _targetHalfturret = null;
             private ItemSpawnEntity? _itemSpawnC4 = null;
             private ItemInstanceEntity? _itemC8 = null;
@@ -180,9 +181,10 @@ namespace MphRead.Entities
             private static int _globalField2 = 0;
             private static readonly AiGlobals[] _globalObjs =
             [
-                new AiGlobals(), new AiGlobals(), new AiGlobals(), new AiGlobals()
+                new AiGlobals(), new AiGlobals(), new AiGlobals(), new AiGlobals(),
+                new AiGlobals(), new AiGlobals(), new AiGlobals(), new AiGlobals() // recomp: seats 5-8 (P8)
             ];
-            private static readonly bool[,] _playerVisibility = new bool[4, 4];
+            private static readonly bool[,] _playerVisibility = new bool[SlotCapacity, SlotCapacity];
             private static byte _visIndex1 = 0;
             private static byte _visIndex2 = 0;
 
@@ -206,9 +208,9 @@ namespace MphRead.Entities
                     globals.NodeDataIndex = 0;
                     globals.NodeData = null!;
                 }
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < SlotCapacity; i++)
                 {
-                    for (int j = 0; j < 4; j++)
+                    for (int j = 0; j < SlotCapacity; j++)
                     {
                         _playerVisibility[i, j] = false;
                     }
@@ -225,6 +227,11 @@ namespace MphRead.Entities
 
             private static void UpdateVisibility(Scene scene)
             {
+                if (_visIndex1 >= MaxPlayers || _visIndex2 >= MaxPlayers) // recomp (P8): after a match of more seats
+                {
+                    _visIndex1 = 1;
+                    _visIndex2 = 0;
+                }
                 // sktodo-ai: presumably these are done one player per frame for efficiency,
                 // but we don't really need to worry about that, and we're not being 100% accurate
                 // to the game by doing this once per 60 fps frame anyway, so yeah.
@@ -252,9 +259,9 @@ namespace MphRead.Entities
                         _playerVisibility[_visIndex2, _visIndex1] = true;
                     }
                 }
-                if (++_visIndex1 >= 4)
+                if (++_visIndex1 >= MaxPlayers) // recomp: MaxPlayers (P8) for the game's 4
                 {
-                    if (++_visIndex2 >= 3)
+                    if (++_visIndex2 >= MaxPlayers - 1)
                     {
                         _visIndex2 = 0;
                     }
@@ -735,6 +742,10 @@ namespace MphRead.Entities
                 Func2134594();
                 Func2148ABC();
                 Execute(_executionTree[0]);
+                if (HostBotUnstick) // recomp: Echoes arenas' generated graphs (PlayerAiUnstick.cs)
+                {
+                    BotUnstickTick();
+                }
                 Array.Fill(_slotHits, 0);
                 Array.Fill(_slotDamage, 0);
                 DamageFromHalfturret = 0;
@@ -2033,14 +2044,14 @@ namespace MphRead.Entities
             // helper
             private bool CheckBeam(BeamType beam)
             {
-                WeaponInfo info = Weapons.Current[(int)beam];
+                WeaponInfo info = PirateBlaster.Info(beam);
                 return _player._ammo[info.AmmoType] >= info.AmmoCost && _player._availableWeapons[beam];
             }
 
             // helper
             private bool CheckCharge(BeamType beam)
             {
-                WeaponInfo info = Weapons.Current[(int)beam];
+                WeaponInfo info = PirateBlaster.Info(beam);
                 return info.Flags.TestFlag(WeaponFlags.CanCharge)
                     && _player._ammo[info.AmmoType] >= info.ChargeCost && _player._availableCharges[beam];
             }
@@ -2065,6 +2076,10 @@ namespace MphRead.Entities
                 {
                     _weapon1 = 3;
                 }
+                else if (CheckBeam(BeamType.PirateBlaster)) // recomp: the Pirate Blaster (index 11 = its BeamType)
+                {
+                    _weapon1 = 11;
+                }
                 else if (CheckBeam(BeamType.VoltDriver))
                 {
                     _weapon1 = 2;
@@ -2086,12 +2101,12 @@ namespace MphRead.Entities
             private void Func1_214A098()
             {
                 // check item spawns for missing affinity weapons
-                BeamType affinityWeapon = Weapons.AffinityWeapons[(int)_player.Hunter];
+                BeamType affinityWeapon = _player.AffinityBeam; // recomp: was Weapons.AffinityWeapons[(int)_player.Hunter]
                 int affinityIndex = GetWeaponIndex(affinityWeapon);
                 int seenBits = 1 | 2;
                 bool sawAffinity = false;
                 int seenCount = 0;
-                Span<int> seenItems = stackalloc int[7];
+                Span<int> seenItems = stackalloc int[8]; // recomp: 7 -> 8 (+ the Pirate Blaster)
                 foreach (ItemSpawnEntity itemSpawn in _scene.GetItemSpawnEntities())
                 {
                     // todo?: this condition is just for efficiency, but it's probably the wrong value since OC is also checked
@@ -2115,6 +2130,10 @@ namespace MphRead.Entities
                         // Guardian - HealthMedium
                         // only Sylux's and Noxus's options are covered below at all, and they aren't their actual affinity
                         type = (ItemType)affinityWeapon;
+                        if (affinityWeapon == BeamType.PirateBlaster)
+                        {
+                            type = ItemType.PirateBlaster; // recomp: the Trooper's affinity pickup is the blaster
+                        }
                     }
                     int index = type switch
                     {
@@ -2125,6 +2144,7 @@ namespace MphRead.Entities
                         ItemType.Magmaul => 6,
                         ItemType.ShockCoil => 7,
                         ItemType.OmegaCannon => 8,
+                        ItemType.PirateBlaster => 11, // recomp: index 11 = its BeamType
                         _ => 0
                     };
                     if ((seenBits & (1 << index)) == 0)
@@ -2161,18 +2181,27 @@ namespace MphRead.Entities
                 }
                 int affinityIndex = 0;
                 int candidateCount = 0;
-                Span<int> candidates = stackalloc int[8];
-                bool includeMissile = Weapons.AffinityWeapons[(int)_player.Hunter] == BeamType.Missile;
+                Span<int> candidates = stackalloc int[9]; // recomp: 8 -> 9 (+ the Pirate Blaster)
+                bool includeMissile = _player.AffinityBeam == BeamType.Missile; // recomp: the seat's affinity beam
                 for (int i = includeMissile ? 1 : 2; i < 9; i++)
                 {
                     BeamType beam = GetBeamType(i);
                     if (CheckBeam(beam))
                     {
                         candidates[candidateCount++] = i;
-                        if (Weapons.AffinityWeapons[(int)_player.Hunter] == beam)
+                        if (_player.AffinityBeam == beam)
                         {
                             affinityIndex = i;
                         }
+                    }
+                }
+                // recomp: a bot holding the Pirate Blaster may switch to it (index 11 = its BeamType); the Trooper's affinity
+                if (CheckBeam(BeamType.PirateBlaster))
+                {
+                    candidates[candidateCount++] = 11;
+                    if (_player.AffinityBeam == BeamType.PirateBlaster)
+                    {
+                        affinityIndex = 11;
                     }
                 }
                 if (candidateCount == 1)
@@ -2470,6 +2499,12 @@ namespace MphRead.Entities
                         UpdateTargetItem(_entityRefs.Field70);
                     }
                 }
+                else if (_findWeaponIndex == 11)
+                {
+                    // recomp: the Pirate Blaster (UA when held, else its pickup)
+                    UpdateTargetItem(_player._availableWeapons[BeamType.PirateBlaster] ? FindItemForUa()
+                        : FindItemForWeapon(ItemType.PirateBlaster, BeamType.PirateBlaster));
+                }
                 else
                 {
                     UpdateTargetItem(null);
@@ -2631,6 +2666,12 @@ namespace MphRead.Entities
                         FindEntityRef(AiEntRefType.Type50);
                         SetEntity(_entityRefs.Field50);
                     }
+                }
+                else if (_findWeaponIndex == 11)
+                {
+                    // recomp: the Pirate Blaster (UA when held, else its pickup)
+                    SetEntity(_player._availableWeapons[BeamType.PirateBlaster] ? FindItemSpawnForUa()
+                        : FindItemSpawnForWeapon(ItemType.PirateBlaster, BeamType.PirateBlaster));
                 }
                 else
                 {
@@ -4800,7 +4841,7 @@ namespace MphRead.Entities
 
             private int Func3_213C334(AiContext context, AiPersonalityData5 param)
             {
-                if (_findWeaponIndex >= 0 && _findWeaponIndex <= 8)
+                if (_findWeaponIndex >= 0 && _findWeaponIndex <= 8 || _findWeaponIndex == 11) // recomp: + the blaster
                 {
                     return _player._availableWeapons[GetBeamType(_findWeaponIndex)] ? 1 : 0;
                 }
@@ -4895,34 +4936,40 @@ namespace MphRead.Entities
                     FindEntityRef(AiEntRefType.Type70);
                     return _entityRefs.Field70 != null ? 1 : 0;
                 }
+                if (_findWeaponIndex == 11)
+                {
+                    // recomp: the Pirate Blaster (UA when held, else its pickup)
+                    return (_player._availableWeapons[BeamType.PirateBlaster] ? FindItemForUa()
+                        : FindItemForWeapon(ItemType.PirateBlaster, BeamType.PirateBlaster)) != null ? 1 : 0;
+                }
                 return 0;
             }
 
             // same as Func3_213BFFC but for _weapon1 instead of _weapon2
             private int Func3_213C078(AiContext context, AiPersonalityData5 param)
             {
-                WeaponInfo info = Weapons.Current[(int)GetBeamType(_weapon1)];
+                WeaponInfo info = PirateBlaster.Info(GetBeamType(_weapon1));
                 return _player._ammo[info.AmmoType] < info.AmmoCost ? 1 : 0;
             }
 
             // same as Func3_213BFD8 but for _weapon1 instead of _weapon2
             private int Func3_213C054(AiContext context, AiPersonalityData5 param)
             {
-                WeaponInfo info = Weapons.Current[(int)GetBeamType(_weapon1)];
+                WeaponInfo info = PirateBlaster.Info(GetBeamType(_weapon1));
                 return _player._ammo[info.AmmoType] >= info.AmmoCost ? 1 : 0; // inverted
             }
 
             // same as Func3_213C078 but for _weapon2 instead of _weapon1
             private int Func3_213BFFC(AiContext context, AiPersonalityData5 param)
             {
-                WeaponInfo info = Weapons.Current[(int)GetBeamType(_weapon2)];
+                WeaponInfo info = PirateBlaster.Info(GetBeamType(_weapon2));
                 return _player._ammo[info.AmmoType] < info.AmmoCost ? 1 : 0;
             }
 
             // same as Func3_213C054 but for _weapon2 instead of _weapon1
             private int Func3_213BFD8(AiContext context, AiPersonalityData5 param)
             {
-                WeaponInfo info = Weapons.Current[(int)GetBeamType(_weapon2)];
+                WeaponInfo info = PirateBlaster.Info(GetBeamType(_weapon2));
                 return _player._ammo[info.AmmoType] >= info.AmmoCost ? 1 : 0;
             }
 
@@ -4967,6 +5014,10 @@ namespace MphRead.Entities
                 {
                     FindEntityRef(AiEntRefType.Type71);
                     return _entityRefs.Field71 != null ? 1 : 0;
+                }
+                if (_weapon1 == 11)
+                {
+                    return FindItemForUa() != null ? 1 : 0; // recomp: the Pirate Blaster uses UA
                 }
                 return 0;
             }
@@ -6983,6 +7034,19 @@ namespace MphRead.Entities
                         SetRandomDelay();
                     }
                 }
+                else if (beam == BeamType.PirateBlaster)
+                {
+                    // recomp: the Pirate Blaster has no touch button: equip it directly, then fire in presses (each a burst)
+                    if (_player.CurrentWeapon != beam)
+                    {
+                        _player.TryEquipWeapon(beam);
+                    }
+                    else if (_buttons.R.FramesUp > _shotDelay)
+                    {
+                        _buttons.R.IsDown = true;
+                        SetRandomDelay();
+                    }
+                }
                 else if (beam == BeamType.Battlehammer)
                 {
                     if (_player.CurrentWeapon != beam)
@@ -7314,6 +7378,10 @@ namespace MphRead.Entities
                 while (Func2140584(context))
                 {
                 }
+                if (HostBotUnstick) // recomp: not toward a node she gave up on here (PlayerAiUnstick.cs)
+                {
+                    BotUnstickSteer();
+                }
                 Debug.Assert(_node40 != null);
                 context.Field18 = _node40.NodeType == NodeType.AltForm && _player.Hunter != Hunter.Guardian ? 2 : 0;
                 if (_player.IsAltForm)
@@ -7458,6 +7526,10 @@ namespace MphRead.Entities
                         Flags2 |= AiFlags2.Bit7;
                         return context.Field24 != 0;
                     }
+                    if (HostBotUnstick) // recomp: Echoes arenas' generated graphs (PlayerAiUnstick.cs)
+                    {
+                        BotUnstick(context);
+                    }
                     if (_player._horizColTimer <= 10 * 2 // todo: FPS stuff
                         || _player.Flags1.TestFlag(PlayerFlags1.Grounded) && _player._horizColTimer <= 60 * 2 // todo: FPS stuff
                         || _player.IsAltForm || _player.IsMorphing)
@@ -7548,7 +7620,8 @@ namespace MphRead.Entities
                     _node40 = _entityRefs.Field1;
                     return false;
                 }
-                if (context.Field24 == 2 && _player.Flags1.TestFlag(PlayerFlags1.UsedJump))
+                if (context.Field24 == 2 && (_player.Flags1.TestFlag(PlayerFlags1.UsedJump)
+                    || HostBotUnstick && BotJumpedOffGround())) // recomp: Echoes' double jump (PlayerAiUnstick.cs)
                 {
                     context.Field20 = 1;
                     context.Field24 = 0;
@@ -8800,6 +8873,10 @@ namespace MphRead.Entities
                     {
                         FindEntityRef(AiEntRefType.Type0);
                         _entityRefs.Field1 = _entityRefs.Field0;
+                        if (HostBotUnstick) // recomp: not a node she gave up on here (PlayerAiUnstick.cs)
+                        {
+                            _entityRefs.Field1 = BotUnstickPick(_entityRefs.Field1);
+                        }
                         return;
                     }
                     Vector3 position = _player.Position;
@@ -8807,6 +8884,10 @@ namespace MphRead.Entities
                         ? -(Fixed.ToFloat(_player.Values.AltColRadius) - Fixed.ToFloat(_player.Values.AltColYPos))
                         : -0.5f);
                     _entityRefs.Field1 = Func2138D28(position);
+                    if (HostBotUnstick) // recomp: not a node she gave up on here (PlayerAiUnstick.cs)
+                    {
+                        _entityRefs.Field1 = BotUnstickPick(_entityRefs.Field1);
+                    }
                 }
                 else if (type == AiEntRefType.Type2)
                 {
@@ -9683,7 +9764,7 @@ namespace MphRead.Entities
             private ItemSpawnEntity? FindItemSpawnForWeapon(ItemType itemType, BeamType beamType)
             {
                 ItemType type2 = ItemType.None;
-                if (Weapons.AffinityWeapons[(int)_player.Hunter] == beamType)
+                if (_player.AffinityBeam == beamType) // recomp: the seat's affinity beam
                 {
                     type2 = ItemType.AffinityWeapon;
                 }
@@ -9693,7 +9774,7 @@ namespace MphRead.Entities
             private ItemInstanceEntity? FindItemForWeapon(ItemType itemType, BeamType beamType)
             {
                 ItemType type2 = ItemType.None;
-                if (Weapons.AffinityWeapons[(int)_player.Hunter] == beamType)
+                if (_player.AffinityBeam == beamType) // recomp: the seat's affinity beam
                 {
                     type2 = ItemType.AffinityWeapon;
                 }
@@ -9713,7 +9794,7 @@ namespace MphRead.Entities
             private ItemSpawnEntity? FindItemSpawnForMissiles()
             {
                 ItemType type3 = ItemType.None;
-                if (Weapons.AffinityWeapons[(int)_player.Hunter] == BeamType.Missile)
+                if (_player.AffinityBeam == BeamType.Missile) // recomp: the seat's affinity beam
                 {
                     type3 = ItemType.AffinityWeapon;
                 }
@@ -9724,7 +9805,7 @@ namespace MphRead.Entities
             private ItemInstanceEntity? FindItemForMissiles()
             {
                 ItemType type3 = ItemType.None;
-                if (Weapons.AffinityWeapons[(int)_player.Hunter] == BeamType.Missile)
+                if (_player.AffinityBeam == BeamType.Missile) // recomp: the seat's affinity beam
                 {
                     type3 = ItemType.AffinityWeapon;
                 }
@@ -10050,7 +10131,8 @@ namespace MphRead.Entities
                     return false;
                 }
                 if (!_player.Flags1.TestFlag(PlayerFlags1.Grounded)
-                    && (_node40 == null || _node40.NodeType != NodeType.Aerial))
+                    && (_node40 == null || _node40.NodeType != NodeType.Aerial)
+                    && !(HostBotUnstick && BotJustLaunched())) // recomp: a node on a jump pad (PlayerAiUnstick.cs)
                 {
                     return false;
                 }
@@ -10538,12 +10620,17 @@ namespace MphRead.Entities
                 }
                 if (itemType == ItemType.VoltDriver || itemType == ItemType.Battlehammer || itemType == ItemType.Imperialist
                     || itemType == ItemType.Judicator || itemType == ItemType.Magmaul || itemType == ItemType.ShockCoil
-                    || itemType == ItemType.OmegaCannon || itemType == ItemType.AffinityWeapon)
+                    || itemType == ItemType.OmegaCannon || itemType == ItemType.AffinityWeapon
+                    || itemType == ItemType.PirateBlaster) // recomp
                 {
                     int weapon = (int)itemType - 4;
                     if (itemType == ItemType.AffinityWeapon)
                     {
-                        weapon = (int)Weapons.AffinityWeapons[(int)_player.Hunter];
+                        weapon = (int)_player.AffinityBeam; // recomp: the seat's affinity beam
+                    }
+                    else if (itemType == ItemType.PirateBlaster)
+                    {
+                        weapon = (int)BeamType.PirateBlaster; // recomp
                     }
                     return _player.AvailableWeapons[weapon];
                 }
@@ -10569,7 +10656,8 @@ namespace MphRead.Entities
             {
                 // UNIT 4 ARCTERRA BASE (Arcterra Gateway)
                 return GameState.IsOctolithMode && _scene.RoomId == 117
-                    && _octolithFlagDC?.Carrier == _player && item.Owner?.Id == 53;
+                    && _octolithFlagDC?.Carrier == _player && item.Owner?.Id == 53
+                    || HostBotUnstick && HostBotMoves && BotItemSkipped(item); // recomp: Echoes bots T7 (PlayerAiUnstick)
             }
 
             private NodeDefenseEntity? FindClosestNodeDefense(Vector3 position)
@@ -10595,7 +10683,7 @@ namespace MphRead.Entities
                 // among any tied opponents, and randomly return one of that opponent's nodes.
                 // if no nodes are captured by opponents, randomly return a non-captured node.
                 NodeDefenseEntity? firstResult = null;
-                int[] captureList = new int[4];
+                int[] captureList = new int[SlotCapacity];
                 int maxCaptureCount = 0;
                 int maxCaptureSlotIndex = 0;
                 foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
@@ -10619,7 +10707,7 @@ namespace MphRead.Entities
                 if (maxCaptureCount > 0)
                 {
                     int playerCount = 0;
-                    var playerList = new PlayerEntity?[4];
+                    var playerList = new PlayerEntity?[SlotCapacity];
                     foreach (PlayerEntity player in _scene.GetPlayerEntities())
                     {
                         if (player.TeamIndex != _player.TeamIndex && player.SlotIndex == maxCaptureSlotIndex)

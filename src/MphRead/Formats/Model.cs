@@ -627,7 +627,7 @@ namespace MphRead
             float translateZ = InterpolateAnimation(group.Translations, animation.TranslateLutIndexZ, currentFrame,
                 animation.TranslateBlendZ, animation.TranslateLutLengthZ, group.FrameCount);
             var nodeMatrix = Matrix4.CreateTranslation(translateX / modelScale.X, translateY / modelScale.Y, translateZ / modelScale.Z);
-            nodeMatrix = Matrix4.CreateRotationX(rotateX) * Matrix4.CreateRotationY(rotateY) * Matrix4.CreateRotationZ(rotateZ) * nodeMatrix;
+            nodeMatrix = DetMatrix.CreateRotationX(rotateX) * DetMatrix.CreateRotationY(rotateY) * DetMatrix.CreateRotationZ(rotateZ) * nodeMatrix;
             nodeMatrix = Matrix4.CreateScale(scaleX, scaleY, scaleZ) * nodeMatrix;
             return nodeMatrix;
         }
@@ -694,7 +694,7 @@ namespace MphRead
             if (rotate != 0)
             {
                 textureMatrix = Matrix4.CreateTranslation(0.5f, 0.5f, 0.0f) * textureMatrix;
-                textureMatrix = Matrix4.CreateRotationZ(rotate) * textureMatrix;
+                textureMatrix = DetMatrix.CreateRotationZ(rotate) * textureMatrix;
                 textureMatrix = Matrix4.CreateTranslation(-0.5f, -0.5f, 0.0f) * textureMatrix;
             }
             textureMatrix = Matrix4.CreateScale(scaleS, scaleT, 1) * textureMatrix;

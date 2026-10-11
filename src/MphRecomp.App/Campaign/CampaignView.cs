@@ -67,6 +67,14 @@ internal sealed partial class CampaignRenderer
     // BuildInput). A read of the game thread's weapon: a frame stale at worst.
     public bool TouchMissileSelected => _host?.Player.CurrentWeapon == MphRead.BeamType.Missile;
 
+    // UI thread, the touch overlay: while the player flies the Trooper's Scout Drone FIRE reads BURST and its LASER
+    // button shows (MphRead PlayerScoutDrone.cs; owner 2026-10-08). A frame stale at worst, as above.
+    public bool TouchDrone => _host?.Player is { HostScoutDrone: true, IsAltForm: true };
+
+    // UI thread, the touch overlay (T11): in this morph ball the touch area is the DS stylus pad -- a drag rolls the
+    // ball, a flick boosts (MphRead PlayerTouch.cs) -- instead of the aim stick. A frame stale at worst, as above.
+    public bool TouchStylusRolls => _host?.Player.HostTouchRolls == true;
+
     // a new GL context took the old objects with it
     public void ViewGlReset()
     {

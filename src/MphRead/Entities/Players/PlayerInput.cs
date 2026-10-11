@@ -26,6 +26,7 @@ namespace MphRead.Entities
 
         private void ProcessInput()
         {
+            TouchTick(); // recomp: the touch controls' stylus (PlayerTouch.cs)
             if (_health > 0)
             {
                 if (Flags1.TestFlag(PlayerFlags1.FreeLook))
@@ -91,6 +92,10 @@ namespace MphRead.Entities
             {
                 _showScoreboard = GameState.Multiplayer && Controls.Pause.IsDown;
             }
+            if (HostAnyShieldWall)
+            {
+                ShieldWallTick(); // recomp: the Trooper's Shield Wall (PlayerShield.cs)
+            }
             if (IsAltForm || IsMorphing)
             {
                 ProcessAlt();
@@ -101,7 +106,8 @@ namespace MphRead.Entities
             }
         }
 
-        private static readonly BeamType[] _weaponOrder = new BeamType[9]
+        // recomp: the Pirate Blaster after the Shock Coil (9 -> 10 entries; the wrap indexes below follow the length)
+        private static readonly BeamType[] _weaponOrder = new BeamType[10]
         {
             /* 0 */ BeamType.PowerBeam,
             /* 1 */ BeamType.Missile,
@@ -111,7 +117,8 @@ namespace MphRead.Entities
             /* 5 */ BeamType.Judicator,
             /* 6 */ BeamType.Magmaul,
             /* 7 */ BeamType.ShockCoil,
-            /* 8 */ BeamType.OmegaCannon
+            /* 8 */ BeamType.PirateBlaster,
+            /* 9 */ BeamType.OmegaCannon
         };
 
         private void ProcessTouchInput()
@@ -207,6 +214,15 @@ namespace MphRead.Entities
                         TryEquipWeapon(BeamType.OmegaCannon, debug: true);
                     }
                 }
+                // recomp: a direct pick of the Pirate Blaster (D-pad / mouse wheel cycling, a LAN or online guest's pick on
+                // the host); off for matches recorded before it (HostPirateBlasterKey)
+                else if (HostPirateBlasterKey && Controls.PirateBlaster.IsPressed)
+                {
+                    if (CurrentWeapon != BeamType.PirateBlaster)
+                    {
+                        TryEquipWeapon(BeamType.PirateBlaster);
+                    }
+                }
                 else if (Controls.AffinitySlot.IsPressed)
                 {
                     BeamType weapon = _weaponSlots[2];
@@ -232,11 +248,11 @@ namespace MphRead.Entities
                         do
                         {
                             nextIndex++;
-                            if (Controls.ScrollAllWeapons && nextIndex > 8)
+                            if (Controls.ScrollAllWeapons && nextIndex > _weaponOrder.Length - 1)
                             {
                                 nextIndex = 0;
                             }
-                            else if (!Controls.ScrollAllWeapons && nextIndex > 7)
+                            else if (!Controls.ScrollAllWeapons && nextIndex > _weaponOrder.Length - 2)
                             {
                                 nextIndex = 2;
                             }
@@ -251,11 +267,11 @@ namespace MphRead.Entities
                             nextIndex--;
                             if (Controls.ScrollAllWeapons && nextIndex < 0)
                             {
-                                nextIndex = 8;
+                                nextIndex = _weaponOrder.Length - 1;
                             }
                             else if (!Controls.ScrollAllWeapons && nextIndex < 2)
                             {
-                                nextIndex = 7;
+                                nextIndex = _weaponOrder.Length - 2;
                             }
                             nextBeam = _weaponOrder[nextIndex];
                         }
@@ -552,8 +568,16 @@ namespace MphRead.Entities
                         // itodo: button aim (see free cam code for FPS-independent stuff)
                     }
                 }
+                if (HostShieldWall)
+                {
+                    ShieldWallInput(); // recomp: plant/drop the Trooper's barrier + its firing slit (PlayerShield.cs)
+                }
                 bool jumping = false;
-                if (!Flags2.TestAny(PlayerFlags2.BipedLock | PlayerFlags2.BipedStuck))
+                if (HostWallCling && WallClingInput())
+                {
+                    jumping = true; // recomp: the Trooper's wall jump (PlayerWallCling.cs)
+                }
+                if (!Flags2.TestAny(PlayerFlags2.BipedLock | PlayerFlags2.BipedStuck) && !ShieldWallLocked && !WallClingHeld)
                 {
                     // unimpl-controls: the game also tests for either the free strafe flag, or the strafe button held
                     // and later, for up/down, it tests for either flag, or the look button not held
@@ -664,11 +688,15 @@ namespace MphRead.Entities
                     }
                     // unimpl-controls: in the up/down code path, the game processes aim reset if that flag is off
                     // unimpl-controls: the aim input disable flag is also checked by the game
-                    if (_jumpPadControlLockMin == 0 && Controls.Jump.IsPressed && !Flags1.TestFlag(PlayerFlags1.UsedJump))
+                    // recomp: under water in an Echoes arena an air press is the Gravity Boost's (PlayerEchoesMoves.cs)
+                    if (_jumpPadControlLockMin == 0 && (Controls.Jump.IsPressed || TouchJumpPressed) && !Flags1.TestFlag(PlayerFlags1.UsedJump)
+                        && !(HostEchoesMoves && EchoesMovesAirPress()))
                     {
-                        // unimpl-controls: double tap jump is hard coded as an alternate condition to the jump input
+                        // recomp: double tap jump is hard coded as an alternate condition to the jump input (TouchJumpPressed)
                         jumping = true;
-                        if (!Flags1.TestFlag(PlayerFlags1.Standing) || !_abilities.TestFlag(AbilityFlags.SpaceJump))
+                        // recomp: in an Echoes arena a jump just after leaving the floor is still a ground jump (PlayerEchoesMoves.cs)
+                        if (!(HostEchoesMoves ? EchoesMovesGroundJump() : Flags1.TestFlag(PlayerFlags1.Standing))
+                            || !_abilities.TestFlag(AbilityFlags.SpaceJump))
                         {
                             Flags1 |= PlayerFlags1.UsedJump;
                         }
@@ -815,7 +843,7 @@ namespace MphRead.Entities
                             EquipInfo.ChargeLevel = 0;
                         }
                     }
-                    if (EquipWeapon.Flags.TestFlag(WeaponFlags.CanZoom))
+                    if (EquipWeapon.Flags.TestFlag(WeaponFlags.CanZoom)) // (recomp: the Trooper's barrier is off while a zooming weapon is equipped, PlayerShield.cs)
                     {
                         if (Controls.Zoom.IsPressed)
                         {
@@ -895,7 +923,7 @@ namespace MphRead.Entities
                     }
                     // the game doesn't require pressed here, but presumably the control scheme would have the pressed flag
                     // todo: use the ability flag for the morph touch button too, even though the game doesn't
-                    if (!Flags2.TestFlag(PlayerFlags2.BipedStuck) && _abilities.TestFlag(AbilityFlags.AltForm)
+                    if (!Flags2.TestFlag(PlayerFlags2.BipedStuck) && !ShieldWallLocked && _abilities.TestFlag(AbilityFlags.AltForm)
                         && Controls.Morph.IsPressed || IsMainPlayer && CameraSequence.Current?.ForceAlt == true)
                     {
                         if (TrySwitchForms() && IsMainPlayer && IsMorphing)
@@ -907,6 +935,14 @@ namespace MphRead.Entities
                         anim1 = PlayerAnimation.Morph;
                         anim2 = PlayerAnimation.Morph;
                     }
+                }
+                if (_jumpPadSameArc && JumpPadEntity.HostSameArcSteer && Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && SameArcSteer(speedDelta, _field70, _field74, out Vector3 sameArcFb))
+                {
+                    speedDelta = sameArcFb; // host hook (Echoes arenas): left/right steered across the push, forward/back left to MPH's rule, see SameArcSteer
+                }
+                if (HostWallCling)
+                {
+                    speedDelta = WallClingSteer(speedDelta); // recomp: a wall jump's kick-off (PlayerWallCling.cs)
                 }
                 float magBefore = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
                 Speed += speedDelta; // todo: FPS stuff?
@@ -970,6 +1006,10 @@ namespace MphRead.Entities
 
         private bool TryFireWeapon()
         {
+            if (ShieldWallStaggered)
+            {
+                return false; // recomp: staggering after the Trooper's barrier broke (PlayerShield.cs)
+            }
             if (!Flags2.TestFlag(PlayerFlags2.Cloaking))
             {
                 _cloakTimer = 0;
@@ -1019,7 +1059,7 @@ namespace MphRead.Entities
             if (IsPrimeHunter)
             {
                 // todo?: make this more solid to avoid e.g. the battlehammer ammo cost thing
-                EquipInfo.Weapon = Weapons.Current[(int)CurrentWeapon + 9];
+                EquipInfo.Weapon = PirateBlaster.Info(CurrentWeapon, affinity: true); // recomp: was Weapons.Current[+ 9]
             }
             if (IsBot && GameState.SinglePlayer)
             {
@@ -1043,6 +1083,7 @@ namespace MphRead.Entities
             }
             // todo: update license stats
             _timeSinceShot = 0;
+            OnPirateBlasterShot(curWeapon); // recomp: the Pirate Blaster's burst (PlayerPirateBlaster.cs)
             if (IsMainPlayer)
             {
                 HudOnFiredShot();
@@ -1066,9 +1107,11 @@ namespace MphRead.Entities
                     _scene.UnlinkEffectEntry(_muzzleEffect);
                     _muzzleEffect = null;
                 }
-                int effectId = Metadata.MuzzleEffectIds[(int)CurrentWeapon];
-                _muzzleEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, _muzzlePos);
-                if (_muzzleEffect != null && !IsMainPlayer)
+                int effectId = Metadata.MuzzleEffectIds[PirateBlaster.BaseIndex(CurrentWeapon)];
+                _muzzleEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, FxMuzzlePos); // recomp: HostFxMuzzle
+                // recomp: the Pirate Blaster's first bolt with the Prime look hides the Power Beam's yellow tip blast too, as
+                // bolts 2-3 do (PlayerPirateBlaster.cs; release 0.2.0 F4: "yellow first then red ... can it just be red?")
+                if (_muzzleEffect != null && (!IsMainPlayer || CurrentWeapon == BeamType.PirateBlaster && HostOwnPirateBlasterLook))
                 {
                     _muzzleEffect.SetDrawEnabled(false);
                 }
@@ -1185,9 +1228,9 @@ namespace MphRead.Entities
             Flags1 |= PlayerFlags1.UsedJump;
             if (_frozenTimer == 0 && _health > 0)
             {
-                // todo?: if touch movement for alt form was a thing, this would need extra conditions
-                if ((!Controls.RollRight.IsDown && !Controls.RolltLeft.IsDown && !Controls.RollUp.IsDown && !Controls.RollDown.IsDown)
-                    || Controls.RollRight.IsPressed || Controls.RolltLeft.IsPressed || Controls.RollUp.IsPressed || Controls.RollDown.IsPressed)
+                // recomp: the game also needs the stylus still (dx4 = dy4 = 0) here (PlayerTouch.cs)
+                if ((!Controls.RollRight.IsDown && !Controls.RolltLeft.IsDown && !Controls.RollUp.IsDown && !Controls.RollDown.IsDown
+                    && !TouchMoved) || Controls.RollRight.IsPressed || Controls.RolltLeft.IsPressed || Controls.RollUp.IsPressed || Controls.RollDown.IsPressed)
                 {
                     Flags1 &= ~PlayerFlags1.AltDirOverride;
                 }
@@ -1354,7 +1397,8 @@ namespace MphRead.Entities
                 else
                 {
                     // Samus, Kanden, Spire, Noxus
-                    // todo: touch roll
+                    // recomp: touch roll, before the d-pad's traction like the game (PlayerTouch.cs)
+                    speedDelta += TouchRollDelta(traction60: !Flags1.TestFlag(PlayerFlags1.UsedJumpPad));
                     float traction = Fixed.ToFloat(Values.RollAltTraction);
                     if (_jumpPadControlLockMin > 0)
                     {
@@ -1491,7 +1535,11 @@ namespace MphRead.Entities
                             _soundSource.PlaySfx(SfxId.TRACE_ALT_ATTACK);
                         }
                     }
-                    if (_abilities.TestFlag(AbilityFlags.WeavelAltAttack))
+                    if (HostScoutDrone)
+                    {
+                        ScoutDroneFire(); // recomp: the Trooper's drone fires its blasters instead (PlayerScoutDrone.cs)
+                    }
+                    else if (_abilities.TestFlag(AbilityFlags.WeavelAltAttack))
                     {
                         if (Flags2.TestFlag(PlayerFlags2.AltAttack) || _altAttackCooldown > 0)
                         {
@@ -1530,9 +1578,12 @@ namespace MphRead.Entities
                     }
                     if (_abilities.TestFlag(AbilityFlags.Boost) && AttachedEnemy == null)
                     {
-                        // todo: touch boost
-                        // else...
-                        if (Controls.Boost.IsDown)
+                        // recomp: touch boost (a flick), instead of the button's this frame (PlayerTouch.cs)
+                        if (TouchBoost(ref speedDelta))
+                        {
+                            // (the button's boost waits this frame; its charge is kept, as in the game)
+                        }
+                        else if (Controls.Boost.IsDown)
                         {
                             // the game plays the boost charge SFX here, but that SFX is empty
                             if (_boostCharge < Values.BoostChargeMax * 2) // todo: FPS stuff
@@ -1584,6 +1635,10 @@ namespace MphRead.Entities
                             _boostCharge = 0;
                         }
                     }
+                }
+                if (_jumpPadSameArc && JumpPadEntity.HostSameArcSteer && Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && SameArcSteer(speedDelta, _altRollFbX, _altRollFbZ, out Vector3 sameArcFb))
+                {
+                    speedDelta = sameArcFb; // host hook (Echoes arenas): left/right steered across the push, forward/back left to MPH's rule, see SameArcSteer
                 }
                 float magBefore = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
                 Speed += speedDelta; // todo: FPS stuff?
@@ -1752,12 +1807,77 @@ namespace MphRead.Entities
             Flags2 &= ~PlayerFlags2.AltAttack;
         }
 
+        // host hook (Echoes arenas, owner 10-08 ~01:10: "make these long jumps more forgiving on left and right input"): on a
+        // same-arc pad's flight the stick's left/right part drifts the hunter across the push (up to the strafe cap) without
+        // eating it; its forward/back part (fb, returned for the caller to add) stays MPH's rule: MPH's speed cap turns the
+        // flight toward it and back brakes (SameArcCut, MPH's cut measured along the flight). MPH's rule turns the whole
+        // flight toward a sideways stick too and eats the push for good, which on Echoes' 3-6x longer jumps dropped a
+        // 0.25 s tap ~20 short. fwdX/fwdZ = the stick's forward axis. False (MPH's rule) once the push is gone
+        private bool SameArcSteer(Vector3 delta, float fwdX, float fwdZ, out Vector3 fb)
+        {
+            fb = Vector3.Zero;
+            var push = new Vector3(_jumpPadAccel.X, 0, _jumpPadAccel.Z);
+            float pushLen = push.Length;
+            var fwd = new Vector3(fwdX, 0, fwdZ);
+            if (pushLen < 0.01f || fwd.LengthSquared < 0.0001f)
+            {
+                return false;
+            }
+            Vector3 along = push / pushLen;
+            var steer = new Vector3(delta.X, 0, delta.Z);
+            fwd.Normalize();
+            fb = fwd * Vector3.Dot(steer, fwd);
+            Vector3 sidePart = steer - fb;
+            // left/right only across the flight, whichever way the hunter looks (its share along the flight braked whenever
+            // the aim was off the line: owner 10-08 "any directional input" fell short)
+            steer = sidePart - along * Vector3.Dot(sidePart, along);
+            var own = new Vector3(Speed.X + steer.X - push.X, 0, Speed.Z + steer.Z - push.Z);
+            float a = Vector3.Dot(own, along);
+            Vector3 across = own - along * a;
+            float cap = Fixed.ToFloat(Values.StrafeSpeedCap);
+            float mag = across.Length;
+            if (mag > cap)
+            {
+                across *= cap / mag;
+            }
+            own = across + along * a;
+            Speed = new Vector3(push.X + own.X, Speed.Y + delta.Y, push.Z + own.Z);
+            return true;
+        }
+
+        // host hook (Echoes arenas): MPH's push cut (own speed against the push takes half of it off the push) along the
+        // flight instead of per world axis, so drifting across never cuts it; leaves Speed = the hunter's own speed like
+        // MPH's exclusion. False (MPH's per-axis rule) once the push is gone
+        private bool SameArcCut()
+        {
+            var push = new Vector3(_jumpPadAccel.X, 0, _jumpPadAccel.Z);
+            float pushLen = push.Length;
+            if (pushLen < 0.01f)
+            {
+                return false;
+            }
+            Vector3 along = push / pushLen;
+            var own = new Vector3(Speed.X - push.X, 0, Speed.Z - push.Z);
+            float a = Vector3.Dot(own, along);
+            if (a < 0 && pushLen + a > 0)
+            {
+                _jumpPadAccel += along * (a / 2); // todo: FPS stuff
+                own -= along * a;
+            }
+            Speed = Speed.WithX(own.X).WithZ(own.Z);
+            return true;
+        }
+
         private void ProcessMovement()
         {
             if (_accelerationTimer > 0)
             {
                 _accelerationTimer--;
                 Speed += Acceleration / 2; // todo: FPS stuff
+            }
+            if (HostWallCling)
+            {
+                WallClingHold(); // recomp: nothing moves the Trooper on a wall (PlayerWallCling.cs)
             }
             var hSpeed = new Vector3(Speed.X, 0, Speed.Z);
             float hSpeedMag = hSpeed.Length;
@@ -1834,7 +1954,11 @@ namespace MphRead.Entities
             {
                 UpdateAimY(0);
             }
-            if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
+            if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && _jumpPadSameArc && JumpPadEntity.HostSameArcSteer && SameArcCut())
+            {
+                // host hook (Echoes arenas): the push excluded and cut along the flight only, see SameArcCut
+            }
+            else if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
             {
                 // basically exclude the jump pad speed for the rest of the speed calc, then restore it below
                 float prevX = Speed.X;
@@ -1945,9 +2069,11 @@ namespace MphRead.Entities
                 _gravityHold--;
             }
             float gravityStep = 0;
+            // recomp: the Trooper's drone hovers instead of falling (PlayerScoutDrone.cs)
+            bool droneHover = HostScoutDrone && ScoutDroneHover();
             if (_health > 0)
             {
-                if (_jumpPadControlLock == 0 && !Flags2.TestFlag(PlayerFlags2.BipedStuck))
+                if (_jumpPadControlLock == 0 && !Flags2.TestFlag(PlayerFlags2.BipedStuck) && !WallClingHeld && !droneHover)
                 {
                     if (holdGravity)
                     {
@@ -1959,7 +2085,19 @@ namespace MphRead.Entities
                     }
                     else
                     {
-                        if (IsAltForm || Flags2.TestFlag(PlayerFlags2.AltFormGravity))
+                        if (_jumpPadSameArc && Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && !Flags1.TestFlag(PlayerFlags1.Standing))
+                        {
+                            // host hook (Echoes arenas): a same-arc pad's flight falls at the biped's gravity in every form
+                            _gravity = Fixed.ToFloat(Values.BipedGravity);
+                        }
+                        else if (DronePadArcOn && Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && !Flags1.TestFlag(PlayerFlags1.Standing)
+                            && Speed.Y <= 0)
+                        {
+                            // recomp: the Trooper's Scout Drone coming down from a pad falls at the biped's gravity, not the
+                            // alt forms' 3x (PlayerScoutDrone.cs, T5 N9)
+                            _gravity = Fixed.ToFloat(Values.BipedGravity);
+                        }
+                        else if (IsAltForm || Flags2.TestFlag(PlayerFlags2.AltFormGravity))
                         {
                             if (Flags1.TestFlag(PlayerFlags1.Standing) && _slipperiness == 0 && Values.AltFormStrafe != 0)
                             {
@@ -1983,7 +2121,8 @@ namespace MphRead.Entities
                             _gravity = Fixed.ToFloat(Values.BipedGravity);
                         }
                     }
-                    gravityStep = _gravity / 2; // todo: FPS stuff
+                    // recomp: Echoes arenas' Gravity Boost under water (PlayerEchoesMoves.cs)
+                    gravityStep = (HostEchoesMoves ? EchoesMovesGravity(_gravity) : _gravity) / 2; // todo: FPS stuff
                     Speed = Speed.AddY(gravityStep);
                 }
                 // vanilla (30 Hz) does speed += g, then position += speed. Our two 60 Hz halves of that are speed += g/2,
@@ -2116,6 +2255,10 @@ namespace MphRead.Entities
                     _walkSfxTimer = 0;
                     _walkSfxIndex = 0;
                 }
+            }
+            if (HostWallCling)
+            {
+                WallClingAfterCollision(); // recomp: the Trooper starts, keeps or leaves a wall (PlayerWallCling.cs)
             }
             bool burning = false;
             if (_health > 0 && (_burnTimer > 0 || Hunter != Hunter.Spire
@@ -2367,11 +2510,11 @@ namespace MphRead.Entities
         // queue #8b). False if it isn't available or is out of ammo.
         public bool HostEquipWeapon(BeamType beam)
         {
-            if ((int)beam < 0 || (int)beam >= 9 || !_availableWeapons[beam])
+            if (!PirateBlaster.IsPlayerBeam(beam) || !_availableWeapons[beam])
             {
                 return false;
             }
-            WeaponInfo info = Weapons.Current[(int)beam];
+            WeaponInfo info = PirateBlaster.Info(beam);
             int ammo = _ammo[info.AmmoType];
             if (beam != BeamType.PowerBeam && ammo < info.AmmoCost && ammo != -1)
             {
@@ -2501,6 +2644,7 @@ namespace MphRead.Entities
         public Keybind OmegaCannon { get; }
         public Keybind AffinitySlot { get; }
         public Keybind Pause { get; }
+        public Keybind PirateBlaster { get; } = new Keybind(Keys.Unknown); // recomp: host-driven only (HostDown)
 
         public bool InvertAimY { get; }
         public bool InvertAimX { get; }
@@ -2555,7 +2699,8 @@ namespace MphRead.Entities
             {
                 moveLeft, moveRight, moveUp, moveDown, rollLeft, rollRight, rollUp, rollDown, aimLeft, aimRight, aimUp, aimDown,
                 shoot, zoom, jump, morph, boost, altAttack, scanVisor, scan, nextWeapon, prevWeapon, weaponMenu, powerBeam,
-                missile, voltDriver, battlehammer, imperialist, judicator, magmaul, shockCoil, omegaCannon, affinitySlot, pause
+                missile, voltDriver, battlehammer, imperialist, judicator, magmaul, shockCoil, omegaCannon, affinitySlot, pause,
+                PirateBlaster // recomp
             };
         }
 

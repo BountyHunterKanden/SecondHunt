@@ -1,0 +1,29 @@
+{
+  "Room": "MP4 HIGHGROUND",
+  "RoomId": 97,
+  "Arena": "High Ground",
+  "Saved": "2026-10-11 10:40:34",
+  "Pickups": [
+    {
+      "Item": "PirateBlaster",
+      "Pos": [
+        2.695,
+        1.121,
+        2.56
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -2.519,
+        1.171,
+        -2.888
+      ],
+      "RespawnSeconds": 10
+    }
+  ],
+  "Crates": [],
+  "RemovedItems": [],
+  "RemovedCrates": []
+}

@@ -37,6 +37,25 @@ namespace MphRead
             if (args.Length >= 2 && args[0] == "-gxdump") { GxDump.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-hdlook") { HdLook.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-hdanim") { HdAnim.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-retropose") { RetroBodyPose.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-shieldtest") { ShieldWallTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-wallclingtest") { WallClingTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-wallclingprobe") { WallClingProbe.Run(args); return; } // T5 N10
+            if (args.Length >= 1 && args[0] == "-trooperfixtest") { TrooperFixesTest.Run(args); return; } // T5
+            if (args.Length >= 1 && args[0] == "-touchtest") { TouchTest.Run(args); return; } // T11
+            if (args.Length >= 1 && args[0] == "-dronetest") { DroneTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-lookalikes") { LookAlikeTest.Run(args); return; } // D5 look-alikes (Look-alikes thread)
+            if (args.Length >= 1 && args[0] == "-blasterpickup") { BlasterPickupTool.Run(args); return; } // Pirate Blaster pickup art
+            if (args.Length >= 1 && args[0] == "-standinghittest") { StandingBodyHitTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-bodytest") { BodyTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-weavelcling") { WeavelClingTool.Run(args); return; } // Pirate Blaster + Trooper abilities online [7d1e5b]
+            if (args.Length >= 1 && args[0] == "-seatabilitiestest") { SeatAbilitiesTest.Run(); return; } // Pirate Blaster + Trooper abilities online (cont.) [22406f]
+            if (args.Length >= 1 && args[0] == "-pirateblastertest") { PirateBlasterTest.Run(args); return; } // Pirate Blaster + Trooper abilities online [e5e980]
+            if (args.Length >= 1 && args[0] == "-placetest") { PlacementTest.Run(args); return; } // Pickup placement editor [e5e356]
+            if (args.Length >= 1 && args[0] == "-noderefsnaptest") { NodeRefSnapTest.Run(args); return; } // joiner room part after a snap [cb9d6a]
+            if (args.Length >= 1 && args[0] == "-darksamustest") { DarkSamusTest.Run(args); return; }   // Dark Samus's native bodies (D14 hold)
+            if (args.Length >= 1 && args[0] == "-armcannontest") { ArmCannonTest.Run(args); return; }   // first-person arm cannons cut from the native bodies
+            if (args.Length >= 1 && args[0] == "-dronefxtest") { DroneFxTest.Run(args); return; }   // the Scout Drone's Prime 1 shot effects (BodyFx + RetroParticles)
             if (args.Length >= 2 && args[0] == "-movieframes") { HdMovieFrames.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-hdrepose") { HdRepose.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-riglook") { RigLook.Run(args); return; }
@@ -68,12 +87,14 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-fxobjects") { CampaignSim.FxObjects(args); return; }
             if (args.Length >= 1 && args[0] == "-escapemusic") { CampaignSim.EscapeMusic(args); return; }
             if (args.Length >= 1 && args[0] == "-bossskip") { CampaignSim.BossSkipRun(args); return; }
+            if (args.Length >= 1 && args[0] == "-endingtest") { CampaignSim.EndingTest(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignspawn") { CampaignSim.SpawnTiming(args); return; }
             if (args.Length >= 1 && args[0] == "-landingcam") { CampaignSim.LandingCam(args); return; }
             if (args.Length >= 1 && args[0] == "-suitspec") { CampaignSuitSpec.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-landingperf") { CampaignSim.LandingPerf(args); return; }
             if (args.Length >= 1 && args[0] == "-suitrow") { CampaignSim.SuitRow(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignhud") { CampaignSim.Hud(args); return; }
+            if (args.Length >= 1 && args[0] == "-huddialog") { CampaignSim.HudDialogs(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignship") { CampaignShipTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-gyrotest") { GyroTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-viewtest") { ViewTest.Run(args); return; }
@@ -81,11 +102,48 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-matchsim") { MatchSim.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-matchsweep") { MatchSim.Sweep(args); return; }
             if (args.Length >= 1 && args[0] == "-matcharenas") { MatchSim.Arenas(args); return; }
+            if (args.Length >= 1 && args[0] == "-p8scoreboard") { P8ScoreboardTool.Run(args); return; } // Netcode P8: 5-8 row scoreboard pictures
+            if (args.Length >= 1 && args[0] == "-introbanner") { IntroBannerTool.Run(args); return; } // F4: Echoes intro banner picture
+            if (args.Length >= 1 && args[0] == "-blastersfxlevels") { BlasterSfxLevels.Run(args); return; } // F4: blaster hit sound level
+            if (args.Length >= 1 && args[0] == "-replaytest") { ReplayTest.Test(args); return; }
+            if (args.Length >= 1 && args[0] == "-replayplay") { ReplayTest.PlayFile(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaynetdump") { ReplayNetDump.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaymock") { ReplayMockTool.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaysweep") { ReplayTest.Sweep(args); return; }
+            if (args.Length >= 1 && args[0] == "-drawinvariance") { ReplayTest.DrawInvariance(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaygolden") { ReplayTest.Golden(args); return; }
+            if (args.Length >= 1 && args[0] == "-detmathtest") { DetMathTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-replayverify") { ReplayTest.Verify(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaynettest") { ReplayTest.NetTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaysnaptest") { ReplayTest.SnapTest(args); return; } // T9 seek checkpoints
             if (args.Length >= 1 && args[0] == "-echoesarena") { EchoesArenaTool.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-netloop") { MatchNetLoop.Host(args); return; }
             if (args.Length >= 1 && args[0] == "-netclient") { MatchNetLoop.Client(args); return; }
             if (args.Length >= 1 && args[0] == "-lantest") { MatchNetLoop.LanTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-lanpausetest") { LanPauseTest.Run(); return; } // (host pause keeps a LAN match, 2026-10-11)
+            if (args.Length >= 1 && args[0] == "-lanagaintest") { LanAgainTest.Run(); return; } // (host + join twice in one process, release 0.2.0)
             if (args.Length >= 1 && args[0] == "-lanjoin") { MatchNetLoop.LanJoin(args); return; }
+            if (args.Length >= 1 && args[0] == "-onlinetest") { OnlineMatchTool.Test(args); return; }
+            if (args.Length >= 1 && args[0] == "-netlobbytest") { NetLobbyTest.Run(args); return; } // Online play menus: lobby protocol 4, no ROM
+            // ONLINE PLAY's menus (Online play menus thread, OnlineMenuTool.cs): sample renders, the live join test, a PC host
+            if (args.Length >= 1 && args[0] == "-onlinemenu") { OnlineMenuTool.Preview(args); return; }
+            if (args.Length >= 1 && args[0] == "-footertaptest") { FooterTapTool.Test(args); return; } // Options footer links [e051ce]
+            if (args.Length >= 1 && args[0] == "-chattest") { ChatTool.Test(args); return; } // (Social O7: ChatTool.cs)
+            if (args.Length >= 1 && args[0] == "-onlinemenutest") { OnlineMenuTool.Test(args); return; }
+            if (args.Length >= 1 && args[0] == "-onlinehostleaveagain") { OnlineHostLeaveTool.Test(args); return; } // (release 0.2.0 F1)
+            if (args.Length >= 1 && args[0] == "-onlinehost") { OnlineMenuTool.Host(args); return; }
+            if (args.Length >= 1 && args[0] == "-onlinecreatetest") { OnlineMenuTool.CreateTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-migratemenutest") { MigrateMenuTool.Test(args); return; }
+            if (args.Length >= 1 && args[0] == "-onlinefriendstest") { OnlineMenuTool.FriendsTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-onlinerecordtest") { OnlineRecordTool.Test(args); return; } // (T3: head to head on the server)
+            if (args.Length >= 1 && args[0] == "-onlinejoin") { OnlineMatchTool.Join(args); return; }
+            if (args.Length >= 1 && args[0] == "-turntest") { TurnTestServer.Test(); return; } // O5 TURN client vs a local TURN server
+            if (args.Length >= 1 && args[0] == "-voicetest") { VoiceTest.Run(args); return; } // O8 voice chat: codec, jitter, policy, PTT
+            // FIND GAME (Social track O6, FindGameTool.cs): sample renders, four devices through the queue, the menus' search
+            if (args.Length >= 1 && args[0] == "-findgamemenu") { FindGameTool.Preview(args); return; }
+            if (args.Length >= 1 && args[0] == "-findgametest") { FindGameTool.Test(args); return; }
+            if (args.Length >= 1 && args[0] == "-findgamejoin") { FindGameTool.Join(args); return; }
+            if (args.Length >= 1 && args[0] == "-findgamemenutest") { FindGameTool.MenuTest(args); return; }
             if (args.Length >= 3 && args[0] == "-campaigndoorprobe") { CampaignDoorProbe.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-campaignmsgscan") { CampaignDoorProbe.MessageScan(args); return; }
             if (args.Length >= 3 && args[0] == "-campaigndoorcheck") { CampaignDoorProbe.DoorCheck(args); return; }
@@ -93,11 +151,18 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-audiolevels") { AudioLevels.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-guntest") { GunTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-importcheck") { ImportCheck.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-importedcontenttest") { Environment.Exit(ImportedContentTest.Run(args)); }   // ship-safe gate (docs/SHIP_SAFE_AUDIT_2026-10-10.md)
+            if (args.Length >= 1 && args[0] == "-recipecheck") { Environment.Exit(RecipeCheck.Run(args)); }   // recipe lint (board S16)
+            if (args.Length >= 1 && args[0] == "-importeditions") { Environment.Exit(ImportEditions.Run(args)); }   // a game from another disc (Import/Editions.cs)
             if (args.Length >= 2 && args[0] == "-feprobe") { FrontendProbe.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-fedump") { FrontendTool.Dump(args); return; }
             if (args.Length >= 2 && args[0] == "-ferender") { FrontendTool.Render(args); return; }
             if (args.Length >= 2 && args[0] == "-fecanvas") { FrontendTool.Canvas(args); return; }
             if (args.Length >= 1 && args[0] == "-feflow") { FrontendTool.Flow(args); return; }
+            if (args.Length >= 1 && args[0] == "-felayouts") { FrontendTool.Layouts(); return; }
+            if (args.Length >= 1 && args[0] == "-mpmenu") { MultiplayerMenuTool.Run(args); return; } // Vanilla multiplayer menu
+            if (args.Length >= 1 && args[0] == "-extrarules") { ExtraRulesTest.Run(args); return; } // Extra pickups + Extra characters rules
+            if (args.Length >= 1 && args[0] == "-pickertest") { PickerTest.Run(args); return; } // Character + skin picker (D9)
             if (args.Length >= 2 && args[0] == "-fesaves") { FrontendTool.Saves(args); return; }
             if (args.Length >= 1 && args[0] == "-feship") { FrontendTool.Ship(args); return; }
             if (args.Length >= 1 && args[0] == "-feshipweapon") { ShipWeaponTest.Run(args); return; }

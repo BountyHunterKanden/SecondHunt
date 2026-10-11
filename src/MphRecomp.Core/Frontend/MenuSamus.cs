@@ -90,7 +90,8 @@ namespace MphRecomp.Frontend
             foreach (string suit in Suits)
             {
                 string dir = Path.Combine(hdRoot, suit);
-                if (Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.dae").Any() && Directory.EnumerateFiles(dir, "*.mphrig").Any())
+                if (Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.dae").Any() && Directory.EnumerateFiles(dir, "*.mphrig").Any()
+                    && MphRecomp.Import.ImportedContent.Usable(hdRoot, suit))
                 {
                     return suit;
                 }

@@ -40,8 +40,14 @@ magnitude is 4043.
 Each channel's data, taken on its own, is a run of 8-byte frames (section 3). Frame f of a channel sits at that
 channel's byte offset 8f. These per-channel offsets are what the header's loop and end fields count in.
 
-The channels are interleaved in blocks. Let D be the length of the sound data (file length minus 0x60), C the channel
-count and K = 0x8F00 (36,608) the block size:
+**Extend the file first.** On the original disc a stream file's length is often not a multiple of 32 bytes: the last
+channel's final one to three frames are simply not stored. Before anything below, extend the file with bytes 0xFF to
+the next multiple of 32 bytes (a file whose length already is a multiple of 32 is used as it is). Everything in the rest
+of this section, the file offsets and the measurements included, is about the extended file. Disc images rebuilt by
+disc tools often store the files already extended this way, so both kinds of image give the same extended file.
+
+The channels are interleaved in blocks. Let D be the length of the sound data (extended file length minus 0x60), C the
+channel count and K = 0x8F00 (36,608) the block size:
 
 - The data starts with F full block groups, where F = floor(D / (K x C)). Group g holds channel 0's next K bytes, then
   channel 1's next K bytes (for stereo).
@@ -60,8 +66,15 @@ same rule with C = 1 (the data is simply one channel's frames in order).
 **Capacity.** A channel can hold at most (its frame count) x 14 samples. If the header's sample count is larger than
 that, use the capacity instead. (No file on the disc needs this; it guards against damaged files.)
 
-**Filler.** The last channel's final one to three frames are often filled with bytes 0xFF, past the end of real sound
-data (the other channel's last frame holds real samples there). Section 3.3 says how to decode them.
+**Filler.** In the extended file, the last channel's final one to three frames are often bytes 0xFF (the extension),
+past the end of real sound data (the other channel's last frame holds real samples there). Section 3.3 says how to
+decode them.
+
+*Amended 2026-10-07: the extension rule above.* The first measurements were taken on a rebuilt disc image whose files
+were already extended. Measured on the original disc (all 84 streams): each file is that rebuilt copy minus its
+trailing 0xFF bytes, R is not always a multiple of 32, and taking T = R / C from the unextended length puts channel 1's
+last group up to 15 bytes early, which decodes it as noise (79 of the 84 streams). With the extension, every stream
+decodes to the same samples from both images.
 
 ## 3. Decoding a channel
 

@@ -19,6 +19,15 @@ namespace MphRead
         private static readonly Dictionary<string, Model> _modelCache = [];
         private static readonly Dictionary<string, Model> _fhModelCache = [];
 
+        // recomp: extra palette sets appended to a model's recolors at load (no-import look-alikes, D5: e.g. Weavel in an
+        // MP1 trooper's colours), built by the host from the model's own recolor 0; null = MPH's set only. Must be set
+        // before the model is first loaded (models are cached).
+        public static Func<string, IReadOnlyList<Recolor>, IEnumerable<Recolor>?>? HostExtraRecolors;
+
+        // recomp: a model the host builds itself instead of reading it from the metadata's files (the Pirate Blaster pickup,
+        // made at load from MPH's own pick_wpn_all: MphRecomp.Core BlasterPickup.cs); null = not one of the host's
+        public static Func<string, Model?>? HostBuildModel;
+
         public static void ClearCache()
         {
             _modelCache.Clear();
@@ -58,6 +67,10 @@ namespace MphRead
 
         private static Model? GetModel(string name, bool firstHunt, MetaDir dir)
         {
+            if (!firstHunt && HostBuildModel?.Invoke(name) is Model built)
+            {
+                return built;
+            }
             ModelMetadata? meta;
             if (firstHunt)
             {
@@ -390,6 +403,10 @@ namespace MphRead
                     }
                 }
                 recolors.Add(new Recolor(meta.Name, textures, palettes, textureData, paletteData));
+            }
+            if (!firstHunt && HostExtraRecolors?.Invoke(name, recolors) is IEnumerable<Recolor> extra)
+            {
+                recolors.AddRange(extra);
             }
             // note: in RAM, model texture matrices are 4x4, but only the leftmost 4x2 or 4x3 is set,
             // and the rest is garbage data, and ultimately only the upper-left 3x2 is actually used

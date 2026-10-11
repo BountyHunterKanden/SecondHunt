@@ -6,7 +6,7 @@ namespace MphRecomp.App;
 
 // The multiplayer screen's choices (Beta 1), shared by the hosts' lobby screens (Android: MatchLobbyActivity; Windows:
 // LobbyScreen): a match against bots on this device (every mode the dev launcher offers), or a LAN match between two
-// devices on one network (MatchLan / the Windows lobby: host + one joiner, Battle only). Only the game's own arenas are
+// devices on one network (MatchLan / the Windows lobby: host + one joiner, any mode, the host's bots). Only the game's own arenas are
 // listed. The hosts keep the last choices (Load / Save over their own key-value store) and start the match screen with
 // the launch args BotMatchArgs / NetMatchArgs give (CampaignRenderer.Create).
 internal sealed class MatchLobby
@@ -40,8 +40,8 @@ internal sealed class MatchLobby
         new("Mode", () => ModeLabel(Modes[Mode]), d => Mode = Wrap(Mode + d, Modes.Count)),
         new("Arena", () => { RoomMetadata a = CurrentArena(BotArenas()); return a.InGameName ?? a.Name; }, StepArena),
         new("Play as", () => Hunters[Hunter], d => Hunter = Wrap(Hunter + d, Hunters.Length)),
-        // a match on this device needs at least one bot; a LAN match has none (host + one joiner)
-        new("Bots (vs bots only)", () => Bots.ToString(), d => Bots = Wrap(Bots - 1 + d, 3) + 1),
+        // a match on this device needs at least one bot; in a LAN match the joiner takes seat 1 (the last bot gives way)
+        new("Bots", () => Bots.ToString(), d => Bots = Wrap(Bots - 1 + d, 7) + 1), // (P8: 1-7 bots, up to 8 seats)
         new("Bot level", () => $"{Level + 1} of 3", d => Level = Wrap(Level + d, 3)),
         new("Time limit", () => Times[Time].Label, d => Time = Wrap(Time + d, Times.Length)),
     };
@@ -148,20 +148,19 @@ internal sealed class MatchLobby
         return args;
     }
 
-    // Beta 1's LAN match: Battle only, the host plus one joiner (no bots). Switches the mode to Battle (true = it
-    // changed, so the host can say so) and gives the settings to host with, or null if the game's files can't be read.
-    public MatchSettings? LanTemplate(out bool modeChanged)
+    // a LAN match: the chosen mode, arena and bots (the joiner takes seat 1; the last bot gives way when all four seats
+    // are taken). The settings to host with, or null if the game's files can't be read. (The mode's state is the host's
+    // in every mode: Core Multiplayer/Net/NetObjective.)
+    public MatchSettings? LanTemplate()
     {
-        int battle = Modes.ToList().IndexOf(GameMode.Battle);
-        modeChanged = Mode != battle;
-        Mode = battle;
-        List<RoomMetadata> lanArenas = Arenas(GameMode.Battle, 2);
+        GameMode mode = Modes[Mode];
+        List<RoomMetadata> lanArenas = Arenas(mode, Math.Min(Bots + 2, MatchSettings.MaxSeats));
         RoomMetadata arena = CurrentArena(lanArenas);
         if (!_pathsReady)
         {
             return null;
         }
-        MatchSettings template = MatchSettings.Quick(GameMode.Battle, arena.Name, Enum.Parse<Hunter>(Hunters[Hunter]), bots: 0, Level);
+        MatchSettings template = MatchSettings.Quick(mode, arena.Name, Enum.Parse<Hunter>(Hunters[Hunter]), bots: Bots, Level);
         template.TimeLimitSeconds = Times[Time].Seconds;
         return template;
     }
@@ -187,7 +186,7 @@ internal sealed class MatchLobby
         Arena = getString("arena");
         int hunter = Array.IndexOf(Hunters, getString("hunter"));
         Hunter = hunter >= 0 ? hunter : 0;
-        Bots = Math.Clamp(getInt("bots", 3), 1, 3);
+        Bots = Math.Clamp(getInt("bots", 3), 1, 7);
         Level = Math.Clamp(getInt("botlevel", 1), 0, 2);
         Time = Math.Clamp(getInt("time", 0), 0, Times.Length - 1);
     }

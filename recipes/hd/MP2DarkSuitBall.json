@@ -1,0 +1,26 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "paks": [
+    {
+      "name": "LogBook.pak",
+      "sha1": "590207df97d73575c7c3c59a821d908438214616"
+    },
+    {
+      "name": "Metroid4.pak",
+      "sha1": "c215ec11904d67ff9d239f154a8fafaaeea84568"
+    },
+    {
+      "name": "TestAnim.pak",
+      "sha1": "e258890ddd904ce38a0680e2e02795775851914d"
+    }
+  ],
+  "cmdl": "07c3c0e0",
+  "static": true,
+  "scale": 9.72,
+  "core": [
+    255,
+    60,
+    40
+  ]
+}

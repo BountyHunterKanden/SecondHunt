@@ -71,6 +71,54 @@ public sealed class PadState
         }
     }
 
+    // the touch controls' stylus (MatchTouchOverlay.cs, T11): a finger on the touch area and how far it moved, in DS
+    // touch-screen pixels; the next simulation step takes it (CampaignRenderer.BuildInput -> CampaignInput.TouchDown /
+    // TouchDx / TouchDy, PlayerTouch.cs). A touch that starts and ends between two steps still counts as down for one,
+    // and the step after it sees it up (the game's double tap needs both). Whole pixels go; the rest waits.
+    bool _stylusDown, _stylusSeen;
+    float _stylusX, _stylusY;
+
+    public void StylusDown()
+    {
+        lock (_aimGate)
+        {
+            _stylusDown = _stylusSeen = true;
+        }
+    }
+
+    public void StylusMove(float dsX, float dsY)
+    {
+        lock (_aimGate)
+        {
+            if (_stylusDown)
+            {
+                _stylusX += dsX;
+                _stylusY += dsY;
+            }
+        }
+    }
+
+    public void StylusUp()
+    {
+        lock (_aimGate)
+        {
+            _stylusDown = false;
+        }
+    }
+
+    public (bool Down, sbyte Dx, sbyte Dy) TakeStylus()
+    {
+        lock (_aimGate)
+        {
+            bool down = _stylusDown || _stylusSeen;
+            _stylusSeen = false;
+            float dx = Math.Clamp(MathF.Truncate(_stylusX), -127, 127), dy = Math.Clamp(MathF.Truncate(_stylusY), -127, 127);
+            _stylusX = down && _stylusDown ? _stylusX - dx : 0;
+            _stylusY = down && _stylusDown ? _stylusY - dy : 0;
+            return (down, (sbyte)dx, (sbyte)dy);
+        }
+    }
+
     // everything released (focus lost, a screen change)
     public void Clear()
     {
@@ -78,6 +126,11 @@ public sealed class PadState
         Array.Clear(_touch);
         Lx = Ly = Rx = Ry = L2 = R2 = HatX = HatY = RawRx = RawRy = 0;
         TakeAim();
+        lock (_aimGate)
+        {
+            _stylusDown = _stylusSeen = false;
+            _stylusX = _stylusY = 0;
+        }
     }
 }
 

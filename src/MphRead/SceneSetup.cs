@@ -207,6 +207,10 @@ namespace MphRead
         // unchanged); default off
         public static bool HostForceEncounters { get; set; }
 
+        // recomp: a host's own entities for a room, added to the ones its entity file gives (e.g. Echoes arenas' weapon
+        // crates): (scene, room id, the room's entities) -> the list to load; default null (nothing added)
+        public static Func<Scene, int, IReadOnlyList<EntityBase>, IReadOnlyList<EntityBase>>? HostExtraEntities { get; set; }
+
         public static void InitHunterSpawns(Scene scene, IReadOnlyList<EntityBase> entities, bool initialize)
         {
             for (int i = 1; i < PlayerEntity.MaxPlayers; i++)
@@ -377,6 +381,10 @@ namespace MphRead
             room.Setup(metadata.Name, metadata, collision, nodeLayerMask, metadata.Id);
             IReadOnlyList<EntityBase> entities = LoadEntities(metadata, entityLayerId, scene);
             entities = GetExtraEntities(room.RoomId, entities, scene);
+            if (HostExtraEntities != null)
+            {
+                entities = HostExtraEntities(scene, room.RoomId, entities);
+            }
             return (collision, entities);
         }
 

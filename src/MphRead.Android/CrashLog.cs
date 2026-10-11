@@ -15,6 +15,9 @@ public class MphApp : Application
         base.OnCreate();
         CrashLog.Install(this);
         AndroidPlatform.Install(this); // the shared app layer's logging, audio output, images and caches
+        VoiceAndroid.Install(this); // online voice chat (O8): follows online games, idle otherwise
+        // device bans (10-09): ANDROID_ID, scrambled before it's sent; a ban then survives clearing data / reinstalling
+        MphRecomp.Online.DeviceTag.SetRawId(Android.Provider.Settings.Secure.GetString(ContentResolver, Android.Provider.Settings.Secure.AndroidId));
         MphRecomp.Config.RecompSettings.PublicBuild = BuildFlags.Public;
         MphRecomp.Config.RecompSettings.AppId = PackageName ?? MphRecomp.Config.RecompSettings.AppId;
         InstallUpdateHost();

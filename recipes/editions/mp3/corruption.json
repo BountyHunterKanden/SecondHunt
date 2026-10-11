@@ -1,0 +1,25 @@
+{
+  "game": "mp3",
+  "title": "Metroid Prime 3: Corruption",
+  "platform": "Wii",
+  "discPrefixes": [ "RM3" ],
+  "discFolder": "",
+  "recipeFolder": "MP3/",
+  "extensions": [ ".rvz", ".wia", ".iso", ".wbfs" ],
+  "files": [
+    { "name": "MP3/InGameDVD.PAK", "sha1": "e68617e163a969c40b22b4012317afd5345643f3", "editionSha1": "e68617e163a969c40b22b4012317afd5345643f3" },
+    { "name": "MP3/Logbook.PAK", "sha1": "1fc09001505f4036efbaeb287cb11f561a3f56e2", "editionSha1": "ae8035e7a69307688751ac9f3fd1f4d892c242e6" },
+    { "name": "MP3/Metroid6.pak", "sha1": "07ae7f08dfe7363522e1e81c6c75e81c77b893d1", "editionSha1": "a0fe37167b49a0dfcee79eff4e75b53a74fc865e" },
+    { "name": "MP3/SamusGun.pak", "sha1": "94dd265e63fb032407a656942fe7ba898a7cc689", "editionSha1": "4725ec76ed46c8392b19adcc5cec892c1c8076c9" }
+  ],
+  "items": [
+    "guns/MP3PEDSuit",
+    "guns/MP3VariaSuit",
+    "hd/MP3DarkSamus",
+    "hd/MP3DarkSamusBall",
+    "hd/MP3PEDSuit",
+    "hd/MP3PEDSuitBall",
+    "hd/MP3VariaSuit",
+    "hd/MP3VariaSuitBall"
+  ]
+}

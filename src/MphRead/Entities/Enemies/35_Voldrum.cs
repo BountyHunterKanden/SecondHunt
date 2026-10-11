@@ -222,7 +222,7 @@ namespace MphRead.Entities.Enemies
             var vec = new Vector3(dist, 0, 0);
             _roamAngleSign *= -1;
             float angle = Fixed.ToFloat(Rng.GetRandomInt2(0xB4000)) * _roamAngleSign; // [0-180)
-            var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(angle));
+            var rotY = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(angle));
             vec = Matrix.Vec3MultMtx3(vec, rotY);
             var moveTarget = new Vector3(_homeVolume.CylinderPosition.X + vec.X, Position.Y, _homeVolume.CylinderPosition.Z + vec.Z);
             UpdateMoveTarget(moveTarget);

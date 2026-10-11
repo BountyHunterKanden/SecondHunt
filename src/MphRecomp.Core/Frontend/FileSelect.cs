@@ -69,6 +69,14 @@ namespace MphRecomp.Frontend
         public MenuPopup? Popup { get; set; }
         public Action<string>? Log { get; set; }
 
+        // the same "saving to the game card" box for another save (the results page's OK after an ending); without the
+        // box, done runs at once
+        public void ShowSaving(Action done)
+        {
+            if (Popup == null) done();
+            else Popup.Busy(_savingText, SavingTicks, done);
+        }
+
         public bool Bound { get; private set; }
 
         public FileSelect(string? savesDir) => _savesDir = savesDir;

@@ -1,0 +1,18 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "paks": [
+    {
+      "name": "MP3/Metroid6.pak",
+      "sha1": "07ae7f08dfe7363522e1e81c6c75e81c77b893d1"
+    }
+  ],
+  "cmdl": "b763c5035b424631",
+  "static": true,
+  "scale": 5.825,
+  "core": [
+    90,
+    200,
+    255
+  ]
+}

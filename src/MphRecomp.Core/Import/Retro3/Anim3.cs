@@ -31,7 +31,7 @@ namespace MphRecomp.Import.Retro3
     // coarsest 1/30, 1/60 or 1/120 s grid holding every stored key.
     // Sources: Retro Modding Wiki "ANIM (Metroid Prime 3)" (layout); metaforce DataSpec DNAMP3/ANIM.cpp +
     // DNACommon/ANIM.cpp (ANIM1 reader, RotationMP3 / KfHead channels, DequantizeRotation_3) --
-    // https://github.com/AxioDL/metaforce, MIT License, Copyright (c) AxioDL. This is a clean re-implementation.
+    // https://github.com/AxioDL/metaforce, MIT License, Copyright (c) Metaforce Contributors. This is a clean re-implementation.
     public static class Anim3
     {
         public sealed class Raw

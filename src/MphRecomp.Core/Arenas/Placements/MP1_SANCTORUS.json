@@ -1,0 +1,29 @@
+{
+  "Room": "MP1 SANCTORUS",
+  "RoomId": 93,
+  "Arena": "Data Shrine",
+  "Saved": "2026-10-11 10:48:08",
+  "Pickups": [
+    {
+      "Item": "UABig",
+      "Pos": [
+        1.94,
+        1.766,
+        29.001
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "PirateBlaster",
+      "Pos": [
+        3.749,
+        1.766,
+        28.848
+      ],
+      "RespawnSeconds": 5
+    }
+  ],
+  "Crates": [],
+  "RemovedItems": [],
+  "RemovedCrates": []
+}

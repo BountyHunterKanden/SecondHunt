@@ -1076,6 +1076,42 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         }
     }
 
+    // A host's own sound, not in MPH's tables (Scout Drone MP1 beam: Prime's drone sounds, CampaignRenderer.DroneFx.cs):
+    // mono PCM at its own rate, once, at a volume, placed like a sample from its source where it starts (no handle, no
+    // later position updates: the sounds are short).
+    public void PlayPcm(short[] pcm, int rate, float volume, SoundSource? source)
+    {
+        if (pcm.Length == 0 || rate <= 0)
+        {
+            return;
+        }
+        lock (_lock)
+        {
+            float vol = SfxDsGain * volume * (Sfx.SfxMute && source != null ? 0 : 1) * (source?.Volume ?? 1);
+            float pan = 0;
+            if (source != null && !source.Self)
+            {
+                Vector3 toSource = source.Position - GetListenerPosition();
+                float dist = toSource.Length;
+                vol *= Falloff(dist, source.ReferenceDistance, source.MaxDistance);
+                if (dist > 0.001f)
+                {
+                    Vector3 right3 = Vector3.Cross(GetListenerFacing(), GetListenerUp()).Normalized();
+                    pan = System.Math.Clamp(Vector3.Dot(right3, toSource.Normalized()), -1f, 1f);
+                }
+            }
+            vol = System.Math.Clamp(vol, 0f, 1f);
+            var v = new Voice { Pcm = pcm, Step = rate / (double)_mixRate, VolL = vol * (1 - pan) * 0.5f, VolR = vol * (1 + pan) * 0.5f };
+            _voices.Add(v);
+            if (_voices.Count > MaxVoices)
+            {
+                int oldest = _voices.FindIndex(x => !x.Stream);
+                _voices[oldest].Stopped = true;
+                _voices.RemoveAt(oldest);
+            }
+        }
+    }
+
     public override void PlayDgn(int id, SoundSource? source, bool loop, bool noUpdate,
         float recency, bool cancellable, float amountA, float amountB)
     {

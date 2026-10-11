@@ -16,6 +16,14 @@ namespace MphRead.Entities
         // gunship cockpit view, where vanilla spawns her only when she steps out of the ship. Default off.
         public static bool HostHoldMainSpawn { get; set; }
 
+        // host hook: no "press FIRE to begin / respawn" prompt (a replay's viewer can't press anything; MatchReplay.cs).
+        // The HUD only: the match plays the same. Default off.
+        public static bool HostNoRespawnPrompt { get; set; }
+
+        // host hook: the main player's sounds come from where they are, like anyone else's, instead of "your own" (a
+        // replay listening from another player or a free cam). Sound only. Default off.
+        public static bool HostMainSoundsPlaced { get; set; }
+
         public override bool Process()
         {
             bool result = ProcessPlayer();
@@ -122,7 +130,7 @@ namespace MphRead.Entities
             {
                 _respawnTimer--;
                 if ((GameState.Mode == GameMode.Survival || GameState.Mode == GameMode.SurvivalTeams)
-                    && GameState.TeamDeaths[SlotIndex] > GameState.PointGoal)
+                    && GameState.TeamDeaths[SlotIndex] > GameState.TeamLives(SlotIndex))
                 {
                     if (IsMainPlayer)
                     {
@@ -198,7 +206,7 @@ namespace MphRead.Entities
                             if (!Bugfixes.NoStrayRespawnText || time > 0
                                 || GameState.Mode != GameMode.Survival && GameState.Mode != GameMode.SurvivalTeams)
                             {
-                                QueueHudMessage(128, 162, 1 / 1000f, 0, messageId);
+                                if (!HostNoRespawnPrompt) QueueHudMessage(128, 162, 1 / 1000f, 0, messageId);
                                 if (time < 150 * 2) // todo: FPS stuff
                                 {
                                     string message = Text.Strings.GetHudMessage(246); // SPAWNING IN %d...
@@ -223,7 +231,7 @@ namespace MphRead.Entities
                 }
             }
             _volume = CollisionVolume.Move(_volumeUnxf, Position);
-            if (IsMainPlayer && !IsAltForm)
+            if (IsMainPlayer && !IsAltForm && !HostMainSoundsPlaced)
             {
                 _soundSource.Update(Position, rangeIndex: -1);
             }
@@ -500,7 +508,10 @@ namespace MphRead.Entities
                 }
             }
             int ammo = EquipInfo.Ammo;
-            if (ammo >= 0 && ammo < EquipInfo.Weapon.AmmoCost)
+            // recomp: a Pirate Blaster burst already paid for finishes before the empty switch
+            // recomp: not on a network client: its ammo is the host's last snapshot (stale right after a pickup), the host
+            // makes the empty switch with real ammo and its snapshot brings the weapon (0.2.0 guest AMMO DEPLETED bug)
+            if (ammo >= 0 && ammo < EquipInfo.Weapon.AmmoCost && _burstShots == 0 && !NetClient)
             {
                 int slot = 0;
                 int priority = 0;
@@ -509,7 +520,7 @@ namespace MphRead.Entities
                     BeamType slotWeap = _weaponSlots[i];
                     if (slotWeap != BeamType.None)
                     {
-                        WeaponInfo slotInfo = Weapons.Current[(int)slotWeap];
+                        WeaponInfo slotInfo = PirateBlaster.Info(slotWeap); // recomp: the Pirate Blaster
                         if (slotInfo.Priority > priority && _ammo[slotInfo.AmmoType] >= slotInfo.AmmoCost)
                         {
                             priority = slotInfo.Priority;
@@ -524,6 +535,7 @@ namespace MphRead.Entities
                 TryEquipWeapon(_weaponSlots[slot]);
             }
             ProcessInput();
+            UpdatePirateBlasterBurst(); // recomp: the Pirate Blaster's bolts 2 and 3 (PlayerPirateBlaster.cs)
             if (Flags1.TestFlag(PlayerFlags1.Boosting) && _hSpeedMag <= Fixed.ToFloat(Values.AltMinHSpeed))
             {
                 Flags1 &= ~PlayerFlags1.Boosting;
@@ -570,6 +582,10 @@ namespace MphRead.Entities
                         _gunViewBob = 270;
                     }
                 }
+            }
+            if (HostHoverWalk)
+            {
+                HoverWalkBob(); // recomp: Dark Samus hovers, no walk bob (PlayerHoverWalk.cs)
             }
             // todo: FPS stuff
             if (_healthRecovery > 0)
@@ -675,7 +691,7 @@ namespace MphRead.Entities
                 }
                 else if (IsMainPlayer)
                 {
-                    _muzzleEffect.Transform(_gunVec2, _gunVec1, _muzzlePos);
+                    _muzzleEffect.Transform(_gunVec2, _gunVec1, FxMuzzlePos); // recomp: HostFxMuzzle
                 }
             }
             if (EquipInfo.ChargeLevel < EquipInfo.Weapon.MinCharge * 2) // todo: FPS stuff
@@ -695,8 +711,8 @@ namespace MphRead.Entities
                         _scene.UnlinkEffectEntry(_chargeEffect);
                         _chargeEffect = null;
                     }
-                    int effectId = Metadata.ChargeEffectIds[(int)CurrentWeapon];
-                    _chargeEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, _muzzlePos);
+                    int effectId = Metadata.ChargeEffectIds[PirateBlaster.BaseIndex(CurrentWeapon)];
+                    _chargeEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, FxMuzzlePos); // recomp: HostFxMuzzle
                     if (!IsMainPlayer && _chargeEffect != null)
                     {
                         _chargeEffect.SetDrawEnabled(false);
@@ -712,8 +728,8 @@ namespace MphRead.Entities
                             _scene.UnlinkEffectEntry(_chargeEffect);
                             _chargeEffect = null;
                         }
-                        int effectId = Metadata.ChargeLoopEffectIds[(int)CurrentWeapon];
-                        _chargeEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, _muzzlePos);
+                        int effectId = Metadata.ChargeLoopEffectIds[PirateBlaster.BaseIndex(CurrentWeapon)];
+                        _chargeEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, FxMuzzlePos); // recomp: HostFxMuzzle
                         if (_chargeEffect != null)
                         {
                             _chargeEffect.SetElementExtension(true);
@@ -728,7 +744,7 @@ namespace MphRead.Entities
                 }
                 if (IsMainPlayer && _chargeEffect != null)
                 {
-                    _chargeEffect.Transform(_gunVec2, _gunVec1, _muzzlePos);
+                    _chargeEffect.Transform(_gunVec2, _gunVec1, FxMuzzlePos); // recomp: HostFxMuzzle
                 }
             }
             if (_frozenTimer == 0)
@@ -739,6 +755,10 @@ namespace MphRead.Entities
             if ((IsAltForm || IsMorphing) && _frozenTimer == 0)
             {
                 UpdateAnimFrames(_altModel);
+                if (HostScoutDrone)
+                {
+                    ScoutDroneAnimate(); // recomp: the Trooper's drone look (PlayerScoutDrone.cs)
+                }
             }
             if (_boostEffect != null)
             {
@@ -1159,7 +1179,16 @@ namespace MphRead.Entities
             _timeSinceJumpPad = 0;
             Flags1 &= ~PlayerFlags1.UsedJump;
             Flags1 |= PlayerFlags1.Standing;
-            if (IsAltForm)
+            // host hook (Echoes arenas): a same-arc pad flies the alt forms on the biped's arc (biped gravity in
+            // PlayerInput, so no lock extension); false for every MPH pad
+            _jumpPadSameArc = jumpPad.SameArc;
+            if (_jumpPadSameArc && JumpPadEntity.HostSameArcSteer)
+            {
+                // the stick back after MPH's minimum like a lock-0 pad (owner: the pair's 1.5 s felt long next to the
+                // single pad); the pad's lock keeps only its gravity hold, so the arc is the same
+                _jumpPadControlLockMin = 5 * 2; // todo: FPS stuff
+            }
+            if (IsAltForm && !_jumpPadSameArc)
             {
                 float accelY = _jumpPadAccel.Y;
                 float altGrav = Fixed.ToFloat(Values.AltAirGravity);
@@ -1229,7 +1258,12 @@ namespace MphRead.Entities
                     {
                         pickedUp = true;
                         _timeSinceHeal = 0;
-                        GainHealth(_healthPickupAmounts[(int)item.ItemType]);
+                        // recomp: network play: a joiner's own energy comes from the host's state (NetApply); raising
+                        // it here first made the host's next, older state read as a hit (damage sound + shake)
+                        if (!NetClient)
+                        {
+                            GainHealth(_healthPickupAmounts[(int)item.ItemType]);
+                        }
                         if (Sfx.TimedSfxMute == 0)
                         {
                             PlaySfx(item.ItemType == ItemType.HealthSmall ? SfxId.POWER_UP1 : SfxId.POWER_UP2);
@@ -1269,6 +1303,7 @@ namespace MphRead.Entities
                 case ItemType.ShockCoil:
                 case ItemType.OmegaCannon:
                 case ItemType.AffinityWeapon:
+                case ItemType.PirateBlaster: // recomp
                     pickedUp = true;
                     PickUpWeapon(item.ItemType);
                     break;
@@ -1375,7 +1410,8 @@ namespace MphRead.Entities
             BeamType weapon;
             if (itemType == ItemType.AffinityWeapon)
             {
-                if (Hunter == Hunter.Samus || Hunter == Hunter.Guardian) // game doesn't check for Guardian
+                // recomp: a seat with an app affinity weapon (the Trooper: the Pirate Blaster) gets it, whatever its hunter
+                if (HostAffinityBeam == null && (Hunter == Hunter.Samus || Hunter == Hunter.Guardian)) // game doesn't check for Guardian
                 {
                     _ammo[1] = Math.Min(_ammo[1] + 50, _ammoMax[1]);
                     if (IsMainPlayer && Sfx.TimedSfxMute == 0)
@@ -1384,7 +1420,7 @@ namespace MphRead.Entities
                     }
                     return;
                 }
-                weapon = Weapons.GetAffinityBeam(Hunter);
+                weapon = AffinityBeam;
             }
             else
             {
@@ -1397,6 +1433,7 @@ namespace MphRead.Entities
                     ItemType.Magmaul => BeamType.Magmaul,
                     ItemType.ShockCoil => BeamType.ShockCoil,
                     ItemType.OmegaCannon => BeamType.OmegaCannon,
+                    ItemType.PirateBlaster => BeamType.PirateBlaster, // recomp
                     _ => BeamType.None
                 };
             }
@@ -1418,7 +1455,7 @@ namespace MphRead.Entities
                 // &tab0 FOUND you've obtained the &tab0. &tab1
                 ShowDialog(DialogType.Event, messageId: 5, param1: weaponId, value1: value1, value2: value2);
             }
-            WeaponInfo info = Weapons.Current[(int)weapon];
+            WeaponInfo info = PirateBlaster.Info(weapon);
             if (_ammo[info.AmmoType] < 60)
             {
                 _ammo[info.AmmoType] = Math.Min(_ammo[info.AmmoType] + 60, 60);
@@ -1428,10 +1465,9 @@ namespace MphRead.Entities
                 _availableWeapons[weapon] = true;
                 _availableCharges[weapon] = true;
                 BeamType slot2Weapon = _weaponSlots[2];
-                int slot2Index = (int)slot2Weapon;
-                BeamType affinityWeapon = Weapons.GetAffinityBeam(Hunter);
+                BeamType affinityWeapon = AffinityBeam;
                 if (slot2Weapon == BeamType.None || weapon == BeamType.OmegaCannon
-                    || (info.Priority > Weapons.Current[slot2Index].Priority || weapon == affinityWeapon)
+                    || (info.Priority > PirateBlaster.Info(slot2Weapon).Priority || weapon == affinityWeapon)
                     && (!Flags2.TestFlag(PlayerFlags2.Shooting) || CurrentWeapon != slot2Weapon))
                 {
                     // todo: update HUD
@@ -1605,8 +1641,8 @@ namespace MphRead.Entities
                 {
                     _altSpinRot -= 360;
                 }
-                var rotX = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_altWobble));
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_altSpinRot));
+                var rotX = DetMatrix.CreateRotationX(MathHelper.DegreesToRadians(_altWobble));
+                var rotY = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(_altSpinRot));
                 Matrix4 transform = rotX * rotY;
                 float mag = MathF.Sqrt(_altTiltX * _altTiltX + _altTiltZ * _altTiltZ);
                 if (mag != 0)
@@ -1614,7 +1650,7 @@ namespace MphRead.Entities
                     var axis = new Vector3(_altTiltZ / mag, 0, -_altTiltX / mag);
                     float angle = mag * Fixed.ToFloat(Values.AltTiltAngleMax);
                     angle = MathF.Min(angle, Fixed.ToFloat(Values.AltTiltAngleCap));
-                    var rotAxis = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(angle));
+                    var rotAxis = DetMatrix.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(angle));
                     transform *= rotAxis;
                 }
                 _modelTransform = transform;
@@ -1643,7 +1679,7 @@ namespace MphRead.Entities
                 {
                     axis /= mag;
                     float angle = mag / (altRadius * altRadius);
-                    var rotMtx = Matrix4.CreateFromAxisAngle(axis, angle);
+                    var rotMtx = DetMatrix.CreateFromAxisAngle(axis, angle);
                     Matrix4 transform = _modelTransform * rotMtx;
                     if (Hunter == Hunter.Samus)
                     {
@@ -1660,7 +1696,7 @@ namespace MphRead.Entities
                                 float div = Math.Min(angle / Fixed.ToFloat(3216), 1);
                                 mbAngle *= div / 8;
                             }
-                            rotMtx = Matrix4.CreateFromAxisAngle(axis, mbAngle);
+                            rotMtx = DetMatrix.CreateFromAxisAngle(axis, mbAngle);
                             transform *= rotMtx;
                         }
                     }
@@ -1740,7 +1776,7 @@ namespace MphRead.Entities
                     axis /= mag;
                     float atan = MathF.Atan2(mag, dot);
                     atan -= MathHelper.DegreesToRadians(45);
-                    var rotMtx = Matrix4.CreateFromAxisAngle(axis, atan);
+                    var rotMtx = DetMatrix.CreateFromAxisAngle(axis, atan);
                     dir = Matrix.Vec3MultMtx3(dir, rotMtx);
                 }
                 _kandenSegMtx[i] = GetTransformMatrix(dir, _kandenSegMtx[0].Row1.Xyz);
@@ -1786,6 +1822,10 @@ namespace MphRead.Entities
                 Flags2 |= PlayerFlags2.Halfturret;
                 _halfturret.NodeRef = NodeRef;
                 _scene.AddEntity(_halfturret);
+                if (HostScoutDrone)
+                {
+                    ScoutDroneSplit(); // recomp: the Trooper's drone (PlayerScoutDrone.cs)
+                }
             }
             else if (Hunter == Hunter.Samus)
             {
@@ -1811,6 +1851,10 @@ namespace MphRead.Entities
             EquipInfo.ChargeLevel = 0;
             SetBipedAnimation(PlayerAnimation.Morph, AnimFlags.NoLoop);
             PlayHunterSfx(HunterSfx.Morph);
+            if (HostScoutDrone)
+            {
+                ScoutDroneSplitAtOnce(); // recomp: no Weavel flip, the drone is out at once (PlayerScoutDrone.cs)
+            }
         }
 
         public void ExitAltForm()
@@ -1841,6 +1885,10 @@ namespace MphRead.Entities
             if (IsAltForm)
             {
                 UpdateForm(altForm: false);
+            }
+            if (HostScoutDrone)
+            {
+                ScoutDroneMergeAtOnce(); // recomp: no Weavel flip back, he's whole at once (PlayerScoutDrone.cs)
             }
         }
 

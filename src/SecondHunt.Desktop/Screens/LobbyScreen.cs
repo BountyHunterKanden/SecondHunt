@@ -12,7 +12,7 @@ namespace SecondHunt.Desktop.Screens;
 
 // The player-facing multiplayer screen (as the Android app's MatchLobbyActivity, the same choices and rules: the shared
 // MatchLobby): a match against bots on this PC, or a LAN match with one other player on the same network, Android or
-// Windows (host + one joiner, Battle only). Arrow keys / D-pad move, left / right change a row, Enter / A presses, Esc /
+// Windows (host + one joiner, any mode, the host's bots). Arrow keys / D-pad move, left / right change a row, Enter / A presses, Esc /
 // B goes back; the mouse clicks rows, their arrows and the buttons. The last choices are kept in lobby.json.
 internal sealed class LobbyScreen : PageScreen
 {
@@ -96,8 +96,8 @@ internal sealed class LobbyScreen : PageScreen
 
     void HostLan()
     {
-        MatchSettings? template = _lobby.LanTemplate(out bool modeChanged);
-        _note = modeChanged ? "LAN matches are Battle only for now: mode set to Battle" : null;
+        MatchSettings? template = _lobby.LanTemplate();
+        _note = null;
         Save();
         if (template == null)
         {
@@ -375,7 +375,7 @@ internal sealed class LobbyScreen : PageScreen
         y += 44 * s;
         using (Font sub = Font(14))
         {
-            string text = _note ?? "LAN play is experimental: two players on the same network, Battle mode only.";
+            string text = _note ?? "LAN play is experimental: two players on the same network, any mode, with your bots.";
             DrawText(g, text, sub, Warning, new RectangleF(x, y, w, 24 * s));
         }
         y += 32 * s;

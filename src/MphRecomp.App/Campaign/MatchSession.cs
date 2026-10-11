@@ -12,38 +12,84 @@ namespace MphRecomp.App;
 //   --es match <Battle|BattleTeams|Survival|...>  --es arena <room or in-game name, default Combat Hall>
 //   --es bots <1-3, default 3>  --es botlevel <0-2, default 1>  --es time <seconds>  --es points <goal>
 // or --es net host|client for a LAN match set up in the launcher (MatchLan.cs; the match comes from LanSession.Current),
+// or --es net online for an online match (MatchOnline.cs; OnlineMatch.Current, through the server's relay),
 // plus the campaign's own --es hunter / gun / layout / gyro, and --es touch auto|on|off (MatchTouchOverlay: auto = only
 // when no game controller is connected). When the match ends the scoreboard stays up until A, Start or a tap (then
-// back to the menu).
+// back to the menu); a match set up in the vanilla multiplayer menu (--es setup, or --es net with --es menu 1 for its
+// LAN games) goes straight back to its RESULTS page instead.
 internal sealed partial class CampaignRenderer
 {
     MatchSettings? _matchSettings;
+    // set up in the vanilla multiplayer menu: its RESULTS page (47) shows the results, not this screen's panel
+    bool _matchFromMenu;
     string? _matchResults;
     double _matchEndedAt;
     volatile bool _matchContinue;
     int _matchShownSecond;
     const double MatchResultsSeconds = 15;
-    LanSession? _netSession;
+    IMatchNet? _netSession;
+    // what closes the match's connection (the LanSession, or the OnlineMatch's screen hold: its server and relay sockets)
+    IDisposable? _netOwner;
+    // an online match (the ONLINE PLAY menus' are handed back to them when they end: RESULTS, then PLAY AGAIN)
+    OnlineMatch? _online;
     MatchNetDriver? _netDriver;
 
     // the results are up (the touch overlay turns a tap into "continue")
     public bool MatchOver => _host?.Match != null && _matchResults != null;
     public void RequestMatchContinue() => _matchContinue = true;
 
-    // the LAN session this match plays over (the host closes it when the screen goes, so the other device hears BYE)
-    public LanSession? NetSession => _netSession;
+    // the LAN session / online match this match plays over (the host closes it when the screen goes, so the other
+    // devices hear BYE)
+    public IDisposable? NetSession => _netOwner;
 
     void ConfigureMatch(LaunchArgs args)
     {
         CampaignRenderer renderer = this;
+        if (ConfigureReplay(args)) return; // --es replay: a recorded match played back (MatchReplay.cs)
         string? mode = args.Get("match");
         string? net = args.Get("net");
-        if (string.IsNullOrEmpty(mode) && string.IsNullOrEmpty(net))
+        // --es setup <MatchSetupText>: a match set up in the vanilla multiplayer menu (Core Frontend/MultiplayerMenu)
+        string? setup = args.Get(MphRecomp.Frontend.MatchSetupText.ArgName);
+        if (string.IsNullOrEmpty(mode) && string.IsNullOrEmpty(net) && string.IsNullOrEmpty(setup))
         {
+            return;
+        }
+        if (!string.IsNullOrEmpty(setup))
+        {
+            try
+            {
+                MatchSettings menuSettings = MphRecomp.Frontend.MatchSetupText.Read(setup);
+                menuSettings.Validate();
+                renderer._matchSettings = menuSettings;
+                renderer._hunter = menuSettings.Players[menuSettings.LocalSeat].Hunter;
+                renderer._matchFromMenu = true;
+            }
+            catch (Exception ex)
+            {
+                renderer._error = "match setup: " + ex.Message;
+                Log.Error("MPHMatch", ex.ToString());
+            }
             return;
         }
         // the touch controls (match layout; --es touch over RECOMP SETTINGS) come from CampaignActivity.OnCreate:
         // MatchTouchOverlay.Attach, shared with the campaign
+        if (net == "online")
+        {
+            OnlineMatch? online = OnlineMatch.Current;
+            if (online?.Net.Settings == null)
+            {
+                renderer._error = "online match: the connection from the launcher is gone -- host or join again";
+                return;
+            }
+            renderer._netSession = online.Net;
+            renderer.SetThirdPerson(false); // ReloadAimFromSettings ran before this (CampaignLaunch): drop a saved THIRD
+            if (renderer.PauseMenu != null) renderer.PauseMenu.NetMatch = true;
+            renderer._netOwner = online.TakeScreenHold();
+            renderer._online = online;
+            renderer._matchSettings = online.Net.Settings;
+            renderer._matchFromMenu = args.Get("menu") == "1";
+            return;
+        }
         if (!string.IsNullOrEmpty(net))
         {
             LanSession? session = LanSession.Current;
@@ -53,7 +99,11 @@ internal sealed partial class CampaignRenderer
                 return;
             }
             renderer._netSession = session;
+            renderer.SetThirdPerson(false); // ReloadAimFromSettings ran before this (CampaignLaunch): drop a saved THIRD
+            if (renderer.PauseMenu != null) renderer.PauseMenu.NetMatch = true;
+            renderer._netOwner = session;
             renderer._matchSettings = session.Settings;
+            renderer._matchFromMenu = args.Get("menu") == "1";
             return;
         }
         try
@@ -68,6 +118,7 @@ internal sealed partial class CampaignRenderer
             if (float.TryParse(args.Get("time"), System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out float time)) settings.TimeLimitSeconds = time;
             if (int.TryParse(args.Get("points"), out int points)) settings.PointGoal = points;
+            ConfigureSolo(args, settings); // dev --es solo 1: alone in the arena, third person (SoloArena.cs)
             settings.Validate();
             renderer._matchSettings = settings;
         }
@@ -85,7 +136,8 @@ internal sealed partial class CampaignRenderer
         {
             return false;
         }
-        _host = CampaignHost.StartMatch(_matchSettings, collectDrawItems: true, viewWidth: width, viewHeight: height);
+        _host = StartMatchReplayed(_matchSettings, width, height); // CampaignHost.StartMatch, recorded or a replay (MatchReplay.cs)
+        if (_host == null) return true; // a replay refused at its start (_error says why)
         _netDriver = _netSession != null ? new MatchNetDriver(_netSession, _host) : null;
         Log.Info("MPHMatch", $"match {_matchSettings.Mode} in {_matchSettings.Arena}, {_matchSettings.Players.Count} players");
         return true;
@@ -104,10 +156,11 @@ internal sealed partial class CampaignRenderer
                 input = new CampaignInput { SelectWeapon = MphRead.BeamType.None }; // stands still under the menu
             }
             _netDriver.Step(input);
+            RecordNetStep(input); // MatchReplay.cs: a network match's host records it (O10, Replays track)
         }
         else
         {
-            _host!.Step(input);
+            StepReplayed(input); // _host.Step, recorded or played back and checked (MatchReplay.cs)
         }
     }
 
@@ -127,7 +180,20 @@ internal sealed partial class CampaignRenderer
             _matchEndedAt = now;
             _matchShownSecond = -1;
             _statusCountdown = 0;
+            EndReplay(complete: true); // MatchReplay.cs: saves the recording
             Log.Info("MPHMatch", "results: " + MatchStatus.Scoreboard().Replace('\n', '|'));
+            if (_matchFromMenu)
+            {
+                // as vanilla: the game's fade to black, then the menus' RESULTS page (MultiplayerMenu); a LAN match's
+                // session ends here (the other device hears BYE once its own match is over too)
+                MphRecomp.Frontend.MatchResults.Last = MphRecomp.Frontend.MatchResults.Capture(_matchSettings!.LocalSeat);
+                _matchEndedAt = double.MaxValue; // once
+                ShipSink?.Invoke("");
+                _online?.EndMatch(); // (an online match goes on in the menus: RESULTS, PLAY AGAIN; its hold then lets it be)
+                _netOwner?.Dispose();
+                ExitSink?.Invoke();
+                return true;
+            }
         }
         else if (_matchEndedAt != double.MaxValue)
         {
@@ -143,7 +209,7 @@ internal sealed partial class CampaignRenderer
             {
                 _matchEndedAt = double.MaxValue; // once
                 ShipSink?.Invoke("");
-                _netSession?.Dispose();
+                _netOwner?.Dispose();
                 ExitSink?.Invoke();
                 return true;
             }
@@ -174,7 +240,7 @@ internal sealed partial class CampaignRenderer
             return "";
         }
         RoomMetadata? meta = Metadata.GetRoomById(_host.RoomId);
-        string net = _netDriver != null ? "\n" + _netDriver.StatusLine() : "";
+        string net = _netDriver != null ? "\n" + _netDriver.StatusLine() : ReplayStatusLine() + SoloStatusLine();
         return $"{meta?.InGameName}  {_fps:0} fps  sim {_simMs:0.0} ms  draw {_drawMs:0.0} ms{net}\n" + MatchStatus.Scoreboard();
     }
 }

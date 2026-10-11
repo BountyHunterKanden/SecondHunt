@@ -159,5 +159,13 @@ new decoder to be written clean-room from the start.
 4. **Swap-in** (2026-10-05 23:58; the harness passed 2026-10-06 00:05 on the same files). New:
    `src/MphRecomp.Core/Import/Retro/DspAdpcm.cs`, `RetroStream.cs`. The player and the match logic around it
    (`Core/Arenas/ArenaMusic.cs`, `MphRecomp.App/Audio/StreamMusicPlayer.cs`) are ordinary project code.
+5. **Amendment** (2026-10-07, by the Clean-room queue thread with the Echoes arenas thread's OK): retail file lengths
+   aren't 32-aligned. The step 1 measurements were taken on a rebuilt disc image whose files a disc tool had padded with
+   0xFF to a multiple of 32 bytes (the "filler"); on the original disc each file is that copy minus the padding, and 79
+   of the 84 streams decoded channel 1's short last group as noise. Spec 2.2 amended first (extend the file with 0xFF
+   to a multiple of 32, then the interleave rule unchanged); `RetroStream.cs` then changed by Clean-room queue per the
+   amended spec (the constructor's `Extended`; sha256 prefix 0020bb00c76f62c2 -> c49855669fbc8b8b; `DspAdpcm.cs`
+   unchanged, 359c9eb8ea74bc13). Harness rerun on both images, same reference hashes: 84 of 84 identical each, both
+   self-test faults caught.
 
 **Not published.** The harness and the reference decoder read the user's game files and stay out of the repository.

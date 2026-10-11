@@ -42,6 +42,7 @@ namespace MphRecomp.Frontend
         private string _text = "";
         private Action<bool>? _answered;
         private Action? _done;
+        private Action? _cancel; // a busy box the player can stop (BusyCancel)
         private int _tick, _busyTicks;
         private int _focus = -1, _focusTick;
         private int _pressed = -1, _pressTick;
@@ -133,6 +134,16 @@ namespace MphRecomp.Frontend
             _done = done;
         }
 
+        // a busy box the player can stop (ours: IMPORT GAMES): the spinner and the NO button in the YES / NO pair's places.
+        // NO (B, A on it, a tap) runs `cancel` after its press flash; the box then stays up with the spinner alone until the
+        // host puts something else in it
+        public void BusyCancel(string text, Action cancel)
+        {
+            Open(Mode.Busy, text);
+            _busyTicks = int.MaxValue;
+            _cancel = cancel;
+        }
+
         private void Open(Mode mode, string text)
         {
             _mode = mode;
@@ -142,6 +153,7 @@ namespace MphRecomp.Frontend
             _pressed = -1;
             _answered = null;
             _done = null;
+            _cancel = null;
         }
 
         // new text in the open box, buttons and state kept (the update download's progress in its busy box)
@@ -171,6 +183,13 @@ namespace MphRecomp.Frontend
                 _mode = Mode.Closed;
                 closed?.Invoke();
             }
+            else if (_mode == Mode.Busy && _pressed == 1 && ++_pressTick >= PressTicks)
+            {
+                Action? cancel = _cancel;
+                _cancel = null;
+                _pressed = -1;
+                cancel?.Invoke();
+            }
             else if (_mode == Mode.Busy && _tick >= _busyTicks)
             {
                 Action? done = _done;
@@ -198,6 +217,18 @@ namespace MphRecomp.Frontend
                 PressButton(0); // the check is the only button: A or B takes it
                 return;
             }
+            if (_mode == Mode.Busy && _cancel != null && _pressed < 0)
+            {
+                // NO is the only button: B presses it, A focuses it first, as in a question
+                if ((keys & MenuKeys.B) != 0) PressButton(1);
+                else if ((keys & MenuKeys.A) != 0)
+                {
+                    if (_focus < 0) SetFocus(1);
+                    else PressButton(1);
+                }
+                else if ((keys & (MenuKeys.Left | MenuKeys.Right)) != 0) SetFocus(1);
+                return;
+            }
             if (_mode != Mode.Ask || _pressed >= 0) return;
             if ((keys & MenuKeys.B) != 0) PressButton(1);
             else if ((keys & MenuKeys.A) != 0)
@@ -211,6 +242,11 @@ namespace MphRecomp.Frontend
 
         public void Navigate(int dx)
         {
+            if (_mode == Mode.Busy && _cancel != null && _pressed < 0)
+            {
+                SetFocus(1);
+                return;
+            }
             if (_mode != Mode.Ask || _pressed >= 0) return;
             if (_focus < 0) SetFocus(0);
             else if (dx < 0) SetFocus(0);
@@ -223,6 +259,11 @@ namespace MphRecomp.Frontend
             if (_mode == Mode.Info)
             {
                 if (_pressed < 0 && y >= ButtonY && y < ButtonY + ButtonSize && x >= SpinnerX && x < SpinnerX + ButtonSize) PressButton(0);
+                return;
+            }
+            if (_mode == Mode.Busy)
+            {
+                if (_cancel != null && _pressed < 0 && y >= ButtonY && y < ButtonY + ButtonSize && x >= NoX && x < NoX + ButtonSize) PressButton(1);
                 return;
             }
             if (_mode != Mode.Ask || _pressed >= 0 || y < ButtonY || y >= ButtonY + ButtonSize) return;
@@ -264,6 +305,12 @@ namespace MphRecomp.Frontend
             else if (_mode == Mode.Info)
             {
                 Quad(output, _buttons[0, ButtonImage(0)], SpinnerX, ButtonY, SpinnerX + ButtonSize, ButtonY + ButtonSize);
+            }
+            else if (_cancel != null || _pressed == 1)
+            {
+                // a busy box that can be stopped: the spinner where YES goes, NO in its own place
+                Quad(output, _spinner[SpinnerImage()], YesX, ButtonY, YesX + ButtonSize, ButtonY + ButtonSize);
+                Quad(output, _buttons[1, ButtonImage(1)], NoX, ButtonY, NoX + ButtonSize, ButtonY + ButtonSize);
             }
             else
             {

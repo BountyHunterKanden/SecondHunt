@@ -1,0 +1,26 @@
+{
+  "Room": "ECHOES SPIRES",
+  "RoomId": 1002,
+  "Arena": "Spires",
+  "Saved": "2026-10-10 12:34:52",
+  "Pickups": [],
+  "Crates": [
+    {
+      "Pool": [
+        "AffinityWeapon"
+      ],
+      "Pos": [
+        -0.5,
+        3.174,
+        -124.4
+      ],
+      "Floor": [
+        -0.5,
+        2.074,
+        -124.4
+      ]
+    }
+  ],
+  "RemovedItems": [],
+  "RemovedCrates": []
+}

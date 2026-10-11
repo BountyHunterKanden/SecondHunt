@@ -4,7 +4,7 @@ using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
-    public class OctolithFlagEntity : EntityBase
+    public partial class OctolithFlagEntity : EntityBase
     {
         private readonly OctolithFlagEntityData _data;
         public OctolithFlagEntityData Data => _data;
@@ -74,7 +74,7 @@ namespace MphRead.Entities
             base.Process();
             // todo?: lots of wifi stuff
             bool pickedUp = false;
-            if (_carrier == null)
+            if (_carrier == null && !PlayerEntity.NetClient) // (network client: the host's events, OctolithFlagNet)
             {
                 foreach (PlayerEntity player in _scene.GetPlayerEntities())
                 {
@@ -117,42 +117,15 @@ namespace MphRead.Entities
                     _carrier.Position.Y + 1.05f,
                     _carrier.Position.Z + -0.35f * _carrier.Field74
                 );
-                if (_carrier.Health <= 0 || _carrier.IsAltForm || _carrier.IsMorphing
-                    || !_carrier.LoadFlags.TestFlag(LoadFlags.Active))
+                if (!PlayerEntity.NetClient && (_carrier.Health <= 0 || _carrier.IsAltForm || _carrier.IsMorphing
+                    || !_carrier.LoadFlags.TestFlag(LoadFlags.Active)))
                 {
                     bool reset = _carrier.Health == 0 && GameState.OctolithReset;
                     OnDropped(reset);
                 }
                 else if (pickedUp)
                 {
-                    if (!_bounty)
-                    {
-                        if (PlayerEntity.Main.TeamIndex == _data.TeamId)
-                        {
-                            _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
-                            PlayerEntity.Main.StartFlagCarrySfx();
-                            Music.PlayRoomMusic(_scene.RoomId, track: 1);
-                        }
-                        else
-                        {
-                            _soundSource.PlayFreeSfx(SfxId.FLAG_ACQUIRED);
-                        }
-                    }
-                    else
-                    {
-                        Music.PlayRoomMusic(_scene.RoomId, track: 1);
-                        if (_carrier == PlayerEntity.Main)
-                        {
-                            _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
-                            _soundSource.PlayFreeSfx(SfxId.FLAG_ACQUIRED);
-                            PlayerEntity.Main.QueueHudMessage(128, 133, 90 / 30f, 1, 202); // return to base
-                        }
-                        else
-                        {
-                            _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
-                            PlayerEntity.Main.StartFlagCarrySfx();
-                        }
-                    }
+                    OnPickedUp();
                 }
             }
             if (_grounded)
@@ -181,12 +154,45 @@ namespace MphRead.Entities
                     }
                 }
                 Debug.Assert(_scene.Room != null);
-                if (Position.Y < _scene.Room.Meta.KillHeight)
+                if (Position.Y < _scene.Room.Meta.KillHeight && !PlayerEntity.NetClient)
                 {
                     Reset();
                 }
             }
             return true;
+        }
+
+        private void OnPickedUp()
+        {
+            Debug.Assert(_carrier != null);
+            if (!_bounty)
+            {
+                if (PlayerEntity.Main.TeamIndex == _data.TeamId)
+                {
+                    _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
+                    PlayerEntity.Main.StartFlagCarrySfx();
+                    Music.PlayRoomMusic(_scene.RoomId, track: 1);
+                }
+                else
+                {
+                    _soundSource.PlayFreeSfx(SfxId.FLAG_ACQUIRED);
+                }
+            }
+            else
+            {
+                Music.PlayRoomMusic(_scene.RoomId, track: 1);
+                if (_carrier == PlayerEntity.Main)
+                {
+                    _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
+                    _soundSource.PlayFreeSfx(SfxId.FLAG_ACQUIRED);
+                    PlayerEntity.Main.QueueHudMessage(128, 133, 90 / 30f, 1, 202); // return to base
+                }
+                else
+                {
+                    _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
+                    PlayerEntity.Main.StartFlagCarrySfx();
+                }
+            }
         }
 
         private bool OnTouched(PlayerEntity player)
@@ -204,6 +210,7 @@ namespace MphRead.Entities
                     int messageId = PlayerEntity.Main.TeamIndex == _data.TeamId ? 201 : 207;
                     PlayerEntity.Main.QueueHudMessage(128, 133, 60 / 30f, 1, messageId);
                 }
+                NetEvent(NetEventKind.Return, player);
                 SetAtBase();
                 return false;
             }
@@ -214,6 +221,7 @@ namespace MphRead.Entities
             player.OctolithFlag = this;
             _carrier = player;
             _lastCarrier = player;
+            NetEvent(NetEventKind.Pickup, player);
             _atBase = false;
             _grounded = true;
             _resetTimer = 0;
@@ -222,6 +230,7 @@ namespace MphRead.Entities
 
         private void Reset()
         {
+            NetEvent(NetEventKind.Reset, null);
             SetAtBase();
             int messageId;
             if (!_bounty)
@@ -248,6 +257,7 @@ namespace MphRead.Entities
         private void OnDropped(bool reset)
         {
             Debug.Assert(_carrier != null);
+            NetEvent(reset ? NetEventKind.DropReset : NetEventKind.Drop, _carrier);
             GameState.OctolithDrops[_carrier.SlotIndex]++;
             int messageId;
             if (!_bounty)
@@ -310,6 +320,7 @@ namespace MphRead.Entities
         public void OnCaptured()
         {
             Debug.Assert(_carrier != null);
+            NetEvent(NetEventKind.Capture, _carrier);
             if (!_bounty)
             {
                 if (PlayerEntity.Main.TeamIndex == _data.TeamId)

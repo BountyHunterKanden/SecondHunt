@@ -70,6 +70,10 @@ namespace MphRecomp.Media
         private readonly System.Diagnostics.Stopwatch _sinceProgress = System.Diagnostics.Stopwatch.StartNew();
         private const double StallSeconds = 3;
 
+        // hosts that keep a record of the movies played (the MOVIES gallery, Frontend/MovieGallery.cs) set this: called
+        // with each movie's top-screen file as it starts
+        public static Action<string>? Opened { get; set; }
+
         // "01" -> movies/01_top.vx + movies/01_bot.vx; "04" -> movies/04.vx
         public static MoviePlayer Open(string name)
         {
@@ -116,6 +120,7 @@ namespace MphRecomp.Media
             {
                 _bottomTask = Task.Run(() => Decode(_bottom, bottomPath, token), token);
             }
+            Opened?.Invoke(topPath);
         }
 
         private async Task Decode(VxDecoder decoder, string path, CancellationToken token)

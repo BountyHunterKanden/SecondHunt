@@ -229,6 +229,32 @@ namespace MphRead
                     Console.WriteLine(FormattableString.Invariant($"  tri tex {tex}: ({t.A.X:0.#},{t.A.Y:0.#} uv {t.A.U:0.###},{t.A.V:0.###}) ({t.B.X:0.#},{t.B.Y:0.#} uv {t.B.U:0.###},{t.B.V:0.###}) ({t.C.X:0.#},{t.C.Y:0.#} uv {t.C.U:0.###},{t.C.V:0.###})"));
                 }
             }
+            if (Environment.GetEnvironmentVariable("FE_TEXDUMP") is string texItems)
+            {
+                var all = new List<WidgetTri>();
+                session.Menu.Collect(all);
+                foreach (string ti in texItems.Split(','))
+                {
+                    WidgetTri? hit = all.FirstOrDefault(t => t.Item == int.Parse(ti));
+                    if (hit == null || hit.Value.TextureId < 0) continue;
+                    UiTexture tx = session.Textures[hit.Value.TextureId];
+                    using var timg = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(tx.Rgba, tx.Width, tx.Height);
+                    timg.SaveAsPng(Path.Combine(OutDir(), $"tex_item{ti}.png"));
+                    Console.WriteLine($"  tex item {ti}: {tx.Key} {tx.Width}x{tx.Height}");
+                }
+            }
+            if (Environment.GetEnvironmentVariable("FE_BOUNDS") == "1")
+            {
+                var all = new List<WidgetTri>();
+                session.Menu.Collect(all);
+                foreach (var g in all.GroupBy(t => t.Item).OrderBy(g => g.Key))
+                {
+                    float x0 = g.Min(t => Math.Min(t.A.X, Math.Min(t.B.X, t.C.X))), x1 = g.Max(t => Math.Max(t.A.X, Math.Max(t.B.X, t.C.X)));
+                    float y0 = g.Min(t => Math.Min(t.A.Y, Math.Min(t.B.Y, t.C.Y))), y1 = g.Max(t => Math.Max(t.A.Y, Math.Max(t.B.Y, t.C.Y)));
+                    MenuItem it = session.Menu.Page!.Items[g.Key];
+                    Console.WriteLine(FormattableString.Invariant($"  item {g.Key} at ({it.X:0.#},{it.Y:0.#}) tris {g.Count()} x {x0:0.#}..{x1:0.#} y {y0:0.#}..{y1:0.#} state {session.Menu.ItemState(g.Key)}"));
+                }
+            }
             (int W, int H)[] sizes = { (960, 540), (1200, 540), (864, 540), (720, 540), (1260, 540) };
             int total = sizes.Sum(s => s.W) + 10 * (sizes.Length - 1);
             using var sheet = new Image<Rgba32>(total, 540, new Rgba32(60, 60, 60, 255));
@@ -263,11 +289,39 @@ namespace MphRead
                 Paths.SetPath(Ver.AMHE1, root);
                 Paths.MphKey = Ver.AMHE1;
             }
-            FrontendSession session = FrontendSession.Load(root ?? Paths.FileSystem, modsDir: Environment.GetEnvironmentVariable("FE_MODS"), savesDir: Environment.GetEnvironmentVariable("FE_SAVES"));
+            // FE_SIDEBORDERS=0: without the screen-wide boxes' vertical borders (Reports R11, MenuEngine.SideBorders)
+            MenuEngine.SideBorders = Environment.GetEnvironmentVariable("FE_SIDEBORDERS") != "0";
+            // FE_PROPOSE=1: the compositions waiting for the owner's pick (MenuLayout.Proposals)
+            MenuLayout.Proposals = Environment.GetEnvironmentVariable("FE_PROPOSE") == "1";
+            // FE_PUBLIC=1: as a public build (as -frontend: the rows and IMPORT GAMES items a public build leaves out)
+            MphRecomp.Config.RecompSettings.PublicBuild = Environment.GetEnvironmentVariable("FE_PUBLIC") == "1";
+            // FE_SETTINGS=<file>: a settings file (its folder also takes IMPORT GAMES' outputs: hd/, guns/, import/)
+            FrontendSession session = FrontendSession.Load(root ?? Paths.FileSystem, settingsPath: Environment.GetEnvironmentVariable("FE_SETTINGS"),
+                modsDir: Environment.GetEnvironmentVariable("FE_MODS"), savesDir: Environment.GetEnvironmentVariable("FE_SAVES"));
             var log = new List<string>();
             session.Log = m => log.Add($"{session.Frame}: {m}");
             session.Request = r => log.Add($"{session.Frame}: request {r}");
-            if (Environment.GetEnvironmentVariable("FE_START") == "pause") session.OpenPause();
+            // FE_IMPORT_PICK=<file>: IMPORT GAMES' file picker answers with this file (a disc image or a key file);
+            // "cancel" = the player backs out of the picker
+            string? importPick = Environment.GetEnvironmentVariable("FE_IMPORT_PICK");
+            if (importPick != null)
+            {
+                MphRecomp.Frontend.ImportHost.Pick = (request, picked) =>
+                {
+                    log.Add($"{session.Frame}: picker {request.Kind} {request.GameId} ({String.Join(" ", request.Extensions)}) -> {importPick}");
+                    picked(importPick == "cancel" ? null : new MphRecomp.Frontend.ImportPicked(Path.GetFullPath(importPick), Path.GetFileName(importPick)));
+                };
+            }
+            // FE_ENDING=good|bad: back from an ending (as a campaign hands over): the menus open where ReturnPage says, the
+            // credits, then the results page with sample numbers
+            if (Environment.GetEnvironmentVariable("FE_ENDING") is "good" or "bad")
+            {
+                MphRecomp.Frontend.GameEnding.Pending = new MphRecomp.Frontend.EndingResults(Environment.GetEnvironmentVariable("FE_ENDING") == "good",
+                    CompletePercent: 87, TotalSeconds: 12 * 3600 + 7 * 60 + 41, GoreaSeconds: 1234, Deaths: 9, Defeated: 23);
+                session.Start(FrontendSession.ReturnPage());
+            }
+            else if (Environment.GetEnvironmentVariable("FE_START") == "pause") session.OpenPause();
+            else if (Environment.GetEnvironmentVariable("FE_START") == "import") session.Start(session.Recomp.ImportPage);
             else session.Start(Int32.TryParse(Environment.GetEnvironmentVariable("FE_START"), out int startPage) ? startPage : 0);
             // FE_EVERY=<ticks>: the snapshot interval; FE_SHOTS=<t>,<t>,...: extra snapshots at those ticks
             int every = Int32.TryParse(Environment.GetEnvironmentVariable("FE_EVERY"), out int e) && e > 0 ? e : 30;
@@ -297,8 +351,35 @@ namespace MphRead
                     case "right": session.Navigate(1, 0); break;
                     case "l": session.Press(MenuKeys.L); break;
                     case "r": session.Press(MenuKeys.R); break;
+                    case "x": session.Press(MenuKeys.X); break;
+                    case "ok": // a tap on the results page's OK (touch only, as vanilla's)
+                        if (session.Menu.Page != null && MphRecomp.Frontend.GameEnding.TryOkPoint(session.Menu.Page, out float okX, out float okY))
+                        {
+                            session.Menu.Touch(okX, okY);
+                        }
+                        else log.Add($"{f}: no OK on page {session.Menu.Page?.Index}");
+                        break;
+                    case "waitimport": // IMPORT GAMES: block until its worker ends (the next ticks show the answer)
+                    {
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        string last = "";
+                        while (session.Recomp.Import.Running)
+                        {
+                            string line = session.Recomp.Import.ProgressLine;
+                            if (line != last) log.Add($"{f}: +{clock.Elapsed.TotalSeconds:F1}s {line}");
+                            last = line;
+                            System.Threading.Thread.Sleep(100);
+                        }
+                        log.Add($"{f}: import worker done after {clock.Elapsed.TotalSeconds:F1}s");
+                        break;
+                    }
                     default:
-                        if (st.Input.StartsWith("touch@"))
+                        if (st.Input.StartsWith("sleep")) // sleep<ms>: real time passes (a worker runs on), e.g. to press B mid-import
+                        {
+                            System.Threading.Thread.Sleep(Int32.Parse(st.Input[5..]));
+                            log.Add($"{f}: slept, import {(session.Recomp.Import.Running ? "running: " + session.Recomp.Import.ProgressLine : "not running")}");
+                        }
+                        else if (st.Input.StartsWith("touch@"))
                         {
                             var xy = st.Input[6..].Split('/');
                             session.TouchCanvas(Single.Parse(xy[0]), Single.Parse(xy[1]));
@@ -314,6 +395,20 @@ namespace MphRead
                 if (f % every == 0 || shotAt.Contains(f))
                 {
                     session.Build(w, h);
+                    // FE_ZDUMP=1: each drawn item's depth range (Z, larger = nearer) and menu-space bounds at the snapshot
+                    if (Environment.GetEnvironmentVariable("FE_ZDUMP") == "1")
+                    {
+                        var zt = new List<WidgetTri>();
+                        session.Menu.Collect(zt);
+                        foreach (var g in zt.GroupBy(t => t.Item).OrderBy(g => g.Min(t => t.Z)))
+                        {
+                            MenuItem it = session.Menu.Page!.Items[g.Key];
+                            string what = it.IsText ? "text" : System.IO.Path.GetFileName(session.Menu.ItemModelPath(g.Key));
+                            float x0 = g.Min(t => MathF.Min(t.A.X, MathF.Min(t.B.X, t.C.X))), x1 = g.Max(t => MathF.Max(t.A.X, MathF.Max(t.B.X, t.C.X)));
+                            float y0 = g.Min(t => MathF.Min(t.A.Y, MathF.Min(t.B.Y, t.C.Y))), y1 = g.Max(t => MathF.Max(t.A.Y, MathF.Max(t.B.Y, t.C.Y)));
+                            log.Add(FormattableString.Invariant($"{f}: z item {g.Key} {what} depth {it.Depth} z {g.Min(t => t.Z):0.##}..{g.Max(t => t.Z):0.##} x {x0:0}..{x1:0} y {y0:0}..{y1:0}"));
+                        }
+                    }
                     shots.Add((f, RasterCanvas(session.DrawList, w, h)));
                     if (frames) shots[^1].Img.SaveAsPng(Path.Combine(OutDir(), $"flow_{f}.png"));
                 }
@@ -332,6 +427,28 @@ namespace MphRead
             sheet.SaveAsPng(path);
             foreach (string line in log) Console.WriteLine(line);
             Console.WriteLine($"{shots.Count} snapshots every {every} frames -> {path}");
+        }
+
+        // -felayouts: every page's MenuLayout (what For picks: combined, side by side...), its frame group and first texts
+        // (FE_ROOT=<files\AMHE1>: another ROM's tree)
+        public static void Layouts()
+        {
+            if (!ToolPaths.UseDesktopExtraction()) return;
+            string? root = Environment.GetEnvironmentVariable("FE_ROOT");
+            if (root != null)
+            {
+                Paths.SetPath(Ver.AMHE1, root);
+                Paths.MphKey = Ver.AMHE1;
+            }
+            FrontendSession session = FrontendSession.Load(root ?? Paths.FileSystem);
+            MenuFile file = session.Menu.File;
+            foreach (MenuPage page in file.Pages)
+            {
+                MenuLayout layout = MenuLayout.For(file, page);
+                var texts = page.Items.Where(i => i.IsText).Select(i => session.Menu.Strings[i.States[0].Text!.StringId].Replace('\n', ' '))
+                    .Where(t => t.Length > 0).Distinct().Take(3);
+                Console.WriteLine($"page {page.Index,2} group {page.Field1D,3} {layout.Kind,-10} {String.Join(" / ", texts)}");
+            }
         }
 
         // -feship ["<frame>:<input>,..." [end]]: the in-ship menu (Core ShipMenu) at 16:9 -> ship_flow.png (a snapshot per

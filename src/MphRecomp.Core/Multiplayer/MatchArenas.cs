@@ -80,5 +80,11 @@ namespace MphRecomp.Multiplayer
         }
 
         public static bool Supports(RoomMetadata arena, GameMode mode, int players = 4) => Census(arena, mode, players).Supports(mode);
+
+        // P8: advice for 5-8 player lobbies, not a limit. One spawn point per player (5-8 players load the 4-player
+        // entity layer); arenas with fewer still work (respawns wait for a free point) but crowd. Never below 4 = vanilla.
+        public static int RecommendedMaxPlayers(RoomMetadata arena, GameMode mode)
+            => System.Math.Clamp(Census(arena, mode, MphRead.Entities.PlayerEntity.SlotCapacity).Spawns,
+                MphRead.Entities.PlayerEntity.VanillaMaxPlayers, MphRead.Entities.PlayerEntity.SlotCapacity);
     }
 }

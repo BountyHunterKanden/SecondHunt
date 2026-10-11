@@ -35,7 +35,7 @@ namespace MphRead.Entities
         protected byte _state2 = 0;
         // some enemies needs to update this in between _state1 being set to _state2 and the subroutine being called
         protected byte _subId = 0;
-        public bool[] HitPlayers { get; } = new bool[4];
+        public bool[] HitPlayers { get; } = new bool[PlayerEntity.SlotCapacity];
         protected Vector3 _prevPos = Vector3.Zero;
         protected Vector3 _speed = Vector3.Zero;
         protected float _boundingRadius = 0;
@@ -128,6 +128,10 @@ namespace MphRead.Entities
             HitPlayers[1] = false;
             HitPlayers[2] = false;
             HitPlayers[3] = false;
+            for (int i = 4; i < HitPlayers.Length; i++) // recomp: seats 5-8 (P8)
+            {
+                HitPlayers[i] = false;
+            }
         }
 
         protected Vector3 FixParallelVectors(Vector3 facing, Vector3 up)
@@ -518,7 +522,7 @@ namespace MphRead.Entities
 
         public Effectiveness GetEffectiveness(BeamType beam)
         {
-            int index = (int)beam;
+            int index = PirateBlaster.BaseIndex(beam); // recomp: the Pirate Blaster takes the Power Beam's row
             Debug.Assert(index < BeamEffectiveness.Length);
             return BeamEffectiveness[index];
         }
@@ -639,7 +643,7 @@ namespace MphRead.Entities
 
         public static Vector3 RotateVector(Vector3 vec, Vector3 axis, float angle)
         {
-            return vec * Matrix3.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(angle));
+            return vec * DetMatrix.CreateFromAxisAngle3(axis, MathHelper.DegreesToRadians(angle));
         }
 
         public static bool SeekTargetVector(Vector3 target, ref Vector3 current, Vector3 axis, ref ushort steps, float angle)
@@ -663,7 +667,7 @@ namespace MphRead.Entities
             if (steps > 0 && Vector3.Dot(target, facing) < MathF.Cos(radians))
             {
                 var cross = Vector3.Cross(target, facing);
-                var rotY = Matrix3.CreateRotationY(radians * (cross.Y <= 0 ? 1 : -1));
+                var rotY = DetMatrix.CreateRotationY3(radians * (cross.Y <= 0 ? 1 : -1));
                 facing = (facing * rotY).Normalized();
                 steps--;
             }

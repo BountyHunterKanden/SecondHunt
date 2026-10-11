@@ -305,8 +305,19 @@ internal sealed class DesktopApp : IDisposable
             PushOver(new LobbyScreen(DesktopPaths.Game, Path.Combine(DesktopPaths.Root, "lobby.json"),
                 args => Defer(() => StartGame(args)), () => Defer(PopBack)));
             break;
+        case FrontendRequestKind.StartMatch: // START GAME in the vanilla multiplayer menu; ExitGame comes back to its lobby
+            Log.Info("MPHFrontend", "StartMatch " + request.Arg);
+            StartGame(MatchSetupText.LaunchArgs(request.Arg!));
+            break;
+        case FrontendRequestKind.PlayReplay: // a recorded match from the REPLAYS list (MatchReplay.cs); ExitGame comes back
+            Log.Info("MPHFrontend", "PlayReplay " + request.Arg);
+            StartGame(new Dictionary<string, string> { ["replay"] = request.Arg! });
+            break;
         case FrontendRequestKind.Credits:
             PushOver(new CreditsScreen(() => Defer(PopBack)));
+            break;
+        case FrontendRequestKind.OnlineRules: // Options' privacy / code of conduct / 13+ line: the same viewer, that text
+            PushOver(new CreditsScreen(() => Defer(PopBack), "online.md"));
             break;
         case FrontendRequestKind.ShareCrashLog:
             ShareCrashLog();
@@ -359,7 +370,7 @@ internal sealed class DesktopApp : IDisposable
         while (_stack.Count > 0) Pop();
         _status.Set("");
         _panel.Set("");
-        OpenFrontend(18);
+        OpenFrontend(FrontendSession.ReturnPage()); // the main menu, or the multiplayer lobby after a match
     }
 
     // ---- window ----

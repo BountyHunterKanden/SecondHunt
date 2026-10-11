@@ -105,7 +105,8 @@ namespace MphRead
         ArtifactKey = 19,
         Deathalt = 20,
         AffinityWeapon = 21,
-        PickWpnMissile = 22
+        PickWpnMissile = 22,
+        PirateBlaster = 23 // recomp: the Prime 1 pirate beam pickup (Metadata/PirateBlaster.cs)
     }
 
     public enum FhItemType : int
@@ -134,7 +135,10 @@ namespace MphRead
         ShockCoil = 7,
         OmegaCannon = 8,
         Platform = 9,
-        Enemy = 10
+        Enemy = 10,
+        // recomp: the Prime 1 pirate beam (multiplayer pickup, the Trooper's affinity weapon; Metadata/PirateBlaster.cs).
+        // After Enemy so vanilla's numbers (ROM tables, the +9 affinity rows, Platform = "no beam" online) stay as they were
+        PirateBlaster = 11
     }
 
     [Flags]
@@ -148,7 +152,8 @@ namespace MphRead
         Judicator = 1 << BeamType.Judicator,
         Magmaul = 1 << BeamType.Magmaul,
         ShockCoil = 1 << BeamType.ShockCoil,
-        OmegaCannon = 1 << BeamType.OmegaCannon
+        OmegaCannon = 1 << BeamType.OmegaCannon,
+        PirateBlaster = 1 << BeamType.PirateBlaster // recomp
     }
 
     public enum BombType : byte

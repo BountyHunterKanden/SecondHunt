@@ -1,0 +1,20 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "paks": [
+    {
+      "name": "TestAnim.Pak",
+      "sha1": "b3b12c3e00dff1766d1fdcac9c0930ee710e047f"
+    }
+  ],
+  "ancs": "d61afb04",
+  "char": "Fusion_Ball",
+  "static": true,
+  "matset": 0,
+  "scale": 9.728,
+  "core": [
+    255,
+    230,
+    90
+  ]
+}

@@ -57,6 +57,8 @@ namespace MphRead
             }
             if (kind == "beyond-anims") { BeyondAnims(args, repo); return; }   // ImportCheckBeyond.cs
             if (kind == "guns4") { Guns4(args, repo); return; }                // ImportCheckGuns4.cs
+            if (kind == "hd") { Hd(args, repo); return; }                      // ImportCheckHd.cs
+            if (kind == "arenas") { Arenas(args, repo); return; }              // ImportCheckArenas.cs
             if (kind != "guns")
             {
                 Console.WriteLine($"  -importcheck: unknown item kind '{kind}' (only 'guns', 'guns4', or 'readers' for the reader sweep)");

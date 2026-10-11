@@ -42,11 +42,11 @@ namespace MphRecomp.Import.Retro
                 throw new InvalidDataException("Sample rate is out of range.");
             }
 
-            _file = file;
+            _file = Extended(file);
             Channels = (int)channels;
             SampleRate = (int)rate;
 
-            long dataLength = file.Length - HeaderSize;
+            long dataLength = _file.Length - HeaderSize;
             long groupBytes = (long)BlockSize * Channels;
             long fullGroups = dataLength / groupBytes;
             _fullGroupBytes = fullGroups * BlockSize;
@@ -142,6 +142,21 @@ namespace MphRecomp.Import.Retro
 
         private static bool HasSignature(ReadOnlySpan<byte> data) =>
             data[0] == 0x52 && data[1] == 0x53 && data[2] == 0x00 && data[3] == 0x03;
+
+        /// <summary>The file extended with 0xFF bytes to a multiple of 32 (spec 2.2, amended 2026-10-07): the original
+        /// disc leaves the last channel's final frames unstored.</summary>
+        private static byte[] Extended(byte[] file)
+        {
+            int rest = file.Length % 32;
+            if (rest == 0)
+            {
+                return file;
+            }
+            byte[] extended = new byte[file.Length + 32 - rest];
+            file.CopyTo(extended, 0);
+            extended.AsSpan(file.Length).Fill(0xFF);
+            return extended;
+        }
 
         private static uint ReadU32(byte[] file, int offset) =>
             BinaryPrimitives.ReadUInt32BigEndian(file.AsSpan(offset, 4));

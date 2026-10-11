@@ -50,7 +50,7 @@ namespace MphRead.Entities
                 if (_transform != value)
                 {
                     _scale = value.ExtractScale();
-                    value.ExtractRotation().ToEulerAngles(out _rotation);
+                    _rotation = DetMatrix.ToEulerAngles(value.ExtractRotation());
                     _position = value.Row3.Xyz;
                     _transform = value;
                     _drawColUpdated = false;
@@ -68,8 +68,8 @@ namespace MphRead.Entities
             {
                 if (_scale != value)
                 {
-                    _transform = Matrix4.CreateScale(value) * Matrix4.CreateRotationZ(Rotation.Z)
-                        * Matrix4.CreateRotationY(Rotation.Y) * Matrix4.CreateRotationX(Rotation.X);
+                    _transform = Matrix4.CreateScale(value) * DetMatrix.CreateRotationZ(Rotation.Z)
+                        * DetMatrix.CreateRotationY(Rotation.Y) * DetMatrix.CreateRotationX(Rotation.X);
                     _transform.Row3.Xyz = Position;
                     _scale = value;
                     _drawColUpdated = false;
@@ -87,8 +87,8 @@ namespace MphRead.Entities
             {
                 if (_rotation != value)
                 {
-                    _transform = Matrix4.CreateScale(Scale) * Matrix4.CreateRotationZ(value.Z)
-                        * Matrix4.CreateRotationY(value.Y) * Matrix4.CreateRotationX(value.X);
+                    _transform = Matrix4.CreateScale(Scale) * DetMatrix.CreateRotationZ(value.Z)
+                        * DetMatrix.CreateRotationY(value.Y) * DetMatrix.CreateRotationX(value.X);
                     _transform.Row3.Xyz = Position;
                     _rotation = value;
                     _drawColUpdated = false;
@@ -515,7 +515,7 @@ namespace MphRead.Entities
                     materialMatrix = Matrix4.CreateTranslation(material.ScaleS * material.TranslateS,
                         material.ScaleT * material.TranslateT, 0.0f);
                     materialMatrix = Matrix4.CreateScale(material.ScaleS, material.ScaleT, 1.0f) * materialMatrix;
-                    materialMatrix = Matrix4.CreateRotationZ(material.RotateZ) * materialMatrix;
+                    materialMatrix = DetMatrix.CreateRotationZ(material.RotateZ) * materialMatrix;
                 }
                 // for texcoord texgen, the animation result is used if any, otherwise the material matrix is used.
                 // for normal texgen, two matrices are multiplied. the first is always the material matrix.

@@ -43,6 +43,8 @@ namespace MphRecomp.Config
         // HUD/menu line art redrawn as clean geometry from the user's ROM (Frontend/Redraw, PixelRedraw); off = the DS pixels
         public bool RedrawArt { get; set; } = true;
         public bool DeveloperMode { get; set; }
+        // dev only: the upper-left status text in gameplay (fps, scoreboard, L3 cycles it); off in every release (owner 2026-10-10)
+        public bool StatusText { get; set; }
         // Samus's first-person arm cannon (and, suit permitting, her HD morph ball) in the Adventure campaign: a
         // guns/<folder> exported on the device, or "original" for MPH's own DS gun (no HD). An explicit --es gun
         // intent extra (the dev launcher) still overrides this; see CampaignActivity.
@@ -94,6 +96,12 @@ namespace MphRecomp.Config
         public int SfxVolume { get; set; } = 9;
         public int MusicVolume { get; set; } = 9;
         public string Speakers { get; set; } = "stereo";
+        // Every local match against bots is recorded and the last 10 kept in <data>/replays (Replay/ReplayLibrary.cs;
+        // docs/REPLAY_MODE.md); off = nothing recorded (owner 2026-10-07: "automatic keep last ten and toggle it off")
+        public bool RecordReplays { get; set; } = true;
+        // Multiplayer's hunters and arenas: false = vanilla's unlocks (the Adventure and matches open them; HunterLicense),
+        // true = every one open (owner 2026-10-07: vanilla by default, a confirmed switch to open everything)
+        public bool UnlockEverything { get; set; }
         public List<string> DisabledMods { get; set; } = new();
         // mod id -> setting id -> the value the player picked (settings a mod declares in its mod.json)
         public Dictionary<string, Dictionary<string, string>> ModSettings { get; set; } = new();

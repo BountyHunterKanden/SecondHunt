@@ -389,6 +389,78 @@ namespace MphRead
                 for (int i = 0; i < 30; i++) host.Step(new CampaignInput { Buttons = CampaignButtons.WeaponMenu, WeaponWheel = new System.Numerics.Vector2(0, 1) });
                 for (int i = 0; i < 30; i++) host.Step(default);
                 Check($"up -> Volt Driver ({p.CurrentWeapon})", p.CurrentWeapon == BeamType.VoltDriver);
+                // 4) the L2 weapon ring (owner queue #9, WeaponRingInput): the pick stays with the stick back at rest, the
+                // release equips it, and a stick still leaning then doesn't aim until it has been at rest
+                var ring = new WeaponRingInput();
+                CampaignInput Ring(bool held, System.Numerics.Vector2 stick)
+                {
+                    System.Numerics.Vector2 wheel = ring.Step(held, stick, p);
+                    return held ? new CampaignInput { Buttons = CampaignButtons.WeaponMenu, WeaponWheel = wheel } : default;
+                }
+                var downLeft = new System.Numerics.Vector2(-0.9f, -0.5f); // sector 4: Magmaul
+                for (int i = 0; i < 10; i++) host.Step(Ring(true, downLeft));
+                for (int i = 0; i < 20; i++) host.Step(Ring(true, System.Numerics.Vector2.Zero));
+                Check($"ring: pick stays at rest ({p.WeaponSelection})", host.WeaponMenuOpen && p.WeaponSelection == BeamType.Magmaul);
+                host.Step(Ring(false, System.Numerics.Vector2.Zero));
+                for (int i = 0; i < 30; i++) host.Step(default);
+                Check($"ring: release equips the kept pick ({p.CurrentWeapon})", p.CurrentWeapon == BeamType.Magmaul);
+                for (int i = 0; i < 10; i++) host.Step(Ring(true, new System.Numerics.Vector2(0.6f, 0.6f))); // sector 1: Battlehammer
+                host.Step(Ring(false, new System.Numerics.Vector2(0.6f, 0.6f)));
+                bool heldAfter = ring.StickAimHeld;
+                ring.Step(false, new System.Numerics.Vector2(0.6f, 0.6f), p);
+                bool stillHeld = ring.StickAimHeld;
+                ring.Step(false, System.Numerics.Vector2.Zero, p);
+                Check($"ring: a leaning stick doesn't aim after the release ({heldAfter}, {stillHeld}) until back at rest ({ring.StickAimHeld})",
+                    heldAfter && stillHeld && !ring.StickAimHeld);
+                for (int i = 0; i < 30; i++) host.Step(default);
+                Check($"ring: Battlehammer equipped ({p.CurrentWeapon})", p.CurrentWeapon == BeamType.Battlehammer);
+                Check($"ring: sectors match the slots (up {CampaignHost.WheelWeapon(CampaignHost.WheelSector(new(0, 1)))}, "
+                    + $"down {CampaignHost.WheelWeapon(CampaignHost.WheelSector(new(0, -1)))})",
+                    CampaignHost.WheelWeapon(CampaignHost.WheelSector(new(0, 1))) == BeamType.VoltDriver
+                    && CampaignHost.WheelWeapon(CampaignHost.WheelSector(new(0, -1))) == BeamType.Judicator
+                    && Enumerable.Range(0, 6).All(s => CampaignHost.WheelSector(CampaignHost.WheelDirection(s)) == s));
+                // 5) tap vs hold (owner 2026-10-09): with the Imperialist a tap zooms, a hold opens the ring and doesn't zoom
+                for (int i = 0; i < 30; i++) host.Step(new CampaignInput { Buttons = CampaignButtons.WeaponMenu, WeaponWheel = CampaignHost.WheelDirection(2) });
+                for (int i = 0; i < 30; i++) host.Step(default);
+                var pad = new WeaponRingInput();
+                bool opened = false;
+                CampaignInput L2(bool held)
+                {
+                    bool open = pad.Hold(held, p, out bool zoom);
+                    opened |= open;
+                    System.Numerics.Vector2 wheel = pad.Step(open, System.Numerics.Vector2.Zero, p);
+                    var buttons = (open ? CampaignButtons.WeaponMenu : CampaignButtons.None) | (zoom ? CampaignButtons.Zoom : CampaignButtons.None);
+                    return new CampaignInput { Buttons = buttons, WeaponWheel = wheel };
+                }
+                for (int i = 0; i < WeaponRingInput.HoldFrames - 2; i++) host.Step(L2(true));
+                for (int i = 0; i < 10; i++) host.Step(L2(false));
+                Check($"tap: Imperialist ({p.CurrentWeapon}) zooms ({p.EquipInfo.Zoomed}), no ring ({opened})",
+                    p.CurrentWeapon == BeamType.Imperialist && p.EquipInfo.Zoomed && !opened);
+                for (int i = 0; i < 30; i++) host.Step(L2(true));
+                bool ringOpen = host.WeaponMenuOpen;
+                for (int i = 0; i < 30; i++) host.Step(L2(false));
+                Check($"hold: ring opens ({ringOpen}), zoom unchanged ({p.EquipInfo.Zoomed}), weapon kept ({p.CurrentWeapon})",
+                    ringOpen && p.EquipInfo.Zoomed && p.CurrentWeapon == BeamType.Imperialist);
+                host.Step(L2(true));
+                for (int i = 0; i < 10; i++) host.Step(L2(false));
+                Check($"tap again: zoom off ({p.EquipInfo.Zoomed})", !p.EquipInfo.Zoomed);
+                for (int i = 0; i < 30; i++) host.Step(new CampaignInput { Buttons = CampaignButtons.WeaponMenu, WeaponWheel = CampaignHost.WheelDirection(1) });
+                for (int i = 0; i < 30; i++) host.Step(default);
+                opened = false;
+                host.Step(L2(true));
+                bool instant = opened && host.WeaponMenuOpen;
+                for (int i = 0; i < 10; i++) host.Step(L2(false));
+                Check($"{p.CurrentWeapon}: the ring opens on the press ({instant}), no zoom ({p.EquipInfo.Zoomed})",
+                    p.CurrentWeapon == BeamType.Battlehammer && instant && !p.EquipInfo.Zoomed);
+            }
+            using (CampaignHost host = CampaignHost.Start("UNIT2_LAND"))
+            {
+                // the ring with weapons not owned yet: pointing at an empty slot picks nothing and keeps an earlier pick
+                for (int i = 0; i < 900; i++) host.Step(default);
+                PlayerEntity p = host.Player;
+                var ring = new WeaponRingInput();
+                System.Numerics.Vector2 w = ring.Step(true, new System.Numerics.Vector2(0, 1), p);
+                Check($"ring: an unowned slot picks nothing ({w})", w == System.Numerics.Vector2.Zero);
             }
             Console.WriteLine($"  {pass} passed, {fail} failed");
         }
@@ -404,7 +476,8 @@ namespace MphRead
             }
             string room = args.Length >= 2 ? args[1] : "UNIT2_LAND";
             string outDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "campaign"));
-            using CampaignHost host = CampaignHost.Start(room, hunter: _hunter, collectDrawItems: true, viewWidth: 1920, viewHeight: 1080);
+            using CampaignHost host = CampaignHost.Start(room, hunter: _hunter, collectDrawItems: true, viewWidth: 1920, viewHeight: 1080,
+                setupSave: s => GiveAll(s, 0));
             int landing = 0;
             for (; landing < 3000 && (landing < 300 || CameraSequence.Current != null); landing++) host.Step(default);
             for (int i = 0; i < 60; i++) host.Step(default);
@@ -419,9 +492,18 @@ namespace MphRead
             Shot("normal");
             for (int i = 0; i < 40; i++) host.Step(new CampaignInput { Buttons = i < 2 ? CampaignButtons.ScanVisor : CampaignButtons.None });
             Shot("scanvisor");
+            // the weapon menu open, MphRead's corner arc and then the L2 weapon ring (PlayerWeaponRing.cs), Magmaul picked
+            for (int i = 0; i < 40; i++) host.Step(new CampaignInput { Buttons = i < 2 ? CampaignButtons.ScanVisor : CampaignButtons.None });
+            var magmaul = new CampaignInput { Buttons = CampaignButtons.WeaponMenu, WeaponWheel = CampaignHost.WheelDirection(4) };
+            for (int i = 0; i < 10; i++) host.Step(magmaul);
+            Shot("weaponarc");
+            PlayerEntity.HostWeaponRing = true;
+            host.Step(magmaul);
+            Shot("weaponring");
+            PlayerEntity.HostWeaponRing = false;
         }
 
-        private static void RenderHud(Scene scene, int w, int h, string file)
+        internal static void RenderHud(Scene scene, int w, int h, string file) // internal: also -pirateblastertest ring pictures
         {
             var img = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(w, h,
                 new SixLabors.ImageSharp.PixelFormats.Rgba32(40, 44, 52, 255));

@@ -53,21 +53,42 @@ namespace MphRead
         // user-facing cheat (unlike Cheats.SkipPlanetIntros, below) -- desktop MphRead never sets this.
         public static bool SkipShipTakeoffMovie { get; set; }
         public static bool EscapePaused { get; set; }
-        public static int[] EncounterState { get; } = new int[4];
+        public static int[] EncounterState { get; } = new int[PlayerEntity.SlotCapacity];
         public static bool[] CompletedRandomEncounterRooms { get; } = new bool[66]; // only for the no repeat encounters feature
         public static int TransitionRoomId { get; set; } = -1;
         public static bool TransitionAltForm { get; set; }
         public static int ActivePlayers { get; set; } = 0;
-        public static string[] Nicknames { get; } = new string[4] { "Player1", "Player2", "Player3", "Player4" };
-        public static int[] Stars { get; } = new int[4];
-        public static int[] Standings { get; } = new int[4];
-        public static int[] TeamStandings { get; } = new int[4];
-        public static int[] ResultSlots { get; } = new int[4]; // ordered by team rank, then by player rank
+        public static string[] Nicknames { get; } = new string[PlayerEntity.SlotCapacity] { "Player1", "Player2", "Player3", "Player4", "Player5", "Player6", "Player7", "Player8" };
+        public static int[] Stars { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Standings { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamStandings { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] ResultSlots { get; } = new int[PlayerEntity.SlotCapacity]; // ordered by team rank, then by player rank
         public static int PrimeHunter { get; set; } = -1;
 
         public static bool Teams { get; set; } = false;
         public static bool FriendlyFire { get; set; } = false;
         public static int PointGoal { get; set; } = 0; // also used for starting extra lives
+
+        // P8 (owner 2026-10-10): survival's spare lives are one pool per team (TeamDeaths). With 5-8 seats in team play the
+        // pool scales with the team's size so each player has what a 2v2 player has: (PointGoal + 1) deaths per two players,
+        // never fewer than vanilla's. 1-4 seats: PointGoal, as the game.
+        public static int TeamLives(int team)
+        {
+            if (PlayerEntity.MaxPlayers <= PlayerEntity.VanillaMaxPlayers || !Teams)
+            {
+                return PointGoal;
+            }
+            int size = 0;
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
+            {
+                PlayerEntity player = PlayerEntity.Players[i];
+                if (player.LoadFlags.TestFlag(LoadFlags.Active) && player.TeamIndex == team)
+                {
+                    size++;
+                }
+            }
+            return Math.Max(PointGoal, ((PointGoal + 1) * size + 1) / 2 - 1);
+        }
         public static float TimeGoal { get; set; } = 0; // also used for starting extra lives
         public static int DamageLevel { get; set; } = 1;
         public static bool OctolithReset { get; set; } = false;
@@ -77,33 +98,33 @@ namespace MphRead
         public static float MatchTime { get; set; } = -1;
         public static bool ForceEndGame { get; set; } = false;
 
-        public static int[] Points { get; } = new int[4];
-        public static int[] TeamPoints { get; } = new int[4];
-        public static int[] Kills { get; } = new int[4];
-        public static int[] TeamKills { get; } = new int[4];
-        public static int[] Deaths { get; } = new int[4];
-        public static int[] TeamDeaths { get; } = new int[4];
-        public static float[] Time { get; } = new float[4]; // used for prime hunter time, player survival time
-        public static float[] TeamTime { get; } = new float[4]; // used for defense time, max team survival time
-        public static int[] BeamDamageMax { get; } = new int[4];
-        public static int[] BeamDamageDealt { get; } = new int[4];
-        public static int[] DamageCount { get; } = new int[4];
-        public static int[] AltDamageCount { get; } = new int[4];
-        public static int[] KillStreak { get; } = new int[4];
-        public static int[] Suicides { get; } = new int[4];
-        public static int[] FriendlyKills { get; } = new int[4];
-        public static int[] HeadshotKills { get; } = new int[4];
-        public static int[,] BeamKills { get; } = new int[4, 9];
+        public static int[] Points { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamPoints { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Kills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamKills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Deaths { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamDeaths { get; } = new int[PlayerEntity.SlotCapacity];
+        public static float[] Time { get; } = new float[PlayerEntity.SlotCapacity]; // used for prime hunter time, player survival time
+        public static float[] TeamTime { get; } = new float[PlayerEntity.SlotCapacity]; // used for defense time, max team survival time
+        public static int[] BeamDamageMax { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] BeamDamageDealt { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] DamageCount { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] AltDamageCount { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] KillStreak { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Suicides { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] FriendlyKills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] HeadshotKills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[,] BeamKills { get; } = new int[PlayerEntity.SlotCapacity, 9];
 
-        public static int[] OctolithScores { get; } = new int[4]; // field260 in-game
-        public static int[] OctolithDrops { get; } = new int[4]; // field268 in-game
-        public static int[] OctolithStops { get; } = new int[4]; // field270 in-game
+        public static int[] OctolithScores { get; } = new int[PlayerEntity.SlotCapacity]; // field260 in-game
+        public static int[] OctolithDrops { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
+        public static int[] OctolithStops { get; } = new int[PlayerEntity.SlotCapacity]; // field270 in-game
 
-        public static int[] NodesCaptured { get; } = new int[4]; // field260 in-game
-        public static int[] NodesLost { get; } = new int[4]; // field268 in-game
+        public static int[] NodesCaptured { get; } = new int[PlayerEntity.SlotCapacity]; // field260 in-game
+        public static int[] NodesLost { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
 
-        public static int[] KillsAsPrime { get; } = new int[4]; // field260 in-game
-        public static int[] PrimesKilled { get; } = new int[4]; // field268 in-game
+        public static int[] KillsAsPrime { get; } = new int[PlayerEntity.SlotCapacity]; // field260 in-game
+        public static int[] PrimesKilled { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
 
         public static Action<Scene> ModeState { get; private set; } = ModeStateAdventure;
         private static bool _pausingDialog = false;
@@ -165,7 +186,7 @@ namespace MphRead
                 || Mode == GameMode.BountyTeams || Mode == GameMode.NodesTeams || Mode == GameMode.DefenderTeams)
             {
                 Teams = true;
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
                 {
                     PlayerEntity player = PlayerEntity.Players[i];
                     if (player.LoadFlags.TestFlag(LoadFlags.Active))
@@ -233,9 +254,13 @@ namespace MphRead
             _nextAlarmIndex = 0;
         }
 
+        // host hook (Second Hunt's Hunter License, at "update license info"): each frame's time
+        public static Action<float>? HostLicenseTime { get; set; }
+
         public static void UpdateTime(Scene scene)
         {
             // todo: update license info etc.
+            HostLicenseTime?.Invoke(scene.FrameTime);
             if (MatchTime > 0)
             {
                 MatchTime = MathF.Max(MatchTime - scene.FrameTime, 0);
@@ -278,7 +303,7 @@ namespace MphRead
                     if (!invalid && Teams)
                     {
                         bool[] teams = new bool[2];
-                        for (int i = 0; i < 4; i++)
+                        for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
                         {
                             PlayerEntity player = PlayerEntity.Players[i];
                             if (player.LoadFlags.TestFlag(LoadFlags.Active))
@@ -323,7 +348,9 @@ namespace MphRead
                 }
                 if (MatchTime != 0 && !ForceEndGame)
                 {
-                    if (Multiplayer)
+                    // recomp: a negative match time never runs out (no time limit: the dev Solo arena); it read as under a
+                    // minute here, so the last-minute tempo and the alarm ran the whole match
+                    if (Multiplayer && MatchTime > 0)
                     {
                         var time = TimeSpan.FromSeconds(MatchTime);
                         if (time.TotalMinutes < 1 && time.Seconds <= 59 && !_tempoChanged)
@@ -364,13 +391,13 @@ namespace MphRead
                     PlayerEntity.Main.HudEndDisrupted();
                     if ((Mode == GameMode.Survival || Mode == GameMode.SurvivalTeams) && !ForceEndGame)
                     {
-                        for (int i = 0; i < 4; i++)
+                        for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
                         {
                             PlayerEntity player = PlayerEntity.Players[i];
                             // the game also checks if the player's time is greater than or equal to the time goal,
                             // which in survival is always zero, so the check isn't needed
                             if (player.LoadFlags.TestFlag(LoadFlags.Active)
-                                && (player.Health > 0 || TeamDeaths[player.TeamIndex] <= PointGoal))
+                                && (player.Health > 0 || TeamDeaths[player.TeamIndex] <= TeamLives(player.TeamIndex)))
                             {
                                 Time[i] = -1;
                                 TeamTime[player.TeamIndex] = -1;
@@ -516,7 +543,18 @@ namespace MphRead
                     }
                 }
             }
-            // todo: game timer/boss record stuff
+            // game timer (arm9 0x2054980): the game adds the time to story +0x1094 in Gorea 1's room (91), +0x1098 in Gorea 2's
+            // (92) and the rest elsewhere; the results page after an ending shows Gorea 1 + 2 (ov0 0x211e538). The rest of the
+            // play time is the host's own. todo: the boss records (top three times kept in the options save)
+            int timerRoom = scene.Room?.RoomId ?? -1;
+            if (timerRoom == 91)
+            {
+                StorySave.Stats.Gorea1Time += scene.FrameTime;
+            }
+            else if (timerRoom == 92)
+            {
+                StorySave.Stats.Gorea2Time += scene.FrameTime;
+            }
         }
 
         private static void EndIfPointGoalReached()
@@ -525,7 +563,7 @@ namespace MphRead
             {
                 return;
             }
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (player.LoadFlags.TestFlag(LoadFlags.Active) && TeamPoints[player.TeamIndex] >= PointGoal)
@@ -549,11 +587,11 @@ namespace MphRead
             int playersAlive = 0;
             int botsAlive = 0;
             bool[] teamsAlive = new bool[2];
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (player.LoadFlags.TestFlag(LoadFlags.Active)
-                    && (player.Health > 0 || TeamDeaths[player.TeamIndex] <= PointGoal))
+                    && (player.Health > 0 || TeamDeaths[player.TeamIndex] <= TeamLives(player.TeamIndex)))
                 {
                     Time[i] += scene.FrameTime;
                     if (player.IsBot)
@@ -574,11 +612,11 @@ namespace MphRead
             if (playersAlive == 0 || playersAlive + botsAlive < 2 || Teams && (!teamsAlive[0] || !teamsAlive[1]))
             {
                 MatchTime = 0;
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
                 {
                     PlayerEntity player = PlayerEntity.Players[i];
                     if (player.LoadFlags.TestFlag(LoadFlags.Active)
-                        && (player.Health > 0 || TeamDeaths[player.TeamIndex] <= PointGoal))
+                        && (player.Health > 0 || TeamDeaths[player.TeamIndex] <= TeamLives(player.TeamIndex)))
                     {
                         Time[i] = -1; // MAX
                     }
@@ -602,7 +640,7 @@ namespace MphRead
 
         public static void ModeStateDefender(Scene scene)
         {
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (player.LoadFlags.TestFlag(LoadFlags.Active) && TeamTime[player.TeamIndex] >= TimeGoal)
@@ -1003,16 +1041,18 @@ namespace MphRead
             }
         }
 
-        public static void UpdateState()
+        // recomp: voices false = only the standings and team sums (a match's RESULTS capture: a match client's last points can
+        // come after the frame's own UpdateState, release 0.2.0 F1), no "one kill to win" / "eliminated"
+        public static void UpdateState(bool voices = true)
         {
             if (PlayerEntity.PlayerCount == 0)
             {
                 return;
             }
             IReadOnlyList<PlayerEntity> players = PlayerEntity.Players;
-            int[] prevTeamPoints = new int[4];
-            int[] prevTeamDeaths = new int[4];
-            for (int i = 0; i < 4; i++)
+            int[] prevTeamPoints = new int[PlayerEntity.SlotCapacity];
+            int[] prevTeamDeaths = new int[PlayerEntity.SlotCapacity];
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
             {
                 prevTeamPoints[i] = TeamPoints[i];
                 prevTeamDeaths[i] = TeamDeaths[i];
@@ -1024,7 +1064,7 @@ namespace MphRead
                     TeamTime[i] = 0;
                 }
             }
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
             {
                 PlayerEntity player = players[i];
                 if (!player.LoadFlags.TestFlag(LoadFlags.Initial) || player.TeamIndex == -1)
@@ -1050,7 +1090,7 @@ namespace MphRead
                 || Mode == GameMode.BountyTeams || Mode == GameMode.Nodes || Mode == GameMode.NodesTeams)
             {
                 int teamPoints = TeamPoints[PlayerEntity.Main.TeamIndex];
-                if (teamPoints != prevTeamPoints[PlayerEntity.Main.TeamIndex] && teamPoints == PointGoal - 1)
+                if (voices && teamPoints != prevTeamPoints[PlayerEntity.Main.TeamIndex] && teamPoints == PointGoal - 1)
                 {
                     Sfx.QueueStream(VoiceId.VOICE_ONE_KILL_TO_WIN, delay: 1);
                 }
@@ -1059,14 +1099,14 @@ namespace MphRead
             {
                 int opponents = 0;
                 int lastTeam = -1;
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
                 {
                     PlayerEntity player = players[i];
                     if (!player.LoadFlags.TestAny(LoadFlags.Active))
                     {
                         continue;
                     }
-                    if (player.Health > 0 || TeamDeaths[player.TeamIndex] <= PointGoal)
+                    if (player.Health > 0 || TeamDeaths[player.TeamIndex] <= TeamLives(player.TeamIndex))
                     {
                         if (player.TeamIndex != PlayerEntity.Main.TeamIndex)
                         {
@@ -1074,7 +1114,7 @@ namespace MphRead
                             lastTeam = player.TeamIndex;
                         }
                     }
-                    if (TeamDeaths[player.TeamIndex] > PointGoal && player.RespawnTimer == PlayerEntity.RespawnTime)
+                    if (voices && TeamDeaths[player.TeamIndex] > TeamLives(player.TeamIndex) && player.RespawnTimer == PlayerEntity.RespawnTime)
                     {
                         Sfx.QueueStream(VoiceId.VOICE_ELIMINATED);
                     }
@@ -1082,7 +1122,7 @@ namespace MphRead
                 if (PlayerEntity.Main.LoadFlags.TestAny(LoadFlags.Active) && opponents == 1 && lastTeam != -1)
                 {
                     int teamDeaths = TeamDeaths[lastTeam];
-                    if (teamDeaths != prevTeamDeaths[lastTeam] && teamDeaths == PointGoal)
+                    if (voices && teamDeaths != prevTeamDeaths[lastTeam] && teamDeaths == TeamLives(lastTeam))
                     {
                         Sfx.QueueStream(VoiceId.VOICE_ONE_KILL_TO_WIN, delay: 1);
                     }
@@ -1094,7 +1134,7 @@ namespace MphRead
                 int a = 0;
                 for (int t = 0; t < 2; t++)
                 {
-                    for (int p = 0; p < 4; p++)
+                    for (int p = 0; p < PlayerEntity.MaxPlayers; p++)
                     {
                         PlayerEntity player = players[p];
                         if (player.TeamIndex == t)
@@ -1112,7 +1152,7 @@ namespace MphRead
             else
             {
                 int a = 0;
-                for (int p = 0; p < 4; p++)
+                for (int p = 0; p < PlayerEntity.MaxPlayers; p++)
                 {
                     Standings[p] = 3;
                     if (players[p].LoadFlags.TestFlag(LoadFlags.Active))
@@ -1173,9 +1213,11 @@ namespace MphRead
                         v47 = 0;
                     }
                 }
+                // recomp: the last row's seat (it indexed by row, so a winner in seat ActivePlayers - 1 took the losing team's
+                // place and the real last seat kept 3: one device read "tied for 2nd", another "last place", release 0.2.0 F1)
                 int index = ActivePlayers - 1;
-                Standings[index] = v57[players[ResultSlots[index]].TeamIndex];
-                TeamStandings[index] = v47;
+                Standings[ResultSlots[index]] = v57[players[ResultSlots[index]].TeamIndex];
+                TeamStandings[ResultSlots[index]] = v47;
             }
             else
             {
@@ -1565,7 +1607,7 @@ namespace MphRead
             TransitionRoomId = -1;
             TransitionAltForm = false;
             ActivePlayers = 0;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 Standings[i] = 0;
                 TeamStandings[i] = 0;
@@ -1981,6 +2023,9 @@ namespace MphRead
             public uint EnemyHunterDeaths { get; set; }
             // todo: this should probably be stored globally and not deleted along with the save slot
             public uint EnemyKills { get; set; }
+            // seconds spent in Gorea 1's and Gorea 2's rooms (story +0x1094 / +0x1098; ModeStateAdventure)
+            public float Gorea1Time { get; set; }
+            public float Gorea2Time { get; set; }
         }
     }
 }

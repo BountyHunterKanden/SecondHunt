@@ -296,8 +296,8 @@ namespace MphRead.Entities.Enemies
             if (_state1 == 0)
             {
                 // patrol aiming
-                var rotX = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_angleX));
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_angleY));
+                var rotX = DetMatrix.CreateRotationX(MathHelper.DegreesToRadians(_angleX));
+                var rotY = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(_angleY));
                 aimTransform = rotX * rotY;
                 _aimVec = Matrix.Vec3MultMtx4(_initialFacing, aimTransform);
                 var transpose = Matrix4.Transpose(Transform.ClearTranslation());

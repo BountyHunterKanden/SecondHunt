@@ -28,4 +28,13 @@
     </None>
   </ItemGroup>
 
+  <!-- Replay R2c (docs/REPLAY_MODE.md): `dotnet build ... -p:ReplayGolden=true` plays the golden replays in
+       tests/replays/ after the build (~10 s) and fails the build if one no longer plays exactly, i.e. the game logic
+       changed (bump ReplayFile.CurrentSimVersion and re-record if that was intended). Opt-in; needs the desktop
+       extraction (skipped without it). -->
+  <Target Name="ReplayGolden" AfterTargets="Build"
+          Condition="'$(ReplayGolden)' == 'true' And Exists('$(MSBuildThisFileDirectory)..\MphRead\bin\Debug\net9.0\paths.txt')">
+    <Exec Command="&quot;$(DOTNET_HOST_PATH)&quot; &quot;$(TargetPath)&quot; -replaygolden" WorkingDirectory="$(OutDir)" />
+  </Target>
+
 </Project>

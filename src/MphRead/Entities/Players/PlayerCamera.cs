@@ -819,6 +819,15 @@ namespace MphRead.Entities
             CameraInfo.Shake = 0;
             CameraInfo.Fov = Fixed.ToFloat(Values.NormalFov) * 2;
             CameraInfo.Update();
+            if (winner.NodeRef.PartIndex == -1)
+            {
+                // recomp: on a match client a remote winner can have no room part (the host's snapshots place it; a
+                // portal-less room or a spot outside every part gives none): the camera's own spot, else this player's
+                // part, else the last one (vanilla's call asserts on it, and a None NodeRef stops the room-part culling)
+                NodeRef at = _scene.GetNodeRefContaining(CameraInfo.Position);
+                CameraInfo.NodeRef = at.PartIndex != -1 ? at : NodeRef.PartIndex != -1 ? NodeRef : CameraInfo.NodeRef;
+                return;
+            }
             CameraInfo.NodeRef = _scene.UpdateNodeRef(winner.NodeRef, winner.Position, CameraInfo.Position);
         }
 

@@ -10,7 +10,8 @@ using System.Linq;
 // "Mouse.Left" / "Mouse.Right" / "Mouse.Middle" / "Mouse.Button4" / "Mouse.Button5" and "Wheel.Up" / "Wheel.Down".
 // A function has one or two buttons. Giving a button to a function takes it from any other function on the same device,
 // and a function left with none gets the first one's old buttons (a swap), so nothing ends up out of reach.
-// Fixed, never offered: the sticks, Start (pause) and Select (map), L3 (the status text), the menus' and dialogs' own
+// Fixed, never offered: the sticks, Start (pause) and Select (map), L3 (the status text), R3 (online voice chat's push to
+// talk; owner 2026-10-09), the menus' and dialogs' own
 // buttons; on a PC Esc / Tab (pause), M (map), the arrow keys (the controller's D-pad), F1-F12 and the 1-9 weapon keys.
 namespace MphRecomp.Config
 {
@@ -22,7 +23,7 @@ namespace MphRecomp.Config
         public const string Fire = "fire", Jump = "jump", Morph = "morph", WeaponMenu = "weaponmenu", ScanZoom = "scanzoom",
             Zoom = "zoom", ScanVisor = "scanvisor", Missiles = "missiles", PrevWeapon = "prevweapon", NextWeapon = "nextweapon",
             MissileToggle = "missiletoggle", Forward = "forward", Back = "back", Left = "left", Right = "right",
-            ZoomScan = "zoomscan", BombScan = "bombscan";
+            ZoomScan = "zoomscan", BombScan = "bombscan", Talk = "talk";
 
         // labels: up to two short lines (a row's label); descriptions: the description band (wrap 230)
         public static readonly Function[] PadFunctions =
@@ -30,9 +31,10 @@ namespace MphRecomp.Config
             new(Fire, "fire", "fires your weapon. in the morph ball, lays bombs.", new[] { "R2", "B" }),
             new(Jump, "jump", "jumps. in the morph ball, boosts.", new[] { "A", "L1" }),
             new(Morph, "morph\nball", "rolls into the morph ball and back out.", new[] { "X" }),
-            new(WeaponMenu, "weapon\nmenu", "hold for the weapon menu, then point the right stick at a weapon.", new[] { "Y" }),
-            new(ScanZoom, "scan /\nzoom", "scans with the scan visor on, zooms the rest of the time.", new[] { "L2" }),
-            new(Zoom, "zoom", "zooms in.", new[] { "ThumbR" }),
+            new(WeaponMenu, "weapon\nmenu", "hold for the weapon ring, point the right stick at a weapon, let go to equip it.", new[] { "L2" }),
+            new(ScanZoom, "scan /\nzoom", "scans with the scan visor on, zooms the rest of the time.", new[] { "Y" }),
+            // (no default button: owner 2026-10-09, R3 is online voice chat's push to talk; L2's tap and Y still zoom)
+            new(Zoom, "zoom", "zooms in.", Array.Empty<string>()),
             new(ScanVisor, "scan\nvisor", "the scan visor on or off. in a match, where there's no visor: the power beam.", new[] { "DpadUp" }),
             new(Missiles, "missiles", "picks missiles.", new[] { "DpadDown" }),
             new(PrevWeapon, "previous\nweapon", "the previous weapon you have, with ammo.", new[] { "DpadLeft" }),
@@ -55,6 +57,7 @@ namespace MphRecomp.Config
             new(WeaponMenu, "weapon\nmenu", "hold for the weapon menu, then move the mouse toward a weapon.", new[] { "Mouse.Middle" }),
             new(NextWeapon, "next\nweapon", "the next weapon you have, with ammo.", new[] { "Wheel.Down" }),
             new(PrevWeapon, "previous\nweapon", "the previous weapon you have, with ammo.", new[] { "Wheel.Up" }),
+            new(Talk, "push to\ntalk", "online voice chat: hold to talk (in push to talk). a controller talks with r3.", new[] { "V" }),
         };
 
         public static Function[] Functions(bool keys) => keys ? KeyFunctions : PadFunctions;
@@ -67,9 +70,12 @@ namespace MphRecomp.Config
         public static string[] Get(RecompSettings s, bool keys, string id)
             => Map(s, keys).TryGetValue(id, out string[]? b) && b != null ? b : Find(keys, id)?.Defaults ?? Array.Empty<string>();
 
-        // `button` does `id` now: in place of what it had, or (add) as its second button
-        public static void Assign(RecompSettings s, bool keys, string id, string button, bool add)
+        // `button` does `id` now: in place of what it had, or (add) as its second button. False (nothing changed, `only` = that
+        // function's label) when the button is another function's only one and there's nothing to swap it for (a second
+        // button, or a function with none like zoom): that function would be out of reach, or the button would do both.
+        public static bool Assign(RecompSettings s, bool keys, string id, string button, bool add, out string? only)
         {
+            only = null;
             string[] old = Get(s, keys, id);
             string[] mine = add && old.Length > 0 && old[0] != button ? new[] { old[0], button } : new[] { button };
             var changes = new Dictionary<string, string[]> { [id] = mine };
@@ -80,9 +86,15 @@ namespace MphRecomp.Config
                 if (!theirs.Contains(button)) continue;
                 string[] left = theirs.Where(b => b != button).ToArray();
                 if (left.Length == 0) left = old.Where(b => !mine.Contains(b)).ToArray(); // a swap
-                if (left.Length > 0) changes[f.Id] = left;
+                if (left.Length == 0 && f.Defaults.Length > 0)
+                {
+                    only = f.Label.Replace('\n', ' ');
+                    return false;
+                }
+                changes[f.Id] = left; // (none left: a function that starts with none, like zoom)
             }
             foreach ((string fid, string[] buttons) in changes) Store(s, keys, fid, buttons);
+            return true;
         }
 
         // only what differs from the defaults is kept, so a later change of a default reaches untouched functions
@@ -98,7 +110,7 @@ namespace MphRecomp.Config
 
         private static readonly HashSet<string> PadNames = new(StringComparer.Ordinal)
         {
-            "A", "B", "X", "Y", "L1", "R1", "L2", "R2", "ThumbR", "DpadUp", "DpadDown", "DpadLeft", "DpadRight",
+            "A", "B", "X", "Y", "L1", "R1", "L2", "R2", "DpadUp", "DpadDown", "DpadLeft", "DpadRight",
         };
 
         private static readonly HashSet<string> ReservedKeys = new(StringComparer.Ordinal)
@@ -133,6 +145,7 @@ namespace MphRecomp.Config
         // is 91); a longer pair drops the spaces
         public static string Value(string[] buttons)
         {
+            if (buttons.Length == 0) return "NONE";
             string spaced = string.Join(" / ", buttons.Select(Short));
             return spaced.Length <= 15 ? spaced : string.Join("/", buttons.Select(Short));
         }

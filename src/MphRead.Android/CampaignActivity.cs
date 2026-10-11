@@ -65,8 +65,8 @@ public class CampaignActivity : Activity
         CampaignGyro.Attach(this, _renderer, settingsPath, Intent);
         // the centred text panel (game over, match results) and leaving the game
         AttachPanel(root);
-        // a LAN match: however the match screen closes (Select, Back, quit), the other device hears BYE at once
-        if (_renderer.NetSession is LanSession session)
+        // a LAN or online match: however the match screen closes (Select, Back, quit), the other devices hear BYE at once
+        if (_renderer.NetSession is IDisposable session)
         {
             Application!.RegisterActivityLifecycleCallbacks(new CloseSessionOnDestroy(this, session));
         }
@@ -97,6 +97,40 @@ public class CampaignActivity : Activity
             StartActivity(new Intent(this, typeof(MainActivity)).AddFlags(ActivityFlags.ClearTop | ActivityFlags.SingleTop));
             Finish();
         });
+        _renderer.ChatBoxRequested = () => RunOnUiThread(ShowChatBox); // an online match's typed chat (MatchChat.cs)
+    }
+
+    // an online match's typed chat (Social O7, MatchChat.cs: a short Select / CHAT tap): one line with the soft keyboard, at the
+    // top so the match stays in view; the match runs on underneath (the player stands still while it's open)
+    void ShowChatBox()
+    {
+        var edit = new EditText(this) { Hint = "say something" };
+        edit.SetSingleLine(true);
+        edit.ImeOptions = Android.Views.InputMethods.ImeAction.Send;
+        edit.SetFilters(new Android.Text.IInputFilter[] { new Android.Text.InputFilterLengthFilter(MphRecomp.Online.ChatReq.MaxChat) });
+        string? sent = null;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .SetView(edit)!
+            .SetPositiveButton("SEND", (_, _) => sent = edit.Text)!
+            .SetNegativeButton("CANCEL", (_, _) => { })!
+            .Create()!;
+        edit.EditorAction += (_, e) =>
+        {
+            e.Handled = e.ActionId == Android.Views.InputMethods.ImeAction.Send
+                || e.Event?.KeyCode is Keycode.Enter && e.Event.Action == KeyEventActions.Down;
+            if (!e.Handled) return;
+            sent = edit.Text;
+            dialog.Dismiss();
+        };
+        dialog.DismissEvent += (_, _) =>
+        {
+            _renderer.SendTypedChat(sent);
+            HideSystemUi();
+        };
+        dialog.Window!.SetGravity(GravityFlags.Top);
+        dialog.Window.SetSoftInputMode(SoftInput.StateAlwaysVisible);
+        dialog.Show();
+        edit.RequestFocus();
     }
 
     protected override void OnPause() { base.OnPause(); _view.OnPause(); _renderer.PauseAudio(); }
@@ -212,6 +246,7 @@ public class CampaignActivity : Activity
             {
                 _renderer.SelectPressed();
             }
+            _renderer.Pad.Set(PadButton.Select, true); // held: an online match's quick-message wheel (MatchChat.cs)
             return true;
         }
         // Android's Back button / gesture never leaves the game (owner 2026-10-04): B in the pause menu, the ship's
@@ -303,6 +338,20 @@ public class CampaignActivity : Activity
             _renderer.ShipTouch(e.GetX(), e.GetY(), e.ActionMasked == MotionEventActions.Down ? 0 : e.ActionMasked == MotionEventActions.Move ? 1 : 2);
             return true;
         }
+        // a replay (MatchReplay.cs): its bar's buttons and scrub drags (a tap elsewhere pauses / plays), or a tap leaves
+        // the final scoreboard
+        if (e != null && _renderer.ReplayPlaying && e.ActionMasked is MotionEventActions.Down or MotionEventActions.Move or MotionEventActions.Up)
+        {
+            if (_renderer.MatchOver)
+            {
+                if (e.ActionMasked == MotionEventActions.Down) _renderer.RequestMatchContinue();
+            }
+            else
+            {
+                _renderer.ReplayTouch(e.GetX(), e.GetY(), e.ActionMasked == MotionEventActions.Down ? 0 : e.ActionMasked == MotionEventActions.Move ? 1 : 2);
+            }
+            return true;
+        }
         // taps during play belong to the touch controls (MatchTouchOverlay.cs, a view above the game: they never get
         // here while it is shown); the view stays WIDE (CampaignView.cs, board #30a)
         return base.OnTouchEvent(e);
@@ -313,6 +362,11 @@ public class CampaignActivity : Activity
         if (PadFor(keyCode) is PadButton up)
         {
             _renderer.Pad.Set(up, false);
+            return true;
+        }
+        if (keyCode == Keycode.ButtonSelect)
+        {
+            _renderer.Pad.Set(PadButton.Select, false);
             return true;
         }
         if (keyCode == Keycode.Back) return true; // handled on the press (OnKeyDown); the release must not finish us

@@ -12,6 +12,21 @@ namespace MphRead.Entities
         // in-ship menu is open, where a camera sequence would otherwise show the body)
         public static bool HostHideMainPlayer { get; set; }
 
+        // host hook: don't draw this seat (a replay's first-person view from another player's eyes). Default -1, none.
+        public static int HostHideSeat { get; set; } = -1;
+
+        // recomp host hooks (a replay's first-person view from another seat's eyes, MatchReplay.cs; drawing only):
+        // HostFirstPersonSeat draws its first-person gun instead of its body, turned about its eye by HostFirstPersonTurn
+        // (the view's turn from the seat's own camera: a bot's eye kept level while it has no target); HostMainSpectated
+        // draws the main player's body, since the view isn't its eyes. Default -1 / identity / off.
+        public static int HostFirstPersonSeat { get; set; } = -1;
+        public static Quaternion HostFirstPersonTurn { get; set; } = Quaternion.Identity;
+        public static bool HostMainSpectated { get; set; }
+        private bool HostFirstPersonView => SlotIndex == HostFirstPersonSeat && !IsMainPlayer;
+
+        private Vector3 HostTurnAboutEye(Vector3 point)
+            => CameraInfo.Position + Vector3.Transform(point - CameraInfo.Position, HostFirstPersonTurn);
+
         // recomp: the campaign host draws the main player's biped / alt form itself (an HD suit): MphRead still poses
         // them and draws the rest (trail, ice, charge and muzzle effects). HostShowMainBiped draws the main player's
         // biped in first person too (the host's third-person view: render only, the game's camera stays first person).
@@ -23,14 +38,60 @@ namespace MphRead.Entities
         public static float HostMainBipedAlpha { get; private set; }
         public ModelInstance HostBipedModel1 => _bipedModel1; // the legs layer (BipedModel2 = the torso layer)
 
+        // recomp: the same per player (a multiplayer skin on any seat, bots and remote players included): the host draws
+        // this player's biped / alt form itself; HostBipedAlpha = its biped's alpha as last drawn, 0 when it wasn't drawn
+        // (not visible, dead, morphed); HostDamageFlash = MphRead would draw it red this frame. Default off.
+        public bool HostOwnBiped { get; set; }
+        public Vector3 HostShootPoint { get; private set; }
+        public Vector3? HostFxShootOffset { get; set; }
+        public bool HostOwnAlt { get; set; }
+
+        // recomp: the main player's first-person charge glow, muzzle flash and gun smoke at this point of MPH's gun space
+        // (world units: X left, Y up, Z forward) instead of the muzzle (0, 0, MuzzleOffset) -- the host's first-person arm
+        // cannon puts them by its own barrel. Drawing only: the shots still spawn at _muzzlePos. Default null.
+        public Vector3? HostFxMuzzle { get; set; }
+        private Vector3 FxMuzzlePos => HostFxMuzzle is Vector3 at ? Matrix.Vec3MultMtx4(at, GetTransformMatrix(_aimVec, _upVector, _gunDrawPos)) : _muzzlePos;
+        public float HostBipedAlpha { get; private set; }
+        public bool HostDamageFlash => _timeSinceDamage < Values.DamageFlashTime * 2; // todo: FPS stuff (as Draw's)
+        // recomp: the morph ball trail's, morph sphere's (samusFurl) and boost glow's (samusDash) colour for this player (a
+        // skin's own, e.g. Dark Samus's blue); null = MPH's
+        public Vector3? HostTrailColor { get; set; }
+        // recomp: a no-import look-alike's palette set (D5, Read.HostExtraRecolors) for this seat's body and alt models; -1 =
+        // Recolor. Drawing only (the gun keeps Recolor).
+        public int HostLookRecolor { get; set; } = -1;
+        // recomp: the seat's picked character's name (D7: TROOPER, DARK SAMUS) for the target health bar; null = the hunter's
+        public string? HostCharacterName { get; set; }
+        // recomp: world positions of these body nodes in the pose just drawn (HostTrackedPoints, in order; HostTrackedPoses
+        // counts the poses), e.g. a look-alike's glows on its shoulders. Null = none (default).
+        public string[]? HostTrackNodes { get; set; }
+        public Vector3[] HostTrackedPoints { get; } = new Vector3[4];
+        public int HostTrackedPoses { get; private set; }
+        private void TrackHostNodes(Model model)
+        {
+            if (HostTrackNodes == null) return;
+            for (int i = 0; i < HostTrackNodes.Length && i < HostTrackedPoints.Length; i++)
+            {
+                HostTrackedPoints[i] = model.GetNodeByName(HostTrackNodes[i])?.Animation.Row3.Xyz ?? Position;
+            }
+            HostTrackedPoses++;
+        }
+        internal int BodyRecolor(ModelInstance inst, int recolor)
+            => HostLookRecolor >= 0 && HostLookRecolor < inst.Model.Recolors.Count ? HostLookRecolor : recolor;
+
         public void Draw()
         {
+            if (_furlEffect != null) _furlEffect.HostColor = HostTrailColor;
+            if (_boostEffect != null) _boostEffect.HostColor = HostTrailColor;
             if (IsMainPlayer)
             {
                 HostMainBipedAlpha = 0;
             }
-            if (IsMainPlayer && HostHideMainPlayer)
+            HostBipedAlpha = 0;
+            if (IsMainPlayer && HostHideMainPlayer || SlotIndex == HostHideSeat)
             {
+                // recomp: a hidden seat's charge glow / muzzle flash off too (else they stay where it was last drawn)
+                _chargeEffect?.SetDrawEnabled(false);
+                _muzzleEffect?.SetDrawEnabled(false);
                 return;
             }
             DrawShadow();
@@ -42,7 +103,7 @@ namespace MphRead.Entities
             {
                 return;
             }
-            if (Hunter == Hunter.Spire && Flags2.TestFlag(PlayerFlags2.AltAttack))
+            if (Hunter == Hunter.Spire && Flags2.TestFlag(PlayerFlags2.AltAttack) && !_scene.HostDrawFreeSim)
             {
                 UpdateSpireAltAttack();
             }
@@ -62,11 +123,11 @@ namespace MphRead.Entities
             // example issue - Kanden visible for one frame before Data Shrine 03 cam seq starts
             // should be culled because the cam seq frustum info has already been loaded, and is facing away from him,
             // even though the player's view is still what's on the screen (at least that seems to be what's happening)
-            if (IsMainPlayer || IsVisible(NodeRef))
+            if (IsMainPlayer || HostFirstPersonView || IsVisible(NodeRef))
             {
-                drawBiped = !IsMainPlayer || CameraType != CameraType.First || CameraSequence.Current != null
+                drawBiped = !IsMainPlayer && !HostFirstPersonView || CameraType != CameraType.First || CameraSequence.Current != null
                     || _camSwitchTimer < Values.CamSwitchTime * 2 // todo: FPS stuff
-                    || HostShowMainBiped;
+                    || IsMainPlayer && (HostShowMainBiped || HostMainSpectated); // (only non-main: HostFirstPersonView)
                 if (IsAltForm)
                 {
                     _modelTransform.Row3.Xyz = Position;
@@ -82,10 +143,14 @@ namespace MphRead.Entities
                     {
                         DrawSpireAltAttack();
                     }
+                    else if (HostScoutDrone)
+                    {
+                        DrawScoutDrone(); // recomp: the Trooper's drone (PlayerScoutDrone.cs)
+                    }
                     else
                     {
-                        UpdateTransforms(_altModel, _modelTransform, Recolor);
-                        if (!IsMainPlayer || !HostOwnMainAlt)
+                        UpdateTransforms(_altModel, _modelTransform, BodyRecolor(_altModel, Recolor));
+                        if ((!IsMainPlayer || !HostOwnMainAlt) && !HostOwnAlt)
                         {
                             GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
                         }
@@ -122,12 +187,13 @@ namespace MphRead.Entities
                         sin = facing.Y <= 0 ? -limit : limit;
                     }
                     float angle = MathF.Atan2(sin, cos);
-                    spineNode.AfterTransform = Matrix4.CreateRotationZ(angle);
+                    spineNode.AfterTransform = DetMatrix.CreateRotationZ(angle);
                     Model model = _bipedModel1.Model;
                     model.AnimateNodes(index: 0, false, Matrix4.Identity, Vector3.One, _bipedModel1.AnimInfo);
                     spineNode.AnimIgnoreChild = false;
                     model.AnimateNodes(spineNode.ChildIndex, false, Matrix4.Identity, Vector3.One, _bipedModel2.AnimInfo);
                     spineNode.AfterTransform = null;
+                    WallClingPoseModel(model); // recomp: Weavel's cling pose (PlayerWallCling.cs), off unless HostWallClingPose
                     float scale = Metadata.HunterScales[Hunter];
                     float bottom = Fixed.ToFloat(Values.MinPickupHeight);
                     var lateral = new Vector3(_field70, 0, _field74);
@@ -145,6 +211,7 @@ namespace MphRead.Entities
                         Node node = model.Nodes[i];
                         node.Animation *= transform; // todo?: could do this in the shader
                     }
+                    WallClingPoseWorld(model, lateral); // recomp: legs turned out of the wall while clinging
                     model.UpdateMatrixStack();
                     if (_health > 0)
                     {
@@ -153,26 +220,36 @@ namespace MphRead.Entities
                             PaletteOverride = Metadata.RedPalette;
                         }
                         float alpha = _curAlpha;
-                        if (IsMainPlayer && CameraSequence.Current == null
+                        // recomp: no unmorph fade in the host's third-person view (it's for the camera going back into the head)
+                        if (IsMainPlayer && CameraSequence.Current == null && !HostShowMainBiped
                             && _bipedModel1.AnimInfo.Index[0] == (int)PlayerAnimation.Unmorph)
                         {
                             alpha -= alpha * _bipedModel1.AnimInfo.Frame[0] / _bipedModel1.AnimInfo.FrameCount[0];
                             alpha = Math.Clamp(alpha, 0, 1);
                         }
-                        UpdateMaterials(_bipedModel2, Recolor);
+                        UpdateMaterials(_bipedModel2, BodyRecolor(_bipedModel2, Recolor));
                         if (IsMainPlayer)
                         {
                             HostMainBipedAlpha = alpha;
                         }
-                        if (!IsMainPlayer || !HostOwnMainBiped)
+                        HostBipedAlpha = alpha;
+                        if ((!IsMainPlayer || !HostOwnMainBiped) && !HostOwnBiped)
                         {
                             GetDrawItems(_bipedModel2, _bipedModel2.Model.Nodes[0], alpha);
                         }
                         PaletteOverride = null;
+                        // recomp: HostShootPoint = where the third-person charge glow / muzzle flash go (the shoot node);
+                        // HostFxShootOffset moves them (left, up, forward of Position by the facing), draw only. Default null.
+                        HostShootPoint = Matrix.Vec3MultMtx4(Metadata.MuzzleOffests[(int)Hunter], _shootNodes[lod]!.Animation);
+                        TrackHostNodes(model); // recomp: HostTrackNodes (default none)
                         if (_chargeEffect != null || _muzzleEffect != null)
                         {
-                            Vector3 muzzlePos = Metadata.MuzzleOffests[(int)Hunter];
-                            muzzlePos = Matrix.Vec3MultMtx4(muzzlePos, _shootNodes[lod]!.Animation);
+                            Vector3 muzzlePos = HostShootPoint;
+                            if (HostFxShootOffset is Vector3 fx && lateral.LengthSquared > 1e-12f)
+                            {
+                                Vector3 ahead = lateral.Normalized();
+                                muzzlePos = Position + Vector3.Cross(Vector3.UnitY, ahead) * fx.X + Vector3.UnitY * fx.Y + ahead * fx.Z;
+                            }
                             if (_chargeEffect != null)
                             {
                                 _chargeEffect.SetDrawEnabled(true);
@@ -205,13 +282,13 @@ namespace MphRead.Entities
                 }
                 else if (AttachedEnemy == null && !_field6D0 && Hunter != Hunter.Guardian)
                 {
-                    Matrix4 transform = GetTransformMatrix(_aimVec, _upVector, _gunDrawPos);
+                    Matrix4 transform = GunDrawTransform; // recomp: turned with a replay's view (HostFirstPersonSeat)
                     UpdateTransforms(_gunModel, transform, Recolor);
                     GetDrawItems(_gunModel, _gunModel.Model.Nodes[0], _curAlpha);
                     if (Flags1.TestFlag(PlayerFlags1.DrawGunSmoke))
                     {
                         // todo?: the game uses an alternate projection matrix to draw this
-                        var drawPos = new Vector3(0, 0, Fixed.ToFloat(Values.MuzzleOffset));
+                        var drawPos = HostFxMuzzle ?? new Vector3(0, 0, Fixed.ToFloat(Values.MuzzleOffset)); // recomp: HostFxMuzzle
                         drawPos = Matrix.Vec3MultMtx4(drawPos, transform);
                         transform.Row3.Xyz = drawPos;
                         UpdateTransforms(_gunSmokeModel, transform, recolor: 0);
@@ -238,6 +315,7 @@ namespace MphRead.Entities
                 UpdateTransforms(_octolithSimpleModel, transform, recolor: 0);
                 GetDrawItems(_octolithSimpleModel, _octolithSimpleModel.Model.Nodes[0], alpha: 1, recolor: 0);
             }
+            DrawShieldWall(); // recomp: the Trooper's barrier (PlayerShield.cs); nothing unless HostShieldWall
             DrawVolumes();
         }
 
@@ -250,6 +328,17 @@ namespace MphRead.Entities
             _altModel.Model.UpdateMatrixStack();
             UpdateMaterials(_altModel, Recolor);
             GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
+        }
+
+        // recomp (Scene.HostDrawFreeSim): the scene calls this every frame where Draw would run, drawn or not. Spire's
+        // rocks hit players (PlayerCollision.cs CheckAltAttackHit1), so they're placed here with Draw's own conditions
+        // minus the drawing-only ones (HostHideMainPlayer); Draw then draws the nodes this posed.
+        internal void UpdateDrawFreeSim()
+        {
+            if (!Flags2.TestFlag(PlayerFlags2.HideModel) && Hunter == Hunter.Spire && Flags2.TestFlag(PlayerFlags2.AltAttack))
+            {
+                UpdateSpireAltAttack();
+            }
         }
 
         private void UpdateSpireAltAttack()
@@ -372,8 +461,8 @@ namespace MphRead.Entities
                 ulong frame = _scene.LiveFrames / 2;
                 float rotZ = ((int)(16 * ((781874935307L * (53248 * frame) >> 32) + 2048)) >> 20) * (360 / 4096f);
                 float rotY = ((int)(16 * ((781874935307L * (26624 * frame) + 0x80000000000) >> 32)) >> 20) * (360 / 4096f);
-                var rot = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(rotZ));
-                rot *= Matrix4.CreateRotationY(MathHelper.DegreesToRadians(rotY));
+                var rot = DetMatrix.CreateRotationZ(MathHelper.DegreesToRadians(rotZ));
+                rot *= DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(rotY));
                 product = rot * product;
                 product *= 1.0f / (texture.Width / 2);
                 product = new Matrix4(
@@ -502,7 +591,7 @@ namespace MphRead.Entities
             }
             if (count > 0)
             {
-                var color = new Vector3(1, 27 / 31f, 11 / 31f);
+                var color = HostTrailColor ?? new Vector3(1, 27 / 31f, 11 / 31f);
                 _scene.AddRenderItem(RenderItemType.TrailStack, _scene.GetNextPolygonId(), color, material.XRepeat, material.YRepeat,
                     material.ScaleS, material.ScaleT, _mbTrailSegments, matrixStack, uvsAndVerts, count, _trailBindingId1);
             }

@@ -193,5 +193,39 @@ namespace MphRecomp.Frontend
                 top -= lineHeight;
             }
         }
+
+        // Emit text straight into a canvas-space UiDrawList (Y down, origin top-left; a HUD bar, not a menu file):
+        // (x, y) is the top-left of the first line, scale multiplies the 8px cell. align as Emit's.
+        public void EmitCanvas(string text, float x, float y, int align, float scale,
+            float r, float g, float b, float a, UiDrawList list)
+        {
+            float lineHeight = Cell * scale;
+            float lineTop = y;
+            foreach (string line in Lines(text, wrapWidth: 0))
+            {
+                float width = Measure(line) * scale;
+                float penX = align == 1 ? x - width : align == 2 ? x - width / 2 : x;
+                for (int i = 0; i < line.Length; i++)
+                {
+                    bool space = line[i] == ' ';
+                    int glyph = Glyph(line, ref i);
+                    if (!space && glyph >= 0 && glyph < _widths.Count)
+                    {
+                        float glyphTop = lineTop + (glyph < _offsets.Count ? _offsets[glyph] : 0) * scale;
+                        const float Inset = 0.02f;
+                        float u0 = ((glyph % Columns) * Cell + Inset) / AtlasWidth;
+                        float v0 = ((glyph / Columns) * Cell + Inset) / AtlasHeight;
+                        float u1 = u0 + (Cell - 2 * Inset) / AtlasWidth;
+                        float v1 = v0 + (Cell - 2 * Inset) / AtlasHeight;
+                        list.Quad(TextureId, penX, glyphTop, penX + Cell * scale, glyphTop + Cell * scale, u0, v0, u1, v1, r, g, b, a);
+                    }
+                    penX += Advance(glyph) * scale;
+                }
+                lineTop += lineHeight;
+            }
+        }
+
+        // MeasureCanvas: a line's width at EmitCanvas's scale (layout before drawing it)
+        public float MeasureCanvas(string line, float scale) => Measure(line) * scale;
     }
 }

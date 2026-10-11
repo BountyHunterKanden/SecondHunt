@@ -26,7 +26,7 @@ namespace MphRead.Entities
 
     public class AvailableArray
     {
-        private readonly bool[] _array = new bool[9];
+        private readonly bool[] _array = new bool[12]; // recomp: 12 for BeamType.PirateBlaster (11); 9 and 10 stay unused
 
         public void ClearAll()
         {
@@ -38,7 +38,7 @@ namespace MphRead.Entities
 
         public void SetAll()
         {
-            for (int i = 0; i < _array.Length; i++)
+            for (int i = 0; i < 9; i++) // recomp: vanilla's weapons (the Pirate Blaster only comes from its pickup)
             {
                 _array[i] = true;
             }
@@ -203,12 +203,28 @@ namespace MphRead.Entities
         // todo: these settings can change
         public static int MainPlayerIndex { get; set; } = 0;
         public static int PlayerCount { get; set; } = 0;
-        public static int MaxPlayers { get; set; } = 4;
+        // recomp (P8, PlayerSlots.cs): the game's 4 unless a match host sets 8 for a match of 5-8 seats; Players and
+        // every loop over seats see only this many (the tables hold SlotCapacity)
+        public static int MaxPlayers
+        {
+            get => _maxPlayers;
+            set
+            {
+                _maxPlayers = Math.Clamp(value, 1, SlotCapacity);
+                _playersView = new ArraySegment<PlayerEntity>(_players, 0, _maxPlayers);
+            }
+        }
+        private static int _maxPlayers = VanillaMaxPlayers;
         public static int PlayersCreated { get; set; } = 0;
         public static PlayerEntity Main => Players[MainPlayerIndex];
-        public static readonly PlayerEntity[] _players = new PlayerEntity[4];
-        public static IReadOnlyList<PlayerEntity> Players => _players;
+        public static readonly PlayerEntity[] _players = new PlayerEntity[SlotCapacity];
+        private static IReadOnlyList<PlayerEntity> _playersView = new ArraySegment<PlayerEntity>(_players, 0, VanillaMaxPlayers);
+        public static IReadOnlyList<PlayerEntity> Players => _playersView;
         public bool IsMainPlayer => this == Main && _scene.CameraMode == CameraMode.Player;
+        // host hooks (Second Hunt's Hunter License, at the game's "update license info" spots): the main player killed an
+        // opponent (the damage's flags and beam); the main player's kill streak ended (it died, or it killed a teammate)
+        public static Action<DamageFlags, BeamType>? HostLicenseKill { get; set; }
+        public static Action? HostLicenseStreakEnd { get; set; }
         private int _altScanId = 0;
 
         private const int UA = 0;
@@ -230,12 +246,11 @@ namespace MphRead.Entities
         // host hook: whether TryEquipWeapon would take this weapon now (owned, and the ammo for a shot)
         public bool CanEquipWeapon(BeamType beam)
         {
-            int index = (int)beam;
-            if (index < 0 || index >= 9 || !_availableWeapons[beam])
+            if (!PirateBlaster.IsPlayerBeam(beam) || !_availableWeapons[beam]) // recomp: vanilla's 0-8 + the Pirate Blaster
             {
                 return false;
             }
-            WeaponInfo info = Weapons.Current[index];
+            WeaponInfo info = PirateBlaster.Info(beam);
             return beam == BeamType.PowerBeam || _ammo[info.AmmoType] >= info.AmmoCost || _ammo[info.AmmoType] == -1;
         }
         private readonly AvailableArray _availableCharges = new AvailableArray();
@@ -252,7 +267,10 @@ namespace MphRead.Entities
         // for host renderers replacing the first-person gun: its animation frame (slot 0, 30 Hz) and where it is drawn
         public int GunAnimFrame => _gunModel.AnimInfo.Frame[0];
         public int GunAnimFrameCount => _gunModel.AnimInfo.FrameCount[0];
-        public Matrix4 GunDrawTransform => GetTransformMatrix(_aimVec, _upVector, _gunDrawPos);
+        public Matrix4 GunDrawTransform => HostFirstPersonView // recomp: a replay's view from this seat (PlayerDraw.cs)
+            ? GetTransformMatrix(Vector3.Transform(_aimVec, HostFirstPersonTurn), Vector3.Transform(_upVector, HostFirstPersonTurn),
+                HostTurnAboutEye(_gunDrawPos))
+            : GetTransformMatrix(_aimVec, _upVector, _gunDrawPos);
         public Vector3 GunMuzzlePosition => _muzzlePos;
         private ushort _bombCooldown = 0;
         private ushort _bombRefillTimer = 0;
@@ -280,9 +298,9 @@ namespace MphRead.Entities
         public bool IsPrimeHunter => SlotIndex == GameState.PrimeHunter;
 
         private const int _mbTrailSegments = 9 * 2;
-        private static readonly Matrix4[,] _mbTrailMatrices = new Matrix4[MaxPlayers, _mbTrailSegments];
-        private static readonly float[,] _mbTrailAlphas = new float[MaxPlayers, _mbTrailSegments];
-        private static readonly int[] _mbTrailIndices = new int[MaxPlayers];
+        private static readonly Matrix4[,] _mbTrailMatrices = new Matrix4[SlotCapacity, _mbTrailSegments];
+        private static readonly float[,] _mbTrailAlphas = new float[SlotCapacity, _mbTrailSegments];
+        private static readonly int[] _mbTrailIndices = new int[SlotCapacity];
         private Matrix4 _modelTransform = Matrix4.Identity;
 
         // todo: visualize
@@ -389,6 +407,7 @@ namespace MphRead.Entities
 
         private ushort _jumpPadControlLock = 0;
         private ushort _jumpPadControlLockMin = 0;
+        private bool _jumpPadSameArc = false; // host hook: this flight's pad is JumpPadEntity.SameArc
         private ushort _timeSinceJumpPad = 0;
         private Vector3 _jumpPadAccel;
 
@@ -466,7 +485,7 @@ namespace MphRead.Entities
 
         public static void Construct(Scene scene)
         {
-            for (int i = 0; i < _players.Length; i++)
+            for (int i = 0; i < MaxPlayers; i++) // recomp: MaxPlayers (P8; the game's table is 4)
             {
                 if (_players[i] == null)
                 {
@@ -485,6 +504,8 @@ namespace MphRead.Entities
             PlayersCreated = 0;
             MainPlayerIndex = 0; // network play: a match client plays another seat (set again after the new scene)
             NetClient = false;
+            NetWeaponPending = false;
+            HostAnyShieldWall = false; // recomp: set again by the match host (PlayerShield.cs)
         }
 
         public static PlayerEntity? Create(Hunter hunter, int recolor)
@@ -547,6 +568,9 @@ namespace MphRead.Entities
             _models.Add(_altIceModel);
             _models.Add(_doubleDmgModel);
             _models.Add(_octolithSimpleModel);
+            ShieldWallInit(); // recomp: the Trooper's Shield Wall (PlayerShield.cs); nothing unless HostShieldWall
+            WallClingInit(); // recomp: the Trooper's Wall Cling (PlayerWallCling.cs)
+            ScoutDroneInit(); // recomp: the Trooper's Scout Drone alt form (PlayerScoutDrone.cs)
             _trailModel = Read.GetModelInstance("trail");
             Material material = _trailModel.Model.Materials[0];
             _trailBindingId1 = _scene.BindGetTexture(_trailModel.Model, material.TextureId, material.PaletteId, 0);
@@ -739,6 +763,7 @@ namespace MphRead.Entities
             {
                 _abilities |= AbilityFlags.WeavelAltAttack;
             }
+            EchoesMovesSpawn(); // recomp: the double jump in Echoes arenas (PlayerEchoesMoves.cs)
             if (GameState.Multiplayer)
             {
                 _health = Values.EnergyTank - 1;
@@ -768,6 +793,7 @@ namespace MphRead.Entities
             Metadata.LoadEffectiveness(0x2AAAA, BeamEffectiveness);
             _frozenTimer = 0;
             _timeSinceFrozen = 255;
+            WallClingInit(); // recomp: off the wall on every spawn (PlayerWallCling.cs)
             _frozenGfxTimer = 0;
             _drawIceLayer = false;
             _hidingTimer = 0;
@@ -881,7 +907,7 @@ namespace MphRead.Entities
             OctolithFlag = null;
             ResetMorphBallTrail();
             _soundSource.StopAllSfx();
-            if (IsMainPlayer)
+            if (IsMainPlayer && !HostMainSoundsPlaced)
             {
                 _soundSource.Update(Position, rangeIndex: -1);
             }
@@ -903,6 +929,7 @@ namespace MphRead.Entities
             _lastJumpPad = null;
             _jumpPadControlLock = 0;
             _jumpPadControlLockMin = 0;
+            _jumpPadSameArc = false;
             _timeSinceJumpPad = UInt16.MaxValue; // the game doesn't do this
             if (IsMainPlayer)
             {
@@ -1321,12 +1348,11 @@ namespace MphRead.Entities
 
         private bool TryEquipWeapon(BeamType beam, bool silent = false, bool debug = false)
         {
-            int index = (int)beam;
-            if (index < 0 || index >= 9)
+            if (!PirateBlaster.IsPlayerBeam(beam)) // recomp: vanilla's 0-8 + the Pirate Blaster
             {
                 return false;
             }
-            WeaponInfo info = Weapons.Current[(int)beam];
+            WeaponInfo info = PirateBlaster.Info(beam);
             byte ammoType = info.AmmoType;
             if (debug && Cheats.FreeWeaponSelect)
             {
@@ -1351,15 +1377,15 @@ namespace MphRead.Entities
             UpdateZoom(false);
             PreviousWeapon = CurrentWeapon;
             CurrentWeapon = WeaponSelection = beam;
-            if (beam == Weapons.GetAffinityBeam(Hunter)
+            if (beam == AffinityBeam // recomp: the seat's (the Trooper's is the Pirate Blaster, PlayerPirateBlaster.cs)
                 || GameState.SinglePlayer && (Hunter == Hunter.Samus && (beam == BeamType.PowerBeam || beam == BeamType.OmegaCannon)
                 || Hunter == Hunter.Guardian && beam == BeamType.VoltDriver))
             {
-                EquipInfo.Weapon = Weapons.Current[(int)beam + 9];
+                EquipInfo.Weapon = PirateBlaster.Info(beam, affinity: true);
             }
             else
             {
-                EquipInfo.Weapon = Weapons.Current[(int)beam];
+                EquipInfo.Weapon = PirateBlaster.Info(beam);
             }
             EquipInfo.ChargeLevel = 0;
             EquipInfo.SmokeLevel = 0;
@@ -1425,6 +1451,13 @@ namespace MphRead.Entities
         private void UpdateAffinityWeaponSlot(BeamType beam, int slot = 2)
         {
             Debug.Assert(slot == 2);
+            // recomp (T4 N15): the Pirate Blaster has its own ring slot, so it doesn't push the Omega Cannon out of the third
+            // slot (it still takes an empty or other weapon's slot); matches recorded before (HostPirateBlasterKey off) as before
+            if (beam == BeamType.PirateBlaster && HostPirateBlasterKey && _weaponSlots[slot] == BeamType.OmegaCannon
+                && _availableWeapons[BeamType.OmegaCannon])
+            {
+                return;
+            }
             if (_weaponSlots[slot] == BeamType.OmegaCannon && beam != BeamType.OmegaCannon)
             {
                 _availableCharges[BeamType.OmegaCannon] = false;
@@ -1455,6 +1488,15 @@ namespace MphRead.Entities
                         }
                     }
                 }
+                // recomp: the Pirate Blaster (11) is past the loop
+                if (_availableWeapons[BeamType.PirateBlaster])
+                {
+                    WeaponInfo info = PirateBlaster.Info(BeamType.PirateBlaster);
+                    if (info.Priority > priority && _ammo[info.AmmoType] >= info.AmmoCost)
+                    {
+                        nextBeam = BeamType.PirateBlaster;
+                    }
+                }
                 UpdateAffinityWeaponSlot(nextBeam);
                 if (nextBeam == BeamType.None)
                 {
@@ -1473,7 +1515,7 @@ namespace MphRead.Entities
             int animId = Metadata.GunAnimationIds[(int)Hunter, (int)anim, 0];
             SetFlags setFlags = SetFlags.Texture | SetFlags.Texcoord | SetFlags.Material | SetFlags.Unused | SetFlags.Node;
             _gunModel.SetAnimation(animId, slot: 0, setFlags, animFlags);
-            animId = Metadata.GunAnimationIds[(int)Hunter, (int)anim, (int)CurrentWeapon + 1];
+            animId = Metadata.GunAnimationIds[(int)Hunter, (int)anim, PirateBlaster.BaseIndex(CurrentWeapon) + 1]; // recomp: blaster = PB
             if (animId >= 0)
             {
                 setFlags &= ~SetFlags.Node;
@@ -1662,6 +1704,7 @@ namespace MphRead.Entities
             {
                 return;
             }
+            ushort hostInvulnBefore = _damageInvulnTimer; // recomp: a hit the Shield Wall takes leaves it as it was
             if (!flags.TestAny(DamageFlags.Death | DamageFlags.IgnoreInvuln | DamageFlags.NoDmgInvuln))
             {
                 if (_damageInvulnTimer > 0)
@@ -1679,7 +1722,7 @@ namespace MphRead.Entities
                 if (source.Type == EntityType.BeamProjectile)
                 {
                     beam = (BeamProjectileEntity)source;
-                    Effectiveness effectiveness = BeamEffectiveness[(int)beam.Beam];
+                    Effectiveness effectiveness = BeamEffectiveness[PirateBlaster.BaseIndex(beam.Beam)]; // recomp: blaster = Power Beam's row
                     if (effectiveness == Effectiveness.Zero)
                     {
                         return;
@@ -1753,6 +1796,16 @@ namespace MphRead.Entities
                     damage = 1;
                 }
             }
+            if (HostShieldWall && !ignoreDamage && ShieldWallAbsorbs(damage, flags, direction, source))
+            {
+                // recomp: the Trooper's barrier took the hit from the front (PlayerShield.cs)
+                _damageInvulnTimer = hostInvulnBefore;
+                if (IsBot && source != null)
+                {
+                    AiData.OnTakeDamage(0, source, attacker);
+                }
+                return;
+            }
             if (Flags2.TestFlag(PlayerFlags2.Halfturret) && attacker != null && !ignoreDamage)
             {
                 _halfturret.OnTakeDamage(attacker, damage);
@@ -1819,7 +1872,9 @@ namespace MphRead.Entities
                 }
                 if (attacker != this)
                 {
-                    GameState.DamageCount[attacker.SlotIndex]++;
+                    // the game adds the damage, not one per hit: its RESULTS "damage dealt" (BizHawk USA rev 1, 2026-10-07:
+                    // the counter grows by 6, 8, 20... per hit, beam or not)
+                    GameState.DamageCount[attacker.SlotIndex] += (int)damage;
                     attacker._hidingTimer = 0;
                     _hidingTimer = 0;
                 }
@@ -1864,6 +1919,7 @@ namespace MphRead.Entities
                 if (IsMainPlayer)
                 {
                     // todo: license info
+                    HostLicenseStreakEnd?.Invoke();
                     HudEndDisrupted();
                     if (_frozenGfxTimer > 0)
                     {
@@ -2149,7 +2205,7 @@ namespace MphRead.Entities
                             {
                                 killedBy = _altAttackNames[(int)attacker.Hunter];
                             }
-                            else if (beamType <= BeamType.OmegaCannon)
+                            else if (beamType <= BeamType.OmegaCannon || beamType == BeamType.PirateBlaster) // recomp
                             {
                                 killedBy = _weaponNames[(int)beamType];
                             }
@@ -2199,6 +2255,7 @@ namespace MphRead.Entities
                                 GameState.FriendlyKills[attacker.SlotIndex]++;
                                 GameState.KillStreak[attacker.SlotIndex] = 0;
                                 // todo: update license info
+                                if (attacker == Main) HostLicenseStreakEnd?.Invoke();
                                 if (attacker == Main)
                                 {
                                     string nickname = GameState.Nicknames[SlotIndex];
@@ -2211,6 +2268,7 @@ namespace MphRead.Entities
                                 if (attacker == Main)
                                 {
                                     // todo: update license info
+                                    HostLicenseKill?.Invoke(flags, beamType);
                                     string nickname = GameState.Nicknames[SlotIndex];
                                     // YOUR HEADSHOT KILLED %s! / YOU KILLED %s!
                                     string message = Strings.GetHudMessage(flags.TestFlag(DamageFlags.Headshot) ? 239 : 238);
@@ -2540,7 +2598,7 @@ namespace MphRead.Entities
 
         private static readonly string[] _altAttackNames = new string[8];
         private static readonly string[] _hunterNames = new string[8];
-        private static readonly string[] _weaponNames = new string[9];
+        private static readonly string[] _weaponNames = new string[12]; // recomp: 9 -> 12 (11 = the Pirate Blaster)
 
         public static void LoadWeaponNames()
         {
@@ -2548,6 +2606,9 @@ namespace MphRead.Entities
             {
                 _weaponNames[i] = Strings.GetMessage('W', i + 1, StringTables.WeaponNames);
             }
+            // recomp: no ROM string for the Pirate Blaster (its kills don't count in the per-beam stats yet: BeamKills is
+            // the vanilla 9 beams)
+            _weaponNames[(int)BeamType.PirateBlaster] = Metadata.WeaponNamesUpper[(int)BeamType.PirateBlaster];
             for (int i = 0; i < 8; ++i)
             {
                 _hunterNames[i] = Strings.GetMessage('H', i + 1, StringTables.WeaponNames);

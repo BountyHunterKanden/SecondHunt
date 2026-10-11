@@ -22,6 +22,7 @@ internal static class DesktopPlatform
         AppPlatform.EncodePng = EncodePng;
         _audio = DesktopAudio.TryOpen();
         if (_audio != null) AppPlatform.Audio = _audio;
+        MphRecomp.App.VoiceAudio.Install(DesktopPaths.Root, () => new VoiceCaptureWindows()); // online voice chat (O8)
     }
 
     public static string AudioStats() => _audio?.Stats() ?? "no sound device";

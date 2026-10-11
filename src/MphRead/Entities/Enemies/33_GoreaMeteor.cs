@@ -117,7 +117,7 @@ namespace MphRead.Entities.Enemies
                 _field1BE -= 360;
             }
             var axis = Vector3.Cross(_effectUp, _effectFacing);
-            var mtx = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_field1BE));
+            var mtx = DetMatrix.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_field1BE));
             Vector3 up = Matrix.Vec3MultMtx3(_effectUp, mtx);
             Vector3 facing = Matrix.Vec3MultMtx3(_effectFacing, mtx);
             SetTransform(facing, up, Position);

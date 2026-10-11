@@ -73,7 +73,7 @@ namespace MphRead.Entities.Enemies
             }
             Vector3 facing = _slench.FacingVector;
             Vector3 up = _slench.UpVector;
-            var rotMtx = Matrix4.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(angle));
+            var rotMtx = DetMatrix.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(angle));
             up = Matrix.Vec3MultMtx3(up, rotMtx).Normalized();
             SetTransform(facing, up, _slench.Position);
             _health = _healthMax = values.Health;

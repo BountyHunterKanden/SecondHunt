@@ -75,7 +75,7 @@ namespace MphRead
                 {
                     ArenaCensus c = MatchArenas.Census(r, mode);
                     Console.WriteLine($"        {mode,-13} spawns {c.Spawns,2} flags {c.Flags} bases {c.Bases} nodes {c.Nodes}"
-                        + (c.Supports(mode) ? "" : "   -- not playable"));
+                        + (c.Supports(mode) ? $"   max {MatchArenas.RecommendedMaxPlayers(r, mode)}" : "   -- not playable"));
                 }
             }
         }
@@ -152,8 +152,10 @@ namespace MphRead
             string outDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..",
                 "extract_out", "multiplayer"));
             Directory.CreateDirectory(outDir);
-            File.WriteAllText(Path.Combine(outDir, "match_sweep.txt"), report.ToString());
-            Console.WriteLine($"written {Path.Combine(outDir, "match_sweep.txt")}");
+            // (P8: a sweep of 5-8 seats keeps its own file, match_sweep_8p.txt)
+            string file = o.Bots + 1 > 4 ? $"match_sweep_{o.Bots + 1}p.txt" : "match_sweep.txt";
+            File.WriteAllText(Path.Combine(outDir, file), report.ToString());
+            Console.WriteLine($"written {Path.Combine(outDir, file)}");
         }
 
         // MphRead's Debug.Asserts would end the process in this Debug build; the app is a Release build (asserts
@@ -285,6 +287,8 @@ namespace MphRead
             public int Kills, Deaths, Points;
             public double LoadMs, SimMs;
             public int NeverSpawned; // seats that never became active
+            public string NeverSpawnedSeats = "";
+            public bool IdleHumanUnspawned; // the no-input local seat only spawns on its timer (30 s with 4+ players): not a failure
             public int StuckBots; // bots that barely moved all match
             public int Asserts;
             public string? RemoteNote;
@@ -297,7 +301,8 @@ namespace MphRead
                 }
                 string notes = "";
                 if (!Ended) notes += " did-not-end";
-                if (NeverSpawned > 0) notes += $" never-spawned={NeverSpawned}";
+                if (NeverSpawned > 0) notes += $" never-spawned={NeverSpawned} (seat{NeverSpawnedSeats})";
+                if (IdleHumanUnspawned) notes += " idle-human-unspawned";
                 if (StuckBots > 0) notes += $" stuck-bots={StuckBots}";
                 if (Asserts > 0) notes += $" asserts={Asserts}";
                 if (RemoteNote != null) notes += " " + RemoteNote;
@@ -396,9 +401,14 @@ namespace MphRead
                     r.Kills += GameState.Kills[i];
                     r.Deaths += GameState.Deaths[i];
                     r.Points += GameState.Points[i];
-                    if (!spawned[i])
+                    if (!spawned[i] && !settings.Players[i].Bot && i == 0 && remote == null)
+                    {
+                        r.IdleHumanUnspawned = true;
+                    }
+                    else if (!spawned[i])
                     {
                         r.NeverSpawned++;
+                        r.NeverSpawnedSeats += $" {i + 1} {settings.Players[i].Hunter}{(settings.Players[i].Bot ? " bot" : "")}";
                     }
                     else if (settings.Players[i].Bot && travel[i] < 10)
                     {

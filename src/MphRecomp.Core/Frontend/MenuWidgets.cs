@@ -34,6 +34,8 @@ namespace MphRecomp.Frontend
             _textures = textures;
         }
 
+        public UiTextureCache Textures => _textures; // the menu's texture cache (MultiplayerMenu adds the imported arenas' pictures)
+
         // the game's paths use backslashes; MphRead combines them with the file system root itself
         private static string FixPath(string path) => path.Replace('\\', '/');
 

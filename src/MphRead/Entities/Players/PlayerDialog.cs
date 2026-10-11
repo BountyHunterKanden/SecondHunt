@@ -578,6 +578,7 @@ namespace MphRead.Entities
 
         private void DrawDialogs()
         {
+            _scene.HostHudDialog(true); // (headless hosts: in a centred 4:3 box, Scene.HostHudDialogBox)
             float baseY = DialogType == DialogType.Event ? 27 : 47;
             if (!ScanVisor && _overlayMessage1 != null)
             {
@@ -760,6 +761,7 @@ namespace MphRead.Entities
                     }
                 }
             }
+            _scene.HostHudDialog(false);
         }
 
         private bool CheckButtonPressed(DialogButton type)

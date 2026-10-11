@@ -37,6 +37,27 @@ namespace MphRead.Entities
         private Node _baseNodeParent = null!;
         private ModelInstance _altIceModel = null!;
 
+        // recomp: the Trooper's Scout Drone (PlayerScoutDrone.cs): with Owner.HostScoutDrone this half is his standing
+        // body, not a turret: it never fires and is drawn as Weavel's biped in its idle (HostBodyModel) where he split,
+        // unless the host draws it (HostBodyByApp: the seat's HD skin). HostBodyPosition = where his own Position would be
+        // for that body (MphRead's biped draw and the host's skins place a body from it).
+        private ModelInstance? _bodyModel = null;
+        public ModelInstance? HostBodyModel => _bodyModel;
+        public bool HostBodyByApp { get; set; }
+        public Vector3 HostBodyPosition => Position.AddY(-0.45f - Fixed.ToFloat(Owner.Values.MinPickupHeight));
+
+        // recomp: hits on the standing body (owner 2026-10-09): a segment `radius` wide (a beam's, the drone laser's) hits
+        // the whole biped standing there -- a player's own standing cylinder (BeamProjectileEntity), MinPickupHeight to
+        // MaxPickupHeight around HostBodyPosition, BipedColRadius wide -- not the turret's 0.45 sphere. Still a Halfturret
+        // hit, so no headshots (the owner is the drone, in alt form).
+        public bool HostBodyHit(Vector3 from, Vector3 to, float radius, ref CollisionResult result)
+        {
+            float minY = Fixed.ToFloat(Owner.Values.MinPickupHeight);
+            float height = Fixed.ToFloat(Owner.Values.MaxPickupHeight) - minY;
+            return CollisionDetection.CheckCylindersOverlap(from, to, HostBodyPosition.AddY(minY), Vector3.UnitY, height,
+                Fixed.ToFloat(Owner.Values.BipedColRadius) + radius, ref result);
+        }
+
         public HalfturretEntity(PlayerEntity owner, Scene scene) : base(EntityType.Halfturret, scene)
         {
             Owner = owner;
@@ -74,6 +95,10 @@ namespace MphRead.Entities
             EquipInfo.Beams = Owner.EquipInfo.Beams;
             EquipInfo.Weapon = Weapons.Current[3]; // non-affinity Battlehammer
             _models[0].SetAnimation(1, AnimFlags.NoLoop);
+            if (Owner.HostScoutDrone && _bodyModel == null)
+            {
+                _bodyModel = SetUpModel(Metadata.HunterModels[Hunter.Weavel][0], (int)PlayerAnimation.Idle);
+            }
             _light1Vector = Owner.Light1Vector;
             _light1Color = Owner.Light1Color;
             _light2Vector = Owner.Light2Vector;
@@ -195,7 +220,7 @@ namespace MphRead.Entities
                         }
                     }
                 }
-                if (_target != null)
+                if (_target != null && !Owner.HostScoutDrone) // recomp: the Trooper's standing body never fires
                 {
                     Vector3 muzzlePos = Position.AddY(0.4f);
                     int encounter = GameState.EncounterState[Owner.SlotIndex];
@@ -262,6 +287,10 @@ namespace MphRead.Entities
             if (Owner == PlayerEntity.Main)
             {
                 string message = Text.Strings.GetHudMessage(233); // turret energy: %d
+                if (Owner.HostScoutDrone)
+                {
+                    message = TrooperEnergyMessage(message);
+                }
                 // hide during dialog pause to prevent overlap -- the game doesn't do this, and also can't play as Weavel in 1P anyway
                 Owner.QueueHudMessage(128, 150, 1 / 1000f, 0, message.Replace("%d", _health.ToString()), dialogHide: true);
             }
@@ -379,6 +408,11 @@ namespace MphRead.Entities
             {
                 return;
             }
+            if (Owner.HostScoutDrone && _bodyModel != null)
+            {
+                DrawStandingBody(_bodyModel);
+                return;
+            }
             ModelInstance inst = _models[0];
             Model model = inst.Model;
             AnimationInfo animInfo = inst.AnimInfo;
@@ -402,7 +436,7 @@ namespace MphRead.Entities
                 node.Animation *= root; // todo?: could do this in the shader
             }
             model.UpdateMatrixStack();
-            UpdateMaterials(inst, Recolor);
+            UpdateMaterials(inst, Owner.BodyRecolor(inst, Recolor));
             GetDrawItems(inst, 0);
             PaletteOverride = null;
             if (_freezeTimer > 0)
@@ -412,6 +446,64 @@ namespace MphRead.Entities
                 var transform = Matrix4.CreateScale(radius);
                 transform.Row3.Xyz = Position;
                 UpdateTransforms(_altIceModel, transform, recolor: 0);
+                GetDrawItems(_altIceModel, 1);
+                _useRoomLights = false;
+            }
+        }
+
+        // recomp: the Trooper's HUD line reads "trooper energy: %d" (owner 2026-10-08): the ROM's word, its case kept
+        private static string TrooperEnergyMessage(string message)
+        {
+            int at = message.IndexOf("turret", StringComparison.OrdinalIgnoreCase);
+            if (at < 0 || at + 6 > message.Length)
+            {
+                return message;
+            }
+            string word = Char.IsUpper(message[at]) ? (Char.IsUpper(message[at + 1]) ? "TROOPER" : "Trooper") : "trooper";
+            return message[..at] + word + message[(at + 6)..];
+        }
+
+        // recomp: the Trooper's standing body (see HostBodyModel): Weavel's biped as PlayerDraw places it, facing where he
+        // split; frozen = the alt ice as the turret's
+        public bool HostDamageFlash => _timeSinceDamage < Owner.Values.DamageFlashTime * 2; // todo: FPS stuff
+
+        private void DrawStandingBody(ModelInstance inst)
+        {
+            if (!HostBodyByApp)
+            {
+                Model model = inst.Model;
+                model.AnimateNodes(index: 0, false, Matrix4.Identity, Vector3.One, inst.AnimInfo);
+                float scale = Metadata.HunterScales[Hunter.Weavel];
+                float bottom = Fixed.ToFloat(Owner.Values.MinPickupHeight);
+                Vector3 facing = FacingVector.WithY(0);
+                facing = facing.LengthSquared < 1e-6f ? Vector3.UnitZ : facing.Normalized();
+                var right = new Vector3(facing.Z, 0, -facing.X);
+                Matrix4 transform = Matrix4.Identity;
+                transform.Row0.Xyz = -right * scale;
+                transform.Row1.Xyz = Vector3.Cross(facing, right) * scale;
+                transform.Row2.Xyz = -facing * scale;
+                transform.Row3.Xyz = HostBodyPosition;
+                transform.Row3.Y += bottom + bottom * (1 - scale);
+                for (int i = 0; i < model.Nodes.Count; i++)
+                {
+                    Node node = model.Nodes[i];
+                    node.Animation *= transform;
+                }
+                model.UpdateMatrixStack();
+                if (HostDamageFlash)
+                {
+                    PaletteOverride = Metadata.RedPalette;
+                }
+                UpdateMaterials(inst, Owner.BodyRecolor(inst, Recolor));
+                GetDrawItems(inst, 0);
+                PaletteOverride = null;
+            }
+            if (_freezeTimer > 0)
+            {
+                _useRoomLights = true;
+                var ice = Matrix4.CreateScale(0.65f);
+                ice.Row3.Xyz = Position;
+                UpdateTransforms(_altIceModel, ice, recolor: 0);
                 GetDrawItems(_altIceModel, 1);
                 _useRoomLights = false;
             }
@@ -465,8 +557,8 @@ namespace MphRead.Entities
                 ulong frame = _scene.LiveFrames / 2;
                 float rotZ = ((int)(16 * ((781874935307L * (53248 * frame) >> 32) + 2048)) >> 20) * (360 / 4096f);
                 float rotY = ((int)(16 * ((781874935307L * (26624 * frame) + 0x80000000000) >> 32)) >> 20) * (360 / 4096f);
-                var rot = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(rotZ));
-                rot *= Matrix4.CreateRotationY(MathHelper.DegreesToRadians(rotY));
+                var rot = DetMatrix.CreateRotationZ(MathHelper.DegreesToRadians(rotZ));
+                rot *= DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(rotY));
                 product = rot * product;
                 product *= 1.0f / (texture.Width / 2);
                 product = new Matrix4(

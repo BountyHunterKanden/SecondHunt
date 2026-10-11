@@ -804,6 +804,10 @@ namespace MphRead.Entities
                     }
                     v165 = true;
                     Flags1 |= PlayerFlags1.CollidingLateral;
+                    if (HostWallCling)
+                    {
+                        WallClingTouch(result.Plane.Xyz, face: result.Field0 == 0); // recomp: the Trooper's Wall Cling (PlayerWallCling.cs)
+                    }
                 }
                 // walking into a wall, jumping into a wall/ceiling, or landing/slopes/etc. -- update x/z
                 position.X += result.Plane.X * v2;
@@ -838,7 +842,8 @@ namespace MphRead.Entities
                     // floor collision
                     float damageSpeed = Fixed.ToFloat(Values.FallDamageSpeed);
                     if (Speed.Y <= -damageSpeed && !v163 && !v165 && !IsAltForm && !IsMorphing
-                        && !IsUnmorphing && !Flags1.TestFlag(PlayerFlags1.Standing) && _timeSinceJumpPad > 5 * 2) // todo: FPS stuff
+                        && !IsUnmorphing && !Flags1.TestFlag(PlayerFlags1.Standing) && _timeSinceJumpPad > 5 * 2 // todo: FPS stuff
+                        && !(HostEchoesPadNoFall && Flags1.TestFlag(PlayerFlags1.UsedJumpPad))) // recomp: Echoes arenas' pads (PlayerEchoesMoves)
                     {
                         // fall damage
                         int damage = (int)(Fixed.ToFloat(Values.FallDamageMax) * -(Speed.Y + damageSpeed) / 0.8f);
@@ -859,7 +864,7 @@ namespace MphRead.Entities
                             _altTiltZ += result.Plane.Z * tilt;
                             _altWobble += Fixed.ToFloat(Values.AltBounceWobble) * -magSqr;
                             _altSpinSpeed -= Fixed.ToFloat(Values.AltBounceSpin) * -magSqr;
-                            var rotMtx = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(40));
+                            var rotMtx = DetMatrix.CreateRotationY(MathHelper.DegreesToRadians(40));
                             Vector3 axis = Matrix.Vec3MultMtx3(result.Plane.Xyz, rotMtx);
                             Speed = Speed.AddX(axis.X * (-magSqr / 2)).AddZ(axis.Z * (-magSqr / 2));
                         }

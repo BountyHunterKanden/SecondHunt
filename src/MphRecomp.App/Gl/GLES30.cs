@@ -272,7 +272,15 @@ public static unsafe class GLES30
     public static void GlDeleteShader(int shader) => p_glDeleteShader(shader);
 
     static delegate* unmanaged<int, int*, void> p_glDeleteTextures;
-    public static void GlDeleteTextures(int n, int[] textures, int offset) { fixed (int* p = textures) p_glDeleteTextures(n, p + offset); }
+    public static void GlDeleteTextures(int n, int[] textures, int offset)
+    {
+        fixed (int* p = textures) p_glDeleteTextures(n, p + offset);
+        if (TextureDeleted is { } hook) for (int i = 0; i < n; i++) hook(textures[offset + i]);
+    }
+
+    // every texture name freed through this binding, after the delete (GL thread): CampaignArena.cs watches for names
+    // its arena still uses being freed by another owner (Echoes arenas, 2026-10-08)
+    public static System.Action<int>? TextureDeleted { get; set; }
 
     static delegate* unmanaged<int, int*, void> p_glDeleteVertexArrays;
     public static void GlDeleteVertexArrays(int n, int[] arrays, int offset) { fixed (int* p = arrays) p_glDeleteVertexArrays(n, p + offset); }

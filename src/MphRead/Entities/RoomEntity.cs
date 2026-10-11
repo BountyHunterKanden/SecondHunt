@@ -895,6 +895,12 @@ namespace MphRead.Entities
         private void UpdateRoomParts()
         {
             NodeRef curNodeRef = PlayerEntity.Main.CameraInfo.NodeRef;
+            // recomp: a HostView (replay spectator camera) sees from the room part it's in (the frustum is already its own)
+            if (_scene.HostView is { } hostView && curNodeRef.PartIndex != -1
+                && GetNodeRefContaining(hostView.Position) is { PartIndex: not -1 } viewNodeRef)
+            {
+                curNodeRef = viewNodeRef;
+            }
             if (_scene.CameraMode != CameraMode.Player || curNodeRef.PartIndex == -1)
             {
                 return;
@@ -1252,6 +1258,65 @@ namespace MphRead.Entities
                 }
             }
             return NodeRef.None;
+        }
+
+        // recomp: the room part whose own geometry is around a spot, the smallest node box (the planes lookup above as a
+        // tie-break and a fallback). GetNodeRefByPosition's portal planes run on forever, so in a room like Council
+        // Chamber a spot can pass a far part's test; a network snap or spawn placed with that part draws the room black
+        // (online joiner, 10-10). Same logic as MphRecomp PickupPlacement.NodeAt. Still not exact where parts' geometry
+        // overlaps (Council Chamber spawns 51/56/57): a spawn uses the spawn point's own part (PlayerEntity.NetSpawnNodeRef).
+        public NodeRef GetNodeRefContaining(Vector3 position)
+        {
+            NodeRef planes = GetNodeRefByPosition(position);
+            if (_models.Count == 0)
+            {
+                return planes;
+            }
+            Model model = _models[0].Model;
+            NodeRef best = NodeRef.None;
+            float bestSize = Single.MaxValue;
+            var stack = new Stack<int>();
+            foreach (Node part in model.Nodes)
+            {
+                if (part.RoomPartId < 0 || part.ChildIndex == -1)
+                {
+                    continue;
+                }
+                stack.Push(part.ChildIndex);
+                while (stack.Count > 0)
+                {
+                    for (int i = stack.Pop(); i != -1; i = model.Nodes[i].NextIndex)
+                    {
+                        Node node = model.Nodes[i];
+                        if (node.ChildIndex != -1)
+                        {
+                            stack.Push(node.ChildIndex);
+                        }
+                        if (node.MeshCount == 0)
+                        {
+                            continue;
+                        }
+                        Vector3 min = node.MinBounds;
+                        Vector3 max = node.MaxBounds;
+                        if (position.X < min.X - 0.5f || position.X > max.X + 0.5f || position.Z < min.Z - 0.5f
+                            || position.Z > max.Z + 0.5f || position.Y < min.Y - 1.5f || position.Y > max.Y + 1.5f)
+                        {
+                            continue;
+                        }
+                        float size = (max.X - min.X + 1) * (max.Y - min.Y + 1) * (max.Z - min.Z + 1);
+                        if (part.RoomPartId != planes.PartIndex)
+                        {
+                            size *= 1000;
+                        }
+                        if (size < bestSize)
+                        {
+                            bestSize = size;
+                            best = new NodeRef(part.RoomPartId, part.ChildIndex, modelIndex: 0);
+                        }
+                    }
+                }
+            }
+            return best.PartIndex != -1 ? best : planes;
         }
 
         public NodeRef UpdateNodeRef(NodeRef current, Vector3 prevPos, Vector3 curPos)

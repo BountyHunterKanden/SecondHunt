@@ -172,7 +172,7 @@ namespace MphRead.Entities.Enemies
         {
             var facing = new Vector3(_targetX, 0, _targetZ);
             var axis = new Vector3(_targetZ, 0, _targetX * -1);
-            var rotMtx = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_targetAngle));
+            var rotMtx = DetMatrix.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_targetAngle));
             facing = Matrix.Vec3MultMtx3(facing, rotMtx).Normalized();
             Vector3 up = Vector3.Cross(facing, axis).Normalized();
             Matrix4 transform = GetTransformMatrix(facing, up);
@@ -349,7 +349,7 @@ namespace MphRead.Entities.Enemies
                     _wobbleAngle -= 360;
                 }
                 Vector3 axis = facing;
-                var rotMtx = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_wobbleAngle));
+                var rotMtx = DetMatrix.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_wobbleAngle));
                 playerTarget += Matrix.Vec3MultMtx3(up, rotMtx).Normalized() * 2;
             }
             if (SlenchFlags.TestFlag(SlenchFlags.TargetingPlayer))
@@ -497,7 +497,7 @@ namespace MphRead.Entities.Enemies
                             // angle being 1 fx32 less (1/4096f). we don't do any of that, but we will still call RNG twice.
                             Rng.GetRandomInt2(360);
                             float angle = Rng.GetRandomInt2(360);
-                            var rotMtx = Matrix4.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(angle));
+                            var rotMtx = DetMatrix.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(angle));
                             Vector3 vecA = Matrix.Vec3MultMtx3(up, rotMtx);
                             Vector3 vecB = facing * 4 + Position;
                             float randf = Rng.GetRandomInt2(0x2000) / 4096f + 2; // [2.0, 4.0)
@@ -720,7 +720,7 @@ namespace MphRead.Entities.Enemies
                                     );
                                 }
                                 Vector3 vecB = Vector3.Cross(_targetHorizontal, Vector3.UnitY).Normalized();
-                                var rotMtx = Matrix4.CreateFromAxisAngle(vecB, MathHelper.DegreesToRadians(angle));
+                                var rotMtx = DetMatrix.CreateFromAxisAngle(vecB, MathHelper.DegreesToRadians(angle));
                                 Position = Matrix.Vec3MultMtx3(_targetHorizontal, rotMtx) * factor + vecA;
                                 if (RotateToTarget(playerTarget, Fixed.ToFloat(phaseValues.AngleIncrement4) / 2)) // todo: FPS stuff
                                 {
@@ -754,7 +754,7 @@ namespace MphRead.Entities.Enemies
                             }
                             vecA *= Fixed.ToFloat(phaseValues.FloatingSpeed);
                             Vector3 vecB = vecA + _detachedPosition;
-                            var rotMtx = Matrix4.CreateFromAxisAngle(_targetHorizontal, MathHelper.DegreesToRadians(angle));
+                            var rotMtx = DetMatrix.CreateFromAxisAngle(_targetHorizontal, MathHelper.DegreesToRadians(angle));
                             vecA = Matrix.Vec3MultMtx3(vecA, rotMtx);
                             Position = vecA + vecB;
                             if (_subtype != 0)
@@ -838,7 +838,7 @@ namespace MphRead.Entities.Enemies
                     {
                         factor = 0.01f;
                     }
-                    var rotMtx = Matrix4.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(_wobbleAngle));
+                    var rotMtx = DetMatrix.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(_wobbleAngle));
                     Position = Matrix.Vec3MultMtx3(up, rotMtx) * factor + _destVec2;
                 }
             }
