@@ -234,7 +234,8 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 
 - Only USA ROMs (1.0 and 1.1) work.
 - No rumble yet. The original supported the DS Rumble Pak, but controller and phone vibration aren't hooked up.
-- Some save details aren't kept yet: the game timer, boss records, a few stats and the artifact flags.
+- Some save details aren't kept yet: boss records, the rest of the game timer (the Gorea times are kept), a few stats
+  and the artifact flags.
 - The speaker setting on OPTIONS > AUDIO is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
 - ERASE ALL DATA on OPTIONS isn't in yet.
 - Arm cannons from the Prime games aren't imported yet, and _Metroid Prime 4: Beyond_ shows WORK IN PROGRESS on
@@ -274,7 +275,8 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 - Feel: the Judicator's fire rate, the Imperialist's auto-zoom, Slench's hit box, and whether the Volt Driver's charged
   shot should distort your visor
 
-**Devices:** so far Second Hunt has only been tested on Snapdragon 8 Gen 2 hardware (AYN Odin 2 Portal, Galaxy S23).
+**Devices:** so far Second Hunt has only been tested on Snapdragon 8 Gen 2 hardware (AYN Odin 2 Portal, Galaxy S23) and
+one Windows PC.
 Reports from other phones and handhelds are very welcome.
 
 **If it crashes:** go to SECOND HUNT SETTINGS > crash log > SHARE to send the latest crash report (it doesn't contain any
@@ -289,11 +291,14 @@ doing.
 - Step-through weapon buttons for touch
 - Sound timing like the original: what plays while paused and during escapes, and how music and sounds stop or fade
   when you die, go back to the ship or finish a match
-- The rest of the save data: game timer, boss records, stats and artifact flags
+- The rest of the save data: boss records, the rest of the game timer, stats and artifact flags
+- ERASE ALL DATA on OPTIONS
 - Fixes for the known issues above, each checked against the original game
 
 **Later**
 - Rumble on controllers and phones that support it
+- Gyro aim on Windows, for controllers with a gyro
+- Dedicated servers for online matches (players host them for now)
 - The original's SURROUND and HEADPHONES speaker modes, and HQ music that keeps more of the DS's treble
 - Unlocking the sound test the original way (after the true ending's results screen). For now it's always open.
 - An optional Prime-style HUD with a mini map and weapon indicators and a radar
@@ -305,39 +310,42 @@ doing.
 
 ## MphRead's to-do list
 
-MphRead marks every unfinished or uncertain spot in its code with a `todo` comment, and there are 1,451 of them as of
-October 2026. They're being worked through area by area, and the ones that change how the game plays are fixed after
-being compared against the original game.
+MphRead marks every unfinished or uncertain spot in its code with a `todo` comment, and there are 1,457 of them. As of
+October 2026, 27 are fixed and 5 more are partly fixed. They're being worked through area by area, and the ones that
+change how the game plays are fixed after being compared against the original game. The full list, with the fixed ones
+crossed off, is in [MPHREAD_TODO.md](docs/MPHREAD_TODO.md).
 
-| Area | TODOs | What they're about |
-|---|---|---|
-| Frame rate | 822 | MphRead runs the game logic at 60 Hz instead of the DS's 30, so every timer, speed and step was converted by hand and marked. Most are exact. The ones that aren't are being measured and fixed (see below). |
-| Naming | 173 | Fields and values whose purpose isn't known yet. No effect on play. |
-| Rendering | 36 | Effects, texture animation, how some objects are drawn. |
-| Wi-Fi rules | 21 | How the original shares damage, weapons and items between DS units in a wireless match. These will become the LAN rules. |
-| Viewer and debug tools | 15 | MphRead's desktop viewer. No effect on play. |
-| Bots | 13 | Open questions about how the bots decide things, to be answered from the original's code. |
-| HUD and menus | 12 | Bar flashes, pop-up text wrapping and size, the multiplayer HUD. |
-| Multiplayer license | 11 | The stats the original records per player. |
-| Sound and music | 9 | Stops, fades and sounds during pauses and escapes. |
-| Saves | 5 | Story save fields not kept yet. |
-| Rumble | 2 | The DS Rumble Pak. |
-| Everything else | 332 | Gameplay details not ported yet, open questions, and notes about the code itself. |
+| Area | TODOs | Fixed | What they're about |
+|---|---|---|---|
+| Frame rate | 831 | 11 | MphRead runs the game logic at 60 Hz instead of the DS's 30, so every timer, speed and step was converted by hand and marked. Most are exact. The ones that aren't are being measured and fixed (see below). |
+| Naming | 173 | 0 | Fields and values whose purpose isn't known yet. No effect on play. |
+| Rendering | 35 | 0 | Effects, texture animation, how some objects are drawn. |
+| Wi-Fi rules | 21 | 0 | How the original shares damage, weapons and items between DS units in a wireless match. Second Hunt's LAN and online play use their own code for this. |
+| Viewer and debug tools | 15 | 0 | MphRead's desktop viewer. No effect on play. |
+| Bots | 13 | 0 | Open questions about how the bots decide things, to be answered from the original's code. |
+| HUD and menus | 12 | 0 | Bar flashes, pop-up text wrapping and size, the multiplayer HUD. |
+| Multiplayer license | 11 | 7 | The stats the original records per player. |
+| Sound and music | 9 | 0 | Stops, fades and sounds during pauses and escapes. |
+| Saves | 5 | 0 | Story save fields not kept yet. |
+| Rumble | 2 | 0 | The DS Rumble Pak. |
+| Everything else | 330 | 9 | Gameplay details not ported yet, open questions, and notes about the code itself. |
 
 **Still open:**
 - Movement: sliding along walls and climbing over edges aren't exact yet. Walking gets to top speed a bit sooner and
-  stops a bit shorter than the original. The boost ball, jump pads, bomb jumps and Space Jump haven't been measured yet.
+  stops a bit shorter than the original, the morph ball coasts a little too far, landing on a sloped floor turns into a
+  slide, and Samus doesn't slide around on the landed gunship like she does in the original. The boost ball, bomb jumps
+  and Space Jump haven't been measured yet. Jump pads have been measured and are left as they are for now.
 - Bots: a few random decisions may happen twice as often as in the original.
 - Effects: some particle and beam effects still need their 60 Hz timing checked. The Cretaphid's beam is drawn too
   thin, and Gorea's second form moves jerkily.
 - Cutscenes: data from the previous room's cutscenes isn't cleared when you change rooms, and an object can show for one
   frame before some cutscenes start.
 - HUD: energy and ammo bar flashes, the scan visor's proportions, and pop-up text wrapping and size.
-- Saves: the game timer, boss records, some stats and the artifact flags.
+- Saves: boss records, the rest of the game timer, some stats and the artifact flags.
 - Sound: sounds during pauses and escape sequences, music and sound stops and fades, and how often Gorea's Shock Coil
   sound restarts.
-- Multiplayer: the Wi-Fi rules, the license stats, unlocks from the adventure, and multiplayer saving.
-- Endings: the credits after each ending.
+- Multiplayer: the Wi-Fi rules, four of the license stats, and multiplayer saving in MphRead's own code. (Second Hunt's
+  LAN and online play, the Hunter License and the unlocks from the adventure are already in.)
 - Wide views: whether portals at the screen edges are tested correctly for a wider screen, and where the gun's muzzle
   smoke is drawn.
 - Rumble.
