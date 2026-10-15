@@ -1,5 +1,9 @@
 # Second Hunt
 
+> If you are seeing this read me from a launcher like Quiver and you like Second Hunt, please consider 
+> giving our repo a star on GitHub. It will help the game get noticed and increase the online player base!
+> Thank you!
+
 **Second Hunt is _Metroid Prime Hunters_ rebuilt as a native game for Android and Windows.** It plays the Nintendo DS
 original campaign and multiplayer, in true widescreen, with dual-stick controller controls (or keyboard and mouse on PC)
 and a one-screen HUD. It runs everything from your own copy of the game.
