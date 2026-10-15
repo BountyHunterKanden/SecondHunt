@@ -1,6 +1,3 @@
-> **Filled in 2026-10-09 from the owner's answers** (name, report checks, appeals, 13+ everywhere). Not legal advice.
-> The game shows the short version (docs/ONLINE_RULES_IN_APP.md) from OPTIONS, bottom left.
-
 # Second Hunt online play: code of conduct
 
 Play hard, talk friendly. Online play means sharing arenas, lobbies and chat with people you don't know.
