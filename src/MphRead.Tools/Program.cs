@@ -162,6 +162,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-felayouts") { FrontendTool.Layouts(); return; }
             if (args.Length >= 1 && args[0] == "-mpmenu") { MultiplayerMenuTool.Run(args); return; } // Vanilla multiplayer menu
             if (args.Length >= 1 && args[0] == "-extrarules") { ExtraRulesTest.Run(args); return; } // Extra pickups + Extra characters rules
+            if (args.Length >= 1 && args[0] == "-updatelaunchtest") { UpdateLaunchTest.Run(args); return; } // launch update check (Update checker, 2026-10-11)
             if (args.Length >= 1 && args[0] == "-pickertest") { PickerTest.Run(args); return; } // Character + skin picker (D9)
             if (args.Length >= 2 && args[0] == "-fesaves") { FrontendTool.Saves(args); return; }
             if (args.Length >= 1 && args[0] == "-feship") { FrontendTool.Ship(args); return; }

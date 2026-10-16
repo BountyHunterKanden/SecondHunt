@@ -12,7 +12,7 @@ Second Hunt aims to modernize and add new features and content to the original H
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data from any Metroid game and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 2 (0.2.0-beta, Android and Windows).** Online play with crossplay between Android and Windows, up to 8
+> **Beta 2.1 (0.2.1-beta, Android and Windows).** Online play with crossplay between Android and Windows, up to 8
 > players, and new characters, suits and arenas imported from your own Metroid Prime discs. Playable start to finish,
 > with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
@@ -27,8 +27,9 @@ code; only the window, the controls and the sound output are each platform's own
 All the game's content comes from your ROM. The first time you launch the app you pick your copy of the game, and
 Second Hunt unpacks it into the app's own storage on your device or PC. The extras (HD suits, new characters, Echoes
 arenas) are made the same way, in the app, from your own Metroid Prime discs (SECOND HUNT SETTINGS > IMPORT GAMES).
-Nothing gets downloaded or uploaded, except a new version of Second Hunt when you ask for one (SECOND HUNT SETTINGS >
-UPDATES), and online play, which talks to the Second Hunt server only while you use ONLINE PLAY.
+Nothing gets downloaded or uploaded, except the update check (at launch, it asks GitHub whether a newer Second Hunt
+is out; you can turn that off in SECOND HUNT SETTINGS > UPDATE ALERTS), a new version when you say yes to one, and
+online play, which talks to the Second Hunt server only while you use ONLINE PLAY.
 
 Since the game is drawn natively instead of through an emulated DS, the 3D runs in real widescreen at your screen's
 resolution, and at 60 fps instead of the DS's 30. The two DS screens become one: the HUD sits in the game view,
@@ -91,7 +92,7 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - HD Samus suits and morph balls from each game you import, picked under SECOND HUNT SETTINGS > SAMUS SUIT (third
   person and morph ball), plus an HD Samus behind the menus
 - TROOPER (from _Metroid Prime_): a Space Pirate trooper with four skins, a wall cling and a Scout Drone alt form
-- DARK SAMUS (from _Echoes_, or _Corruption_ on the _Metroid Prime Trilogy_ disc)
+- DARK SAMUS (from _Echoes_, or from _Corruption_ on either its own disc or the _Metroid Prime Trilogy_ disc)
 - Six _Echoes_ multiplayer arenas with their music: Sidehopper Station, Spires, Crossfire Chaos, Pipeline, Spider
   Complex and Shooting Gallery, with _Echoes_ movement (double jump, Gravity Boost)
 - Playing with someone who hasn't imported a character? They still see you, drawn as the closest hunter in matching
@@ -124,9 +125,10 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   redrawn as clean lines or kept as DS pixels
 - Pause map look and mode
 - Credits, licenses, and a button to share crash reports (on Windows it opens their folder)
-- Updates: CHECK asks GitHub for a newer Second Hunt and, if there is one, downloads and installs it in the game. It
-  goes online only when you press CHECK, never on its own, and it only installs a release signed with the project's
-  update key. It works from the main menu, not from a paused campaign or match.
+- Updates: when the game starts it asks GitHub in the background for a newer Second Hunt, and if there is one, the main
+  menu asks whether to install it (UPDATE ALERTS turns that off). CHECK asks right away. Either way the game downloads
+  and installs the update itself, only installs a release signed with the project's update key, and only from the main
+  menu, not from a paused campaign or match.
 - Lua mods, sandboxed so they can't touch your files or the network
 - MODS and SECOND HUNT SETTINGS are on the game's OPTIONS page, where the Nintendo WFC stats option was
 
@@ -159,8 +161,9 @@ To install:
    it's allowed. If other devices can't see your match or joining says no answer, go to Windows Security > Firewall &
    network protection > Allow an app through firewall, add `SecondHunt.exe`, and tick both Private and Public.
 
-**Updating.** From Beta 1.3 on, go to Options > SECOND HUNT SETTINGS > UPDATES and press CHECK. If a newer version is out,
-Second Hunt downloads it, checks its signature, and installs it over the old one, keeping your saves and settings.
+**Updating.** When a newer version is out, the main menu asks whether to update (from 0.2.1 on; or go to Options >
+SECOND HUNT SETTINGS > UPDATES and press CHECK, from Beta 1.3 on). Say yes and Second Hunt downloads it, checks its
+signature, and installs it over the old one, keeping your saves and settings.
 On Android, the first update asks you to allow Second Hunt to install apps, then Android asks you to confirm the
 update. On Windows the game restarts by itself when it's done (keep the Second Hunt folder somewhere you can write to,
 not Program Files). Older betas don't have the button: install Beta 1.3 from Releases once, as before.

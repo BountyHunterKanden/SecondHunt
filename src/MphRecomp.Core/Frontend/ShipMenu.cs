@@ -165,14 +165,23 @@ namespace MphRecomp.Frontend
         // a PC mouse's own sensitivity (OPTIONS > CONTROLS' KEYBOARD & MOUSE column): on a PC the customizer buttons are
         // tabs -- the lit one (the control-type box's "on" look) is the device the slider shows and changes; LOOK INVERT
         // is the controller's only (owner 2026-10-05: no mouse invert), hidden on the mouse's tab
-        public int MouseSensitivity { get; set; } = 8;
+        public float MouseSens { get; set; } = MphRecomp.Config.MouseScale.Default;
         private int _controlDevice; // 0 the controller, 1 the keyboard & mouse
         private bool MouseTab => !ClassicControls && KeyboardControls && _controlDevice == 1;
+        // the slider's position 0..SliderMax: the controller's level 1-15, or on the mouse's tab its step in
+        // Config/MouseScale.cs (the same steps as OPTIONS > CONTROLS' mouse row)
+        private int SliderMax => MouseTab ? MphRecomp.Config.MouseScale.Steps.Length - 1 : 14;
         private int OptSensitivity
         {
-            get => MouseTab ? MouseSensitivity : Sensitivity;
-            set { if (MouseTab) MouseSensitivity = value; else Sensitivity = value; }
+            get => MouseTab ? MphRecomp.Config.MouseScale.Index(MouseSens) : Math.Clamp(Sensitivity, 1, 15) - 1;
+            set
+            {
+                if (MouseTab) MouseSens = MphRecomp.Config.MouseScale.Steps[Math.Clamp(value, 0, SliderMax)];
+                else Sensitivity = Math.Clamp(value, 0, 14) + 1;
+            }
         }
+        private string OptSensitivityText => MouseTab ? MphRecomp.Config.MouseScale.Text(MouseSens)
+            : Math.Clamp(Sensitivity, 1, 15).ToString(System.Globalization.CultureInfo.InvariantCulture);
         // the options page changed ControlType / Sensitivity / LookInvert (the host saves them)
         public Action? OptionsChanged;
         // weapon select equipped a weapon into Story.WeaponSlots[2]
@@ -856,11 +865,11 @@ namespace MphRecomp.Frontend
             OptionsChanged?.Invoke();
         }
 
-        // 0x2144d78: v = touch y + 68 clamped to 122..180 (180 = 1, 122 = 15)
+        // 0x2144d78: v = touch y + 68 clamped to 122..180 (180 = 1, 122 = 15; the mouse's steps spread over the same track)
         private void SetSensitivityFromTouch(float py)
         {
             float v = Math.Clamp(py + 68, 122, 180);
-            int level = 1 + (int)MathF.Round((180 - v) * 14 / 58);
+            int level = (int)MathF.Round((180 - v) * SliderMax / 58);
             if (level != OptSensitivity) SetOption(() => OptSensitivity = level);
             // the loop's pitch follows the marker every frame (0x210c3b0): 0x1800 at the bottom .. 0x4000 at the top
             if (_sensLoop >= 0) SetLoopPitch?.Invoke(_sensLoop, 0x1800 + (int)((180 - v) * 0x2800 / 58));
@@ -947,7 +956,7 @@ namespace MphRecomp.Frontend
                 if (row is >= 0 and <= 5) _optRow = row;
                 if (!ClassicControls && _optRow < ControlButtons) _controlDevice = _optRow; // the cursor lights a tab
             }
-            else if (_optRow == 4) SetOption(() => OptSensitivity = Math.Clamp(OptSensitivity + dx, 1, 15));
+            else if (_optRow == 4) SetOption(() => OptSensitivity = Math.Clamp(OptSensitivity + dx, 0, SliderMax));
             else if (_optRow == 5 && !MouseTab) SetInvert(dx < 0);
         }
 
@@ -1428,6 +1437,11 @@ namespace MphRecomp.Frontend
             {
                 int block = c.DstY / 32;
                 float hx = c.DstX * 8 + ((block & 1) != 0 ? 256 : 0), hy = c.DstY % 32 * 8 + ((block & 2) != 0 ? 256 : 0);
+                if (_panel == Panel.Options && MouseTab && c == d.Copies[0])
+                {
+                    SliderEndsBlanked(c, hx - d.ScrollX, hy - d.ScrollY);
+                    continue;
+                }
                 BlendedLayer(_lyr2, hx - d.ScrollX, hy - d.ScrollY, c.W * 8, c.H * 8, c.SrcX * 8, c.SrcY * 8, c.W * 8, c.H * 8, 1);
             }
             var tab = Tabs[(int)_panel - 1];
@@ -1573,10 +1587,10 @@ namespace MphRecomp.Frontend
                 Quad(_onOff[invert ? 1 : 0], 165, 240 - sy, 173, 248 - sy, 0, 0, 1, 1, 1, 1, 1, 1);
             }
             // sensitivity: v in 122..180 (180 = 1), marker at (103, v - 76), bar 64 px tall at (130, 115) filled 180 - v of 58
-            float v = 180 - (Math.Clamp(OptSensitivity, 1, 15) - 1) * 58f / 14;
+            float v = 180 - OptSensitivity * 58f / SliderMax;
             Quad(_sensMarker, 103, v - 76, 135, v - 44, 0, 0, 1, 1, 1, 1, 1, 1);
             // the value in the grab tab (owner 2026-10-05), centred on the tab's body (x 103..122 of the 32-px marker)
-            Text(OptSensitivity.ToString(System.Globalization.CultureInfo.InvariantCulture), 112, v - 64, 2, 0, 2);
+            Text(OptSensitivityText, 112, v - 64, 2, 0, 2);
             // the bar fills the slider track in the panel art (screen y 58..122), lit from the bottom up to the marker
             Bar(_sensBar, 180 - v, 58, 64, 130, 58, vertical: true);
             if (_keyFocus)
@@ -1677,6 +1691,40 @@ namespace MphRecomp.Frontend
         }
 
         // a BG layer region drawn the way the DS blends the panel over what's behind (panel + 6/16 of it)
+        // OPTIONS' big panel copy on the mouse's tab: the slider's "15" / "1" (tiles of the panel art, copy-local tiles
+        // 17-18 x 2-3 and 17 x 10-11) drawn as plain panel (the blank tile 21, 6), then the mouse's own range written
+        // there (Config/MouseScale.cs), so the slider's ends match the steps it moves through
+        private static readonly (int X, int Y, int W, int H)[] SliderEndTiles = { (17, 2, 2, 2), (17, 10, 1, 2) };
+
+        private void SliderEndsBlanked(Copy c, float x, float y)
+        {
+            for (int row = 0; row < c.H; row++)
+            {
+                int col = 0;
+                while (col < c.W)
+                {
+                    bool blank = Array.Exists(SliderEndTiles, t => col >= t.X && col < t.X + t.W && row >= t.Y && row < t.Y + t.H);
+                    int end = col + 1;
+                    while (end < c.W && blank == Array.Exists(SliderEndTiles, t => end >= t.X && end < t.X + t.W && row >= t.Y && row < t.Y + t.H)) end++;
+                    if (!blank) // a run of art tiles in one strip
+                    {
+                        BlendedLayer(_lyr2, x + col * 8, y + row * 8, (end - col) * 8, 8, (c.SrcX + col) * 8, (c.SrcY + row) * 8, (end - col) * 8, 8, 1);
+                    }
+                    else // blanked tiles one by one from the plain tile
+                    {
+                        for (int i = col; i < end; i++)
+                        {
+                            BlendedLayer(_lyr2, x + i * 8, y + row * 8, 8, 8, (c.SrcX + 21) * 8, (c.SrcY + 6) * 8, 8, 8, 1);
+                        }
+                    }
+                    col = end;
+                }
+            }
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            Text(MphRecomp.Config.MouseScale.Max.ToString("0.##", inv), x + 138, y + 20, 0, 0, 2);
+            Text(MphRecomp.Config.MouseScale.Min.ToString("0.##", inv), x + 138, y + 82, 0, 0, 2);
+        }
+
         private void BlendedLayer(int tex, float x, float y, float w, float h, float sx, float sy, float sw, float sh, float alpha)
         {
             UiTexture t = _textures[tex];

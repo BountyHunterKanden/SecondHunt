@@ -27,6 +27,8 @@ namespace MphRecomp.Import.Hd
     //   core     [r, g, b] (0..255)                a ball's core glow (the game draws it as a particle; the app lights it)
     //   rigidHeadBand  points Retro blends only between the helmet and the neck / collar right under it ride the
     //                  helmet solidly in the rig layout (Fusion's tubes bent at every head turn when blended)
+    //   skip     [clip names]                      a Prime 3 body's own clips left out (Dark Samus: her two side dashes, the
+    //            only clips Trilogy re-tuned and none the game plays: without them both Corruption discs make the same body)
     public sealed class HdRecipe
     {
         public sealed record PakRef(string Name, string Sha1);
@@ -45,6 +47,7 @@ namespace MphRecomp.Import.Hd
         public Attach[] Attaches = Array.Empty<Attach>();
         public Add[] Adds = Array.Empty<Add>();
         public int[]? Core;
+        public string[] Skip = Array.Empty<string>();
 
         // the folder's file stem: "Dol" + the item name, like every imported HD model
         public string Stem => "Dol" + Name;
@@ -96,6 +99,7 @@ namespace MphRecomp.Import.Hd
                 h.Adds = l.ToArray();
             }
             if (root.TryGetProperty("core", out _)) h.Core = r.Ints("core");
+            if (root.TryGetProperty("skip", out JsonElement sk)) h.Skip = sk.EnumerateArray().Select(x => x.GetString()!).ToArray();
             if (h.Static && h.Attaches.Length > 0) throw new InvalidDataException($"{r.Id}: a static model has no skeleton to attach to");
             return h;
         }

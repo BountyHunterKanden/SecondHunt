@@ -636,12 +636,21 @@ namespace MphRecomp.Frontend
                     Step = _ => Requested?.Invoke(FrontendRequestKind.ShareCrashLog),
                     Action = true
                 },
-                // owner 2026-10-06: checked only when pressed, never on its own, and installed by the game; from the main
-                // menu only, not a paused campaign or match (FrontendSession.CheckForUpdates)
+                // owner 2026-10-11: also checked once at launch in the background (ON by default), asking on the main menu
+                // only when an update is out (FrontendSession.TickLaunchCheck); OFF = only when CHECK is pressed
+                new()
+                {
+                    Label = "update\nalerts",
+                    Description = "on: when the game starts, it asks github.com for a newer second hunt and offers it on the main menu. off: only when you press check.",
+                    Value = () => _settings.CheckUpdatesAtLaunch ? "ON" : "OFF",
+                    Step = _ => _settings.CheckUpdatesAtLaunch = !_settings.CheckUpdatesAtLaunch
+                },
+                // owner 2026-10-06: installed by the game; from the main menu only, not a paused campaign or match
+                // (FrontendSession.CheckForUpdates)
                 new()
                 {
                     Label = "updates",
-                    Description = "from the main menu: asks github.com for a newer second hunt and installs it. it goes online only when you press this.",
+                    Description = "from the main menu: asks github.com for a newer second hunt now and installs it.",
                     Value = () => "CHECK",
                     Step = _ => Requested?.Invoke(FrontendRequestKind.CheckUpdates),
                     Action = true
@@ -1377,7 +1386,7 @@ namespace MphRecomp.Frontend
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             _strings.Set(_sensValueString, Math.Clamp(_settings.GameSensitivity, 1, 15).ToString(inv));
             _strings.Set(_invertValueString, _settings.GameLookInvert ? "ON" : "OFF");
-            _strings.Set(_mouseSensValueString, Math.Clamp(_settings.MouseSensitivity, 1, 15).ToString(inv));
+            _strings.Set(_mouseSensValueString, MouseScale.Text(_settings.MouseSens));
         }
 
         // the Controls page's own callbacks (and the mouse row's copies of them): each change is saved at once (owner
@@ -1395,7 +1404,7 @@ namespace MphRecomp.Frontend
                 break;
             case MouseSensUp:
             case MouseSensDown:
-                _settings.MouseSensitivity = Math.Clamp(_settings.MouseSensitivity + (call == MouseSensUp ? 1 : -1), 1, 15);
+                _settings.MouseSens = MouseScale.Step(_settings.MouseSens, call == MouseSensUp ? 1 : -1); // the ship's slider has the same steps
                 break;
             case ControlsSave: // hidden (HideSaveButtons); if a ROM still shows it, it just goes back
                 menu.GoTo(menu.Page?.Index == _controlsCopyPage ? SettingsPage : OptionsPage);

@@ -95,8 +95,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         var s = MphRecomp.Config.RecompSettings.Load(SettingsPath);
         _aimScale = 0.5f + Math.Clamp(s.GameSensitivity, 1, 15) / 16f;
         _aimInvertY = s.GameLookInvert;
-        // a PC mouse has its own sensitivity (OPTIONS > CONTROLS, KEYBOARD & MOUSE), same scale, and no invert
-        _mouseScale = 0.5f + Math.Clamp(s.MouseSensitivity, 1, 15) / 16f;
+        // a PC mouse has its own sensitivity (OPTIONS > CONTROLS, KEYBOARD & MOUSE) on the Source engine's scale, and no invert
+        _mouseScale = MphRecomp.Config.MouseScale.UnitsPerCount(s.MouseSens);
         bool statusText = s.DeveloperMode && s.StatusText;
         if (statusText != _statusText) _statusMode = statusText ? 0 : 2;
         _statusText = statusText;
@@ -124,7 +124,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         }
     }
 
-    // the mouse's own sensitivity (level 8, the default, is one unit per pixel)
+    // the mouse's own sensitivity (Config/MouseScale.cs: MphRead units per mouse count)
     System.Numerics.Vector2 PointerAim(System.Numerics.Vector2 pointer) =>
         new(pointer.X * _mouseScale, pointer.Y * _mouseScale);
     const int CullFaceCap = 0x0B44; // GL_CULL_FACE (the binding names the constant and glCullFace alike)

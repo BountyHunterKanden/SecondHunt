@@ -286,7 +286,7 @@ internal sealed partial class CampaignRenderer
                 settings.GameControlType = _shipMenu.ControlType;
                 settings.GameSensitivity = _shipMenu.Sensitivity;
                 settings.GameLookInvert = _shipMenu.LookInvert;
-                settings.MouseSensitivity = _shipMenu.MouseSensitivity; // a PC's KEYBOARD & MOUSE tab
+                settings.MouseSens = _shipMenu.MouseSens; // a PC's KEYBOARD & MOUSE tab
                 settings.Save(_gunSettingsPath);
             };
         }
@@ -294,7 +294,7 @@ internal sealed partial class CampaignRenderer
         _shipMenu.ControlType = saved.GameControlType;
         _shipMenu.Sensitivity = saved.GameSensitivity;
         _shipMenu.LookInvert = saved.GameLookInvert;
-        _shipMenu.MouseSensitivity = saved.MouseSensitivity;
+        _shipMenu.MouseSens = saved.MouseSens;
         _shipMenu.RedrawArt = saved.RedrawArt;
         _shipMenu.ClassicControls = saved.ClassicControlsPage && !MphRecomp.Config.RecompSettings.PublicBuild;
         _shipMenu.KeyboardControls = MphRecomp.Config.RecompSettings.DesktopHost;

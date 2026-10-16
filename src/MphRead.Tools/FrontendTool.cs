@@ -489,7 +489,7 @@ namespace MphRead
                 menu.Story.HealthMax = 99 + 7 * Metadata.PlayerValues[0].EnergyTank;
                 menu.Story.FoundOctoliths = 0xFF;
             }
-            menu.OptionsChanged = () => log.Add($"options: control {menu.ControlType} sensitivity {menu.Sensitivity} invert {menu.LookInvert}");
+            menu.OptionsChanged = () => log.Add($"options: control {menu.ControlType} sensitivity {menu.Sensitivity} invert {menu.LookInvert} mouse {menu.MouseSens}");
             menu.WeaponsChanged = () => log.Add($"equipped {(BeamType)menu.Story.WeaponSlots[2]}");
             menu.Open("CELESTIAL ARCHIVES");
             var fresh = new StorySave();

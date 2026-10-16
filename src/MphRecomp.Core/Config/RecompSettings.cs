@@ -80,9 +80,11 @@ namespace MphRecomp.Config
         public int GameControlType { get; set; }
         public int GameSensitivity { get; set; } = 8;
         public bool GameLookInvert { get; set; }
-        // A PC mouse's own aim speed (1-15, 8 = MphRead's one unit a pixel): OPTIONS > CONTROLS under KEYBOARD & MOUSE
-        // (owner 2026-10-05; the Game* pair above is the controller's; the mouse has no look invert)
-        public int MouseSensitivity { get; set; } = 8;
+        // A PC mouse's own aim speed: OPTIONS > CONTROLS under KEYBOARD & MOUSE and the gunship's OPTIONS (owner
+        // 2026-10-05; the Game* pair above is the controller's; the mouse has no look invert). The Source engine's scale
+        // (0.022 degrees a count x this, 0.1-20, default 2.5; Config/MouseScale.cs) from owner 2026-10-15: the old
+        // 1-15 "MouseSensitivity" (0.14-0.36 degrees a count, default 0.25) was too fast even at 1, so it isn't carried over
+        public float MouseSens { get; set; } = MouseScale.Default;
         // The control customizer (OPTIONS > CONTROLS and the gunship's OPTIONS; Config/ControlBinds.cs): function id ->
         // button names, for a controller and for a PC's keyboard and mouse. A function that isn't listed has its default.
         public Dictionary<string, string[]> PadBinds { get; set; } = new();
@@ -102,6 +104,9 @@ namespace MphRecomp.Config
         // Multiplayer's hunters and arenas: false = vanilla's unlocks (the Adventure and matches open them; HunterLicense),
         // true = every one open (owner 2026-10-07: vanilla by default, a confirmed switch to open everything)
         public bool UnlockEverything { get; set; }
+        // UPDATES at launch (owner 2026-10-11): once per run the game asks GitHub in the background and, only if a signed
+        // update is out, asks on the main menu whether to install it (FrontendSession.TickLaunchCheck); off = CHECK only
+        public bool CheckUpdatesAtLaunch { get; set; } = true;
         public List<string> DisabledMods { get; set; } = new();
         // mod id -> setting id -> the value the player picked (settings a mod declares in its mod.json)
         public Dictionary<string, Dictionary<string, string>> ModSettings { get; set; } = new();

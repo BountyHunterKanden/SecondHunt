@@ -317,6 +317,7 @@ namespace MphRecomp.Frontend
             Menu.Tick();
             Popup?.Tick();
             TickUpdateCheck();
+            TickLaunchCheck();
             TickStaleImports();
             Recomp.Tick();
             Multiplayer.Tick(Menu);
@@ -576,6 +577,7 @@ namespace MphRecomp.Frontend
                 Popup.Inform(UpdateInGameText);
                 return;
             }
+            _launchDone = true; // a check by hand answers for this run; the launch check doesn't ask again
             string? feed = Config.RecompSettings.PublicBuild ? null : UpdateHost.DevFeed();
             Log?.Invoke($"update check: {UpdateHost.AppVersion} on {UpdateHost.Platform}" + (feed != null ? $", test feed {feed}" : ""));
             Popup.Busy("checking for updates.", int.MaxValue, () => { });
@@ -659,6 +661,53 @@ namespace MphRecomp.Frontend
                     _updateStep = UpdateStep.Idle;
                     if (yes) StartUpdateDownload(result);
                 });
+        }
+
+        // ---- the launch check (owner 2026-10-11: "check for an update at launch in the background and alert the user"):
+        //      once per run, the same signed check as CHECK, silent unless an update is offered; the offer waits for the
+        //      main menu with nothing else up, then asks as CHECK does. RECOMP SETTINGS > UPDATE ALERTS OFF skips it. ----
+
+        // per process, not per session: a shell coming back from a game makes a new session, which mustn't check again
+        private static Task<UpdateResult>? _launchCheck;
+        private static bool _launchDone;
+        private int _launchMenuTicks;
+        // how long the main menu has been settled (no box, no page change) before the offer opens over it
+        private const int LaunchOfferDelayTicks = 45;
+
+        private void TickLaunchCheck()
+        {
+            if (_launchDone || Paused || Popup == null) return;
+            if (_launchCheck == null)
+            {
+                string? feed = Config.RecompSettings.PublicBuild ? null : UpdateHost.DevFeed();
+                // a dev build asks only its test feed: GitHub's release is the public app, another package than this one
+                if (!Settings.CheckUpdatesAtLaunch || (!Config.RecompSettings.PublicBuild && feed == null))
+                {
+                    _launchDone = true;
+                    return;
+                }
+                Log?.Invoke($"update launch check: {UpdateHost.AppVersion} on {UpdateHost.Platform}" + (feed != null ? $", test feed {feed}" : ""));
+                _launchCheck = Task.Run(() => UpdateCheck.RunAsync(UpdateHost.AppVersion, UpdateHost.Platform,
+                    Config.RecompSettings.PublicBuild, feed));
+                return;
+            }
+            if (!_launchCheck.IsCompleted) return;
+            UpdateResult result = _launchCheck.IsCompletedSuccessfully
+                ? _launchCheck.Result
+                : new UpdateResult(UpdateStatus.Failed, UpdateHost.AppVersion, Detail: _launchCheck.Exception?.GetBaseException().Message ?? "");
+            if (result.Status != UpdateStatus.Available)
+            {
+                _launchDone = true; // nothing to offer, or no answer: said nothing (CHECK tells why)
+                Log?.Invoke($"update launch check: {result.Status} latest {result.Latest ?? "-"} {result.Detail}");
+                return;
+            }
+            bool idle = Menu.Page?.Index == MainMenuPage && Menu.PendingPage < 0 && !Popup.IsOpen && _updateStep == UpdateStep.Idle
+                && _bootTicks < 0 && _loadHold <= 0 && _hostGoTo == -1;
+            _launchMenuTicks = idle ? _launchMenuTicks + 1 : 0;
+            if (_launchMenuTicks < LaunchOfferDelayTicks) return;
+            _launchDone = true;
+            Log?.Invoke($"update launch check: offering {result.Latest}");
+            OfferUpdate(result);
         }
 
         private void StartUpdateDownload(UpdateResult offer)

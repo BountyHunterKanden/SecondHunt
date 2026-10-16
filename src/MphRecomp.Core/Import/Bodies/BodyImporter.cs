@@ -96,7 +96,7 @@ namespace MphRecomp.Import.Bodies
             foreach ((string nm, Char3.Meta meta) in Char3.Animations(res.Get(cid), id => res.TypeOf(id) == "ANIM"))
             {
                 List<Char3.Meta> ps = Char3.Prims(meta);
-                if (ps.Count != 1) continue;
+                if (ps.Count != 1 || h.Skip.Contains(nm)) continue; // (the recipe's "skip": left out)
                 if (!ids.ContainsKey(nm)) order.Add(nm);
                 ids[nm] = ps[0].AnimId;
             }

@@ -10,5 +10,9 @@
   "chars": [
     "7f305ff98ff689fb"
   ],
-  "char": "DarkSamus"
+  "char": "DarkSamus",
+  "skip": [
+    "b_dash_left_dark_samus",
+    "b_dash_right_dark_samus"
+  ]
 }

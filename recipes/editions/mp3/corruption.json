@@ -13,6 +13,7 @@
     { "name": "MP3/SamusGun.pak", "sha1": "94dd265e63fb032407a656942fe7ba898a7cc689", "editionSha1": "4725ec76ed46c8392b19adcc5cec892c1c8076c9" }
   ],
   "items": [
+    "bodies/MP3DarkSamus",
     "guns/MP3PEDSuit",
     "guns/MP3VariaSuit",
     "hd/MP3DarkSamus",
