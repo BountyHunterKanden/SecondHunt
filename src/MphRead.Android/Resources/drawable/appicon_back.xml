@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Background of the launcher icon (the Hunters Octolith, owner pick 2026-10-11; foreground = mipmap-*/appicon_foreground.png):
+     a dark blue radial fill and a soft cyan glow ring behind the crystal. Gradients only, no game texture.
+     Adaptive canvas 108 x 108 (visible 18..90). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="54" android:centerY="54" android:gradientRadius="54">
+                <item android:offset="0" android:color="#FF0E1A2C" />
+                <item android:offset="1" android:color="#FF02040A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M20,54 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="54" android:centerY="54" android:gradientRadius="34">
+                <item android:offset="0" android:color="#663CC6FF" />
+                <item android:offset="1" android:color="#003CC6FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

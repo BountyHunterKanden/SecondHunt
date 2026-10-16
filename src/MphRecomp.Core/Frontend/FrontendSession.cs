@@ -1068,6 +1068,8 @@ namespace MphRecomp.Frontend
                 DrawList.Triangle(t.TextureId, t.WrapS, t.WrapT, UiBlend.Alpha, Place(p, t.A), Place(p, t.B), Place(p, t.C));
             }
             (_pageFrom, _pageTo, _drawnWidth, _drawnHeight) = (pageFrom, DrawList.Vertices.Count, width, height);
+            // the version, small and faint in the title's lower right (TOUCH TO START, page 13; owner 2026-10-15)
+            if (Menu.Page?.Index == 13 && !string.IsNullOrEmpty(UpdateHost.AppVersion)) DrawVersion(width, height);
             if (PopupOpen) DrawPopup(width, height);
             if (_bootTicks >= 0)
             {
@@ -1127,6 +1129,14 @@ namespace MphRecomp.Frontend
         // half-black over the whole canvas (darkening only the touch screen's scattered parts reads as a patchwork).
         private const float PopupCentreX = 128, PopupCentreY = -88;
         private readonly List<WidgetTri> _popupTris = new();
+
+        // canvas units as the replay bar's (u = height / 360, the same size on the Odin and a PC): one u a font pixel,
+        // half the menus' own text size, white at 30%, 6u in from the corner
+        private void DrawVersion(float width, float height)
+        {
+            float u = height / 360f;
+            Menu.Font.EmitCanvas(UpdateHost.AppVersion, width - 6 * u, height - 6 * u - MenuFont.Cell * u, 1, u, 1, 1, 1, 0.3f, DrawList);
+        }
 
         private void DrawPopup(float width, float height)
         {

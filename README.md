@@ -12,7 +12,7 @@ Second Hunt aims to modernize and add new features and content to the original H
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data from any Metroid game and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 2.1 (0.2.1-beta, Android and Windows).** Online play with crossplay between Android and Windows, up to 8
+> **Beta 2.2 (0.2.2-beta, Android and Windows).** Online play with crossplay between Android and Windows, up to 8
 > players, and new characters, suits and arenas imported from your own Metroid Prime discs. Playable start to finish,
 > with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
