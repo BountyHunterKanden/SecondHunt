@@ -132,13 +132,45 @@ namespace MphRecomp.Frontend
             ImportGameInfo? g = Service?.Games.FirstOrDefault(x => x.Id == gameId);
             if (g == null) return null;
             // the suits and characters first, then the arenas, then their music, then the songs (in the catalog's order)
-            var sorted = g.Items.Where(Offered).OrderBy(i => i.Kind switch { "arenas" => 1, "music" => 2, Songs => 3, _ => 0 })
+            var sorted = Fold(g.Items.Where(Offered).ToList()).OrderBy(i => i.Kind switch { "arenas" => 1, "music" => 2, Songs => 3, _ => 0 })
                 .ThenBy(i => IsSong(i) ? SongOrder(i.Name) : 0)
                 .ThenBy(i => SuitOrder(GroupOf(i.Name))).ThenBy(i => GroupOf(i.Name), StringComparer.Ordinal)
                 .ThenBy(i => i.Kind == "hd" ? (i.Name.EndsWith("Ball", StringComparison.Ordinal) ? 1 : 0) : 2).ToList();
             g.Items.Clear();
             g.Items.AddRange(sorted);
             return g;
+        }
+
+        // ---- cards that stand for more than one import: Beyond Sylux's suit (hd/, his pictures in the menus) and his own
+        //      Prime 4 body (bodies/, how he moves in a match) are one SYLUX card. The card is the first id; the rest are
+        //      imported, updated and deleted with it, and the card shows the least finished of them ----
+
+        private static readonly Dictionary<string, string[]> Joined = new() { ["hd/MP4Sylux"] = new[] { "bodies/MP4Sylux" } };
+
+        // an id and the ids that go with it
+        public static IEnumerable<string> WithJoined(string id) => Joined.TryGetValue(id, out string[]? more) ? more.Prepend(id) : new[] { id };
+
+        // each card's joined items taken out of the list and folded into its status
+        private static List<ImportItemInfo> Fold(List<ImportItemInfo> items)
+        {
+            foreach (ImportItemInfo lead in items.Where(i => Joined.ContainsKey(i.Id)).ToList())
+            {
+                List<ImportItemInfo> parts = items.Where(i => Joined[lead.Id].Contains(i.Id)).ToList();
+                if (parts.Count == 0) continue;
+                List<ImportItemInfo> all = parts.Prepend(lead).ToList();
+                ImportItemInfo worst = all.FirstOrDefault(i => i.Status == ItemImportStatus.Failed)
+                    ?? all.FirstOrDefault(i => i.Status == ItemImportStatus.HashMismatch)
+                    ?? all.FirstOrDefault(i => i.Status != ItemImportStatus.Complete) ?? lead;
+                ItemImportStatus status = worst.Status;
+                // half of it on disk (the other half missing or made by an older version) needs doing again: an update
+                if (status == ItemImportStatus.Missing && all.Any(Imported)) status = ItemImportStatus.Stale;
+                items.RemoveAll(parts.Contains);
+                items[items.IndexOf(lead)] = new ImportItemInfo
+                {
+                    Id = lead.Id, Kind = lead.Kind, Name = lead.Name, Status = status, Message = worst.Message, Seconds = all.Sum(i => i.Seconds),
+                };
+            }
+            return items;
         }
 
         // ---- the Prime songs (docs/PRIME_MUSIC.md; owner 2026-10-14: one MUSIC tile on the game's page opens their list) ----
@@ -686,7 +718,7 @@ namespace MphRecomp.Frontend
                 {
                     foreach (IGrouping<string, (string Game, ImportItemInfo Item)> game in clear.GroupBy(x => x.Game))
                     {
-                        Service!.Remove(game.Key, game.Select(x => x.Item.Id).ToList());
+                        Service!.Remove(game.Key, game.SelectMany(x => WithJoined(x.Item.Id)).ToList());
                     }
                     Log?.Invoke($"import: deleted {String.Join(", ", clear.Select(x => x.Item.Id))}");
                     Changed?.Invoke();
@@ -850,6 +882,7 @@ namespace MphRecomp.Frontend
             // would make every recipe
             bool all = only == null;
             if (all && items.Count < games.Sum(id => service.Recipes.ForGame(id).Count())) only = items.Select(i => i.Item.Id).ToArray();
+            if (only != null) only = only.SelectMany(WithJoined).Distinct().ToArray();
             // the suits' rigs are fitted on MPH's own hunters (HdRigBuild: Samus; Sylux for Prime 4's): read them here, on the
             // menu thread, so the worker only takes MphRead's cached models and never fills its caches beside this thread
             if (items.Any(i => i.Item.Kind == "hd"))
@@ -873,8 +906,8 @@ namespace MphRecomp.Frontend
             _runKey = key;
             _runName = src.Name;
             _runGames = games;
-            _runCount = items.Count;
-            _names = items.ToDictionary(i => i.Game + ":" + i.Item.Id, i => ItemName(i.Item));
+            _names = items.SelectMany(i => WithJoined(i.Item.Id).Select(id => (Key: i.Game + ":" + id, Name: ItemName(i.Item))))
+                .ToDictionary(x => x.Key, x => x.Name);
             _order = new Dictionary<string, int>();
             _gameOffsets = new int[games.Length];
             _gameCounts = new int[games.Length];
@@ -888,6 +921,7 @@ namespace MphRecomp.Frontend
                 }
                 _gameCounts[k] = n - _gameOffsets[k];
             }
+            _runCount = n;
             _cancelled = false;
             _item = "";
             _fraction = 0;
@@ -1019,7 +1053,7 @@ namespace MphRecomp.Frontend
 
         private string Summary(List<ImportReport> reports)
         {
-            var items = reports.SelectMany(r => r.Items).ToList();
+            var items = Fold(reports.SelectMany(r => r.Items).ToList());
             int n = items.Count;
             int done = items.Count(i => i.Status == ItemImportStatus.Complete);
             int wrong = items.Count(i => i.Status == ItemImportStatus.HashMismatch);

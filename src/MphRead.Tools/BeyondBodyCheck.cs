@@ -83,6 +83,18 @@ namespace MphRead
                     Console.WriteLine($"  {(use ? "PASS" : "FAIL")} {it.Id,-26} {it.Status,-10} {it.Seconds,6:F1} s  usable {use}  {it.Message}");
                 }
                 Console.WriteLine($"  public PRIME 4 import: {(ok ? "all PASS" : "FAIL")} ({rep.Items.Count} items into {outRoot})");
+                // the PRIME 4 page: one card per name (the suit and the body are one SYLUX card), done; with the body gone
+                // the card wants an update, and its delete takes both
+                var page = new MphRecomp.Frontend.ImportGames(outRoot);
+                List<ImportItemInfo> cards = page.Game("mp4")!.Items;
+                foreach (ImportItemInfo c in cards) Console.WriteLine($"  card {MphRecomp.Frontend.ImportGames.ItemName(c),-20} {c.Id,-26} {c.Status}");
+                bool unique = cards.Select(MphRecomp.Frontend.ImportGames.ItemName).Distinct().Count() == cards.Count;
+                bool done = cards.All(c => c.Status == ItemImportStatus.Complete) && cards.Count == ids.Count - 1;
+                svc.Remove("mp4", new[] { "bodies/MP4Sylux" });
+                bool half = page.Game("mp4")!.Items.First(c => c.Id == "hd/MP4Sylux").Status == ItemImportStatus.Stale;
+                svc.Remove("mp4", MphRecomp.Frontend.ImportGames.WithJoined("hd/MP4Sylux").ToList());
+                bool gone = page.Game("mp4")!.Items.First(c => c.Id == "hd/MP4Sylux").Status == ItemImportStatus.Missing;
+                Console.WriteLine($"  {(unique && done && half && gone ? "PASS" : "FAIL")} one SYLUX card: names unique {unique}, all done {done}, body gone = update {half}, delete takes both {gone}");
                 return;
             }
             // --keys <chpr file> <clip|*> <joint regex> [--slot Rot|Trans|Scale] [--changed] [--wrapped]: a clip's raw keys on
