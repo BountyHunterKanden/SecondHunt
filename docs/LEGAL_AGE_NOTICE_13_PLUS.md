@@ -1,5 +1,4 @@
-> **Filled in 2026-10-09 from the owner's answers** (name, report checks, appeals, 13+ everywhere). Not legal advice.
-> (docs/ONLINE_PLAY.md section 8)
+> Not legal advice.
 
 # Second Hunt online play: 13 and older
 
@@ -25,14 +24,14 @@ Online, you play and talk with people you don't know: quick messages, typed chat
 
 More: privacy notice, code of conduct (ABOUT ONLINE PLAY).
 
-## Notes for the owner
+## Notes
 
 - **Why 13:** the US children's privacy law (COPPA) puts strict parental-consent rules on online services that knowingly
   collect data from children under 13. A 13+ line, with no data collected from players who say they're younger, is
   the usual way small games stay out of it. The UK and EU set the age for a child's own consent to data use at 13
-  (UK) to 16 (some EU countries). The owner's choice (2026-10-09): 13 and up everywhere, one rule for all players.
+  (UK) to 16 (some EU countries). The choice: 13 and up everywhere, one rule for all players.
 - **It's a self-declaration** (no ID checks): the risk assessment (`docs/UK_ONLINE_SAFETY_ACT_RISK_ASSESSMENT.md`)
   explains why that fits a service of this size and what else limits the risk.
-- **Where players see it** (no popups, owner 2026-10-09): a dim line on the ONLINE PLAY hub (`OnlineMenus.DrawHub`),
+- **Where players see it** (no popups): a dim line on the ONLINE PLAY hub (`OnlineMenus.DrawHub`),
   the rules page from OPTIONS' bottom-left line (docs/ONLINE_RULES_IN_APP.md), and ONLINE PLAY > SETTINGS > ABOUT
   ONLINE PLAY (`NoticeText` in `src/MphRecomp.Core/Frontend/OnlineMenus.Settings.cs`).

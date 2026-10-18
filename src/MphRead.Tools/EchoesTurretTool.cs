@@ -18,7 +18,7 @@ namespace MphRead
     //       bounds, read from the retail disc
     //   -echoesturret dump id=<hex> out=<file> [disc=]: one resource's bytes
     //   -echoesturret test: a Shooting Gallery match on the PC (the arena imported from the retail disc:
-    //       -echoesarena import disc=../brawl_extract/prime/echoes_retail.rvz arena=M06_ShootingGallery) driving the turret
+    //       -echoesarena import disc=<echoes disc> arena=M06_ShootingGallery) driving the turret
     //       through its states: the entry kill, control, the barrel's limits, fire rate, a hit, getting out, the turret's
     //       health, and the bomb slot (Samus's bomb, then each other hunter's alt-form attack laying Samus's bomb)
     //   -echoesturret look [out=<dir>]: the imported look (hd/turret.json) drawn by the thumbnail renderer: lowered with

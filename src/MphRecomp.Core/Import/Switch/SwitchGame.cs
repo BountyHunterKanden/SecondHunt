@@ -97,7 +97,7 @@ namespace MphRecomp.Import.Switch
             _file.Read(head, b);
             long root = head + (long)BinaryPrimitives.ReadUInt64LittleEndian(b.AsSpan(0x130));
             if (!PartitionFs.IsPartitionFs(_file, root)) throw new InvalidDataException("XCI: no root HFS0 at the card header's address (damaged dump?)");
-            List<PartitionFile> parts = PartitionFs.Read(_file, root);
+            List<PartitionFile> parts = PartitionFs.Read(_file, root, rootTable: true);
             PartitionFile secure = parts.FirstOrDefault(p => p.Name == "secure");
             if (secure.Name == null) throw new InvalidDataException("XCI: no secure partition");
             return PartitionFs.Read(_file, secure.Offset);

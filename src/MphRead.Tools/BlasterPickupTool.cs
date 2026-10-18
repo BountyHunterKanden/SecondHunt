@@ -8,7 +8,7 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace MphRead
 {
-    // Pirate Blaster pickup art (board row "Pirate Blaster pickup art"), headless:
+    // Pirate Blaster pickup art, headless:
     //   -blasterpickup dump [out=<dir>]
     // prints each MPH weapon pickup model's nodes, meshes, materials and textures (with out=, one texture sheet per model)
     internal static class BlasterPickupTool

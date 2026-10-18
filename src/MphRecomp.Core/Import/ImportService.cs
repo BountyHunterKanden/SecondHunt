@@ -500,7 +500,7 @@ namespace MphRecomp.Import
 
         // delete what the item's imports wrote; its folder too once nothing else is in it. An item imported before the lists
         // (2026-10-07) loses every file but hand-pushed trophy rig variants (TrophyRigIO's straight/clean/tpose/hinge .mphrig,
-        // the rigging thread's dev files): an import writes only the .rigid and .retro ones
+        // the dev rig files): an import writes only the .rigid and .retro ones
         void DeleteMade(ImportRecipe r)
         {
             string dir = ItemDir(r);

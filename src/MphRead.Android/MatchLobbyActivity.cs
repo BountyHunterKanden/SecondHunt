@@ -14,7 +14,7 @@ namespace MphRecomp.App;
 
 // The player-facing multiplayer screen (Beta 1): the front end's MULTIPLAYER opens it (GameActivity,
 // FrontendRequestKind.Multiplayer). The choices and the rules are the shared MatchLobby (MphRecomp.App): a match against
-// bots on this device, or a LAN match between two devices on one Wi-Fi network (MatchLan.cs; Beta 1 scope, board S35:
+// bots on this device, or a LAN match between two devices on one Wi-Fi network (MatchLan.cs; Beta 1 scope:
 // host + one joiner, any mode, the host's bots). Only the game's own arenas are listed. Works with a gamepad (D-pad / left stick move, left / right or A change a
 // row, B / Back leave) and with touch (tap a row or its arrows). The last choices are kept in SharedPreferences.
 // Leaving a match goes back to the game's menus: CampaignActivity exits through MainActivity, which bounces to

@@ -17,7 +17,7 @@ namespace MphRead
     // Trilogy disc (the two folders must be byte-identical), loads them the way the app does, and runs the effects:
     // the gun flash (06296852, 2 frames of emission) must draw for about 6-10 frames, the hit (eb8b9043) about 8-14, the
     // firing glows must draw while emitting and die out after. --strip: a frame strip of each (side view, additive) to
-    // compare with the study picture handoffs/drone-mp1-beam-files/prime_drone_fx.png.
+    // compare with a capture of Prime's own drone.
     // Prime's drone sounds (Core Import/Retro/MusyX.cs, from AudioGrp.pak): the four sound ids its clips and its CRSC play
     // must come out as sfx_<id>.wav through the right MusyX sounds, at a sane rate, about as long as their macros make them,
     // and not silent; each one's macro steps are printed.

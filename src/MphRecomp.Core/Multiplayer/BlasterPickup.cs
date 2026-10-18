@@ -8,7 +8,7 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Multiplayer
 {
-    // The Pirate Blaster's pickup (item 23, model "pick_wpn_blaster"; board row "Pirate Blaster pickup art"). MPH's weapon
+    // The Pirate Blaster's pickup (item 23, model "pick_wpn_blaster"). MPH's weapon
     // pickups are one kit: a dark backdrop disc, glow quads in the weapon's colour (vertex colours) and a flat emblem of
     // the weapon's symbol, all facing the camera. This one is a copy of one of the user's own weapon pickups (owner: "copy
     // and recolor one of the existing vanilla beams and then draw the three marks"): its backdrop and glows unchanged but

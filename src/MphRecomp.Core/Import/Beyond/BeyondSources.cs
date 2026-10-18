@@ -8,7 +8,7 @@ namespace MphRecomp.Import.Beyond
     // test-only adapters over the Prime 4 Model Dumper's glTF and mp4_to_trophy.py --static's conversion
     // (MphRead.Tools Gun4TestSources.cs, never shipped); the in-app path implements them on our own Beyond readers
     // (RomFS pak + SMDL/CMDL + MATI + TXTR, and the material conversion). Campaign's file (the gun builder's contract);
-    // the rigging session's readers implement the interfaces.
+    // the rig readers implement the interfaces.
 
     // One drawable mesh of a Beyond model: one material slot, one level of detail, an indexed triangle list and its skin.
     public sealed class BeyondMesh

@@ -3,9 +3,11 @@
 param(
     [Parameter(Mandatory = $true)][string]$Route,
     [int]$Timeout = 300,
-    [string]$EmuDir = "$env:USERPROFILE\Downloads\mph-emu",
-    [string]$Rom = "$env:USERPROFILE\Downloads\mph-emu\roms\AMHE1.nds"
+    [string]$EmuDir = $env:MPH_EMU_DIR,
+    [string]$Rom = ""
 )
+if (-not $EmuDir) { throw "give -EmuDir or set MPH_EMU_DIR" }
+if (-not $Rom) { $Rom = Join-Path $EmuDir "roms\AMHE1.nds" }
 $bh = Get-ChildItem -Directory "$EmuDir" -Filter "BizHawk-*" | Sort-Object Name | Select-Object -Last 1
 if (-not $bh) { throw "No BizHawk-* folder in $EmuDir" }
 New-Item -ItemType Directory -Force "$EmuDir\out\shots", "$EmuDir\states" | Out-Null

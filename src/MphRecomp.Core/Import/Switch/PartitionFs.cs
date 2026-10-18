@@ -30,7 +30,9 @@ namespace MphRecomp.Import.Switch
             return magic == Pfs0Magic || magic == Hfs0Magic;
         }
 
-        public static List<PartitionFile> Read(IDiscBlob blob, long offset)
+        // rootTable: an XCI's root HFS0, whose last partition (secure) may be listed up to a media unit past the end of a
+        // dump cut at the card header's valid data end; clamped to the file, its own files are still checked in full
+        public static List<PartitionFile> Read(IDiscBlob blob, long offset, bool rootTable = false)
         {
             var head = new byte[0x10];
             blob.Read(offset, head);
@@ -53,6 +55,7 @@ namespace MphRecomp.Import.Switch
                 if (name < 0 || at >= table.Length) throw new InvalidDataException("PFS0/HFS0: name outside the string table");
                 int end = Array.IndexOf(table, (byte)0, at);
                 string n = Encoding.UTF8.GetString(table, at, (end < 0 ? table.Length : end) - at);
+                if (rootTable && off >= 0 && size >= 0 && data + off <= blob.Size && data + off + size > blob.Size) size = blob.Size - (data + off);
                 if (off < 0 || size < 0 || data + off + size > blob.Size) throw new InvalidDataException($"PFS0/HFS0: {n} lies outside the file (truncated dump?)");
                 files.Add(new PartitionFile(n, data + off, size));
             }

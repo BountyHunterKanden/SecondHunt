@@ -1,6 +1,6 @@
-# M1 boot spike — Android GLES surface
+# M1 boot spike: Android GLES surface
 
-Purpose: de-risk the single biggest unknown before the real M1 work — does the
+Purpose: de-risk the single biggest unknown before the real M1 work: does the
 `.NET 9 + net9.0-android + direct GLES` stack run efficiently on the **Odin 2
 Portal**? This is a throwaway spike, standalone from the MphRead runtime.
 

@@ -4,12 +4,12 @@ mph-recomp is moddable in four layers. You can go as light or as deep as you lik
 
 | Tier | What it is | How |
 |---|---|---|
-| 1. **Assets** | Replace or add any game asset (texture, model, data file) | Drop a file at the same path in your mod folder — it overrides the base game (`MphRecomp.Assets.AssetVfs`) |
+| 1. **Assets** | Replace or add any game asset (texture, model, data file) | Drop a file at the same path in your mod folder and it overrides the base game (`MphRecomp.Assets.AssetVfs`) |
 | 2. **Data / config** | Retune game constants (camera, movement, lighting…) | Ship a partial `config.json`; it deep-merges over the defaults (`MphRecomp.Config`) |
 | 3. **Scripts (Lua)** | React to game events, add behavior | A sandboxed Lua mod using the `mod` API below (`MphRecomp.Mods`) |
 | 4. **Plugins (C#)** | Compiled extensions | (planned) |
 
-Mods are **sandboxed** (no file/OS access from Lua), **isolated** from each other, and a mod that throws — on load or in a hook — is caught and disabled without taking down the game. Each mod gets its own persistent storage inside your save, so mods never clobber each other or the base save.
+Mods are **sandboxed** (no file/OS access from Lua), **isolated** from each other, and a mod that throws (on load or in a hook) is caught and disabled without taking down the game. Each mod gets its own persistent storage inside your save, so mods never clobber each other or the base save.
 
 ## A mod is a folder
 
@@ -55,7 +55,7 @@ The game fires these to your `mod.on` handlers:
 
 | Event | Args | When |
 |---|---|---|
-| `start` | — | Once, after mods load |
+| `start` | none | Once, after mods load |
 | `room_enter` | `roomName` | You enter a room |
 | `tick` | `dt` | Every fixed sim step (dt seconds) |
 
@@ -63,7 +63,7 @@ More events (damage, pickup, death, …) arrive as the gameplay layer lands.
 
 ## Example
 
-A complete, working example ships in [`docs/mods/example_stat_tracker/`](mods/example_stat_tracker/) — a small stat tracker that counts launches, room visits, and playtime and reads config + an asset. Copy that folder to start your own.
+A complete, working example ships in [`docs/mods/example_stat_tracker/`](mods/example_stat_tracker/): a small stat tracker that counts launches, room visits, and playtime and reads config + an asset. Copy that folder to start your own.
 
 ```lua
 mod.on("room_enter", function(room)
@@ -77,5 +77,5 @@ end)
 ## Notes
 
 - **Persistence** is per-mod and per-key, stored in the versioned save under your mod id, so uninstalling a mod never corrupts the base save (mirrors the `save.modData[modId]` pattern from gen1recomp mods).
-- **Load order** matters if two mods override the same asset or react to the same event — later-loaded wins for assets; all handlers run for events. Reorder in the mod manager.
+- **Load order** matters if two mods override the same asset or react to the same event: later-loaded wins for assets; all handlers run for events. Reorder in the mod manager.
 - The whole mod stack is covered by headless tests (`-modtest`, `-modapitest`, `-modmgrtest`, `-vfstest` in the tools CLI).

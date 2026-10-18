@@ -87,7 +87,7 @@ namespace MphRead
             }
             else if (test == "logbook")
             {
-                // a new game's logbook (UI session's report 2026-09-30): the starting equipment by scan id = record number.
+                // a new game's logbook: the starting equipment by scan id = record number.
                 // A real DS shows EQUIPMENT 33% (9 of 27) and no scans on a fresh file.
                 var save = new StorySave();
                 string[] want = { "SCAN VISOR", "THERMAL POSITIONER", "ARM CANNON", "POWER BEAM", "MISSILE LAUNCHER",

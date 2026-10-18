@@ -15,7 +15,7 @@ namespace MphRead
 {
     // Render a Brawl trophy on the PC through the SAME GX program the Odin uses (MphRecomp.Render.GxShader), straight
     // on from the front, orthographic, over a flat background -- the conditions of the BrawlCrate reference renders
-    // (scratchpad brawl_render2.ps1) -- so the two can be compared pixel for pixel.
+    // -- so the two can be compared pixel for pixel.
     //   MphRead.Tools.dll -hdlook <Trophy> [--out dir] [--size 1024] [--amb 1] [--light x,y,z,r,g,b] [--bg 255,0,255] [--time s]
     // Writes <out>/<Trophy>_ours.png. Lights are in camera space (x right, y up, z towards the viewer).
     internal static class HdLook

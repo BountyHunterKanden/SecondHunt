@@ -265,7 +265,7 @@ namespace MphRead
         }
 
         // --frames Flourish:0,12,24 --out <dir>: both models posed in those frames, triangle by triangle, to draw side by
-        // side (scratchpad frames_plot.py). One line per triangle: 9 coordinates, the bone of each corner (the game
+        // side. One line per triangle: 9 coordinates, the bone of each corner (the game
         // model: its one bone; the rig: its main bone, -1 when blended), and the triangle's WARP = the largest change of an
         // edge's length relative to that edge in the model's own standing Idle f0 (0 = moved rigidly).
         // Files: <T>_<clip>_<f>_game.txt / _rig.txt, same space (the game's model space, trophy scaled to it).

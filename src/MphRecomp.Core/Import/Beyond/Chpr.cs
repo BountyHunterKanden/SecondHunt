@@ -9,7 +9,7 @@ namespace MphRecomp.Import.Beyond
     // Metroid Prime 4: Beyond character project (CHPR): the container, its animation table and the parts of the
     // character info the animation decoder needs. Clean-room: worked out from the owner's own RomFS dump (Samus's
     // universeRoom.pak CHPR 7238eaad-21a1-4966-83fb-7fb7d1173bf6) with no game code read, and it replaces the Prime 4
-    // Model Dumper's CHPR class (chpr.json) that brawl_extract/rig_work/gun/mp4anim/py/mp4anim_lib.py used to read.
+    // Model Dumper's CHPR class (chpr.json) that mp4anim_lib.py used to read.
     // Input: the CHPR's decompressed bytes (the pak/RomFS layer that pulls them out of a pak is a separate reader).
     //
     // FORMAT (little endian):

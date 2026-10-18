@@ -19,7 +19,7 @@
 set -u
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 adb=${ADB:-adb}
-command -v "$adb" >/dev/null 2>&1 || adb="$USERPROFILE/Desktop/android-sdk/platform-tools/adb.exe"
+command -v "$adb" >/dev/null 2>&1 || { echo "adb not found: put it on PATH or set ADB"; exit 1; }
 dotnet=${DOTNET:-$USERPROFILE/.dotnet/dotnet.exe}
 [ -x "$dotnet" ] || dotnet=dotnet
 tools=${TOOLS:-$repo/src/MphRead.Tools/bin/Replay/net9.0}

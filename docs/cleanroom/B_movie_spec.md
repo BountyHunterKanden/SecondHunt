@@ -532,7 +532,7 @@ the set of frame n is reused by frame n + 4, which is only decoded after the con
 **`GetImage(frameIndex, texture)`** (called from the display thread while decoding continues): if no frame has been
 decoded since the last Reset or the current Decode's header, or frameIndex ≥ the number of frames decoded so far,
 return false and change nothing. Otherwise convert that frame's picture (7.1) into `texture` as RGB24: pixel (x, y) at
-byte offset **(y · 256 + x) · 3** (R, G, B) — the row stride is always 256 pixels, whatever the movie's width — then
+byte offset **(y · 256 + x) · 3** (R, G, B); the row stride is always 256 pixels, whatever the movie's width, then
 atomically decrement FramesQueued and return true. Each successful call decrements once. (In recycled mode a frame's
 entry shows whatever its picture set holds now; callers take frames in order within the 4-frame window, so that's
 always the frame itself.)
@@ -579,7 +579,7 @@ you're given: the playback part of `src/MphRead/Formats/Movie.cs` (what's left o
 
 **Don't open:** any earlier version of the VX decoder, the project's git history, any other VX / Mobiclip / Actimagine
 decoder or encoder in any language (for example actimagine, Gericom's ffmpeg patch or MobiclipDecoder, or ffmpeg's own
-H.264 decoder sources), upstream MphRead online, or anything under the spec author's `handoffs/` folder or scratchpad.
+H.264 decoder sources), upstream MphRead online, or or the spec author's own notes and working files.
 If you think you need one of them, stop and say what you need instead.
 
 ### Done means

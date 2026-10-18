@@ -15,8 +15,8 @@ namespace MphRead
 {
     // -importcheck beyond-anims [--chpr <CHPR.bin>] [--golden <dir>] [--json <chpr.json>|none] [--anim <name>] [--no-bitexact] [-v]
     // The golden check of the Beyond animation decoder (MphRecomp.Import.Beyond, the C# port of
-    // brawl_extract/rig_work/gun/mp4anim/py): decodes Samus's CHPR from its bytes ALONE and compares with the Python's
-    // exports in brawl_extract/mp4/anims/fps (made by mp4anim_export.py from the CHPR + the Model Dumper's chpr.json):
+    // the mp4anim Python scripts): decodes Samus's CHPR from its bytes ALONE and compares with the Python's
+    // exports (--golden, made by mp4anim_export.py from the CHPR + the Model Dumper's chpr.json):
     //   index.json      every fp* anim: status (ok / fail / error) and message; for ok ones every meta field
     //   <anim>.npz      every ok anim: names, parents, flags exact; per-frame rot / trans / scale (+ deltas) within 1e-5
     //   skeleton.npz    names, parents, flags exact; rest locals + rest world (bind) matrices equal as float32

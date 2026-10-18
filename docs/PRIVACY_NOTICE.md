@@ -1,5 +1,4 @@
-> **Filled in 2026-10-09 from the owner's answers** (name, report checks, appeals, 13+ everywhere). Not legal advice.
-> Written from what the server code actually keeps (`src/SecondHunt.Server/Store.cs`, `HubChat.cs`, `deploy/`). If
+> Not legal advice. Written from what the server code actually keeps (`src/SecondHunt.Server/Store.cs`, `HubChat.cs`, `deploy/`). If
 > the server changes what it keeps, update this file (and docs/ONLINE_RULES_IN_APP.md, the in-app page) in the same change.
 
 # Second Hunt online play: privacy notice

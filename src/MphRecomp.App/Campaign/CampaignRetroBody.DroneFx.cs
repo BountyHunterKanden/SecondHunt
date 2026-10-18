@@ -9,7 +9,7 @@ using OpenTK.Mathematics;
 namespace MphRecomp.App;
 
 // The Scout Drone's Prime 1 effects (CampaignRenderer.DroneFx.cs): the drone body's own fx folder and its bones posed as
-// the body draws them. Kept in its own file beside the characters thread's CampaignRetroBody.cs.
+// the body draws them. Kept in its own file beside CampaignRetroBody.cs.
 internal sealed partial class CampaignRetroBody
 {
     bool _fxRead;

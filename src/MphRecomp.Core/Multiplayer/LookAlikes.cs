@@ -253,8 +253,8 @@ namespace MphRecomp.Multiplayer
             Variant.Fifth => 5, Variant.Sixth => 6, Variant.Seventh => 7, Variant.Eighth => 8, _ => null,
         };
 
-        // copies 2-8 (body, lights), owner-approved as one set 10-12 (handoffs/team-colours-5-8_2026-10-12_0206-files/
-        // sheet_looks_v6.png); the 1st is the character's own look
+        // copies 2-8 (body, lights), owner-approved as one set
+        // 10-12; the 1st is the character's own look
         static readonly ((float R, float G, float B), (float R, float G, float B))[] TrooperCopy =
         {
             default, default,

@@ -11,7 +11,7 @@ using MphRecomp.Import.Beyond;
 namespace MphRecomp.Import.Guns
 {
     // Metroid Prime 4: Beyond's first-person arm cannon WITH Beyond's own animations, as MPHGUN2 (port of
-    // brawl_extract/rig_work/gun/scripts/gun_export4b.py; everything it does after reading its inputs):
+    // gun_export4b.py; everything it does after reading its inputs):
     //   inputs  the model's geometry + skin (IBeyondModelSource), its converted look (IBeyondLookSource: per-corner
     //           normals/UVs, gx.json materials, textures), Samus's character project (ChprCharacter: the game's
     //           skeleton, bind matrices and decoded animations; joints are matched by NAME)

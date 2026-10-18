@@ -2,30 +2,30 @@
 
 The real game in an emulator, driven by script, as the reference for `docs/ACCURACY.md`. PC only. Nothing here ships
 in the app, and no game data goes in the repo: ROMs, savestates, RAM dumps and screenshots stay in the emulator work
-dir (default `%USERPROFILE%\Downloads\mph-emu`).
+dir (`-EmuDir`, or the `MPH_EMU_DIR` environment variable).
 
 ## Setup (done 2026-09-30)
 
 - BizHawk 2.11.1 (`BizHawk-2.11.1-win-x64.zip` from github.com/TASEmulators/BizHawk releases, sha256
-  `dd7cbd5e...5717`) unzipped to `mph-emu\BizHawk-2.11.1`. DS core = melonDS (built in). No BIOS files needed.
+  `dd7cbd5e...5717`) unzipped to `<emu dir>\BizHawk-2.11.1`. DS core = melonDS (built in). No BIOS files needed.
 - **Unbind the mouse from the DS touch screen** in `BizHawk-*\config.ini`: `AllTrollersAnalog` -> `NDS Controller` ->
   `Touch X`/`Touch Y` `"Value": ""`, and `AllTrollers` -> `NDS Controller` -> `Touch` `""`. Otherwise
   `joypad.setanalog` touch positions are silently dropped (BizHawk issue #4535: sticky axes XOR the mouse axes). The
   original is kept as `config.ini.orig`.
-- ROM: `mph-emu\roms\AMHE1.nds` = USA rev 1, SHA-1 `a8679d4f8dcb445cbe946a424241ef44901b0caf` (MphRead follows 1.1).
+- ROM: `<emu dir>\roms\AMHE1.nds` = USA rev 1, SHA-1 `a8679d4f8dcb445cbe946a424241ef44901b0caf` (MphRead follows 1.1).
 
 ## Running
 
 ```
 tools\accuracy\run.ps1 -Route tools\accuracy\routes\to_landing.lua
-python tools\accuracy\sheet.py %USERPROFILE%\Downloads\mph-emu\out\shots out.png
+python tools\accuracy\sheet.py <emu dir>\out\shots out.png
 ```
 
 `driver.lua` plays a route file (taps, keys, savestate load/save, screenshots, Main RAM dumps); see its header.
-Output goes to `mph-emu\out\`. The game's save file persists between runs in BizHawk's SaveRAM folder; routes that
+Output goes to `<emu dir>\out\`. The game's save file persists between runs in BizHawk's SaveRAM folder; routes that
 start from a savestate don't depend on it.
 
-## Routes and states (`mph-emu\states\`)
+## Routes and states (`<emu dir>\states\`)
 
 | State | Where |
 |---|---|

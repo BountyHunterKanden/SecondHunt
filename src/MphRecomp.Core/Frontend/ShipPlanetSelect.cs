@@ -7,7 +7,7 @@ using MphRead.Text;
 using MphRecomp.Frontend.Redraw;
 
 // The gunship's PLANET SELECT (vanilla: ShipInSpace state 1 -- overlay9_0 enter 0x2104a5c, process 0x2104094, draw
-// 0x2103d2c; decoded 2026-10-01, handoffs/start-menu-ui-rebuild_2026-10-01_0103-files/re3_planetselect/spec.md) as ONE
+// 0x2103d2c; decoded 2026-10-01) as ONE
 // 16:9 screen: the top screen's cockpit (the deep-space view through the window is the host's 3D -- DeepSpaceView,
 // drawn first and moved by CameraX/Y; the planet banner; the zoom panel), with the touch screen's star map, sliders and
 // LAND SHIP rebuilt into the console strip below the window.
@@ -61,8 +61,8 @@ namespace MphRecomp.Frontend
         private const int GripMargin = 8;
         private const float TapReach = 22;
         private const int PreSelect = 0x1f0, SliderDown = 0x1f1, SliderUp = 0x1f3, LandShipSound = 0x1f4;
-        // the camera's thrust (rev 0 0x2105790 / rev 1 0x2106258; traced in BizHawk 2026-10-01,
-        // handoffs/start-menu-ui-rebuild_2026-10-01-files/sound_census/thrust): SHIP_THRUST_LOOP (table volume 80, centre,
+        // the camera's thrust (rev 0 0x2105790 / rev 1 0x2106258; traced in BizHawk 2026-10-01):
+        // SHIP_THRUST_LOOP (table volume 80, centre,
         // pitch 1.0, never updated while it plays) starts on the first tick the camera trails its target by 3.0 or more
         // on an axis while the slider loop's handle (+0x6C) is set, and is restarted if its voice died. On the 6th tick
         // in a row without that it is stopped -- StopSfxHandle, which the DS turns into the channel's release (about

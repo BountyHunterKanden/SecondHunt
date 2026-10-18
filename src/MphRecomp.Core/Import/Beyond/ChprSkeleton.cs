@@ -6,7 +6,7 @@ using System.Linq;
 namespace MphRecomp.Import.Beyond
 {
     // A Beyond CHPR's skeleton: the abs (skeleton) nodes, their parents, the rest pose ("bind locals") and the skinned
-    // bind matrices. Port of mp4pose.Rig / skel.py (brawl_extract/rig_work/gun/mp4anim/py), reading everything from the
+    // bind matrices. Port of mp4pose.Rig / skel.py, reading everything from the
     // CHPR bytes (Chpr) instead of the dumper's chpr.json.
     //
     // Rest pose: an array of 28-byte records (f32 qw, qx, qy, qz, tx, ty, tz: rotation + translation local to the

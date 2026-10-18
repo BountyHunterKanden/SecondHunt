@@ -21,7 +21,7 @@ namespace MphRead
     // The golden check of the Beyond first-person guns (game "mp4" recipes in recipes/guns): the C# builder
     // (MphRecomp.Import.Guns.Gun4Builder, the port of gun_export4b.py) fed by the TEST-ONLY adapters over the reference
     // pipeline's inputs (Gun4TestSources.cs: the Model Dumper glTF, the static material conversion) and Samus's CHPR
-    // decoded by ChprCharacter, compared with brawl_extract/Converted/guns/MP4<Suit> (made by gun_export4b.py):
+    // decoded by ChprCharacter, compared with the reference guns/MP4<Suit> (made by gun_export4b.py):
     //   gun.bin      MPHGUN2 parsed: bones, names, parents, palettes, counts equal; floats within 1e-4 relative
     //                (1e-6 absolute near zero)
     //   gun.gx.json  parsed: structurally equal, numbers within 1e-5

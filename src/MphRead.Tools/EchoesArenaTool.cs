@@ -1191,7 +1191,7 @@ namespace MphRead
         // MphRead side of tools/accuracy/routes/probe_jumppad.lua (PAD_AT=deck): Celestial Gateway's pad 14 moved under
         // Samus on the gunship (volume base y 6.95), launch (-0.3, 0.5196, 0), the given lock (30 Hz ticks), a d-pad key
         // held from the tick after the launch; velocity per 30 Hz tick next to the vanilla trace (vanilla=<csv>).
-        // -echoesarena padvanilla lock=12 key=Right vanilla=<mph-emu/out/jp_d_L12_Right.csv>
+        // -echoesarena padvanilla lock=12 key=Right vanilla=<BizHawk trace .csv>
         static void PadVanilla(string[] args)
         {
             ushort lock30 = ushort.Parse(Arg(args, "lock") ?? "0");

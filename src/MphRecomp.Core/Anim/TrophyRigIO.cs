@@ -446,7 +446,7 @@ namespace MphRecomp.Anim
         public const float TemplateReach = 0.2f;   // a hand-made layout's torso answer may reach this far (x limb length) down a limb
         public const int RigidChunksVersion = 10;   // part of the rigid rig's cache key: bump whenever RigidChunks changes
         // A HAND-MADE RIG'S LAYOUT transferred onto the trophy ("<dae>.fighter.txt", made on the PC by
-        // brawl_extract/rig_work/session16/scripts/fighter_transfer.py from Nintendo's own Brawl fighter -- the owner's disc,
+        // fighter_transfer.py from Nintendo's own Brawl fighter -- the owner's disc,
         // study data, never shipped): per rig vertex the game bone the fighter's weights give that spot ("-" = no answer)
         // and whether it is SOFT (the fighter blends there: its ribbed abdomen), plus seam widths. The rigid rig's chunk rules
         // start from it instead of guessing the torso.

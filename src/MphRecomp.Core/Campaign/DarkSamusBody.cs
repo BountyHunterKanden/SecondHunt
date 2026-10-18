@@ -6,8 +6,8 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Campaign
 {
-    // Dark Samus on her own game's skeleton with her own clips (docs/CHARACTERS_AND_SKINS.md D2/D8/D14/D18; clip picks:
-    // handoffs/dark-samus-clipmap_2026-10-08.md): the clip map for her Echoes body (bodies/MP2DarkSamus, CINF 4abc8a50)
+    // Dark Samus on her own game's skeleton with her own clips (docs/CHARACTERS_AND_SKINS.md D2/D8/D14/D18):
+    // the clip map for her Echoes body (bodies/MP2DarkSamus, CINF 4abc8a50)
     // and her Corruption body (bodies/MP3DarkSamus, CINF adba16a78d7d49f7), registered with BodyClips.
     // D8: Samus's gameplay; her body is drawn with its toe tips just into the floor (BodyClips.Lift; owner 2026-10-08 20:30
     // after the 0.25 hover: "way too high ... the tips of her big toe a little bit in the ground").

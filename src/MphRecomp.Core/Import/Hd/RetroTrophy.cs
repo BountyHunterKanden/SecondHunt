@@ -13,7 +13,7 @@ namespace MphRecomp.Import.Hd
 {
     // A Retro character (or a static model: a morph ball) from the user's own Prime 1 / Echoes / Prime 3 disc, turned into
     // an HD model folder the app loads like the Brawl trophies (TrophyRigIO, HdBall, GxJson). Port of prime_to_trophy.py's
-    // first pass (brawl_extract/rig_work/session16/scripts; Prime 3 through prime3_char.py's load_chars: Convert3; the
+    // first pass (Prime 3 through prime3_char.py's load_chars: Convert3; the
     // --graft branch is not ported). Writes:
     //   <Stem>.dae          the mesh, one <triangles> block per Retro material, Y up and facing +Z like the Brawl
     //                       trophies, UVs exactly Retro's

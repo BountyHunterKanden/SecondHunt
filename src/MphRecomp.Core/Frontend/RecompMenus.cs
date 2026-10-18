@@ -703,8 +703,7 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.TouchAim.ToUpperInvariant(),
                     Step = s => _settings.TouchAim = Next(RecompSettings.TouchAimModes, _settings.TouchAim, s)
                 },
-                // replays (added by the replay session, board rule 2; docs/REPLAY_MODE.md R2): every local match against
-                // bots recorded, the last ten kept (App Campaign/MatchReplay.cs)
+                // replays: every local match against bots recorded, the last ten kept (App Campaign/MatchReplay.cs)
                 new()
                 {
                     Label = "record\nreplays",
@@ -712,8 +711,7 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.RecordReplays ? "ON" : "OFF",
                     Step = _ => _settings.RecordReplays = !_settings.RecordReplays
                 },
-                // multiplayer unlocks (added by the vanilla multiplayer menu session, board rule 2; owner 2026-10-07: vanilla
-                // by default, ALL after a confirmation; MultiplayerMenu reads it as its pages open)
+                // multiplayer unlocks (vanilla by default, ALL after a confirmation; MultiplayerMenu reads it as its pages open)
                 new()
                 {
                     Label = "unlocks",
@@ -721,8 +719,7 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.UnlockEverything ? "ALL" : "VANILLA",
                     Step = _ => AskUnlockEverything()
                 },
-                // First Hunt (added by the First Hunt session, board rule 2; owner 2026-10-14: it lives under EXTRAS): the
-                // imported cart's own game, its title screen first; Android dev builds only while the port is in progress
+                // First Hunt (it lives under EXTRAS): the imported cart's own game, its title screen first; Android dev builds only while the port is in progress
                 new()
                 {
                     Label = "extras",

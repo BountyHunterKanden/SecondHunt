@@ -9,7 +9,7 @@ namespace MphRead
 {
     // -sndtrace <route.txt>... : drives our menu screens (Core Frontend) through a scripted route of taps and keys at
     // 60 Hz and logs every sound call they make, one line per call in the BizHawk tracer's format, so ours and vanilla's
-    // can be diffed (handoffs/start-menu-ui-rebuild_2026-10-01-files/sound_census/compare.py):
+    // can be diffed:
     //   f00031 PlaySfx id=0x4 | PlayScript id=0x4017 | StopFreeScripts | PlaySfx id=0x1f5 h=1 (a loop the screen keeps)
     //   | StopHandle h=1 | UpdateHandle h=1 vol=0xff pan=0xff pitch=0x2400 (0xff / 0xffff = unchanged)
     // A menu script goes out through the game's dispatcher (ov0 0x21028d8 = StopFreeScripts(1) + PlayScript), which is

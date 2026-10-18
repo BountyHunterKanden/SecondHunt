@@ -3,8 +3,8 @@ using System.Collections.Generic;
 
 namespace MphRecomp.Frontend
 {
-    // The HUNTER LICENSE door's picture (owner 2026-10-08, candidate G3 of the mockups in
-    // handoffs/vanilla-multiplayer-menu_2026-10-08-files/door_candidates): ours, drawn here, not taken from the ROM. Three
+    // The HUNTER LICENSE door's picture (owner 2026-10-08, candidate G3 of the mockups):
+    // ours, drawn here, not taken from the ROM. Three
     // stars -- the big one in front, two behind it lower and to the sides, touching it -- each point split into a lit half
     // and a shaded half, inside a ring with the middle see-through. That's the style of the button the door borrows (page 52's
     // FRIENDS AND RIVALS, wifi_createjoin/wififriend), and the ring, size and place in a 128x128 texture are that button's, so

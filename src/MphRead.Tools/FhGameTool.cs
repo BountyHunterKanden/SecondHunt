@@ -550,7 +550,7 @@ namespace MphRead
         // lands on it, not through it, and moves with it
         // -fhgame walk [room] at=x,y,z [move=x,y] [frames=240] [out=file]: Samus placed at the cart's position (its y + 1,
         // our body centre), facing -z like the cart's spawn, then the stick held: her pose every frame, as the cart-vs-ours
-        // comparison's BizHawk walk.lua logs the cart's (scratchpad bh/)
+        // comparison's BizHawk walk.lua logs the cart's
         static void Walk(string room, string at, string move, int frames, string? outPath)
         {
             // at=spawn: from the level's own spawn
@@ -710,7 +710,7 @@ namespace MphRead
         }
 
         // the room's collision polygons (room + entities), one per line: "name terrain flags nx ny nz d | x y z | x y z ...",
-        // for the cart-vs-ours comparison's maps (scratchpad scripts)
+        // for the cart-vs-ours comparison's maps
         static void ColPolys(string room, string outPath)
         {
             CampaignHost host = StartP2(room, out PlayerEntity me);

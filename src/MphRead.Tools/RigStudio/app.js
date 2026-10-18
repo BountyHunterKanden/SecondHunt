@@ -69,7 +69,7 @@ window.addEventListener('resize', () => { resize(); frameAll(); });
 
 // ---------------- helpers
 const boneName = (i) => (S.M && i >= 0 ? S.M.bones[i].name : '');
-const boneLabel = (i) => (i < 0 ? '—' : `${LABEL[boneName(i)] ?? boneName(i)}`);
+const boneLabel = (i) => (i < 0 ? '-' : `${LABEL[boneName(i)] ?? boneName(i)}`);
 function boneColor(i) {
   const c = new THREE.Color(PALETTE[boneName(i)] ?? '#888');
   return c;
@@ -78,7 +78,7 @@ function setStatus(t) { $('status').textContent = t; }
 function markDirty(d = true) { S.dirty = d; $('dirty').textContent = d ? '● unsaved changes' : ''; updateNotice(); }
 function updateNotice() {
   const n = $('notice');
-  if (S.mode === 'preview' && S.dirty) { n.textContent = 'Preview shows the last SAVED rig — Save & refit to see your changes'; n.style.display = 'block'; }
+  if (S.mode === 'preview' && S.dirty) { n.textContent = 'Preview shows the last SAVED rig. Save & refit to see your changes'; n.style.display = 'block'; }
   else n.style.display = 'none';
 }
 
@@ -144,7 +144,7 @@ function applyModel(M, fresh) {
   markDirty(false);
   const hid = M.hiddenA.reduce((a, b) => a + b, 0);
   $('stats').textContent = `${M.trophy} on the ${M.hunter} rig · ${nv} trophy vertices · ${S.patchVerts.length} patches · ${S.pieceVerts.length} pieces${hid ? ` · ${hid} hidden` : ''}`;
-  setStatus(M.userA ? 'Loaded your saved grouping.' : 'No grouping saved yet — starting from the automatic one.');
+  setStatus(M.userA ? 'Loaded your saved grouping.' : 'No grouping saved yet, starting from the automatic one.');
   if (S.mode === 'preview') enterPreview();
 }
 
@@ -372,7 +372,7 @@ function refreshCounts() {
 function setActive(i) {
   S.active = i;
   $('activeSw').style.background = i >= 0 ? '#' + boneColor(i).getHexString() : 'transparent';
-  $('activeName').innerHTML = i >= 0 ? `<b>${boneLabel(i)}</b> <span class="help">${boneName(i)}</span>` : '—';
+  $('activeName').innerHTML = i >= 0 ? `<b>${boneLabel(i)}</b> <span class="help">${boneName(i)}</span>` : '-';
   $('activeHint').textContent = i >= 0 && !S.M.bones[i].ownsDs ? 'This bone carries no mesh in the game model' : 'Click or drag on the trophy to give it parts';
   for (const el of document.querySelectorAll('.bone')) el.classList.toggle('on', +el.dataset.bone === i);
 }
@@ -454,7 +454,7 @@ function handleHover(e) {
   } else {
     brushCursor.visible = false;
     const hitD = pick(e, [dsMesh]);
-    if (hitD) { bone = S.M.dsNodeA[hitD.face.a]; text = `game model: <b>${boneLabel(bone)}</b> <span style="color:#9aa1b1">${boneName(bone)}</span> — click to paint with it`; }
+    if (hitD) { bone = S.M.dsNodeA[hitD.face.a]; text = `game model: <b>${boneLabel(bone)}</b> <span style="color:#9aa1b1">${boneName(bone)}</span>: click to paint with it`; }
   }
   if (!S.painting) setHover(bone);
   const r = canvas.getBoundingClientRect();

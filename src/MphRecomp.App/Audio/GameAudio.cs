@@ -25,8 +25,8 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
     // Music, movie audio and SFX all sit on the DS mixer's own scale, and NcsfPlay's float output already is that
     // scale (SEQ_DRONE, seq vol 127, renders within 0.2 dB of a BizHawk capture of vanilla), so no extra gain. The
     // 0.875 that was here only matched CHUTNEY because NcsfPlay applied the SDAT sequence volume linearly (fixed by
-    // SquaredSeqVolume below); it left vol-127 cues ~1 dB quiet and vol-86 cues ~2.4 dB loud (UI session's mix
-    // measurements, handoffs/ui-to-music_2026-10-01.md 2b). The limiter catches cues that go over full scale.
+    // SquaredSeqVolume below); it left vol-127 cues ~1 dB quiet and vol-86 cues ~2.4 dB loud (mix
+    // measurements). The limiter catches cues that go over full scale.
     const float HeadroomGain = 1f;
     const float DcBlockHz = 10;
     const int ChunkFrames = 512;
@@ -131,7 +131,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
         stream.SquaredSeqVolume = true; // the SDAT volume on the NITRO player's curve, as on the DS
         stream.ExactTempo = true; // the DS's 5.2095 ms sequencer tick, not rounded up to whole samples
         // look-ahead limiter, not the tanh soft limit: same on most cues (both ~-50 dB distortion), but the one cue
-        // that runs 5.5 dB over at this gain (GOREA_1 M21, Seal Sphere) distorts 9 dB less (PC, scratchpad limtest,
+        // that runs 5.5 dB over at this gain (GOREA_1 M21, Seal Sphere) distorts 9 dB less (PC,
         // 2026-09-30)
         stream.DcBlockHz = mode.Fixes ? DcBlockHz : 0;
         stream.Limiter = mode.Fixes;
@@ -685,7 +685,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         public volatile bool Finished; // set by the mixer when a one-shot reaches its end
         // a stopped sound on the DS isn't cut: StopSfxHandle (ARM9 rev 0 0x2071d68) force-stops its sequence and the ARM7
         // releases the channel, about -18 dB a frame, silent ~55 ms later (BizHawk SOUNDxCNT, USA rev 1, 2026-10-01:
-        // v80 -> 40/s2 -> 20/s3 -> 1/s3 -> off; UI session's sound_census/thrust/report.md). The mixer fades Env out.
+        // v80 -> 40/s2 -> 20/s3 -> 1/s3 -> off). The mixer fades Env out.
         public volatile bool Releasing;
         public float Env = 1;
         // a stream's StopStream(fade): the DS stream fader runs the volume down to 0 over the fade frames, through the
@@ -970,7 +970,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
     // like MphRead.Sound.Sfx's own id-based dispatch (PlaySfx/PlayFreeSfx) picks sample vs. script by the id's flags
     // scriptRate: the screen's DS script clock (60 = title menus and the in-ship menu, 30 = in game, the briefing and the
     // planet select; half for an id the game plays with bit 31). Returns the sample's handle (-1 for a script or
-    // nothing), for a loop the caller stops. (UI session, 2026-10-01: script clock + handle, see Instance.ScriptRate.)
+    // nothing), for a loop the caller stops. (Script clock + handle: see Instance.ScriptRate.)
     public int PlayUi(int sfxId, float scriptRate = 30)
     {
         if (sfxId < 0)
@@ -997,7 +997,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         return -1;
     }
 
-    // the game's StopAllSfx: every sound stops (the pause map's open, overlay 8 -- UI session 2026-10-03)
+    // the game's StopAllSfx: every sound stops (the pause map's open, overlay 8)
     public void StopAll()
     {
         lock (_lock)
@@ -1491,7 +1491,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
     // The DS plays a sound effect on a hardware channel on the same scale as the music channels (BizHawk SOUNDxCNT:
     // BEAM, table vol 110 -> channel vol 111; BEAM_CHARGE2, 96 -> 97), so no extra SFX scale. MphRead desktop's
     // Sfx.Volume default (0.35) with a full-volume-per-side pan put every effect 3.1 dB under vanilla at centre and
-    // 9.1 dB under at a hard pan (UI session's mix measurements, handoffs/ui-to-music_2026-10-01.md 2b).
+    // 9.1 dB under at a hard pan (mix measurements).
     const float SfxDsGain = 1f;
 
     // SfxDsGain * the layer's own scale (1 for a plain sample, the DGN curve's volume, or a script entry's volume)

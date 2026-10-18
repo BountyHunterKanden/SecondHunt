@@ -10,8 +10,7 @@ using MphRecomp.Import;
 using MphRecomp.Import.Disc;
 using MphRecomp.Import.Switch;
 
-// IMPORT GAMES (owner 2026-10-07: "yes I want an import games screen"; board D8 / S32 / CR8): the player picks their own
-// Prime disc images, each game's page lists what can be made from it (ImportService's recipes: the arm cannons, Prime 1's
+// IMPORT GAMES: the player picks their own Prime disc images, each game's page lists what can be made from it (ImportService's recipes: the arm cannons, Prime 1's
 // suits and morph balls) with each one's status, and imports them -- all, or one again -- in the game's own message box
 // with a progress line and a NO button to stop. The pages are RecompMenus' (cloned from the game's own pieces like
 // RECOMP SETTINGS); this is their game code.

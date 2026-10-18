@@ -8,7 +8,7 @@ using OpenTK.Mathematics;
 namespace MphRecomp.Arenas
 {
     // Echoes' multiplayer movement in Echoes arenas only (owner 2026-10-09: "double jump in all echoes maps", water in
-    // Pipeline, gravity in water, the Gravity Boost, spider ball; brief handoffs/echoes-movement-water_2026-10-09_brief.md).
+    // Pipeline, gravity in water, the Gravity Boost, spider ball).
     // MPH's own arenas and the campaign stay MphRead's own: MphRead's hooks (Entities/Players/PlayerEchoesMoves.cs) are
     // switched on only while an Echoes arena's room is loaded in a match that has it on.
     //   - double jump: every hunter (MphRead's SpaceJump ability, given on spawn)

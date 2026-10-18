@@ -3487,7 +3487,7 @@ internal sealed class SceneRenderer : Java.Lang.Object, GLSurfaceView.IRenderer
     // The real bg_top/bg_top_ovl ROM art (DecodeBgLayer et al. above) is genuinely useful as ground
     // truth for shape/position, but two problems rule it out for the actual frame render: (1) it's a
     // small DS-native raster source, and a large shallow curve (Kanden's ring) can't be both crisp AND
-    // smooth from that no matter how it's upscaled -- confirmed empirically this session, not assumed;
+    // smooth from that no matter how it's upscaled -- confirmed by testing, not assumed;
     // (2) the real art was laid out for a 256x192 4:3 screen, and its pieces are NOT one continuous
     // shape in every case -- some hunters (Noxus, Weavel) have genuinely separate corner/edge pieces,
     // which should sit at the TRUE 16:9 screen corners on a widescreen display, not clustered in a

@@ -6,8 +6,8 @@ using System.Linq;
 using MphRecomp.Config;
 
 // OPTIONS > AUDIO ("ADJUST AUDIO OPTIONS", page 22): the game code behind the page's callbacks, which the menu data only
-// names (ov0's page-22 switch, callback - 0x31; USA rev 0 and rev 1 use the same numbers; research in
-// handoffs/beta-release-planning_2026-10-05_0300-files/audio_research.md): the speaker type, the SFX and music volumes
+// names (ov0's page-22 switch, callback - 0x31; USA rev 0 and rev 1 use the same numbers):
+// the speaker type, the SFX and music volumes
 // (steps 0-9, heard at once) and the sound test (SFXSELECTLIST.DAT / BGMSELECTLIST.DAT). The recomp's changes: the MIC row (the DS microphone's level) is gone, and the music quality
 // (RecompSettings.Music, GameAudio.cs MusicMode) sits in its place, so a music test song can be heard in every mode, live;
 // and every change is saved at once (owner 2026-10-05: no SAVE; vanilla kept them until SAVE, B forgot them).

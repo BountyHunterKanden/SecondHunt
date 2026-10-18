@@ -1,4 +1,4 @@
-# ARCHITECTURE — mph-recomp
+# Architecture
 
 > Status: M0 foundation draft (kit v0.1.0 → v0.2.x). This document encodes the
 > **non-negotiable structural rules** from the planning kit §6 as enforceable
@@ -19,12 +19,12 @@ An unofficial, legally-clean, highly-moddable native **Android** reimplementatio
 of *Metroid Prime Hunters* (Nintendo DS). It ships **zero game assets**: on first
 launch the user points it at a ROM they legally own, and assets are extracted to
 app-private storage. Default presentation is **single-screen "Trilogy" style**
-(twin-stick, in-viewport HUD), baked into the core — not the DS dual-screen
+(twin-stick, in-viewport HUD), baked into the core, not the DS dual-screen
 layout. Primary device: **AYN Odin 2 Portal**.
 
 ---
 
-## 1. The sim / presentation split (Rule 1 — the spine)
+## 1. The sim / presentation split (Rule 1, the spine)
 
 The codebase is split into two layers with a **one-way dependency**:
 
@@ -33,12 +33,12 @@ The codebase is split into two layers with a **one-way dependency**:
   (may read sim)                 (must NOT know presentation exists)
 ```
 
-**Simulation layer** — the authoritative game: entity state, physics, collision,
+**Simulation layer:** the authoritative game: entity state, physics, collision,
 AI, weapons, enemies, bosses, progression, RNG, and **saves**. It runs
 identically no matter how the game is drawn or controlled. It must not reference
 any camera, HUD, input-scheme, screen-layout, or renderer type.
 
-**Presentation layer** — camera, HUD, reticle, input schemes, screen layout,
+**Presentation layer:** camera, HUD, reticle, input schemes, screen layout,
 renderer, audio output. It observes and issues intent to the sim; it never *owns*
 game state.
 
@@ -70,7 +70,7 @@ split lands, treat the boundary as a review rule: **no `Renderer`, `Camera`,
   - `formatVersion` : int, starts at `1`.
   - `game`         : sim state (progression, inventory, story flags, position,
     unlocked hunters/weapons, difficulty/version tag).
-  - No `presentation` / `ui` / `input` keys — enforced by a serialization test.
+  - No `presentation` / `ui` / `input` keys, enforced by a serialization test.
 
 ## 3. Repo split: slim runtime core vs. desktop tools (Rule 3)
 
@@ -78,16 +78,12 @@ MphRead grew from a model viewer and carries desktop-only tooling the Android
 build must never contain (COLLADA/Blender exporters, PNG/WAV exporters, repackers,
 analyzers, test harnesses, console menus). The fork separates:
 
-- `runtime/` — everything that ships in the APK: sim + presentation + the format
+- `runtime/`: everything that ships in the APK, so sim + presentation + the format
   parsers and the runtime asset **extractor**.
-- `tools/`   — desktop-only: exporters, repackers, analyzers, the console
+- `tools/`: desktop-only exporters, repackers, analyzers, the console
   front-end, test/dev harnesses.
 
-The concrete file-by-file classification and the **delete-or-relocate** task list
-live in [`docs/M0_survey_and_split_plan.md`](docs/M0_survey_and_split_plan.md).
-No files are moved until that plan is reviewed.
-
-## 4. Data-driven engine (Rule 4 — a standing practice, not one late task)
+## 4. Data-driven engine (Rule 4, a standing practice)
 
 Gameplay constants currently live hardcoded in `Metadata/` (`Weapons.cs`,
 `Rooms.cs`, `Enemies.cs`, `Player.cs`, …). The standing rule for **M2–M4**:
@@ -117,14 +113,14 @@ so geometry does not pop at screen edges.
 
 ---
 
-## Moddability model (four tiers — the payoff of the rules above)
+## Moddability model (four tiers)
 
-- **(a) Asset tier** — a layered virtual filesystem; mod folders override the
+- **(a) Asset tier:** a layered virtual filesystem; mod folders override the
   extracted asset cache. Mods never touch the ROM or the cache; they overlay it.
-- **(b) Data tier** — the definition files from Rule 4. The effort center.
-- **(c) Script tier** — **MoonSharp** (pure-C# Lua) hooks on events, entity
+- **(b) Data tier:** the definition files from Rule 4. The effort center.
+- **(c) Script tier:** **MoonSharp** (pure-C# Lua) hooks on events, entity
   lifecycle, input, HUD, with an API that can spawn/modify/query the sim.
-- **(d) Plugin tier** — full compiled C# assemblies for total conversions.
+- **(d) Plugin tier:** full compiled C# assemblies for total conversions.
 
 Plus a **baked-in mod manager UI** (enable / disable / order). All four tiers land
 in M4; the data tier already exists from M2–M3.
@@ -132,10 +128,10 @@ in M4; the data tier already exists from M2–M3.
 ## Tech stack (fixed decisions)
 
 C# / .NET 9 (`net9.0-android`, AOT to native ARM) · OpenGL ES (direct bindings
-preferred) · OpenAL Soft · **MoonSharp** Lua (not LuaJIT — no native toolchain on
+preferred) · OpenAL Soft · **MoonSharp** Lua (not LuaJIT: no native toolchain on
 Android) · APK pipeline reused from sibling **buusfury-recomp**: zipalign +
 keytool + apksigner with **V1+V2+V3** signatures (V1-only self-signed APKs fail to
-install on Odin-family devices — proven empirically).
+install on Odin-family devices, tested on hardware).
 
 ## The rules as a review checklist
 

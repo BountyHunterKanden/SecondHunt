@@ -65,7 +65,16 @@ namespace MphRead
                     Console.WriteLine($"  {(MphRecomp.Frontend.ImportGames.Offered(it) ? "OFFERED" : "held   ")} {it.Id}");
                 List<string> ids = game.Items.Where(MphRecomp.Frontend.ImportGames.Offered).Select(i => i.Id).ToList();
                 var progress = new Progress(verbose);
-                ImportReport rep = svc.Import("mp4", romfs, progress, default, ids);
+                // --xci <file> --prodkeys <prod.keys>: from the game file instead, through the app's own stream path
+                string? xci = Arg("--xci", "") is { Length: > 0 } x ? x : null;
+                ImportReport rep;
+                if (xci != null)
+                {
+                    svc.SwitchKeys = MphRecomp.Import.Switch.SwitchKeys.FromFile(Arg("--prodkeys", ""));
+                    using FileStream fs = File.OpenRead(xci);
+                    rep = svc.Import("mp4", fs, progress, default, ids);
+                }
+                else rep = svc.Import("mp4", romfs, progress, default, ids);
                 bool ok = true;
                 foreach (ImportItemInfo it in rep.Items)
                 {

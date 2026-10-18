@@ -1,4 +1,4 @@
--- Jump pad control lock (Echoes arenas thread, owner question 2026-10-07: "are you certain that there is a delay and
+-- Jump pad control lock (question 2026-10-07: "are you certain that there is a delay and
 -- that you cant influence the arc on the way up with the dpad in vanilla"). From landing.State (Celestial Gateway):
 -- pokes Celestial Gateway's jump pad 14 (entity data at 0x022A0AA0; the CJumpPad at 0x022E2C80 caches what it fires
 -- at load: beam * speed fx at +0xD8, control lock u16 at +0xD6 in 30 Hz ticks, world volume (cylinder) center at

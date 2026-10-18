@@ -461,7 +461,7 @@ The 12 Sylux textures, all formats above, equal the reference images exactly.
     and rounded down, ⌊(2 × c0 + c1) / 3⌋ and ⌊(c0 + 2 × c1) / 3⌋; the alpha sevenths and fifths are rounded to
     nearest, ⌊((7 − i) × a0 + i × a1 + 3) / 7⌋ and ⌊((5 − i) × a0 + i × a1 + 2) / 5⌋. The harness compared the 4
     BC3 sRGB (25) textures of universeRoom.pak that have a reference image
-    (brawl_extract/mp4/tex/universeRoom/<id>.png): all equal exactly, their colour blocks with c0 ≤ c1 included.
+    (universeRoom/<id>.png): all equal exactly, their colour blocks with c0 ≤ c1 included.
     Rounding the thirds to nearest instead left every texture off by 1 in up to a quarter of its colour bytes. No
     BC1, BC2, BC4 or BC5 texture has a reference image, so BC1's half (taken the same way, ⌊(c0 + c1) / 2⌋) is
     **[unchecked]**.

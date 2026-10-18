@@ -6,7 +6,7 @@ using MphRecomp.Frontend;
 using MphRecomp.Update;
 
 // -updatelaunchtest [feed folder]: the launch update check (owner 2026-10-11; FrontendSession.TickLaunchCheck) driven on
-// a real session against the test-signed 0.1.9-beta feed (handoffs/updater_2026-10-06-files/feed_file, file:// URLs):
+// a real session against the test-signed 0.1.9-beta feed (testdata/update_feed, file:// URLs):
 // offered once on the main menu, YES answers through the host, silent when up to date / switched off / a dev build
 // without a feed, waits off the main menu, and doesn't come back on a later session in the same run.
 namespace MphRead
@@ -18,7 +18,7 @@ namespace MphRead
         public static void Run(string[] args)
         {
             string feedDir = Path.GetFullPath(args.Length > 1 ? args[1] : Path.Combine(AppContext.BaseDirectory,
-                "..", "..", "..", "..", "..", "handoffs", "updater_2026-10-06-files", "feed_file"));
+                "..", "..", "..", "..", "..", "testdata", "update_feed"));
             if (!ToolPaths.UseDesktopExtraction()) return;
             string tmp = Path.Combine(Path.GetTempPath(), "updatelaunchtest");
             Directory.CreateDirectory(tmp);

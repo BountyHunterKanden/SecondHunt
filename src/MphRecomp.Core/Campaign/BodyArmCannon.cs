@@ -106,7 +106,7 @@ namespace MphRecomp.Campaign
             return null;
         }
 
-        // by eye on the desktop, 2026-10-08 (pictures in handoffs/first-person-arm-cannons_2026-10-08_pictures)
+        // by eye on the desktop, 2026-10-08
         static readonly Vector3 TrooperBlast = new(-0.015f, -0.055f, -0.045f);
         const float EchoesLight = 1.6f;
 

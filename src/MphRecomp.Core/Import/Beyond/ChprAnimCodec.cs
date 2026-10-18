@@ -13,7 +13,7 @@ namespace MphRecomp.Import.Beyond
 
     // Metroid Prime 4: Beyond CHPR animation codec: the "CompStream" bitstream records of a CHPR's animation table.
     // Clean-room, worked out from the owner's own RomFS dump (no game code read). Port of
-    // brawl_extract/rig_work/gun/mp4anim/py/mp4anim_codec.py (all arithmetic double precision, as the Python's is).
+    // mp4anim_codec.py (all arithmetic double precision, as the Python's is).
     //
     // Anim record: u8 type (0 = CompStream, 1 = Sequence, 2 = Grid), u8 set, u16 index, u8 x4, u8 has name, u32 name
     //   (string index), i32 ref.  CompStream (type 0), at +17 (all offsets below relative to +17):

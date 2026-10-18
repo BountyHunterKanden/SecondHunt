@@ -225,13 +225,13 @@ namespace MphRead
             Console.WriteLine($"font atlas {atlas.Width}x{atlas.Height}, {metrics.Count} chars");
         }
 
-        // -replaymock renamecheck: RENAME end to end on a scratch copy of the sample replays (handoffs/replay-mode_2026-10-08_0150-files/
-        // fe_testdata): REPLAYS -> the newest replay -> rename -> the name keyboard (MultiplayerMenu.EditText) -> a new name -> OK:
+        // -replaymock renamecheck: RENAME end to end on a scratch copy of the sample replays (testdata/
+        // replays): REPLAYS -> the newest replay -> rename -> the name keyboard (MultiplayerMenu.EditText) -> a new name -> OK:
         // back on the REPLAY page with the new title, the file renamed, WATCH asks for the new file, and the list shows it
         private static void RenameCheck()
         {
-            string src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "handoffs",
-                "replay-mode_2026-10-08_0150-files", "fe_testdata"));
+            string src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "testdata",
+                "replays"));
             string dir = Path.Combine(Path.GetTempPath(), $"replay_renamecheck_{Environment.ProcessId}");
             foreach (string f in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
             {

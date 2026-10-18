@@ -10,7 +10,7 @@ using MphRecomp.Import;
 namespace MphRead
 {
     // -recipecheck [--recipes dir] [-v]
-    // The recipe lint (board S16, docs/IMPORT_PIPELINE.md rule 2, docs/PUBLIC_BETA_AUDIT.md section 4): everything under
+    // The recipe lint: everything under
     // recipes/ ships inside the app, so it may hold ids, names, parameters and source hashes, never game data. Run it
     // before each commit; the exit code is 1 when any file fails.
     //   every file    strict JSON (the parser the app uses; nothing else may live in recipes/); no numeric array longer
@@ -36,7 +36,7 @@ namespace MphRead
         // mp1-mp3 import today (ImportService.KnownGames); mp4's recipes are ready, its game is not registered yet (CR6)
         static readonly string[] Games = { "mp1", "mp2", "mp3", "mp4" };
 
-        // never shipped (docs/IMPORT_PIPELINE.md section 6, board S26): community fan-rig meshes and the dropped MP3 suit
+        // never shipped: community fan-rig meshes and the dropped MP3 suit
         static readonly string[] NeverShips = { "KandenRest", "SyluxRest" };
 
         static readonly Regex Sha1Rx = new("^[0-9a-fA-F]{40}$", RegexOptions.Compiled);

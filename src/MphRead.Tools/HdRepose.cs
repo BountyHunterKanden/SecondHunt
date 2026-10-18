@@ -7,7 +7,7 @@ using OpenTK.Mathematics;
 
 namespace MphRead
 {
-    // Bake a RE-POSED rest shape (brawl_extract/rig_work/session17/scripts/repose.py: the whole statue moved into Pose Studio's
+    // Bake a RE-POSED rest shape (repose.py: the whole statue moved into Pose Studio's
     // rest pose, pieces solid, joint regions re-solved as-rigid-as-possible) into one of a trophy's rig caches: the rig's
     // bind pose becomes that rest pose (BindWorld = the rest pose's bone matrices) and every vertex gets its rest position
     // and the turn that took it there (BindPos / BindRot, the format the app already reads for straightened rigs). The

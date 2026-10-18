@@ -4,7 +4,7 @@
      - GLES 3.0 is required (every shader is "#version 300 es"), so stores and installers can filter on it.
      - Backup covers only the player's saves and settings. The extracted ROM (FilesDir) and the imported hd/, guns/
        and arenas/ folders are game data the app rebuilds from the user's own files; they're never backed up.
-     - label = ${appLabel} (MphRead.Android.csproj: dev "MPH Recomp", public builds the owner's pick, board D1); the icon
+     - label = ${appLabel} (MphRead.Android.csproj: dev "MPH Recomp", public builds the public name); the icon
        is provisional. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-feature android:glEsVersion="0x00030000" android:required="true" />

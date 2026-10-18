@@ -11,7 +11,7 @@ using SixLabors.ImageSharp;
 // TROOPER's info box and skin chooser, a pick into the lobby, the lobby badge's chooser for this player and a bot, the
 // arrows over all nine, D7's bot names and START GAME's setup; then the same page with no HD models (TROOPER and DARK
 // SAMUS greyed, Samus straight to the lobby). MP_SHOTS=1: picker_*.png (extract_out/frontend) at MP_SIZE (default
-// 1920x1080), the pictures taken from the mockup's renders (handoffs/character-skin-picker_2026-10-08_1907-files).
+// 1920x1080), the pictures taken from the mockup's renders (testdata/picker_renders).
 namespace MphRead
 {
     public static class PickerTest
@@ -492,7 +492,7 @@ namespace MphRead
         // the mockup's renders as the device's pictures (the names CharacterPictures.For looks for)
         private static void FillPictures(string hd, string pictures)
         {
-            string? renders = FindUp(AppContext.BaseDirectory, Path.Combine("handoffs", "character-skin-picker_2026-10-08_1907-files", "renders"));
+            string? renders = FindUp(AppContext.BaseDirectory, Path.Combine("testdata", "picker_renders"));
             if (renders == null) return;
             foreach (string folder in Directory.EnumerateDirectories(hd))
             {

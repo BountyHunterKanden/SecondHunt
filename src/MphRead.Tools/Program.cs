@@ -174,7 +174,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-beyondbody") { BeyondBodyCheck.Run(args); return; }   // Prime 4 native body (CR6 Beyond)
             if (args.Length >= 1 && args[0] == "-releasegatestest") { Environment.Exit(ReleaseGatesTest.Run(args)); }   // next release's public-build exclusions
             if (args.Length >= 1 && args[0] == "-importedcontenttest") { Environment.Exit(ImportedContentTest.Run(args)); }   // ship-safe gate (docs/SHIP_SAFE_AUDIT_2026-10-10.md)
-            if (args.Length >= 1 && args[0] == "-recipecheck") { Environment.Exit(RecipeCheck.Run(args)); }   // recipe lint (board S16)
+            if (args.Length >= 1 && args[0] == "-recipecheck") { Environment.Exit(RecipeCheck.Run(args)); }   // recipe lint
             if (args.Length >= 1 && args[0] == "-importeditions") { Environment.Exit(ImportEditions.Run(args)); }   // a game from another disc (Import/Editions.cs)
             if (args.Length >= 2 && args[0] == "-feprobe") { FrontendProbe.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-fedump") { FrontendTool.Dump(args); return; }

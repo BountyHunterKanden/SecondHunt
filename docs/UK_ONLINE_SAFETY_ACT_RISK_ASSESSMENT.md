@@ -1,5 +1,4 @@
-> **Filled in 2026-10-09 from the owner's answers** (name, report checks, appeals, 13+ everywhere). Not legal advice.
-> A plain-language
+> Not legal advice. A plain-language
 > first version of the written risk assessments the UK Online Safety Act 2023 asks of user-to-user services (Ofcom's
 > illegal content risk assessment and children's risk assessment guidance), sized for a one-person free fan game. The
 > owner checks it against Ofcom's current guidance before UK players can chat, signs it, and reviews it on the date
@@ -89,4 +88,4 @@ default, user-made content, larger lobbies, or if reports show a pattern. Record
 
 | Date | Change | By |
 |---|---|---|
-| 2026-10-09 | First draft (O7) | Social O7 thread |
+| 2026-10-09 | First draft | BountyHunterKanden |

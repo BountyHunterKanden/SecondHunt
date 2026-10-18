@@ -9,8 +9,8 @@ namespace MphRecomp.Multiplayer
     // The 5th-8th seat playing the same hunter in an 8-player match (owner 10-11/10-12): four more colours per hunter, as
     // MPH's own pal_01-04 are made. Vanilla's copies put two colours on two groups of parts (Trace's chest hole + eye vs his
     // armour, Kanden's lights, Sylux's stripes vs body), so each new one is built from one of MPH's own palettes by moving
-    // its two hue groups to two new colours (owner-approved sheet handoffs/team-colours-5-8_2026-10-12_0206-files/
-    // sheet_hunters_v2.png). Extra palette sets appended to every model of the hunter as it loads (Read.HostExtraRecolors,
+    // its two hue groups to two new colours (owner-approved
+    // colour sheet). Extra palette sets appended to every model of the hunter as it loads (Read.HostExtraRecolors,
     // through LookAlikes' hook), picked per seat by PlayerEntity.HostLookRecolor / HostGunLookRecolor. The seat's MPH
     // Recolor stays 0-3 (gameplay, effects, replays and netcode as before): drawing only. Their bombs' colours are made
     // the same way (Sylux's Lockjaw glow and trail, Kanden's tail bomb).

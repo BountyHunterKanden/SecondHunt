@@ -6,7 +6,7 @@ using Javax.Microedition.Khronos.Opengles;
 
 namespace MphRecomp.BootSpike;
 
-// Minimal GLES boot spike. Direct GLES bindings (Android.Opengl.GLES30) — no ANGLE.
+// Minimal GLES boot spike. Direct GLES bindings (Android.Opengl.GLES30), no ANGLE.
 // Goal on-device (Odin 2): screen clears to a dark blue and logcat prints the
 // GPU's GL_VENDOR / GL_RENDERER / GL_VERSION, confirming the surface + context.
 [Activity(

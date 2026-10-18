@@ -1447,7 +1447,7 @@ namespace MphRecomp.Frontend
         // the boxes its numbers sit in drawn in (49 good: good1 / good2, Gorea over Samus unmasked; 50 bad: bad1 / bad2),
         // as do the multiplayer RESULTS pages (47 / 48: results1 / results2); every other page the menus' Samus (main1 /
         // main2), which the HD backdrop replaces. Owner 2026-10-07 (Reports R6): the results page looked "suspiciously
-        // bare" -- it had main1 / main2 (vanilla capture: handoffs/start-menu-ui-rebuild_2026-10-07-endings-files/screens).
+        // bare" -- it had main1 / main2 (checked against vanilla).
         private const double EndingHold = 5, EndingFade = 1.5; // seconds
 
         private static string BackgroundName(int page) => page switch

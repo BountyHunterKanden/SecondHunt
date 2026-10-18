@@ -37,7 +37,7 @@ namespace MphRecomp.Import.Beyond
     }
 
     // A Beyond character project's animations and skeleton from its CHPR bytes alone (no chpr.json, no dumper DLLs).
-    // Port of brawl_extract/rig_work/gun/mp4anim/py (mp4anim_lib.Character, mp4pose.Rig, mp4anim_export.export_anim).
+    // Port of the mp4anim Python scripts (mp4anim_lib.Character, mp4pose.Rig, mp4anim_export.export_anim).
     //   var ch = ChprCharacter.Load(bytes);
     //   ChprAnimResult r = ch.Decode(ch.FindAnim("fp_idle_samus"));      // r.Animation: per-frame local TRS on the rest pose
     //   ch.Skeleton.RestWorld[i]                                          // bind matrices (IBM = inverse)

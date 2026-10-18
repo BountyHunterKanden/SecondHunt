@@ -19,8 +19,8 @@ namespace MphRead
         // server is pointed at a closed local port (nothing leaves this PC).
         private static void LicenseCheck()
         {
-            string src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "handoffs",
-                "replay-mode_2026-10-08_0150-files", "fe_testdata"));
+            string src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "testdata",
+                "replays"));
             string dir = Path.Combine(Path.GetTempPath(), $"replay_licensecheck_{Environment.ProcessId}");
             foreach (string f in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
             {

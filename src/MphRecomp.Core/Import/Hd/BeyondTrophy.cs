@@ -12,7 +12,7 @@ using MphRecomp.Import.Retro;
 namespace MphRecomp.Import.Hd
 {
     // A Metroid Prime 4: Beyond character from the user's own RomFS, turned into an HD model folder the app loads like the
-    // Retro imports (RetroTrophy writes the same set). Port of mp4_to_trophy.py (brawl_extract/rig_work/session17/scripts),
+    // Retro imports (RetroTrophy writes the same set). Port of mp4_to_trophy.py,
     // our own converter; its model, materials and textures come from Core's clean-room Beyond readers (Import/Beyond,
     // docs/cleanroom/G_beyond_spec.md) through a Source, in the numbers the reference converter read. Writes:
     //   <Stem>.dae           the mesh, one <triangles> block per material, Y up and facing +Z, UVs as the game's

@@ -12,9 +12,9 @@ internal static class RomSetup
 
     public static bool IsExtracted(string filesDir) => File.Exists(MarkerPath(filesDir));
 
-    // Beta 1 supports Metroid Prime Hunters USA (AMHE), rev 0 (1.0) and rev 1 (1.1): the only ROMs tested end to end
-    // (public beta audit 5.3, board S28). The header's game code (0x0C) and version (0x1E) decide; anything else gets a
-    // plain message instead of a half-working game.
+    // Beta 1 supports Metroid Prime Hunters USA (AMHE), rev 0 (1.0) and rev 1 (1.1): the only ROMs tested end to end.
+    // The header's game code (0x0C) and version (0x1E) decide; anything else gets a plain message instead of a
+    // half-working game.
     public static string? Unsupported(string romPath)
     {
         byte[] head = new byte[0x20];

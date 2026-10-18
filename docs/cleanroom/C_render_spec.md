@@ -202,7 +202,7 @@ Keep the style of the surrounding code (C# 12, nullable on, 4-space indent, `//`
 This spec; GBATEK; the OpenGL / GLSL / OpenTK / Android GLES docs; and in the staging tree you're given:
 `src/MphRead.Android/GlNative.cs`, any `.csproj`, and other files only for build settings and namespaces. **Don't
 open:** `src/MphRead/Renderer.cs`, `src/MphRead/Shaders.cs`, `src/MphRead.Android/CampaignActivity.cs`,
-`src/MphRead.Tools/Testing/TestPrint.cs`, anything under the spec author's scratchpad, git history, or any third-party
+`src/MphRead.Tools/Testing/TestPrint.cs`, the spec author's own working files, git history, or any third-party
 model-viewer source (upstream MphRead, mph-viewer, dsgraph and others) online or on disk. If you think you need one of
 them, stop and say what you need instead.
 

@@ -8,7 +8,7 @@ namespace MphRecomp.Frontend
     // menu (mode 12 init, rev 1 0x2111558) and the planet select (0x21056c8) select preset 0, the briefing preset 1 (no
     // echo, 0x2106134). It doesn't run in game, on the title, main menu or file select (BizHawk USA rev 1, 2026-10-01: the
     // callback is never called there). It is what carries the planet select's ship thrust on after its stop: ~1.5 s of
-    // 125 ms repeats. Traced and measured: handoffs/start-menu-ui-rebuild_2026-10-01-files/sound_census/thrust/report.md.
+    // 125 ms repeats. Traced and measured in BizHawk.
     //
     // Per DS sample (32.73 kHz, in 256-sample blocks): A <- L + R; x = A[-pre*512] + B[-comb*512] * fb;
     // B <- 5-tap low-pass(x); L' = L*dry + B[-tapL*512]*wet, R' likewise with tapR (all /4096). Here it runs at the output's
