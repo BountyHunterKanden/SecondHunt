@@ -16,6 +16,10 @@ Second Hunt is a fan project and a fork of MphRead. It contains no game data fro
 > Gallery, online games hosted on our server, rebuilt controls and settings, and a lot of fixes. Playable start to finish,
 > with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
+> <a href="https://discord.gg/yBTbkBN"><img src="https://cdn.simpleicons.org/discord/5865F2" width="18" height="18" alt="Discord"></a>
+> **Join the Metroid Prime Hunters Discord** for Second Hunt support or to discuss and play Second Hunt and related
+> projects with other players! https://discord.gg/yBTbkBN
+
 ## What Second Hunt is
 
 The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
