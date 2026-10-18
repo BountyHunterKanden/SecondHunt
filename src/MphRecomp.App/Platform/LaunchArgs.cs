@@ -32,8 +32,27 @@ public enum PadButton
 // Raw controller state: written by the host's input thread, read on the GL thread once per simulation step.
 public sealed class PadState
 {
-    public volatile float Lx, Ly, Rx, Ry, L2, R2, HatX, HatY;
+    public volatile float L2, R2, HatX, HatY;
     public volatile float RawRx, RawRy; // the right stick before the dead zone (input trace)
+
+    // the sticks: the controller's (set here) and the touch controls' (SetTouchSticks) kept apart, so a finger on the
+    // screen doesn't wipe a controller stick that is held still (it only sends events when it moves). Each stick reads
+    // whichever of the two is pushed further.
+    volatile float _lx, _ly, _rx, _ry, _touchLx, _touchLy, _touchRx, _touchRy;
+    public float Lx { get => TouchLeft ? _touchLx : _lx; set => _lx = value; }
+    public float Ly { get => TouchLeft ? _touchLy : _ly; set => _ly = value; }
+    public float Rx { get => TouchRight ? _touchRx : _rx; set => _rx = value; }
+    public float Ry { get => TouchRight ? _touchRy : _ry; set => _ry = value; }
+    bool TouchLeft => _touchLx * _touchLx + _touchLy * _touchLy > _lx * _lx + _ly * _ly;
+    bool TouchRight => _touchRx * _touchRx + _touchRy * _touchRy > _rx * _rx + _ry * _ry;
+
+    public void SetTouchSticks(float lx, float ly, float rx, float ry)
+    {
+        _touchLx = lx;
+        _touchLy = ly;
+        _touchRx = rx;
+        _touchRy = ry;
+    }
     readonly bool[] _keys = new bool[(int)PadButton.Count];
     readonly bool[] _touch = new bool[(int)PadButton.Count];
 
@@ -148,6 +167,7 @@ public sealed class PadState
         Array.Clear(_keys);
         Array.Clear(_touch);
         Lx = Ly = Rx = Ry = L2 = R2 = HatX = HatY = RawRx = RawRy = 0;
+        SetTouchSticks(0, 0, 0, 0);
         TakeAim();
         TakeStylusAim();
         lock (_aimGate)

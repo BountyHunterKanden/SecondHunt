@@ -691,7 +691,8 @@ namespace MphRecomp.Frontend
                 new()
                 {
                     Label = "touch\ncontrols",
-                    Description = "on-screen controls in the campaign and in matches. auto shows them only while no controller is connected.",
+                    Describe = () => _settings.TouchControls == "aim only" ? "no buttons. the whole screen aims."
+                        : "on-screen controls in the campaign and in matches. auto shows them only while no controller is connected.",
                     Value = () => _settings.TouchControls.ToUpperInvariant(),
                     Step = s => _settings.TouchControls = Next(RecompSettings.TouchModes, _settings.TouchControls, s)
                 },

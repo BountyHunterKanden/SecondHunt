@@ -34,7 +34,8 @@ namespace MphRecomp.App;
 // It stands aside (draws nothing, passes taps on) while the pause menu, the pause map or an in-ship menu is open: those
 // take their own taps in CampaignActivity.OnTouchEvent.
 // Shown per RECOMP SETTINGS "touch controls" (RecompSettings.TouchControls): auto = only while no game controller is
-// connected (follows a controller connecting / disconnecting live), on = always, off = never; re-read when the pause
+// connected (follows a controller connecting / disconnecting live), on = always, aim only = always but only the aim finger (no
+// buttons, no move stick: the whole screen aims, for a controller player aiming by touch), off = never; re-read when the pause
 // menu resumes. A match's --es touch auto|on|off overrides the setting. CampaignActivity.OnCreate calls Attach.
 internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListener
 {
@@ -138,7 +139,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     {
         MphRecomp.Config.RecompSettings? settings = LoadSettings();
         string mode = (_explicitMode ?? settings?.TouchControls ?? "auto").ToLowerInvariant();
-        _mode = mode is "on" or "off" ? mode : "auto";
+        _mode = mode is "on" or "aim only" or "off" ? mode : "auto";
         _stylusAimSetting = string.Equals(settings?.TouchAim, "stylus", StringComparison.OrdinalIgnoreCase);
         StylusOnly(); // (a change re-centres the aim stick under a finger that is down)
         ApplyMode();
@@ -159,7 +160,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     void ApplyMode()
     {
         // a replay has nothing to steer: no touch controls (a tap pauses it, CampaignActivity.OnTouchEvent)
-        bool show = !_renderer.ReplayPlaying && (_mode == "on" || (_mode == "auto" && !HasGameController()));
+        bool show = !_renderer.ReplayPlaying && (_mode is "on" or "aim only" || (_mode == "auto" && !HasGameController()));
         if (show == (Visibility == ViewStates.Visible))
         {
             return;
@@ -247,6 +248,9 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
 
     // the aim finger's drag turns the view (TOUCH AIM: STYLUS): not while it rolls the morph ball (that drag rolls instead)
     bool StylusAims => _stylusAimSetting && !_renderer.TouchStylusRolls;
+
+    // TOUCH CONTROLS: AIM ONLY: no buttons and no move stick, any finger on the screen is the aim finger
+    bool AimOnly => _mode == "aim only";
 
     // the pause menu, the pause map and the in-ship menus (menu, briefing, planet select) take their own taps
     bool MenuUp => _renderer.PauseMenuOpen || _renderer.ShipMenuOpen || _renderer.MapOpen;
@@ -353,7 +357,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
                 return;
             }
         }
-        Stick s = x < Width / 2f ? _move : _aim;
+        Stick s = x < Width / 2f && !AimOnly ? _move : _aim;
         if (s.Pointer == -1)
         {
             s.Pointer = pointer;
@@ -370,7 +374,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     // a shown button under (x, y), with a little slack around the drawn circle
     bool Hits(TouchButton b, float x, float y, bool drone)
     {
-        if (b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
+        if (AimOnly || b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
             || b.OmegaOnly && !_renderer.TouchOmega)
         {
             return false;
@@ -464,10 +468,11 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
 
     void UpdateSticks()
     {
-        PadState pad = _renderer.Pad;
-        (pad.Lx, pad.Ly) = Deflection(_move);
-        // (in the rolling morph ball, or with TOUCH AIM: STYLUS, the aim finger is the stylus: no right stick from it)
-        (pad.Rx, pad.Ry) = _wheel.Pointer != -1 ? Deflection(_wheel) : StylusOnly() ? (0, 0) : Deflection(_aim);
+        // (in the rolling morph ball, or with TOUCH AIM: STYLUS, the aim finger is the stylus: no right stick from it). The
+        // touch sticks have their own slots, so a controller's sticks keep working alongside them.
+        (float lx, float ly) = Deflection(_move);
+        (float rx, float ry) = _wheel.Pointer != -1 ? Deflection(_wheel) : StylusOnly() ? (0, 0) : Deflection(_aim);
+        _renderer.Pad.SetTouchSticks(lx, ly, rx, ry);
     }
 
     protected override void OnDraw(Canvas canvas)
@@ -488,7 +493,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         float textSize = Height * 0.03f;
         foreach (TouchButton b in _buttons)
         {
-            if ((b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
+            if ((AimOnly || b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
                 || b.OmegaOnly && !_renderer.TouchOmega) && b.Pointer == -1)
             {
                 continue;

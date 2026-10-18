@@ -18,7 +18,7 @@ namespace MphRecomp.Config
         public static readonly string[] GyroModes = { "off", "on", "zoom" };
         public static readonly int[] GyroSensitivities = { 50, 75, 100, 125, 150, 200, 250, 300, 400, 500 }; // percent
         public static readonly string[] GyroAxes = { "yaw", "player", "roll" };
-        public static readonly string[] TouchModes = { "auto", "on", "off" };
+        public static readonly string[] TouchModes = { "auto", "on", "aim only", "off" };
         public static readonly string[] TouchAimModes = { "stick", "stylus" };
 
         // A public build (the Android app's MPH_PUBLIC, set once at startup by its Application class): RECOMP SETTINGS
@@ -86,7 +86,8 @@ namespace MphRecomp.Config
         public int GyroSensitivity { get; set; } = 150;
         public string GyroAxis { get; set; } = "yaw";
         // On-screen touch controls in the campaign and in matches (MphRead.Android/MatchTouchOverlay.cs): "auto" shows
-        // them only while no game controller is connected, "on" always, "off" never.
+        // them only while no game controller is connected, "on" always, "aim only" always but with no buttons or move stick (the
+        // whole screen aims, for playing on a controller and aiming by touch), "off" never.
         public string TouchControls { get; set; } = "auto";
         // How the touch controls' right-hand finger aims (owner 2026-10-16): "stick" = a floating virtual stick, "stylus" =
         // the DS's stylus aim (the finger's drag turns the view by the game's own rule; CampaignRenderer.StylusAimDelta).

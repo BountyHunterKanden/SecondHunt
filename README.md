@@ -134,7 +134,7 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   is selected, so a change can be heard.
 - Controls: the same page as OPTIONS > CONTROLS
 - Gyro aim (Android): off, on, or only while zoomed or scanning, with its own speed and axis settings
-- Touch controls (Android): auto (shown when no controller is connected), on or off
+- Touch controls (Android): auto (shown when no controller is connected), on, aim only (no buttons, the whole screen aims) or off
 - Record replays on or off, and UNLOCKS to open every hunter, arena and movie at once
 - Menus with both DS screens merged into one or side by side, crisp or smoothed pixel art, and the HUD's line art
   redrawn as clean lines or kept as DS pixels
