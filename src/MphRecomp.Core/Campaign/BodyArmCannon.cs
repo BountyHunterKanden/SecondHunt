@@ -40,7 +40,7 @@ namespace MphRecomp.Campaign
         // a body's cannon: the pose it's cut in (clip at t) and its muzzle locator; Hand/HandClip: the bones from Hand down
         // play HandClip (looped) over the cut pose -- the Trooper's claw as it moves when he stands ready
         sealed record Spec(string? Clip, float T, string Tip, float Size, Vector3? Blast = null, float Light = 1, string? Hand = null,
-            string? HandClip = null);
+            string? HandClip = null, Action<NativeBody>? Poser = null);
 
         BodyArmCannon(NativeBody body, int elbow, int tip, int[][] cut, Matrix4 toCannon, float length, Spec spec)
         {
@@ -69,6 +69,11 @@ namespace MphRecomp.Campaign
         public void Pose(double seconds = 0)
         {
             HdGun g = Body.Data;
+            if (_spec.Poser != null)
+            {
+                _spec.Poser(Body); // a held gun (Held)
+                return;
+            }
             if (_poseClip != null) Body.Pose(_poseClip, _spec.T);
             else
             {
@@ -111,6 +116,33 @@ namespace MphRecomp.Campaign
             if (SpecOf(body) is not Spec spec) return null;
             int elbow = body.Bone("R_elbow"), tip = body.Bone(spec.Tip);
             if (elbow < 0 || tip < 0) return null;
+            int[][] cut = CutBelow(body, elbow);
+            var c = new BodyArmCannon(body, elbow, tip, cut, Matrix4.Identity, 0, spec);
+            c.Pose();
+            // the barrel: elbow -> muzzle; its top: the model's up, square to the barrel
+            Vector3 e = body.World[elbow].Row3.Xyz, k0 = body.World[tip].Row3.Xyz;
+            return Finish(body, elbow, tip, cut, spec, k0, (k0 - e).Normalized(), Vector3.UnitY);
+        }
+
+        // a gun held in the hand (Brawl Zero Suit's Paralyzer, owner 10-15: "the first person 'arm cannon' dissections we did
+        // for trooper and dark samus"): the cut from `elbowBone` down, held in the pose `pose` makes, its muzzle, barrel and
+        // top (model space, in that pose) from `gun` -- the barrel isn't the forearm's line, nor the muzzle a bone
+        public static BodyArmCannon? Held(NativeBody body, string elbowBone, string tipBone, Action<NativeBody> pose,
+            Func<NativeBody, (Vector3 Muzzle, Vector3 Barrel, Vector3 Top)?> gun, float size, Vector3? blast = null)
+        {
+            int elbow = body.Bone(elbowBone), tip = body.Bone(tipBone);
+            if (elbow < 0 || tip < 0) return null;
+            var spec = new Spec(null, 0, tipBone, size, Blast: blast, Poser: pose);
+            int[][] cut = CutBelow(body, elbow);
+            var c = new BodyArmCannon(body, elbow, tip, cut, Matrix4.Identity, 0, spec);
+            c.Pose();
+            if (gun(body) is not (Vector3 muzzle, Vector3 barrel, Vector3 top) || barrel.LengthSquared < 1e-12f) return null;
+            return Finish(body, elbow, tip, cut, spec, muzzle, barrel.Normalized(), top);
+        }
+
+        // every whole triangle whose vertices all lean on `elbow` or a bone under it, per material
+        static int[][] CutBelow(NativeBody body, int elbow)
+        {
             HdGun g = body.Data;
             var sub = new bool[g.BoneCount];
             foreach (int i in g.Order) sub[i] = i == elbow || g.Parent[i] >= 0 && sub[g.Parent[i]];
@@ -139,12 +171,14 @@ namespace MphRecomp.Campaign
                 }
                 cut[m] = keep.ToArray();
             }
-            var c = new BodyArmCannon(body, elbow, tip, cut, Matrix4.Identity, 0, spec);
-            c.Pose();
-            // the barrel: elbow -> muzzle; its top: the model's up, square to the barrel
-            Vector3 e = body.World[elbow].Row3.Xyz, k0 = body.World[tip].Row3.Xyz;
-            Vector3 f = (k0 - e).Normalized();
-            Vector3 up = Vector3.UnitY - Vector3.Dot(Vector3.UnitY, f) * f;
+            return cut;
+        }
+
+        // the cannon space of a posed cut: muzzle k0 at the origin, barrel f along +Z, `upHint` (square to it) up
+        static BodyArmCannon Finish(NativeBody body, int elbow, int tip, int[][] cut, Spec spec, Vector3 k0, Vector3 f, Vector3 upHint)
+        {
+            HdGun g = body.Data;
+            Vector3 up = upHint - Vector3.Dot(upHint, f) * f;
             up = up.LengthSquared > 1e-8f ? up.Normalized() : Vector3.UnitZ;
             Vector3 left = Vector3.Cross(up, f);
             // row vectors: v * M = (v.left, v.up, v.f) after the muzzle goes to the origin

@@ -126,6 +126,41 @@ internal sealed class DesktopAudio : IAudioOutput, IDisposable
                 t.MixInto(buffer, channels);
             }
             foreach (float v in buffer) Peak = Math.Max(Peak, Math.Abs(v));
+            Dump(buffer, channels);
+        }
+
+        // dev: env SECONDHUNT_AUDIO_DUMP=<file.wav> records the mix as played (48 kHz float WAV, its sizes rewritten
+        // every second so a killed run still reads), for comparing the game's sound with an emulator capture
+        static readonly string? DumpPath = Environment.GetEnvironmentVariable("SECONDHUNT_AUDIO_DUMP");
+        FileStream? _dump;
+        long _dumpBytes;
+        long _dumpPatched;
+
+        void Dump(Span<float> buffer, int channels)
+        {
+            if (DumpPath == null)
+            {
+                return;
+            }
+            if (_dump == null)
+            {
+                _dump = new FileStream(DumpPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                var h = new BinaryWriter(_dump);
+                h.Write("RIFF"u8); h.Write(0); h.Write("WAVEfmt "u8); h.Write(16); h.Write((short)3); h.Write((short)channels);
+                h.Write(Rate); h.Write(Rate * channels * 4); h.Write((short)(channels * 4)); h.Write((short)32);
+                h.Write("data"u8); h.Write(0);
+            }
+            _dump.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(buffer));
+            _dumpBytes += buffer.Length * 4;
+            if (_dumpBytes - _dumpPatched >= Rate * channels * 4)
+            {
+                _dumpPatched = _dumpBytes;
+                long end = _dump.Position;
+                _dump.Position = 4; _dump.Write(BitConverter.GetBytes((int)(36 + _dumpBytes)));
+                _dump.Position = 40; _dump.Write(BitConverter.GetBytes((int)_dumpBytes));
+                _dump.Position = end;
+                _dump.Flush();
+            }
         }
     }
 

@@ -73,7 +73,8 @@ namespace MphRecomp.Arenas
             }
             if (tintMode == 1)
             {
-                sb.Append("  vec3 fc = clamp(c0, 0.0, 1.0);\n  fc = uTint.rgb * max(fc.r, max(fc.g, fc.b));\n");
+                // (w -1: multiplied, an Echoes model particle's colour; GxShader's uTint)
+                sb.Append("  vec3 fc = clamp(c0, 0.0, 1.0);\n  fc = uTint.w < -0.5 ? fc * uTint.rgb : uTint.rgb * max(fc.r, max(fc.g, fc.b));\n");
                 sb.Append($"  o = vec4(fc * uExposure, {(p.Blend ? "outa" : "1.0")});\n}}\n");
             }
             else sb.Append($"  o = vec4(clamp(c0, 0.0, 1.0) * uExposure, {(p.Blend ? "outa" : "1.0")});\n}}\n");

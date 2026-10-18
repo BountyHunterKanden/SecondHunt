@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Leviathan Seed",
+  "group": "Shared",
+  "role": "area",
+  "files": [
+    { "name": "MP3/Audio/Seeds/seed.fsb", "sha1": "e02aa8ad9896cf4e0dc8a099056dda8daf195783" }
+  ],
+  "gain": 1.292
+}

@@ -239,6 +239,7 @@ namespace MphRead
             }
 
             string pakSha1 = Sha1("Metroid6.pak");
+            string? audioSha1 = null, hudSha1 = null;   // AudioGrp.pak: only for an arena with the turret (its sounds)
             foreach (EchoesArena.Def d in EchoesArena.All)
             {
                 string json = Path.Combine(refRoot, "_archives", d.Archive, "arena.json");
@@ -253,6 +254,13 @@ namespace MphRead
                     w.WriteString("pak", "Metroid6.pak");
                     w.WriteString("pakSha1", pakSha1);
                     w.WriteNumber("scale", info.Scale);
+                    if (info.Turret != null)
+                    {
+                        w.WriteString("audioPak", "AudioGrp.pak");
+                        w.WriteString("audioPakSha1", audioSha1 ??= Sha1("AudioGrp.pak"));
+                        w.WriteString("hudPak", "NoARAM.pak");
+                        w.WriteString("hudPakSha1", hudSha1 ??= Sha1("NoARAM.pak"));
+                    }
                     if (info.CrateWeapons.Count > 0)
                     {
                         w.WriteStartArray("crates");

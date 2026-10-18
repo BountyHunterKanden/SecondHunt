@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Ing Hive",
+  "group": "Sanctuary Fortress",
+  "role": "area",
+  "files": [
+    { "name": "Audio/Clif-dark32.dsp", "sha1": "5d0105bb2cd6441244f82740a7ba555381077883" }
+  ],
+  "gain": 0.802
+}

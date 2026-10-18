@@ -1,0 +1,16 @@
+{
+  "game": "ssbb",
+  "discId": "RSBE01",
+  "files": [
+    {
+      "name": "sound/smashbros_sound.brsar",
+      "sha1": "5344fa5328ea966e2d1468f17c86dc554a4f7cc8"
+    }
+  ],
+  "soundArchive": "sound/smashbros_sound.brsar",
+  "sounds": [
+    "snd_se_szerosuit_smash_L01", "snd_se_szerosuit_012", "snd_se_szerosuit_013",
+    "snd_se_common_Electric_hit_s", "snd_se_common_Electric_hit_m", "snd_se_common_Electric_hit_l",
+    "snd_se_common_Electric_hit_ll"
+  ]
+}

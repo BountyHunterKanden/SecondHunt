@@ -37,6 +37,8 @@ internal sealed class DesktopApp : IDisposable
     FrontendRenderer? _front;
     CampaignRenderer? _game;
     readonly TextOverlay _status = new(TextOverlay.Kind.Status), _panel = new(TextOverlay.Kind.Panel), _note = new(TextOverlay.Kind.Status);
+    // the centred panel's line under a click (DesktopInput: the ship's save prompt / game over rows)
+    public (string Text, int Line)? PanelLineAt(float x, float y) => _panel.LineAt(x, y);
     double _noteUntil;
     readonly Stopwatch _clock = Stopwatch.StartNew();
     bool _minimized, _audioPausedForMinimize;
@@ -74,6 +76,11 @@ internal sealed class DesktopApp : IDisposable
         }
         else if (options.Launch != null)
         {
+            // straight in, no menus: the ROM's paths as the menus would have set them (imported Echoes arenas are only
+            // found once they're known: EchoesArena.EnsureRegistered)
+            Directory.SetCurrentDirectory(DesktopPaths.Game);
+            MphRead.Paths.UpdatePaths();
+            MphRead.Paths.ChooseMphPath();
             StartGame(options.Launch);
         }
         else

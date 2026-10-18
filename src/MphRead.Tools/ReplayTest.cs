@@ -356,6 +356,8 @@ namespace MphRead
             ("battle-combat-hall-spire-x3", new[] { "mode=Battle", "arena=Combat Hall", "hunter=Samus",
                 "opponents=Spire,Spire,Spire", "time=90", "seed=8" }),
             ("battle-pipeline-samus", new[] { "mode=Battle", "arena=Pipeline", "hunter=Samus", "seed=109" }),
+            // Shooting Gallery's manned turret and bomb slot, bots using them (format 42 hashes the turret)
+            ("battle-shooting-gallery-kanden", new[] { "mode=Battle", "arena=Shooting Gallery", "hunter=Kanden", "seed=110" }),
         };
 
         public static string GoldenDir() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..",
@@ -811,9 +813,13 @@ namespace MphRead
         private static readonly System.Reflection.FieldInfo _rockR = typeof(PlayerEntity).GetField("_spireRockPosR",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
+        // a probe run each replayed step (step, host): -echoesturret crateprobe
+        public static Action<int, CampaignHost>? StepProbe { get; set; }
+
         private static void Collect(Run run, CampaignHost host, in ReplayStateParts parts)
         {
             int step = run.Parts.Count;
+            StepProbe?.Invoke(step, host);
             if (step >= _traceFrom && step <= _traceTo)
             {
                 PlayerEntity t = PlayerEntity.Players[0];

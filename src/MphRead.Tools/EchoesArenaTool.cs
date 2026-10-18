@@ -286,13 +286,17 @@ namespace MphRead
             string disc = Arg(args, "disc") ?? DefaultDisc;
             string which = Arg(args, "arena") ?? "all";
             float scale = Arg(args, "scale") is string s ? float.Parse(s, System.Globalization.CultureInfo.InvariantCulture) : EchoesArena.DefaultScale;
-            using FileStream fs = File.OpenRead(disc);
-            var gc = new GcDisc(fs);
+            // (any image DiscImage reads: the retail .rvz too, the turret's source disc)
+            using MphRecomp.Import.IFileSource gc = DiscImage.Open(disc);
             if (gc.GameId != "G2ME01")
             {
                 Console.WriteLine($"  note: {gc.GameId} is not the NTSC-U Echoes disc these arenas were checked on");
             }
             var pak = new Pak(gc.ReadFile("Metroid6.pak"), "Metroid6.pak");
+            // the sound lookup + the slot's arc group: Shooting Gallery's turret sounds
+            var audio = new Pak(gc.ReadFile("AudioGrp.pak"), "AudioGrp.pak");
+            // the turret HUD's textures
+            var hud = new Pak(gc.ReadFile("NoARAM.pak"), "NoARAM.pak");
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
                 if (which != "all" && EchoesArena.Find(which) != def) continue;
@@ -301,11 +305,11 @@ namespace MphRead
                 // the shared staged file system
                 if (Arg(args, "out") is string outDir)
                 {
-                    EchoesArena.Import(pak, def, EchoesArena.Layout.Folder(Path.Combine(outDir, def.Key)), scale, null, Console.WriteLine);
+                    EchoesArena.Import(pak, def, EchoesArena.Layout.Folder(Path.Combine(outDir, def.Key)), scale, null, Console.WriteLine, audio: audio, hud: hud);
                     Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
                     continue;
                 }
-                EchoesArena.Import(pak, def, Paths.FileSystem, scale, Console.WriteLine);
+                EchoesArena.Import(pak, def, Paths.FileSystem, scale, Console.WriteLine, audio, hud);
                 Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
             }
             if (Arg(args, "out") == null) ArenaMusic.Import(gc, Paths.FileSystem, Console.WriteLine);
@@ -313,14 +317,15 @@ namespace MphRead
 
         static void ScriptsVerb(string disc, string type, string? which)
         {
-            using FileStream fs = File.OpenRead(disc);
-            var gc = new GcDisc(fs);
+            using MphRecomp.Import.IFileSource gc = DiscImage.Open(disc);
             var pak = new Pak(gc.ReadFile("Metroid6.pak"), "Metroid6.pak");
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
                 if (which != null && EchoesArena.Find(which) != def) continue;
                 Mrea area = Mrea.Read(pak.Get(def.Mrea));
-                List<Mrea.ScriptObject> objs = area.ReadScripts().Where(o => o.Type == type).ToList();
+                // (SCRIPTS_GENERATED=1: with the generated layer, where generators' templates live)
+                List<Mrea.ScriptObject> objs = area.ReadScripts(includeGenerated: Environment.GetEnvironmentVariable("SCRIPTS_GENERATED") == "1")
+                    .Where(o => type == "*" || o.Type == type).ToList();
                 Console.WriteLine($"{def.InGameName}: {objs.Count} {type}");
                 foreach (Mrea.ScriptObject o in objs)
                 {
@@ -328,15 +333,15 @@ namespace MphRead
                     string extra = type == "PCKP"
                         ? $" item 0x{o.Root.Find(0xA02EF0C4)?.U32 ?? 0xFFFFFFFF:x} amount {o.Root.Find(0x94AF1445)?.I32 ?? 0}"
                         : "";
-                    Console.WriteLine($"  {o.Id:x8} L{o.Layer} {(o.Active ? "on " : "off")} '{o.Name}' at ({x[0]:0.0}, {x[1]:0.0}, {x[2]:0.0}){extra}" +
-                        $" conns {o.Connections.Count}");
+                    Console.WriteLine($"  {o.Id:x8} {(type == "*" ? o.Type + " " : "")}L{o.Layer} {(o.Active ? "on " : "off")} '{o.Name}' at ({x[0]:0.0}, {x[1]:0.0}, {x[2]:0.0}){extra}" +
+                        $" conns {o.Connections.Count}" + (Environment.GetEnvironmentVariable("SCRIPTS_CONNS") == "1" ? ": " + string.Join(", ", o.Connections.Select(c => $"{c.State} {c.Message} {c.Target:x8}")) : ""));
                     if (Environment.GetEnvironmentVariable("SCRIPTS_PROPS") == "1")
                     {
                         void Dump(Mrea.Property pr, string indent)
                         {
                             foreach (Mrea.Property c in pr.Children ?? new List<Mrea.Property>())
                             {
-                                string v = c.Data.Length == 4 ? $" = 0x{c.U32:x8} ({c.F32:0.###})" : $" [{c.Data.Length} bytes]";
+                                string v = c.Data.Length == 4 ? $" = 0x{c.U32:x8} ({c.F32:0.###})" : c.Data.Length == 1 ? $" = {c.Data[0]}" : $" [{c.Data.Length} bytes]";
                                 Console.WriteLine($"{indent}{c.Id:x8}{v}");
                                 if (c.Children != null && indent.Length < 10) Dump(c, indent + "  ");
                             }
@@ -2214,7 +2219,10 @@ namespace MphRead
                     Check(crate.Breaks == 1, $"broke after {shots} shots (health {start}: {start / 6} Power Beam shots)");
                     if (crate.Breaks == 0) continue;
                     Check(!crate.Up, "hidden once broken");
-                    string[] pool = EchoesArena.CratePools[d.Key].Select(t => t.ToString()).ToArray();
+                    string[] pool = EchoesArena.CratePools[d.Key].Concat(EchoesCrates.Blaster ? new[] { ItemType.PirateBlaster } : Array.Empty<ItemType>())
+                        .Select(t => t.ToString()).ToArray();
+                    Check(crate.Pool.Contains(ItemType.PirateBlaster) == EchoesCrates.Blaster,
+                        $"Pirate Blaster in the pool: {crate.Pool.Contains(ItemType.PirateBlaster)} (EXTRA PICKUPS: {EchoesCrates.Blaster})");
                     Check(pool.Contains(crate.LastDrop.ToString()), $"dropped {crate.LastDrop} (pool {string.Join(", ", pool)})");
                     ItemInstanceEntity? drop = null;
                     foreach (ItemInstanceEntity it in host.Scene.GetItemInstanceEntities()) if (it.ItemType == crate.LastDrop) drop = it;

@@ -71,7 +71,7 @@ namespace MphRead
             }
             if (withAbilities)
             {
-                var a = new SeatAbilities { Cling = new PlayerNetCling[seats], Drone = new PlayerNetDrone[seats] };
+                var a = new SeatAbilities { Cling = new PlayerNetCling[seats], Drone = new PlayerNetDrone[seats], SquadMark = new byte[seats] };
                 for (int i = 0; i < seats; i++)
                 {
                     a.Cling[i] = new PlayerNetCling
@@ -85,6 +85,7 @@ namespace MphRead
                         LaserFrame = rng.Next(3) == 0 ? (byte)255 : (byte)rng.Next(255), LaserPattern = (byte)rng.Next(4),
                         LaserWait = (ushort)rng.Next(601), LaserDist = (byte)rng.Next(256)
                     };
+                    a.SquadMark[i] = (byte)rng.Next(256); // the Squad Mark: the marking seats (LAN 20 / online 18)
                 }
                 snap.Abilities = a;
             }
@@ -123,6 +124,10 @@ namespace MphRead
                 if (!a.Abilities.Drone[i].Equals(b.Abilities.Drone[i]))
                 {
                     errors.Add($"{what}: seat {i} drone differs");
+                }
+                if (b.Abilities.SquadMark.Length <= i || a.Abilities.SquadMark[i] != b.Abilities.SquadMark[i])
+                {
+                    errors.Add($"{what}: seat {i} squad mark differs");
                 }
             }
         }

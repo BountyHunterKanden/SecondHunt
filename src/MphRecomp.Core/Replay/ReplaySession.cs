@@ -262,7 +262,7 @@ namespace MphRecomp.Replay
         // after the step TryNext gave: false = the state differs from the recording's (stop; nothing more plays)
         public bool Check(Scene scene)
         {
-            uint checksum = ReplayState.Capture(scene).Checksum;
+            uint checksum = ReplayState.Capture(scene, !File.OldTurretHash).Checksum;
             int step = Position++;
             if (checksum != File.Steps[step].Checksum)
             {

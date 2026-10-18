@@ -15,7 +15,9 @@ using MphRecomp.Import.Guns;
 namespace MphRead
 {
     // -importcheck guns4 [Suit|all] [--out dir] [--chpr-dir dir] [--gltf-root dir] [--conv-root dir] [--recipes dir|embedded]
-    //                    [--repo dir] [--no-emulate] [-v]
+    //                    [--repo dir] [--no-emulate] [-v] [--romfs dir]
+    // --romfs <dir>: the in-app import's inputs instead (Gun4Sources.FromGame: our Beyond readers on the RomFS paks the
+    // recipe names, BeyondTrophy's static look, the CHPR from the paks), compared with the same reference folders
     // The golden check of the Beyond first-person guns (game "mp4" recipes in recipes/guns): the C# builder
     // (MphRecomp.Import.Guns.Gun4Builder, the port of gun_export4b.py) fed by the TEST-ONLY adapters over the reference
     // pipeline's inputs (Gun4TestSources.cs: the Model Dumper glTF, the static material conversion) and Samus's CHPR
@@ -61,6 +63,12 @@ namespace MphRead
             if (recipes.Count == 0)
             {
                 Console.WriteLine($"  no mp4 guns recipe named '{which}'");
+                return;
+            }
+            string? romfs = Arg("--romfs", "") is { Length: > 0 } rf ? rf : null;
+            if (romfs != null)
+            {
+                Guns4FromGame(recipes, romfs, refRoot, outRoot, verbose);
                 return;
             }
             var characters = new Dictionary<string, (ChprCharacter Ch, double[] Pool)?>(StringComparer.OrdinalIgnoreCase);
@@ -119,7 +127,7 @@ namespace MphRead
                 {
                     var sw = Stopwatch.StartNew();
                     GltfBeyondModel model = GltfBeyondModel.Load(gltf);
-                    DaeBeyondLook look = DaeBeyondLook.Load(conv, r.Character);
+                    Gun4Look look = Gun4Look.Load(conv, r.Character);
                     double tRead = sw.Elapsed.TotalSeconds;
                     sw.Restart();
                     ch.Pool0 = pool;
@@ -134,7 +142,7 @@ namespace MphRead
                         // reference emulation: pool 0 as the dumper's chpr.json printed it, parsed as float64 (the npz inputs)
                         ch.Pool0 = pool.Select(v => Double.IsFinite(v) ? Double.Parse(((float)v).ToString("R", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture) : v).ToArray();
                         string emuDir = Path.Combine(outRoot, "emulated", r.Name);
-                        Gun4Builder.Build(GltfBeyondModel.Load(gltf), DaeBeyondLook.Load(conv, r.Character), ch, r, emuDir);
+                        Gun4Builder.Build(GltfBeyondModel.Load(gltf), Gun4Look.Load(conv, r.Character), ch, r, emuDir);
                         ch.Pool0 = pool;
                         Console.WriteLine("    -- reference emulation (pool 0 via the dumper's JSON decimals): animation floats must be bit-identical");
                         ok &= CompareSuit4(Path.Combine(refRoot, "guns", r.Name), emuDir, true);
@@ -156,6 +164,56 @@ namespace MphRead
             Console.WriteLine();
             foreach (string t in times) Console.WriteLine("  time " + t);
             Console.WriteLine($"  SUMMARY: {pass}/{recipes.Count} MP4 suits PASS" + (failed.Count > 0 ? "; FAIL: " + String.Join(", ", failed) : ""));
+        }
+
+        // --romfs: each recipe built from the game's own files, as GunImportKind does in the app
+        static void Guns4FromGame(List<ImportRecipe> recipes, string romfs, string refRoot, string outRoot, bool verbose)
+        {
+            int pass = 0;
+            var failed = new List<string>();
+            var archives = new Dictionary<string, BeyondArchive>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (ImportRecipe ir in recipes)
+                {
+                    Gun4Recipe r = Gun4Recipe.From(ir);
+                    Console.WriteLine($"  == {r.Name} (from the RomFS: {String.Join(", ", r.Paks)})");
+                    bool ok;
+                    try
+                    {
+                        var set = new List<BeyondArchive>();
+                        foreach (string pk in r.Paks)
+                        {
+                            if (!archives.TryGetValue(pk, out BeyondArchive? a)) archives[pk] = a = BeyondArchive.Open(Path.Combine(romfs, pk));
+                            set.Add(a);
+                        }
+                        var sw = Stopwatch.StartNew();
+                        string work = Path.Combine(outRoot, "look", r.Name), outDir = Path.Combine(outRoot, "guns", r.Name);
+                        Gun4Sources.Inputs inp = Gun4Sources.FromGame(set, r, work);
+                        double tRead = sw.Elapsed.TotalSeconds;
+                        if (verbose) foreach (BeyondMesh m in inp.Model.Meshes) Console.WriteLine($"      mesh {m.Number} {m.Name} lod {m.Lod} mat {m.MaterialId}: {m.TriangleCount} tris, {m.VertexCount} verts");
+                        sw.Restart();
+                        GunImporter.Result res = Gun4Builder.Build(inp.Model, inp.Look, inp.Character, r, outDir,
+                            verbose ? (f, m) => Console.WriteLine($"      [{f * 100,5:F1}%] {m}") : null);
+                        foreach (string line in res.Log) Console.WriteLine("    | " + line);
+                        Console.WriteLine($"    inputs {tRead:F2} s, built {sw.Elapsed.TotalSeconds:F2} s; CHPR SHA-1 {inp.ChprSha1}");
+                        ok = CompareSuit4(Path.Combine(refRoot, "guns", r.Name), outDir, false);
+                    }
+                    catch (Exception e) when (e is InvalidDataException or IOException or KeyNotFoundException or FormatException)
+                    {
+                        Console.WriteLine($"    FAIL build: {e.GetType().Name}: {e.Message}");
+                        ok = false;
+                    }
+                    Console.WriteLine($"    => {(ok ? "PASS" : "FAIL")} {r.Name}");
+                    if (ok) pass++;
+                    else failed.Add(r.Name);
+                }
+            }
+            finally
+            {
+                foreach (BeyondArchive a in archives.Values) a.Dispose();
+            }
+            Console.WriteLine($"  SUMMARY (from the RomFS): {pass}/{recipes.Count} MP4 suits PASS" + (failed.Count > 0 ? "; FAIL: " + String.Join(", ", failed) : ""));
         }
 
         // animFloatsExact: the gun.bin animation floats must be bit-identical (the reference emulation)
@@ -309,7 +367,9 @@ namespace MphRead
                 {
                     if (!a.Mats[m].Palette.SequenceEqual(b.Mats[m].Palette)) errs.Add($"draw {m} palette [{String.Join(",", a.Mats[m].Palette)}] vs [{String.Join(",", b.Mats[m].Palette)}]");
                     if (a.Mats[m].Count != b.Mats[m].Count) { errs.Add($"draw {m} vertices {a.Mats[m].Count} vs {b.Mats[m].Count}"); continue; }
-                    for (int i = 0; i < a.Mats[m].Verts.Length; i++) verts.Add(a.Mats[m].Verts[i], b.Mats[m].Verts[i], $"draw {m} vertex {i / 19} float {i % 19}");
+                    // the reference keeps the Python's raw V (float 7); Gun4Builder writes 1 - V since 2026-10-17
+                    for (int i = 0; i < a.Mats[m].Verts.Length; i++)
+                        verts.Add(i % 19 == 7 ? 1 - a.Mats[m].Verts[i] : a.Mats[m].Verts[i], b.Mats[m].Verts[i], $"draw {m} vertex {i / 19} float {i % 19}");
                 }
             }
             int nb = a.Parent.Length;

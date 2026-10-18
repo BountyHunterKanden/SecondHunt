@@ -5,7 +5,7 @@ Owner's report (L3 #2): "Real game ending(s) from the base game instead of our f
 and `CampaignShip.cs` opens the stand-in "MISSION COMPLETE" text panel. MphRead marks the gap as `todo: credits` at
 `28_Gorea1B.cs:1028` (bad ending) and `31_Gorea2.cs:946` (good ending).
 
-Found 2026-10-07 from the ROM (US rev 1, ov0 = the front end; session Start menu UI rebuild (cont.) [16cf9c]); built the
+Found 2026-10-07 from the ROM (US rev 1, ov0 = the front end); built the
 same day (section 3).
 
 ## 1. The sequence
@@ -60,7 +60,7 @@ same day (section 3).
 - PC: `FE_ENDING=good|bad -feflow "<t>:ok"`: credits 6-12 (A / B / taps ignored) -> 49 / 50 with the numbers -> a tap on
   OK (`ok` step) -> saving box -> logos 2-5 -> intro movie -> title 13. Options' credits still skip back to 21.
 
-### 3a. Checked against vanilla and fixed (2026-10-07 PM, session Start menu UI rebuild (cont. 2))
+### 3a. Checked against vanilla and fixed (2026-10-07 PM)
 
 BizHawk, USA rev 1: from a gameplay state, pause -> QUIT -> YES, with the front end's entry word (`0x020CBD90+0x74`)
 switched to bit 12 / 11 when ov0's init (0x21251ec) reads it (handoffs/start-menu-ui-rebuild_2026-10-07-endings-files/

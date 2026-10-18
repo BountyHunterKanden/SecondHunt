@@ -166,15 +166,23 @@ namespace MphRecomp.Arenas
         // jumps: one-way flights (jump pads: pad -> landing); the pad's node leaves only by its flight. water: boxes (min,
         // max) whose floors a bot leaves with the Gravity Boost (Pipeline's flooded cave)
         public static Graph Build(ArenaRaycaster ray, IReadOnlyList<Vector3> anchors, float killHeight,
-            IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null)
+            IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null,
+            Vector2? gridOrigin = null, bool echoesMoves = true, float padReach = 0)
         {
             var g = new Graph();
             bool Wet(Vector3 p) => water?.Any(w => p.X >= w.Min.X && p.X <= w.Max.X && p.Z >= w.Min.Z && p.Z <= w.Max.Z
                 && p.Y >= w.Min.Y - 0.5f && p.Y + 0.5f < w.Max.Y) == true;
             // 1. floor samples on an XZ grid, every walkable level of each column, with headroom
-            for (float x = ray.Min.X + Spacing / 2; x < ray.Max.X; x += Spacing)
+            // echoesMoves false: no double jump or Gravity Boost links (First Hunt's arenas: MPH's own moves only). padReach: a
+            // pad floating up to this high over the floor beside it is reached by a jump into its trigger (First Hunt's
+            // Assault Cradle: the centre lifts are discs 2.9 up, which Samus jumps into from the floor around: -fharena liftjump)
+            // gridOrigin: a point the grid passes through (First Hunt's arenas: their centre, where their narrow doorways sit
+            // on the axes); default half a step in from the arena's corner
+            float x0 = gridOrigin is { } go ? go.X + MathF.Ceiling((ray.Min.X - go.X) / Spacing) * Spacing : ray.Min.X + Spacing / 2;
+            float z0 = gridOrigin is { } gz ? gz.Y + MathF.Ceiling((ray.Min.Z - gz.Y) / Spacing) * Spacing : ray.Min.Z + Spacing / 2;
+            for (float x = x0; x < ray.Max.X; x += Spacing)
             {
-                for (float z = ray.Min.Z + Spacing / 2; z < ray.Max.Z; z += Spacing)
+                for (float z = z0; z < ray.Max.Z; z += Spacing)
                 {
                     float top = ray.Max.Y + 1;
                     while (top > ray.Min.Y)
@@ -216,12 +224,12 @@ namespace MphRecomp.Arenas
                         if (jump) g.Kinds[(i, j)] = LinkJump;
                     }
                     // Echoes' moves (version 3): a ledge too high for one jump, out of water with the boost, a gap
-                    else if (Walkable(ray, a, b, rise: DoubleRise) == true)
+                    else if (echoesMoves && Walkable(ray, a, b, rise: DoubleRise) == true)
                     {
                         g.Edges[i].Add((j, (b - a).Length + MoveCost));
                         g.Kinds[(i, j)] = LinkDouble;
                     }
-                    else if (Wet(a) && Walkable(ray, a, b, rise: BoostRise) == true)
+                    else if (echoesMoves && Wet(a) && Walkable(ray, a, b, rise: BoostRise) == true)
                     {
                         g.Edges[i].Add((j, (b - a).Length + MoveCost));
                         g.Kinds[(i, j)] = LinkBoost;
@@ -235,7 +243,7 @@ namespace MphRecomp.Arenas
             }
             // long drops: stepping off a ledge to any floor further below (MPH has no fall damage). Without these, a ledge or
             // pad landing left only by a drop over MaxDrop was a pocket the component step threw away (Spider Complex: both
-            // pads and their y 23.5 top, the y 5.1 east ledge: 33 of 144 nodes, and bots up there gave up, [dca6ae])
+            // pads and their y 23.5 top, the y 5.1 east ledge: 33 of 144 nodes, and bots up there gave up)
             for (int i = 0; i < n; i++)
             {
                 for (int j = 0; j < n; j++)
@@ -252,7 +260,7 @@ namespace MphRecomp.Arenas
                 g.Edges[from].Add((to, (g.Nodes[to] - g.Nodes[from]).Length * 0.5f));
             }
             // nor does any other way cross a pad: a floor node 0.6 from Spider Complex's centre pad had bots launched on the
-            // way to it, steering back to it in the air and landing on the pad again, over and over ([dca6ae])
+            // way to it, steering back to it in the air and landing on the pad again, over and over
             bool OnPad(Vector3 p, int pad) => (p.Xz - g.Nodes[pad].Xz).Length < PadKeepOut && p.Y > g.Nodes[pad].Y - 0.5f && p.Y < g.Nodes[pad].Y + 1.5f;
             bool Crosses(Vector3 a, Vector3 b, int pad)
             {
@@ -266,6 +274,25 @@ namespace MphRecomp.Arenas
             {
                 if (pads.Any(q => q.From == i)) continue;
                 g.Edges[i].RemoveAll(e => PadInWay(i, e.To));
+            }
+            if (padReach > 0)
+            {
+                foreach ((int pad, _) in pads)
+                {
+                    Vector3 p = g.Nodes[pad];
+                    for (int i = 0; i < n; i++)
+                    {
+                        Vector3 a = g.Nodes[i];
+                        float up = p.Y - a.Y;
+                        if (up <= JumpRise || up > padReach || (a.Xz - p.Xz).Length > Spacing || pads.Any(q => q.From == i)
+                            || g.Edges[i].Any(e => e.To == pad) || ray.Cast(a + Vector3.UnitY * 0.8f, new Vector3(p.X, a.Y + 0.8f, p.Z)) != null)
+                        {
+                            continue;
+                        }
+                        g.Edges[i].Add((pad, (p - a).Length + JumpCost));
+                        g.Kinds[(i, pad)] = LinkJump;
+                    }
+                }
             }
             // 3. keep what the spawns' component can reach and come back from
             var starts = anchors.Select(p => Nearest(g.Nodes, p)).Where(k => k >= 0).Distinct().ToList();

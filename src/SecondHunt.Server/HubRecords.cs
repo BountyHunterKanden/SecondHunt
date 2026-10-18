@@ -21,6 +21,8 @@ namespace SecondHunt.Server
             public HashSet<string> Members { get; } = new();
             public DateTime At { get; } = DateTime.UtcNow;
             public bool Reported { get; set; }
+            // a served game's match: the match host reports it (HubServed.cs), the players' reports aren't taken
+            public bool Served { get; set; }
         }
 
         private readonly Dictionary<string, Round> _rounds = new();
@@ -36,7 +38,7 @@ namespace SecondHunt.Server
             {
                 _rounds.Remove(id);
             }
-            var round = new Round();
+            var round = new Round { Served = g.MatchHost != null };
             round.Members.UnionWith(g.Slots.Values);
             _rounds[g.Id] = round;
         }
@@ -88,20 +90,26 @@ namespace SecondHunt.Server
                     {
                         throw new OnlineException("bad_result", "a player who wasn't in the match");
                     }
-                    if (round.Reported)
+                    if (round.Reported || round.Served)
                     {
                         return new OkMsg { Done = false };
                     }
                     round.Reported = true;
                 }
             }
+            return new OkMsg { Done = CountHeadToHead(rows, r.Teams) > 0 };
+        }
+
+        // every pair of opponents in a finished match moves on together (teammates aren't opponents); the pairs counted
+        private int CountHeadToHead(List<ResultRow> rows, bool teams)
+        {
             int pairs = 0;
             for (int i = 0; i < rows.Count; i++)
             {
                 for (int j = i + 1; j < rows.Count; j++)
                 {
                     ResultRow a = rows[i], b = rows[j];
-                    if (r.Teams && a.Team >= 0 && a.Team == b.Team)
+                    if (teams && a.Team >= 0 && a.Team == b.Team)
                     {
                         continue; // (teammates aren't opponents)
                     }
@@ -109,7 +117,7 @@ namespace SecondHunt.Server
                     pairs++;
                 }
             }
-            return new OkMsg { Done = pairs > 0 };
+            return pairs;
         }
     }
 }

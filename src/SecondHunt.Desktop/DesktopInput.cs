@@ -15,7 +15,8 @@ namespace SecondHunt.Desktop;
 //     pause key), Esc as Android's Back (the pause menu, or back out of a menu), M the map (the controller's Select),
 //     F3 the status line (L3). The mouse is captured while playing and free over the game's own screens.
 //   In the game's screens and menus: arrows / WASD move, Enter / Space choose (A), Backspace back (B), Q / E page (L / R),
-//     X / Y, the mouse clicks (the DS touch screen).
+//     X / Y, the mouse clicks (the DS touch screen). On the name keyboard and the address keypad the keys type (Backspace
+//     deletes, Enter is ENTER / OK, Esc backs out; the arrows still move over the on-screen keys).
 //   A gamepad (any GLFW knows, Xbox layout) works everywhere exactly as on Android: the same buttons, sticks and
 //     triggers, Start the pause menu, Back / View the map.
 //   F11 or Alt+Enter: full screen.
@@ -28,6 +29,7 @@ internal sealed class DesktopInput
     // the gamepad's previous buttons / pushes, for presses and once-per-push moves
     readonly bool[] _padPrev = new bool[15];
     int _hatX, _hatY, _stickX, _stickY;
+    float _menuRy; // the right stick's up / down in the menus: scrolls settings and CONTROLS (FrontendSession.ScrollStick)
     float _prevL2, _prevR2; // the triggers (0..1) last poll, for the control customizer's capture
     int _wheelFrames; // mouse wheel in the map: L1 / R1 held a few frames
 
@@ -39,11 +41,7 @@ internal sealed class DesktopInput
         KeyboardMouse.MouseDown = button => button == MouseButton.Left && _scriptFire > 0 || _captured && _w.MouseState.IsButtonDown(button);
         _w.KeyDown += OnKeyDown;
         _w.KeyUp += OnKeyUp;
-        _w.TextInput += e =>
-        {
-            if (_app.TopScreen is PageScreen page) page.Text((char)e.Unicode);
-            else if (_app.TopScreen is CampaignRenderer game && game.ChatLineOpen) game.ChatLineChar((char)e.Unicode); // MatchChat.cs
-        };
+        _w.TextInput += e => OnText((char)e.Unicode);
         _w.MouseDown += OnMouseDown;
         _w.MouseUp += OnMouseUp;
         _w.MouseMove += OnMouseMove;
@@ -87,7 +85,7 @@ internal sealed class DesktopInput
     public void Poll()
     {
         CampaignRenderer? game = _app.Game;
-        SetCapture(game != null && game.InGameplay && _w.IsFocused);
+        SetCapture(game != null && game.InGameplay && !game.DialogUp && _w.IsFocused); // a dialog frees it for its buttons
         PollGamepad();
         if (game != null && _wheelFrames > 0 && --_wheelFrames == 0)
         {
@@ -96,8 +94,8 @@ internal sealed class DesktopInput
         }
     }
 
-    // --script "<frame>:<key>,<frame>:click@<x>;<y>,<frame>:wheeldown,...": synthetic key presses (down that frame, up the
-    // next), wheel notches and clicks
+    // --script "<frame>:<key>,<frame>:click@<x>;<y>,<frame>:wheeldown,<frame>:text:<chars>,...": synthetic key presses (down
+    // that frame, up the next), wheel notches, clicks and typed characters (no ',' in a text:)
     // through the same handlers, for scripted test runs of the menus and screens (dev builds)
     readonly List<(int Frame, string Action)> _script = new();
     readonly List<Keys> _scriptHeld = new();
@@ -130,6 +128,10 @@ internal sealed class DesktopInput
                 float y = float.Parse(xy[1], System.Globalization.CultureInfo.InvariantCulture);
                 ScriptClick(x, y);
             }
+            else if (action.StartsWith("text:", StringComparison.Ordinal))
+            {
+                foreach (char c in action[5..]) OnText(c); // typed, as the window's TextInput
+            }
             else if (action == "fire")
             {
                 _scriptFire = 3;
@@ -144,6 +146,14 @@ internal sealed class DesktopInput
                 _scriptHeld.Add(key);
             }
         }
+    }
+
+    // a typed character (the window's TextInput, or a script's text:)
+    void OnText(char c)
+    {
+        if (_app.TopScreen is FrontendRenderer front && front.Typing) front.Post(s => s.TypeChar(c)); // the name keyboard / keypad
+        else if (_app.TopScreen is PageScreen page) page.Text(c);
+        else if (_app.TopScreen is CampaignRenderer game && game.ChatLineOpen) game.ChatLineChar(c); // MatchChat.cs
     }
 
     void ScriptClick(float x, float y)
@@ -213,6 +223,7 @@ internal sealed class DesktopInput
         switch (_app.TopScreen)
         {
         case FrontendRenderer front:
+            if (front.Typing && TypingKey(front, e)) break;
             MenuKey(e, key => front.Post(s => s.Press(key)), (dx, dy) => front.Post(s => s.Navigate(dx, dy)));
             break;
         case CampaignRenderer game:
@@ -241,6 +252,12 @@ internal sealed class DesktopInput
 
     void OnKeyUp(KeyboardKeyEventArgs e)
     {
+        // a key let go while the customizer waits: the capture commits once every pressed key is up (combos)
+        if (CaptureDevice() == "keys")
+        {
+            CaptureButton("-" + e.Key);
+            return;
+        }
         if (_app.TopScreen is CampaignRenderer game)
         {
             if (e.Key == Keys.F3) game.Pad.Set(PadButton.ThumbL, false);
@@ -263,6 +280,29 @@ internal sealed class DesktopInput
         Keys.Y => PadButton.Y,
         _ => null,
     };
+
+    // the name keyboard / address keypad up (FrontendSession.Typing): characters come through TextInput (TypeChar), so
+    // the letter keys don't move the focus or press X / Y / L / R; Backspace deletes (repeating), Enter is ENTER / OK, Esc
+    // backs out (B: CANCEL); the arrows still move over the on-screen keys. True when the key was taken here.
+    static bool TypingKey(FrontendRenderer front, KeyboardKeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+        case Keys.Up or Keys.Down or Keys.Left or Keys.Right:
+            return false;
+        case Keys.Backspace:
+            front.Post(s => s.TypeKey(backspace: true));
+            return true;
+        case Keys.Enter or Keys.KeyPadEnter:
+            if (!e.IsRepeat) front.Post(s => s.TypeKey(backspace: false));
+            return true;
+        case Keys.Escape:
+            if (!e.IsRepeat) front.Post(s => s.Press(MenuKeys.B));
+            return true;
+        default:
+            return true; // (typed: TextInput)
+        }
+    }
 
     // the menus' keys: a press once, moves on every repeat (as a held D-pad on Android)
     static void MenuKey(KeyboardKeyEventArgs e, Action<MenuKeys> press, Action<int, int> navigate)
@@ -333,11 +373,7 @@ internal sealed class DesktopInput
             if (!e.IsRepeat) game.BackPressed(); // Android's Back: B on the game's screens, else the pause menu
             return;
         }
-        if (e.Key == Keys.Tab)
-        {
-            if (!e.IsRepeat) game.StartPressed(); // MphRead's pause key: the pause menu (Start)
-            return;
-        }
+        // Tab is the keyboard SCOREBOARD key since 2026-10-11 (KeyboardMouseInput); Esc opens the pause menu
         if (e.Key == Keys.M && !game.PauseMenuOpen)
         {
             if (!e.IsRepeat) game.SelectPressed(); // the map (Select)
@@ -385,21 +421,32 @@ internal sealed class DesktopInput
         switch (_app.TopScreen)
         {
         case FrontendRenderer front:
-            if (e.Button == MouseButton.Left) front.Post(s => s.TouchCanvas(x, y)); // the DS touch screen
+            if (e.Button == MouseButton.Left) front.Post(s => s.TouchCanvas(x, y, 0)); // the DS touch screen (a drag scrolls settings)
             else if (e.Button == MouseButton.Right) front.Post(s => s.Press(MenuKeys.B));
             break;
         case CampaignRenderer game:
             game.KeyboardHints = true;
             if (_captured) break; // playing: KeyboardMouseInput reads the buttons
+            if (game.DialogUp && !game.PauseMenuOpen && !game.MapOpen && !game.ShipMenuOpen)
+            {
+                // a dialog's OK / YES / NO / page arrows (CampaignRenderer.DialogTouch.cs)
+                if (e.Button is MouseButton.Left or MouseButton.Right) game.DialogClick(x, y, e.Button == MouseButton.Right);
+                break;
+            }
             if (e.Button != MouseButton.Left)
             {
                 if (e.Button == MouseButton.Right && game.PauseMenuOpen) game.PauseMenuInput(p => p.Press(MenuKeys.B));
                 break;
             }
-            if (game.PauseMenuOpen) game.PauseMenuInput(p => p.Touch(x, y));
+            if (game.PauseMenuOpen) game.PauseMenuInput(p => p.Touch(x, y, 0));
             else if (game.ReplayPlaying && !game.MatchOver) game.ReplayTouch(x, y, 0); // the replay bar (MatchReplay.cs)
             else if (game.MapOpen) game.MapTouch(x, y, 0);
             else if (game.ShipMenuOpen) game.ShipTouch(x, y, 0);
+            else if (game.ShipPanelUp)
+            {
+                // the save prompt's YES / NO, game over's rows: a click on one chooses it
+                if (_app.PanelLineAt(x, y) is { } hit) game.ShipPanelTap(hit.Text, hit.Line);
+            }
             else game.Pad.Set(PadButton.A, true); // a cutscene or a ship page: a click is A (skips, next)
             break;
         case PageScreen page:
@@ -411,9 +458,21 @@ internal sealed class DesktopInput
 
     void OnMouseUp(MouseButtonEventArgs e)
     {
+        if (CaptureDevice() == "keys")
+        {
+            if (MouseName(e.Button) is string name) CaptureButton("-" + name);
+            return;
+        }
+        if (_app.TopScreen is FrontendRenderer front && e.Button == MouseButton.Left)
+        {
+            float fx = _w.MouseState.X, fy = _w.MouseState.Y;
+            front.Post(s => s.TouchCanvas(fx, fy, 2)); // (a click held on settings' rows lands here)
+            return;
+        }
         if (_app.TopScreen is not CampaignRenderer game || _captured || e.Button != MouseButton.Left) return;
         float x = _w.MouseState.X, y = _w.MouseState.Y;
-        if (game.MapOpen) game.MapTouch(x, y, 2);
+        if (game.PauseMenuOpen) game.PauseMenuInput(p => p.Touch(x, y, 2));
+        else if (game.MapOpen) game.MapTouch(x, y, 2);
         else if (game.ShipMenuOpen) game.ShipTouch(x, y, 2);
         else if (game.ReplayPlaying) game.ReplayTouch(x, y, 2);
         game.Pad.Set(PadButton.A, false);
@@ -423,6 +482,9 @@ internal sealed class DesktopInput
     {
         switch (_app.TopScreen)
         {
+        case FrontendRenderer front when _w.MouseState.IsButtonDown(MouseButton.Left):
+            front.Post(s => s.TouchCanvas(e.X, e.Y, 1)); // a held click drags settings and CONTROLS
+            break;
         case CampaignRenderer game:
             if (_captured)
             {
@@ -430,7 +492,8 @@ internal sealed class DesktopInput
             }
             else if (_w.MouseState.IsButtonDown(MouseButton.Left))
             {
-                if (game.MapOpen) game.MapTouch(e.X, e.Y, 1); // drags turn the map
+                if (game.PauseMenuOpen) game.PauseMenuInput(p => p.Touch(e.X, e.Y, 1)); // drags scroll settings
+                else if (game.MapOpen) game.MapTouch(e.X, e.Y, 1); // drags turn the map
                 else if (game.ShipMenuOpen) game.ShipTouch(e.X, e.Y, 1); // the ship's slider and weapon drags
                 else if (game.ReplayPlaying) game.ReplayTouch(e.X, e.Y, 1); // the replay bar's scrub drag
             }
@@ -450,10 +513,17 @@ internal sealed class DesktopInput
         }
         switch (_app.TopScreen)
         {
+        case FrontendRenderer front:
+            front.Post(s => s.ScrollWheel(e.OffsetY)); // settings and CONTROLS scroll
+            break;
         case CampaignRenderer game:
             if (_captured)
             {
                 KeyboardMouse.AddScroll(e.OffsetY); // MphRead: wheel up / down = previous / next weapon
+            }
+            else if (game.PauseMenuOpen)
+            {
+                game.PauseMenuInput(p => p.ScrollWheel(e.OffsetY)); // settings and CONTROLS scroll
             }
             else if (game.MapOpen)
             {
@@ -480,6 +550,9 @@ internal sealed class DesktopInput
     readonly bool[] _now = new bool[15];
     readonly float[] _axes = new float[6];
 
+    // a gamepad was there at the last poll (the settings tabs show L1 / R1 then: RecompMenus.PadConnected, Program.cs)
+    public static volatile bool PadSeen;
+
     unsafe bool ReadGamepad()
     {
         for (int jid = 0; jid <= 15; jid++)
@@ -488,10 +561,10 @@ internal sealed class DesktopInput
             {
                 for (int i = 0; i < 15; i++) _now[i] = state.Buttons[i] != 0;
                 for (int i = 0; i < 6; i++) _axes[i] = state.Axes[i];
-                return true;
+                return PadSeen = true;
             }
         }
-        return false;
+        return PadSeen = false;
     }
 
     void PollGamepad()
@@ -508,23 +581,22 @@ internal sealed class DesktopInput
         int sx = Step(lx, 0.6f), sy = Step(ly, 0.6f);
         if (CaptureDevice() is string device)
         {
-            // the customizer waits: on the controller page the first new press (a trigger past half way) is the answer;
-            // Start / Back keep the buttons as they are. Nothing reaches the menu meanwhile.
+            // the customizer waits: on the controller page every press (a trigger past half way; Back = Select, a
+            // customizer function since 2026-10-11) and every release goes to it ("-" + name), so held buttons make a
+            // combo that commits once all are let go; Start keeps the buttons as they are. Nothing reaches the menu meanwhile.
             if (device == "pad")
             {
-                string? name = null;
-                foreach ((GamepadButton b, PadButton pb) in PadMap)
+                bool any = false;
+                void Send(bool down, bool was, string name)
                 {
-                    if (Pressed(b))
-                    {
-                        name = pb.ToString();
-                        break;
-                    }
+                    if (down && !was) { CaptureButton(name); any = true; }
+                    else if (!down && was) CaptureButton("-" + name);
                 }
-                if (name == null && l2 >= 0.5f && _prevL2 < 0.5f) name = nameof(PadButton.L2);
-                if (name == null && r2 >= 0.5f && _prevR2 < 0.5f) name = nameof(PadButton.R2);
-                if (name != null) CaptureButton(name);
-                else if (Pressed(GamepadButton.Start) || Pressed(GamepadButton.Back)) CancelCapture();
+                foreach ((GamepadButton b, PadButton pb) in PadMap) Send(now[(int)b], _padPrev[(int)b], pb.ToString());
+                Send(Btn(GamepadButton.Back), _padPrev[(int)GamepadButton.Back], nameof(PadButton.Select));
+                Send(l2 >= 0.5f, _prevL2 >= 0.5f, nameof(PadButton.L2));
+                Send(r2 >= 0.5f, _prevR2 >= 0.5f, nameof(PadButton.R2));
+                if (!any && Pressed(GamepadButton.Start)) CancelCapture();
             }
             else if (Pressed(GamepadButton.Start) || Pressed(GamepadButton.Back)) CancelCapture();
             _hatX = hx; _hatY = hy; _stickX = sx; _stickY = sy;
@@ -544,6 +616,7 @@ internal sealed class DesktopInput
         {
         case FrontendRenderer front:
             Pushes((dx, dy) => front.Post(s => s.Navigate(dx, -dy)));
+            if (MenuStick(ry)) front.Post(s => s.ScrollStick(ry));
             foreach ((GamepadButton b, MenuKeys key) in MenuButtons)
             {
                 if (Pressed(b)) front.Post(s => s.Press(key));
@@ -562,6 +635,14 @@ internal sealed class DesktopInput
         _hatX = hx; _hatY = hy; _stickX = sx; _stickY = sy;
         _prevL2 = l2; _prevR2 = r2;
         Array.Copy(now, _padPrev, 15);
+    }
+
+    // the right stick's up / down for the menus, sent when it changes (FrontendSession.ScrollStick scrolls while it's held)
+    bool MenuStick(float ry)
+    {
+        if (Math.Abs(ry - _menuRy) <= 0.05f && (Math.Abs(ry) < 0.3f) == (Math.Abs(_menuRy) < 0.3f)) return false;
+        _menuRy = ry;
+        return true;
     }
 
     // the gamepad's buttons the game reads, as the hosts' PadButtons (the triggers are axes; Start / Back go on their own)
@@ -586,8 +667,9 @@ internal sealed class DesktopInput
         float l2, float r2, int hx, int hy, int sx, int sy)
     {
         if (pressed(GamepadButton.Start)) game.StartPressed();
-        if (pressed(GamepadButton.Back)) game.SelectPressed();
-        game.Pad.Set(PadButton.Select, now[(int)GamepadButton.Back]); // held: an online match's quick-message wheel (MatchChat.cs)
+        // Back = Select, held: the customizer's "map / scoreboard" unless moved -- the campaign's map (CampaignMap.MapFrame), a
+        // match's live scoreboard (MatchChat.cs MatchScoreboardHeld)
+        game.Pad.Set(PadButton.Select, now[(int)GamepadButton.Back]);
         bool l3 = now[(int)GamepadButton.LeftThumb], r3 = now[(int)GamepadButton.RightThumb];
         if ((pressed(GamepadButton.LeftThumb) && r3) || (pressed(GamepadButton.RightThumb) && l3)) game.ToggleGunMenu();
         if (game.PauseMenuOpen)
@@ -602,6 +684,7 @@ internal sealed class DesktopInput
             if (hy != _hatY && hy != 0) game.PauseMenuInput(p => p.Navigate(0, -hy));
             if (sx != _stickX && sx != 0) game.PauseMenuInput(p => p.Navigate(sx, 0));
             if (sy != _stickY && sy != 0) game.PauseMenuInput(p => p.Navigate(0, -sy));
+            if (MenuStick(ry)) game.PauseMenuInput(p => p.ScrollStick(ry));
             return;
         }
         PadState pad = game.Pad;

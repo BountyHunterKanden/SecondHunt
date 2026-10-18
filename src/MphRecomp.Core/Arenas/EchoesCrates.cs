@@ -32,6 +32,10 @@ namespace MphRecomp.Arenas
         // on unless the settings turn them off (LAN + online too: the host's state reaches clients, Net/NetWorld.cs)
         public static bool For(MatchSettings settings) => settings.Crates ?? true;
 
+        // the arena's crates can also drop the Pirate Blaster (owner 2026-10-15: every Echoes crate pool but the placed
+        // affinity crates', PlacedPickups): with EXTRA PICKUPS, set by MatchStart (old replays: off, MatchSettings.CrateBlaster)
+        public static bool Blaster { get; set; }
+
         // an arena registered (info) or gone (null): its crates, as arena.json gives them
         internal static void SetRoom(int roomId, EchoesArena.Info? info)
         {
@@ -71,11 +75,12 @@ namespace MphRecomp.Arenas
             }
             var list = new List<EntityBase>(entities);
             int id = entities.Count == 0 ? 0 : entities.Max(e => e.Id) + 1;
+            ItemType[] pool = Blaster && !room.Pool.Contains(ItemType.PirateBlaster) ? room.Pool.Append(ItemType.PirateBlaster).ToArray() : room.Pool;
             for (int i = 0; i < room.Pos.Length; i++)
             {
-                list.Add(new EchoesCrateEntity(id++, room.Pos[i], room.Floor[i], room.Light[i], room.Pool, room.Scale, scene));
+                list.Add(new EchoesCrateEntity(id++, room.Pos[i], room.Floor[i], room.Light[i], pool, room.Scale, scene));
             }
-            foreach (ItemType t in room.Pool) scene.LoadModel(Metadata.Items[(int)t]);
+            foreach (ItemType t in pool) scene.LoadModel(Metadata.Items[(int)t]);
             scene.LoadEffect(EchoesCrateEntity.BreakEffect, persistent: false);
             return list;
         }

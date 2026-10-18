@@ -74,12 +74,16 @@ internal sealed partial class CampaignRenderer
         public CampaignRetroBody? Body;
         public int Bone = -1, Mode, EmitLeft;
         public float Scale = 1;
+        public float Fade = 1;           // times its alpha (the Echoes turret's own effects seen by its occupant)
     }
 
     readonly Dictionary<PlayerEntity, DroneFxSeat> _fxSeats = new();
     readonly List<DroneFxLive> _fxLive = new();
     readonly List<(BeamProjectileEntity Beam, CollisionResult Col)> _fxHits = new();
     readonly Dictionary<uint, string> _fxTexFile = new();
+    // textures sampled repeating, as Retro loads every particle texture (CElementGen: CTexture::kCM_Repeat): Echoes'
+    // turret effects (an ATEX tile can run past the texture: the column bolts' 256-wide tiles on a 128 texture)
+    readonly HashSet<uint> _fxTexRepeat = new();
     readonly Dictionary<uint, int> _fxTex = new();
     readonly HashSet<CampaignRetroBody> _fxTexListed = new();
     readonly List<RetroBillboard> _fxBoards = new();
@@ -307,6 +311,9 @@ internal sealed partial class CampaignRenderer
         _fxHits.Clear();
         _fxPose.Clear();
         ResetBlasterFx(); // the Pirate Blaster's bolts (CampaignRenderer.BlasterFx.cs)
+        ResetParalyzerFx(); // the Paralyzer's Brawl look (CampaignRenderer.ParalyzerFx.cs)
+        ResetHyperFx(); // Dark Samus's Hyper Ball look and hum (CampaignRenderer.HyperFx.cs)
+        ResetTurretFx(); // Shooting Gallery turret's Echoes effects (CampaignRenderer.TurretFx.cs)
     }
 
     // the sound a clip's EVNT plays (the first; none: UInt32.MaxValue)
@@ -330,8 +337,9 @@ internal sealed partial class CampaignRenderer
 
     void OnDroneShotHit(BeamProjectileEntity beam, CollisionResult col, bool expired)
     {
-        // a shot that runs out of life in the air hits nothing (Prime's ray would fly on)
-        if (!expired && _fxHits.Count < 64) _fxHits.Add((beam, col));
+        // a shot that runs out of life in the air hits nothing (Prime's ray would fly on); a weapon the app draws itself
+        // (the Shooting Gallery turret's shots, fired by a seat that may have a drone) has its own hit effect
+        if (!expired && !beam.HostWeaponLook && _fxHits.Count < 64) _fxHits.Add((beam, col));
     }
 
     Matrix4? PoseOf(PlayerEntity p, CampaignRetroBody d)
@@ -410,7 +418,7 @@ internal sealed partial class CampaignRenderer
             // the local player's own drone fades its effects with its body (MatchDrones.DroneAlpha), and any effect
             // fades as the camera gets inside it (Prime's glows are metres wide: in the alt form's close camera one
             // would fill the screen)
-            float alpha = fx.P != null ? DroneAlpha(scene, fx.P) : 1;
+            float alpha = (fx.P != null ? DroneAlpha(scene, fx.P) : 1) * fx.Fade;
             for (int k = from; k < _fxBoards.Count; k++)
             {
                 RetroBillboard bb = _fxBoards[k];
@@ -442,6 +450,7 @@ internal sealed partial class CampaignRenderer
         Matrix4 view = scene.ViewMatrix;
         var right = new Vector3(view.M11, view.M21, view.M31);
         var up = new Vector3(view.M12, view.M22, view.M32);
+        var fwd = -new Vector3(view.M13, view.M23, view.M33);
         // alpha-blended ones first, then the additive ones, grouped by texture
         _fxBoards.Sort((a, b) => a.Additive != b.Additive ? (a.Additive ? 1 : -1) : a.Texture.CompareTo(b.Texture));
         GLES30.GlUseProgram(_fxProg);
@@ -462,6 +471,13 @@ internal sealed partial class CampaignRenderer
             for (; j < _fxBoards.Count && _fxBoards[j].Additive == first.Additive && _fxBoards[j].Texture == first.Texture; j++)
             {
                 RetroBillboard bb = _fxBoards[j];
+                if (bb.Fore != Vector3.Zero)
+                {
+                    // ORNT: u along Fore, v across (Fore x the camera's forward, times Width), as Retro's corners
+                    Vector3 f = bb.Fore / 2, r = Vector3.Cross(bb.Fore, fwd) * bb.Width / 2;
+                    Quad(ref n, vp, bb.Position - f + r, bb.Position + f + r, bb.Position - f - r, bb.Position + f - r, bb.Color, uv: bb.Uv);
+                    continue;
+                }
                 float rad = MathHelper.DegreesToRadians(bb.Rotation);
                 float c = MathF.Cos(rad) * bb.Size / 2, s = MathF.Sin(rad) * bb.Size / 2;
                 Vector3 ax = right * c + up * s, ay = -right * s + up * c;
@@ -571,6 +587,9 @@ internal sealed partial class CampaignRenderer
         if (white) id = _fxWhite;
         else if (FxTexture(tex) is int t) id = t;
         else return;
+        // the MPH passes leave a nearest-filter sampler object on unit 0, and a sampler object overrides the texture's own
+        // filter: the effects drew blocky (owner 10-16, the turret's explosions), not smooth as Retro's bilinear ones
+        GLES30.GlBindSampler(0, 0);
         GLES30.GlBindTexture(GLES30.GlTexture2d, id);
         GLES30.GlBlendFunc(GLES30.GlSrcAlpha, additive ? GLES30.GlOne : GLES30.GlOneMinusSrcAlpha);
         GLES30.GlBufferData(GLES30.GlArrayBuffer, verts * 10 * 4, _fxVerts, GLES30.GlDynamicDraw);
@@ -592,8 +611,9 @@ internal sealed partial class CampaignRenderer
         GLES30.GlGenerateMipmap(GLES30.GlTexture2d);
         GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureMinFilter, GLES30.GlLinearMipmapLinear);
         GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureMagFilter, GLES30.GlLinear);
-        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapS, GLES30.GlClampToEdge);
-        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapT, GLES30.GlClampToEdge);
+        int wrap = _fxTexRepeat.Contains(t) ? GLES30.GlRepeat : GLES30.GlClampToEdge;
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapS, wrap);
+        GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapT, wrap);
         return _fxTex[t] = ids[0];
     }
 

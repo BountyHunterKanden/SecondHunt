@@ -36,6 +36,7 @@ internal sealed class CampaignSuit
     public bool HasBody { get; private set; }
     public bool HasBall { get; private set; }
     bool _asBuilt; // the menus' still: the body's corners as the model was built, not the rig's straightened BindPos
+    IReadOnlyDictionary<string, Vector3>? _stand; // ... and its stance there (MenuSamus.StandFor: offsets per bone, rig units)
 
     // one draw: a range of the vertex buffer, its GX program and the PNG each texmap unit samples
     sealed class Batch
@@ -56,6 +57,8 @@ internal sealed class CampaignSuit
     // decoded in TryLoad (RGBA bytes, ready for GL), handed to GL by Warm / the first draw and dropped (after a context
     // loss a worker thread reads them again: _reprep)
     readonly Dictionary<string, (int[] Px, int W, int H)?> _pixels = new();
+    // the DS model's own textures for its attached parts ("dspart<n>", see LoadBody): no PNG behind them, kept for a reprep
+    readonly Dictionary<string, (int[] Px, int W, int H)> _raw = new();
     float[]? _vertBuf;
     Task<(Dictionary<string, (int[] Px, int W, int H)?> Pixels, float[] Verts)>? _reprep;
 
@@ -67,6 +70,8 @@ internal sealed class CampaignSuit
     Model _dsModel = null!;
     DsSkeleton _skel = null!;
     TrophyRig _rig = null!;
+    SuitFlourish? _flourish;
+    PlayerEntity? _posing; // DrawBody's player while it poses (the flourish clocks are per seat)
     SkeletonPose _pose = null!;
     Matrix4[] _world = Array.Empty<Matrix4>();
     bool[] _legs = Array.Empty<bool>(), _torso = Array.Empty<bool>();
@@ -86,6 +91,11 @@ internal sealed class CampaignSuit
     // GxShader's uTint for this draw (the interpreter only): w = 1 recolours it (MphRead's red damage flash)
     Vector4 _tint;
     static readonly Vector4 DamageTint = new(1f, 0.28f, 0.22f, 1f);
+    // the seat being drawn's team / duplicate tint (LookAlikes.BodyTint, through the interpreter as the flash; w = 0
+    // none), set by MatchSkins around each draw: a skin is shared by every seat wearing it
+    public Vector4 SeatTint { get; set; }
+    // ... and a same-look copy's lights colour (LookAlikes.BodyLight: GxShader uTint2 with w 9+k)
+    public Vector4 SeatTint2 { get; set; }
 
     // _prog = the interpreter (GunPrograms.SuitInterpFrag), _depthProg = depth only, _specProg = the materials' own
     // programs (_specSrc, one Warm step each). Every one on GunPrograms.Vert: the depth pass and the colour pass must
@@ -150,7 +160,8 @@ internal sealed class CampaignSuit
     // "original" / "none". CPU work only, safe on a worker thread (GL objects are made by Warm / the first draw); samus =
     // that hunter's MphRead model (Samus's for her suits, despite the name), looked up by the caller on the GL thread
     // (HunterModel; else read here). Never fits a rig: the body comes from the model's cached rig files or not at all.
-    public static CampaignSuit? TryLoad(string hdRoot, string id, Model? samus = null, bool asBuilt = false)
+    public static CampaignSuit? TryLoad(string hdRoot, string id, Model? samus = null, bool asBuilt = false,
+        IReadOnlyDictionary<string, Vector3>? stand = null)
     {
         if (string.IsNullOrEmpty(id) || id.Equals("original", StringComparison.OrdinalIgnoreCase) || id.Equals("none", StringComparison.OrdinalIgnoreCase))
         {
@@ -166,7 +177,7 @@ internal sealed class CampaignSuit
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var suit = new CampaignSuit(id) { _asBuilt = asBuilt };
+            var suit = new CampaignSuit(id) { _asBuilt = asBuilt, _stand = asBuilt ? stand : null };
             string body, ball;
             try { body = suit.LoadBody(hdRoot, samus); }
             catch (Exception ex)
@@ -233,6 +244,7 @@ internal sealed class CampaignSuit
         DaeModel dae = DaeModel.Load(daePath);
         Dictionary<string, GxMaterial> gx = ReadGx(dir, daePath, out Dictionary<string, int> formats);
         Matrix4 g = rig.TrophyToRig;
+        Vector3[]? stand = MphRecomp.Frontend.MenuSamus.StandOffsets(_stand, sk.Names);
         int tris = 0, hidden = 0, missing = 0;
         foreach (DaeMesh part in dae.Meshes)
         {
@@ -263,6 +275,7 @@ internal sealed class CampaignSuit
                         rp = rig.BindPos[vi];
                         rn = Vector3.Transform(rn, rig.BindRot![vi]);
                     }
+                    if (stand != null && vi >= 0) rp = MphRecomp.Frontend.MenuSamus.Stand(rp, stand, rig.Bones, rig.Weights, vi);
                     if (rn.LengthSquared > 1e-12f) rn.Normalize();
                     Corner(rp, rn, part, i);
                     if (vi < 0)
@@ -283,15 +296,37 @@ internal sealed class CampaignSuit
         }
         if (rig.Attachments.Length > 0)
         {
-            // the DS model's own parts for replaced bones (RenderActivity draws them on its old shader): left out here
-            int partTris = 0;
-            foreach (var (_, corners) in TrophyRigger.ReplacementParts(rm, rig)) partTris += corners.Count / 3;
-            Log.Info(Tag, $"suit {Id}: the rig replaces parts with the DS model's own -- those {partTris} triangles have no GX program, not drawn");
+            // the DS model's own parts the rig attaches (a held gun: Zero Suit Samus holds Weavel's, HdRecipe "hold"), each
+            // through a one-stage GX program (texture x lit vertex colour), its pixels straight from the DS model
+            int partTris = 0, n = 0;
+            GxMaterial? like = System.Linq.Enumerable.FirstOrDefault(gx.Values, x => x.Lit) ?? System.Linq.Enumerable.FirstOrDefault(gx.Values);
+            foreach (var (src, corners) in TrophyRigger.ReplacementParts(rm, rig))
+            {
+                if (corners.Count == 0) continue;
+                string key = $"dspart{n++}";
+                if (src.Pixels != null) _raw[key] = (src.Pixels, src.W, src.H);
+                int start = _build.Count / Floats;
+                foreach (TrophyRigger.ReplacementCorner c in corners)
+                {
+                    _build.Add(c.Pos.X); _build.Add(c.Pos.Y); _build.Add(c.Pos.Z); _build.Add(c.Normal.X); _build.Add(c.Normal.Y); _build.Add(c.Normal.Z);
+                    _build.Add(c.U); _build.Add(c.V); _build.Add(c.R); _build.Add(c.G); _build.Add(GxShader.PackBlueAlpha(c.B, 1f));
+                    Rigid(c.Node);
+                }
+                var b = new Batch { Start = start, Count = corners.Count, Gx = DsPartMaterial(key, like, src.Pixels != null) };
+                b.P = GxShader.Pack(b.Gx);
+                if (src.Pixels != null) b.Png[0] = key;
+                _body.Add(b);
+                partTris += corners.Count / 3;
+            }
+            tris += partTris;
+            Log.Info(Tag, $"suit {Id}: {partTris} triangles of {rm.Name}'s own parts attached (held)");
         }
         if (_body.Count == 0) return $"none (no part of {Path.GetFileName(daePath)} has a GX program: no .brres or .gx.json?)";
         _dsModel = rm;
         _skel = sk;
         _rig = rig;
+        // its own game's idle flourish, when the import made one (SuitFlourish: Beyond Sylux)
+        _flourish = SuitFlourish.Load(daePath, sk, m => Log.Info(Tag, $"suit {Id}: {m}"));
         _pose = new SkeletonPose(sk.Count);
         _world = new Matrix4[sk.Count];
         _legs = new bool[sk.Count];
@@ -301,6 +336,7 @@ internal sealed class CampaignSuit
             _torso[i] = sk.AboveSpine[i];
             _legs[i] = !sk.AboveSpine[i];
         }
+        SetupUpright();
         HasBody = true;
         return $"{label} rig ({_body.Count} batches, {tris} tris, {hidden} hidden, {missing} unmapped corners)";
     }
@@ -455,6 +491,37 @@ internal sealed class CampaignSuit
         _build.Add(1); _build.Add(0); _build.Add(0); _build.Add(0);
     }
 
+    // a DS part's program: one stage, its texture (unit 0, the mesh's UVs) x the body's lit light channel 0, alpha tested
+    static GxMaterial DsPartMaterial(string tex, GxMaterial? like, bool textured)
+    {
+        var m = new GxMaterial { Name = tex, NumTevStage = 1, NumTexGen = textured ? 1 : 0, NumChans = 1, CullMode = 0 };
+        m.Stages = new[]
+        {
+            textured
+                ? new GxTevStage { Ca = 15, Cb = 8, Cc = 10, Cd = 15, Cclamp = 1, Aa = 7, Ab = 4, Ac = 5, Ad = 7, Aclamp = 1, TexMap = 0, TexCoord = 0, RasChan = 0 }
+                : new GxTevStage { Ca = 15, Cb = 15, Cc = 15, Cd = 10, Cclamp = 1, Aa = 7, Ab = 7, Ac = 7, Ad = 5, Aclamp = 1, TexMap = -1, RasChan = 0 },
+        };
+        if (like != null)
+        {
+            m.Chan[0] = like.Chan[0];
+            m.ColorControl = like.ColorControl;
+            m.MatColor = like.MatColor;
+            m.AmbColor = like.AmbColor;
+        }
+        m.Chan[0].Mat = System.Numerics.Vector4.One;
+        if (textured)
+        {
+            m.TexGenSrc[0] = 5;
+            m.Layers[0] = new GxLayer { Name = tex, TexMapId = 0 };
+            m.TexNames[0] = tex;
+            m.AlphaTest = true;
+            m.AlphaComp0 = 6; // GEQUAL
+            m.AlphaRef0 = 128;
+            m.AlphaComp1 = 7;
+        }
+        return m;
+    }
+
     Batch MakeBatch(int start, int count, GxMaterial m, string dir, Dictionary<string, int> formats)
     {
         var b = new Batch { Start = start, Count = count, Gx = m, P = GxShader.Pack(m), Pass = m.Additive ? 2 : m.BlendEnable ? 1 : 0 };
@@ -472,6 +539,9 @@ internal sealed class CampaignSuit
     }
 
     static string Key(string png, bool intensity) => intensity ? png + "#i" : png;
+
+    // a texture's pixels: a DS part's own (_raw), else its PNG
+    (int[] Px, int W, int H)? PixelsOf(string png, bool intensity) => _raw.TryGetValue(png, out var raw) ? raw : Decode(png, intensity);
 
     // a PNG -> ABGR ints (GL's RGBA bytes), as GL takes them
     static (int[] Px, int W, int H)? Decode(string png, bool intensity)
@@ -500,6 +570,7 @@ internal sealed class CampaignSuit
     // once per 60 Hz sim step, after the game's step: the ball's roll (heading and spin from the player's movement)
     public void Tick(PlayerEntity player)
     {
+        _flourish?.Tick(player);
         if (!HasBall) return;
         Roll r = RollOf(player);
         if (!player.IsAltForm)
@@ -548,9 +619,17 @@ internal sealed class CampaignSuit
     // each pixel once. DepthRebuild (pass 4): their depth only; alpha-tested parts through their colour programs (their
     // holes come from the TEV alpha; the caller masks colour).
     // lift: drawn this far (world units) above the player (a native body's hover kept while this suit stands in for it)
-    public void DrawBody(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, float alpha, bool flash = false, float lift = 0) =>
-        DrawBodyAt(player.HostBipedModel1.AnimInfo, player.BipedModel2.AnimInfo, player.FacingVector.Y, player.Position + new Vector3(0, lift, 0),
-            new Vector3(player.Field70, 0, player.Field74), view, proj, pass, alpha, flash);
+    public void DrawBody(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, float alpha, bool flash = false, float lift = 0)
+    {
+        _posing = player;
+        try
+        {
+            DrawBodyAt(player.HostBipedModel1.AnimInfo, player.BipedModel2.AnimInfo, player.FacingVector.Y, player.Position + new Vector3(0, lift, 0),
+                new Vector3(player.Field70, 0, player.Field74), view, proj, pass, alpha, flash);
+        }
+        finally { _posing = null; }
+        if (pass == SuitPass.Opaque) GunFlashOnTip(player);
+    }
 
     // a body with no player of its own (the Trooper's standing body while his Scout Drone flies, HalfturretEntity's
     // HostBodyModel): one clip on both layers, level, where a player at `position` facing `facing` would stand
@@ -570,8 +649,10 @@ internal sealed class CampaignSuit
             bool own = !(fade && p == 0);
             bool moved = fade && p == 1;
             if (!(own && Has(_body, p)) && !(moved && Has(_body, 0))) return;
-            Pose(legs, torso, pitch);
             Matrix4 model = HunterRig.ModelMatrix(_dsModel, HunterRig.Placement(_hunter, position, facing));
+            if (_upright != 0) AimInModel(model, facing, pitch);
+            Pose(legs, torso, pitch);
+            _lastModel = model;
             Begin(view, proj, model, _pal, _skel.Count);
             double s = Environment.TickCount64 / 1000.0;
             if (moved) DrawFaded(alpha, s);
@@ -598,10 +679,10 @@ internal sealed class CampaignSuit
 
     // MphRead's damage flash (PlayerEntity.HostDamageFlash: it draws its own model in its red palette): the whole draw
     // through the interpreter, recoloured red (the materials' own programs have no tint)
-    void Flash(bool on)
+    void Flash(bool on, bool seatTint = true)
     {
-        _interpOnly = on;
-        _tint = on ? DamageTint : Vector4.Zero;
+        _interpOnly = on || seatTint && SeatTint.W > 0;
+        _tint = on ? DamageTint : seatTint ? SeatTint : Vector4.Zero;
     }
 
     // The body in one still pose with no player (the menus' HD Samus backdrop, MenuSamusRender -- UI's, reached in
@@ -687,8 +768,141 @@ internal sealed class CampaignSuit
         Sample(torso.Index[0], torso.Frame[0], _torso);
         // a Space Pirate fires one-handed: the blade arm stays on the legs layer's clip (RenderActivity's custom players)
         if (_offArm != null && TrophyRigs.IsFiringClip(torso.Index[0])) Sample(legs.Index[0], legs.Frame[0], _offArm);
+        // Zero Suit: her gun arm also keeps the legs layer's (idle / walk) bent arm while firing -- Weavel's firing clips
+        // fold it into the middle of her chest; HoldGunArm then turns just the forearm onto the aim
+        if (_upright != 0 && _armShoulder != null && TrophyRigs.IsFiringClip(torso.Index[0])) Sample(legs.Index[0], legs.Frame[0], _armShoulder);
         _skel.Fk(_pose, _world, pitch, _rig.Lengths, _rig.Offsets);
+        Straighten();
+        if (_posing != null) _flourish?.Apply(_posing, _rig, _world);
         for (int i = 0; i < _skel.Count; i++) HunterRig.ToArray(_rig.InvBind[i] * _world[i], _pal, i * 16);
+    }
+
+    // Zero Suit Samus on Weavel's rig (owner 2026-10-12: "go back to putting her on a vanilla rig but just updating her
+    // posture to be a little more upright"): an armoured hunter's clips hunch the chest forward, so her upper body is tilted
+    // back about the waist (Spine_1, about its own side axis -- the aim's), then each shoulder and the head are turned back
+    // by the same amount about their own joints, so the gun stays on the aim and her eyes stay level. Dev: --es zsupright <deg>
+    public static float ZeroSuitUprightDeg = 25f;
+    float _upright; // radians, 0 = none (every other skin)
+    bool[]? _uprightAll, _uprightL, _uprightR, _uprightHead;
+
+    void SetupUpright()
+    {
+        _upright = 0;
+        if (!Id.Contains("ZeroSuit", StringComparison.Ordinal) || _hunter != Hunter.Weavel) return;
+        int sp = _skel.IndexOf("Spine_1");
+        if (sp < 0) return;
+        _upright = MathHelper.DegreesToRadians(ZeroSuitUprightDeg);
+        _uprightAll = _skel.Subtree("Spine_1");
+        _uprightL = _skel.Subtree("L_shoulder");
+        _uprightR = _skel.Subtree("R_shoulder");
+        _uprightHead = _skel.Subtree("Head_1");
+        Log.Info(Tag, $"suit {Id}: upright {ZeroSuitUprightDeg:0.#} deg (shoulders {_skel.IndexOf("L_shoulder")}/{_skel.IndexOf("R_shoulder")}, head {_skel.IndexOf("Head_1")})");
+    }
+
+    void Straighten()
+    {
+        if (_upright == 0 || _uprightAll == null) return;
+        int sp = _skel.IndexOf("Spine_1");
+        Vector3 axis = _world[sp].Row2.Xyz;
+        if (axis.LengthSquared < 1e-8f) return;
+        axis.Normalize();
+        Turn(_uprightAll, sp, axis, _upright);
+        foreach ((bool[]? part, string root) in new[] { (_uprightL, "L_shoulder"), (_uprightR, "R_shoulder"), (_uprightHead, "Head_1") })
+        {
+            int r = _skel.IndexOf(root);
+            if (part != null && r >= 0) Turn(part, r, axis, -_upright);
+        }
+        HoldGunArm();
+    }
+
+    // her gun arm held straight out along the aim from her right shoulder, where a hunter's arm cannon is (owner 2026-10-12:
+    // Weavel's firing clips fold the arm into the middle of her chest, away from the muzzle flash): the elbow straightened,
+    // then the whole arm turned onto the aim. The flash then goes on the gun's own tip (GunFlashOnTip). Dev: zsupright 0 = off
+    Vector3 _aimModel; // the aim in the rig's model space (DrawBodyAt)
+    Matrix4 _lastModel = Matrix4.Identity;
+    bool[]? _armShoulder, _armElbow;
+    bool _armHeld;
+
+    void AimInModel(Matrix4 model, Vector3 facing, float pitch)
+    {
+        var flat = new Vector3(facing.X, 0, facing.Z);
+        if (flat.LengthSquared < 1e-12f) return;
+        flat.Normalize();
+        float y = Math.Clamp(pitch, -1f, 1f), h = MathF.Sqrt(1 - y * y);
+        Vector3 aim = Vector3.TransformVector(new Vector3(flat.X * h, y, flat.Z * h), model.Inverted());
+        if (aim.LengthSquared > 1e-12f) _aimModel = aim.Normalized();
+    }
+
+    void HoldGunArm()
+    {
+        _armHeld = false;
+        // Weavel's gun arm ends at R_elbow (his cannon is the forearm: no R_wrist); her forearm, hand and the held gun ride it
+        int sh = _skel.IndexOf("R_shoulder"), el = _skel.IndexOf("R_elbow");
+        if (sh < 0 || el < 0 || _aimModel.LengthSquared < 0.5f)
+        {
+            if (!_armLogged) Log.Warn(Tag, $"suit {Id}: gun arm NOT held (shoulder {sh}, elbow {el}, aim {_aimModel})");
+            _armLogged = true;
+            return;
+        }
+        _armShoulder ??= _skel.Subtree("R_shoulder");
+        _armElbow ??= _skel.Subtree("R_elbow");
+        // the upper arm as the clip bends it (a straight arm out on the aim looked rigid and stretched her shoulder skin,
+        // owner 2026-10-12); just the forearm's barrel line (elbow -> MPH's muzzle point on R_elbow) onto the aim, so the
+        // gun and its flash stay on the aim
+        TurnOnto(_armElbow, el, Muzzle() - _world[el].Row3.Xyz, _aimModel);
+        _armHeld = true;
+        if (!_armLogged)
+        {
+            _armLogged = true;
+            Vector3 got = (Muzzle() - _world[el].Row3.Xyz).Normalized();
+            Log.Info(Tag, $"suit {Id}: gun arm held: aim (model) {_aimModel.X:0.00},{_aimModel.Y:0.00},{_aimModel.Z:0.00}, barrel "
+                + $"{got.X:0.00},{got.Y:0.00},{got.Z:0.00}");
+        }
+    }
+
+    // MPH's muzzle point (its shoot node R_elbow + Weavel's muzzle offset) in the rig's model space, on her posed arm
+    Vector3 Muzzle() => MphRead.Matrix.Vec3MultMtx4(MphRead.Metadata.MuzzleOffests[(int)Hunter.Weavel], _world[_skel.IndexOf("R_elbow")]);
+    bool _armLogged;
+
+    // every marked node turned about node `pivot`'s joint by the shortest turn taking direction `from` onto `to`
+    void TurnOnto(bool[] nodes, int pivot, Vector3 from, Vector3 to)
+    {
+        if (from.LengthSquared < 1e-10f || to.LengthSquared < 1e-10f) return;
+        from.Normalize(); to.Normalize();
+        float d = Math.Clamp(Vector3.Dot(from, to), -1f, 1f);
+        Vector3 axis = Vector3.Cross(from, to);
+        if (d > 0.99999f || axis.LengthSquared < 1e-12f) return;
+        axis.Normalize();
+        float angle = MathF.Acos(d);
+        // OpenTK's axis-angle sense in row-vector use: take whichever sign lands `from` on `to`
+        if (Vector3.Dot(Vector3.TransformVector(from, Matrix4.CreateFromAxisAngle(axis, angle)), to) < d) angle = -angle;
+        Turn(nodes, pivot, axis, angle);
+    }
+
+    // third person: her muzzle flash / charge glow on the held gun's tip -- MPH's own muzzle offset on R_elbow (its shoot
+    // node, PlayerEntity) in her posed arm -- as PlayerDraw's HostFxShootOffset (left, up, forward of her position by her
+    // facing; MatchArmCannon.CannonFx3P clears it each frame before the skins draw, so it is set again every frame)
+    void GunFlashOnTip(PlayerEntity player)
+    {
+        if (!_armHeld) return;
+        int el = _skel.IndexOf("R_elbow");
+        var ahead = new Vector3(player.Field70, 0, player.Field74);
+        if (el < 0 || ahead.LengthSquared < 1e-12f) return;
+        ahead.Normalize();
+        Vector3 tip = Vector3.TransformPosition(Muzzle(), _lastModel);
+        Vector3 d = tip - player.Position;
+        player.HostFxShootOffset = new Vector3(Vector3.Dot(d, Vector3.Cross(Vector3.UnitY, ahead)), d.Y, Vector3.Dot(d, ahead));
+    }
+
+    // every marked node's model-space matrix turned by `angle` about `axis` through node `pivot`'s joint
+    void Turn(bool[] nodes, int pivot, Vector3 axis, float angle)
+    {
+        Vector3 at = _world[pivot].Row3.Xyz;
+        Matrix4 r = Matrix4.CreateTranslation(-at) * Matrix4.CreateFromAxisAngle(axis, angle) * Matrix4.CreateTranslation(at);
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            if (nodes[i]) _world[i] *= r;
+        }
     }
 
     void Sample(int clip, int frame, bool[] nodes)
@@ -706,7 +920,7 @@ internal sealed class CampaignSuit
         if (!HasBall || !Has(_ball, p) || !EnsureGl()) return;
         try
         {
-            Flash(flash && !rebuild);
+            Flash(flash && !rebuild, !rebuild);
             Roll r = RollOf(player);
             HunterRig.ToArray(HdBall.Placement(_ballCenter, _ballWidth, r.Spin, r.Heading), _ballPal);
             float half = HdBall.GameDiameter / 2f;
@@ -961,6 +1175,7 @@ internal sealed class CampaignSuit
         GLES30.GlUniform1f(U(prog, "uExposure"), 1f);
         GLES30.GlUniform1i(U(prog, "uRawEnvNormal"), 0);
         GLES30.GlUniform4f(U(prog, "uTint"), _tint.X, _tint.Y, _tint.Z, _tint.W);
+        GLES30.GlUniform4f(U(prog, "uTint2"), SeatTint2.X, SeatTint2.Y, SeatTint2.Z, 0);
         for (int t = 0; t < 8; t++)
         {
             GLES30.GlUniform1i(U(prog, TexUniform[t]), t);
@@ -1184,7 +1399,7 @@ internal sealed class CampaignSuit
     {
         List<(string Png, bool Intensity)> keys = TexKeys();
         var read = new (int[] Px, int W, int H)?[keys.Count];
-        Parallel.For(0, keys.Count, new ParallelOptions { MaxDegreeOfParallelism = 4 }, i => read[i] = Decode(keys[i].Png, keys[i].Intensity));
+        Parallel.For(0, keys.Count, new ParallelOptions { MaxDegreeOfParallelism = 4 }, i => read[i] = PixelsOf(keys[i].Png, keys[i].Intensity));
         for (int i = 0; i < keys.Count; i++) _pixels[Key(keys[i].Png, keys[i].Intensity)] = read[i];
     }
 
@@ -1215,7 +1430,7 @@ internal sealed class CampaignSuit
     {
         string key = Key(png, intensity);
         if (_texIds.TryGetValue(key, out int id)) return id;
-        (int[] Px, int W, int H)? img = _pixels.TryGetValue(key, out var pre) ? pre : Decode(png, intensity);
+        (int[] Px, int W, int H)? img = _pixels.TryGetValue(key, out var pre) ? pre : PixelsOf(png, intensity);
         id = img.HasValue ? Upload(img.Value.Px, img.Value.W, img.Value.H) : White();
         return _texIds[key] = id;
     }
@@ -1246,7 +1461,7 @@ internal sealed class CampaignSuit
             _reprep = Task.Run(() =>
             {
                 var pixels = new Dictionary<string, (int[] Px, int W, int H)?>();
-                foreach ((string png, bool intensity) in keys) pixels[Key(png, intensity)] = Decode(png, intensity);
+                foreach ((string png, bool intensity) in keys) pixels[Key(png, intensity)] = PixelsOf(png, intensity);
                 return (pixels, verts);
             });
         }

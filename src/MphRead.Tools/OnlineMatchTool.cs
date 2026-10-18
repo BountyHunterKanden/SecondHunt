@@ -59,7 +59,7 @@ namespace MphRead
     // looks=1: seat characters + skins (SeatLooksTest: a Varia Samus host, joiner 1 a Wave Trooper, the last bot a Plasma
     // Trooper); every device must show the same looks with the Trooper's abilities on (each Trooper seat), and joiner 1 first sends a JOIN
     // from the previous protocol, which must be refused.
-    internal static class OnlineMatchTool
+    internal static partial class OnlineMatchTool
     {
         private sealed class Options
         {
@@ -74,6 +74,11 @@ namespace MphRead
             public int Jitter;
             public int Lag; // lag=<ms>: a round trip added on this device's link (half each way)
             public bool External; // external=1: the joiners are outside devices (phones), not processes started here
+            public bool Served; // served=1 (docs/DEDICATED_SERVERS.md D1): the host has no seat; players= joiners play every human seat
+            public bool ServedHub; // served=hub (D3, OnlineServedTest.cs): the server runs the match (SecondHuntMatchHost); joiner 1 owns the lobby
+            public int Owner; // -onlinejoin owner=<players>: open a served game and run its lobby (OnlineServedTest.cs)
+            public int Matches = 1; // served=hub matches=<n>: PLAY AGAIN after each match, n in all
+            public bool OwnerLeave; // served=hub ownerleave=1: the owner leaves after the first match (the next slot owns it)
             public int? Goal; // goal=<points>: the match's point goal (0 = none, ends on time only); default = the mode's
             public float Leave;
             public float HostLeave;
@@ -122,6 +127,10 @@ namespace MphRead
                 case "jitter": o.Jitter = Int32.Parse(value); break;
                 case "lag": o.Lag = Int32.Parse(value); break;
                 case "external": o.External = value != "0"; break;
+                case "served": o.Served = value != "0"; o.ServedHub = value == "hub"; break;
+                case "owner": o.Owner = Int32.Parse(value); break;
+                case "matches": o.Matches = Int32.Parse(value); break;
+                case "ownerleave": o.OwnerLeave = value != "0"; break;
                 case "goal": o.Goal = Int32.Parse(value); break;
                 case "leave": o.Leave = Single.Parse(value, CultureInfo.InvariantCulture); break;
                 case "hostleave": o.HostLeave = Single.Parse(value, CultureInfo.InvariantCulture); break;
@@ -218,6 +227,7 @@ namespace MphRead
                 Directory.CreateDirectory(dbDir);
                 server = Start(Environment.ProcessPath!, $"\"{dll}\" --urls http://127.0.0.1:{http} --db \"{Path.Combine(dbDir, "test.db")}\" "
                     + $"--relay-port {relayPort} --relay-delay {o.Delay} --words none.txt"
+                    + (o.ServedHub ? $" --matchhost \"{MatchHostExe()}\" --matchhost-data \"{MatchHostData()}\"" : "")
                     + (turnServer != null ? $" --turn-static \"{turnServer.Url}|{TurnTestServer.User}|{TurnTestServer.Password}\"" : ""),
                     serverOut);
                 uri = new Uri($"ws://127.0.0.1:{http}/v1/ws");
@@ -236,7 +246,14 @@ namespace MphRead
             var hostLines = new List<string>();
             try
             {
-                RunHost(o, uri, joiners, hostLines);
+                if (o.ServedHub)
+                {
+                    RunServedHub(o, uri, joiners);
+                }
+                else
+                {
+                    RunHost(o, uri, joiners, hostLines);
+                }
             }
             catch (Exception ex)
             {
@@ -245,7 +262,8 @@ namespace MphRead
             finally
             {
                 // (hostleave: the joiners play the rest of the match after the host is gone)
-                int waitMs = o.HostLeave > 0 ? (int)Math.Max(40000, (o.Time - o.HostLeave + 40) * 1000) : 40000;
+                int waitMs = o.HostLeave > 0 ? (int)Math.Max(40000, (o.Time - o.HostLeave + 40) * 1000)
+                    : o.ServedHub ? (int)((o.Time + 90) * 1000 * o.Matches) : 40000; // (served: nobody here played the match first)
                 foreach ((Process p, List<string> output) in joiners)
                 {
                     if (!p.WaitForExit(waitMs))
@@ -284,6 +302,11 @@ namespace MphRead
                     }
                 }
             }
+            if (o.ServedHub)
+            {
+                ServedVerdict(o, serverOut, joiners.Select(j => j.Out).ToList());
+                return;
+            }
             Verdict(o, hostLines, joiners.Select(j => j.Out).ToList());
         }
 
@@ -302,13 +325,20 @@ namespace MphRead
             {
                 SeatLooksTest.Dress(template);
             }
+            if (o.Served)
+            {
+                // a served match host: no player of its own (its template keeps only the bots), every human joins
+                template.Players.RemoveAll(p => !p.Bot);
+                template.ServedHost = true;
+            }
+            int want = o.Served ? o.Players : o.Players - 1; // the joiners this host waits for
 
             OnlineClient online = Wait(OnlineClient.ConnectAsync(uri, OnlineIdentity.Create(), "PC host", "onlinetest"));
             GameMsg game = Wait(online.RequestAsync<GameMsg>(new HostGameReq
             {
                 Info = new GameInfo
                 {
-                    Mode = mode.ToString(), Arena = arena.Name, MaxPlayers = o.Players, Public = true, Version = VersionKey,
+                    Mode = mode.ToString(), Arena = arena.Name, MaxPlayers = o.Players + (o.Served ? 1 : 0), Public = true, Version = VersionKey,
                     Rules = $"{o.Time:0} s",
                 },
             }));
@@ -319,15 +349,15 @@ namespace MphRead
             string dll = typeof(OnlineMatchTool).Assembly.Location;
             if (o.External)
             {
-                Console.WriteLine($"host: waiting up to 10 min for {o.Players - 1} outside player(s) (game version {VersionKey}); "
+                Console.WriteLine($"host: waiting up to 10 min for {want} outside player(s) (game version {VersionKey}); "
                     + "on the device: dev menu -> ONLINE TEST: JOIN");
             }
-            for (int i = 1; i < o.Players && !o.External; i++)
+            for (int i = 1; i <= want && !o.External; i++)
             {
                 var output = new List<string>();
-                float leave = i == o.Players - 1 ? o.Leave : 0;
-                float rejoin = i == o.Players - 1 ? o.Rejoin : 0;
-                float wifi = i == o.Players - 1 ? o.Wifi : 0;
+                float leave = i == want ? o.Leave : 0;
+                float rejoin = i == want ? o.Rejoin : 0;
+                float wifi = i == want ? o.Wifi : 0;
                 string a = $"\"{dll}\" -onlinejoin server={uri} game={game.Game.Id} index={i} "
                     + (o.Looks && i == 1 ? $"hunter={SeatLooksTest.JoinerHunter} character={SeatLooksTest.JoinerCharacter} skin={SeatLooksTest.JoinerSkin} "
                         : $"hunter={JoinerHunters[(i - 1) % JoinerHunters.Length]} ")
@@ -346,17 +376,17 @@ namespace MphRead
 
             var clock = Stopwatch.StartNew();
             int seen = 0;
-            while (net.Joined < o.Players - 1 && clock.ElapsedMilliseconds < (o.External ? 600000 : 60000))
+            while (net.Joined < want && clock.ElapsedMilliseconds < (o.External ? 600000 : 60000))
             {
                 if (o.External && net.Joined != seen)
                 {
                     seen = net.Joined;
-                    Console.WriteLine($"host: {seen}/{o.Players - 1} joined ({net.Status})");
+                    Console.WriteLine($"host: {seen}/{want} joined ({net.Status})");
                 }
                 Thread.Sleep(20);
             }
-            Console.WriteLine($"host: {net.Joined}/{o.Players - 1} joined after {clock.ElapsedMilliseconds} ms ({net.Status})");
-            if (net.Joined < o.Players - 1)
+            Console.WriteLine($"host: {net.Joined}/{want} joined after {clock.ElapsedMilliseconds} ms ({net.Status})");
+            if (net.Joined < want)
             {
                 lines.Add("FAIL not everyone joined");
                 Wait(online.RequestAsync<OkMsg>(new LeaveGameReq()));
@@ -485,6 +515,7 @@ namespace MphRead
             lines.Add("SEATSBACK " + driver.SeatsBack);
             lines.Add("INPUTS " + string.Join(",", net.RemoteSeats.Select(s => net.InputsFrom(s))));
             lines.Add(Scores(settings.Players.Count, host.Scene));
+            lines.Add(Board());
             lines.Add(Results(settings.Players.Count));
             if (ResultsProblem(settings.Players.Count) is string bad)
             {
@@ -722,6 +753,13 @@ namespace MphRead
                 {
                     problems.Add($"joiner {i + 1} {scores} vs host {hostScores}");
                 }
+                // the held-Select live scoreboard as the joiner draws it
+                string? board = lines.FirstOrDefault(l => l.StartsWith("BOARD "));
+                string? hostBoard = host.FirstOrDefault(l => l.StartsWith("BOARD "));
+                if (!left && o.HostLeave == 0 && board != hostBoard)
+                {
+                    problems.Add($"joiner {i + 1} {board ?? "no BOARD"} vs host {hostBoard ?? "no BOARD"}");
+                }
                 // release 0.2.0 F1: the same RESULTS places, at about the same time (a match that ran to its end)
                 string? results = lines.FirstOrDefault(l => l.StartsWith("RESULTS "));
                 string? hostResults = host.FirstOrDefault(l => l.StartsWith("RESULTS "));
@@ -765,7 +803,7 @@ namespace MphRead
             string name = $"PC {o.Index}";
             OnlineIdentity me = (o.Code != null ? OnlineIdentity.FromBackupCode(o.Code) : null) ?? OnlineIdentity.Create();
             OnlineClient online = Wait(OnlineClient.ConnectAsync(uri, me, name, "onlinetest"));
-            if (!o.Again)
+            if (!o.Again && o.Owner == 0)
             {
                 GamesMsg list = Wait(online.RequestAsync<GamesMsg>(new ListGamesReq()));
                 GameCard? card = list.Games.FirstOrDefault(g => g.Id == o.Game);
@@ -782,7 +820,8 @@ namespace MphRead
                 }
             };
             // a restarted app asks for "my started game" (no id): the server gives it its slot back with a new token
-            GameMsg game = Wait(online.RequestAsync<GameMsg>(new JoinGameReq { GameId = o.Again ? "" : o.Game, Version = VersionKey }));
+            GameMsg game = o.Owner > 0 && !o.Again ? OwnServedGame(o, online)
+                : Wait(online.RequestAsync<GameMsg>(new JoinGameReq { GameId = o.Again ? "" : o.Game, Version = VersionKey, Served = true }));
             if (o.Again)
             {
                 Console.WriteLine($"joiner {o.Index}: back as {online.Me} in game {game.Game.Id}");
@@ -793,6 +832,7 @@ namespace MphRead
                 Console.WriteLine(SeatLooksTest.OldOnlineJoin(relay, RomKey));
             }
             NetMatchSession net = NetMatchSession.Client(Link(o, relay, o.Index, online), RomKey);
+            net.IsOwner = o.Owner > 0; // (a served game's lobby owner: OnlineServedTest.cs)
             net.LinkAlive = () => relay.RelayAlive; // (as OnlineMatch: reconnect tells our own network from the host's)
             // O5b: as OnlineMatch does in the app: the server names a new host when this one leaves or drops
             net.CanMigrate = online.ServerAtLeast(OnlineMatch.MigrateSinceServer);
@@ -802,6 +842,11 @@ namespace MphRead
                 {
                     Console.WriteLine($"joiner {o.Index}: server: slot {slot} hosts now (slot {moved.Slot} left)");
                     net.HostMoved(slot);
+                }
+                else if (m is MemberEvent { Owner: string owner } ownerMoved && ownerMoved.GameId == game.Game.Id && owner == online.Me.Code)
+                {
+                    Console.WriteLine($"joiner {o.Index}: server: this device owns the lobby now (slot {ownerMoved.Slot} left)");
+                    net.IsOwner = true;
                 }
                 else if (m is GameClosedEvent closedGame && closedGame.GameId == game.Game.Id)
                 {
@@ -817,6 +862,10 @@ namespace MphRead
                     return;
                 }
                 Console.WriteLine($"joiner {o.Index}: relay slot {relay.LocalSlot}, {net.Status}");
+                if (net.IsOwner && !o.Again && !OwnerSetup(o, net))
+                {
+                    return;
+                }
                 if (!net.WaitForStart(o.Again ? 15000 : 90000))
                 {
                     Console.WriteLine($"joiner {o.Index}: no START ({net.Status})");
@@ -965,12 +1014,20 @@ namespace MphRead
                 Console.WriteLine($"joiner {o.Index}: own beam hits seen here {PlayerEntity.NetBeamHits[seat]}");
                 Console.WriteLine($"SAWHITS {seat}:{PlayerEntity.NetBeamHits[seat]}");
                 Console.WriteLine(Scores(net.Settings.Players.Count, host.Scene));
+                Console.WriteLine(Board());
                 Console.WriteLine(Results(net.Settings.Players.Count));
                 Console.WriteLine(ObjectiveEvents());
                 Console.WriteLine(Detail(net.Settings.Players.Count));
                 Console.WriteLine($"joiner {o.Index}: {Afflictions()}");
                 Console.WriteLine($"joiner {o.Index} scoreboard:\n" + MatchStatus.Scoreboard());
                 host.Dispose();
+                for (int match = 2; match <= o.Matches && o.Leave == 0 && !(o.OwnerLeave && o.Owner > 0); match++)
+                {
+                    if (!PlayAgain(o, net, match))
+                    {
+                        break;
+                    }
+                }
             }
             finally
             {
@@ -1020,17 +1077,51 @@ namespace MphRead
         internal static string Scores(int seats, Scene? scene = null) => "SCORES " + string.Join("|", Enumerable.Range(0, seats)
             .Select(i => $"{GameState.Points[i]},{GameState.Kills[i]},{GameState.Deaths[i]}")) + " OBJ " + NetObjective.Summary() + World(scene);
 
+        // what the held-Select live scoreboard draws (PlayerHud.DrawScoreboard: ResultSlots order, team rows, the mode's two
+        // columns): every device must agree, joiners included (live scoreboard thread, 2026-10-11)
+        internal static string Board()
+        {
+            GameMode mode = GameState.Mode;
+            bool timeColumn = mode is GameMode.Survival or GameMode.SurvivalTeams or GameMode.Defender or GameMode.DefenderTeams
+                or GameMode.PrimeHunter;
+            bool deathsColumn = mode is GameMode.Battle or GameMode.BattleTeams or GameMode.Survival or GameMode.SurvivalTeams;
+            string Value1(float time, int points) => timeColumn ? (time < 0 ? "MAX" : ((int)time).ToString()) : points.ToString();
+            string Value2(int deaths, int kills) => deathsColumn ? deaths.ToString() : kills.ToString();
+            var parts = new List<string>();
+            int curTeam = 4;
+            for (int i = 0; i < GameState.ActivePlayers; i++)
+            {
+                int slot = GameState.ResultSlots[i];
+                PlayerEntity player = PlayerEntity.Players[slot];
+                if (!player.LoadFlags.TestFlag(LoadFlags.Active))
+                {
+                    continue;
+                }
+                if (GameState.Teams && player.TeamIndex != curTeam)
+                {
+                    curTeam = player.TeamIndex;
+                    parts.Add($"T{curTeam}:{Value1(GameState.TeamTime[curTeam], GameState.TeamPoints[curTeam])},"
+                        + Value2(GameState.TeamDeaths[curTeam], GameState.TeamKills[curTeam]));
+                }
+                parts.Add($"{slot}:{Value1(GameState.Time[slot], GameState.Points[slot])},"
+                    + $"{Value2(GameState.Deaths[slot], GameState.Kills[slot])},{GameState.Stars[slot]}");
+            }
+            return "BOARD " + String.Join(" ", parts);
+        }
+
         // the Echoes crates + breakables: how many and how often each broke (every device must agree: Net/NetWorld.cs)
         internal static string World(Scene? scene)
         {
             if (scene == null) return "";
             var list = NetWorld.Elements(scene);
-            return list.Count == 0 ? "" : " WORLD " + string.Join(",", list.Select(e => e switch
+            // (+ Shooting Gallery's turret: how often it blew up; Arenas/EchoesTurret.cs)
+            string turret = NetWorld.TurretOf(scene) is { } t ? $" TURRET {t.Destructions}" : "";
+            return (list.Count == 0 ? "" : " WORLD " + string.Join(",", list.Select(e => e switch
             {
                 MphRecomp.Arenas.EchoesCrateEntity c => $"c{c.Breaks}",
                 MphRecomp.Arenas.EchoesBreakableEntity b => $"b{b.Breaks}",
                 _ => "?"
-            }));
+            }))) + turret;
         }
 
         // each seat's place as the RESULTS page shows it (GameState.Standings, team:place), the result order, and the table

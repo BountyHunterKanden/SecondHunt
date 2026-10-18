@@ -119,6 +119,29 @@ public sealed class PadState
         }
     }
 
+    // stylus aim (the touch controls' TOUCH AIM: STYLUS, owner 2026-10-16): the aim finger's drag in DS touch-screen
+    // pixels, unrounded; the next simulation step turns it into aim (CampaignRenderer.StylusAimDelta)
+    float _stylusAimX, _stylusAimY;
+
+    public void StylusAim(float dsX, float dsY)
+    {
+        lock (_aimGate)
+        {
+            _stylusAimX += dsX;
+            _stylusAimY += dsY;
+        }
+    }
+
+    public System.Numerics.Vector2 TakeStylusAim()
+    {
+        lock (_aimGate)
+        {
+            var aim = new System.Numerics.Vector2(_stylusAimX, _stylusAimY);
+            _stylusAimX = _stylusAimY = 0;
+            return aim;
+        }
+    }
+
     // everything released (focus lost, a screen change)
     public void Clear()
     {
@@ -126,6 +149,7 @@ public sealed class PadState
         Array.Clear(_touch);
         Lx = Ly = Rx = Ry = L2 = R2 = HatX = HatY = RawRx = RawRy = 0;
         TakeAim();
+        TakeStylusAim();
         lock (_aimGate)
         {
             _stylusDown = _stylusSeen = false;

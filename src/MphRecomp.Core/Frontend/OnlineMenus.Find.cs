@@ -466,7 +466,8 @@ namespace MphRecomp.Frontend
             {
                 try
                 {
-                    OnlineMatch match = await OnlineMatch.HostAsync(client, ServerUri, template, romKey, people, isPublic: false, friends: false, rivals: false);
+                    OnlineMatch match = await OnlineMatch.HostAsync(client, ServerUri, template, romKey, people, isPublic: false, friends: false, rivals: false,
+                        askServed: false); // (served Find Game: later, DEDICATED_SERVERS.md D3)
                     Post(() =>
                     {
                         _creating = false;

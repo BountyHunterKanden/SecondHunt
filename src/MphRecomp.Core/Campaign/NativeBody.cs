@@ -29,6 +29,18 @@ namespace MphRecomp.Campaign
         // a little taller than its pickup box, as the hunters' own models are
         public const float PlayerHeight = 1.7f;
 
+        // the Trooper (the Prime 1 pirate rig, B_ready_pirate) drawn at his Prime 1 size next to the hunters (owner
+        // 2026-10-15): MP1's rooms place troopers 1.5x the size of Samus's own stand-in relative to their binds, so fitted
+        // to PlayerHeight like the others he idled at 1/1.5 of it (top 1.33, head 0.66); at 1.5x his top is ~2.0, like
+        // Spire's. Draw only (the hitbox is the sim's, the same cylinder for everyone): ModelMatrix and the walk rate;
+        // Scale (the first-person cannon's size) is unchanged. Owner 10-16: 1.5x is "oppressively bigger", find a middle
+        // ground; owner picked 1.3x by eye in a lineup with every hunter (top ~1.73, Noxus/Sylux height). Live steps 1x..1.5x
+        // in the gun-adjust pause (TrooperSizeToggle.cs).
+        public static float TrooperSize = 1.3f;
+        readonly bool _pirate;
+        public float Size => _pirate ? TrooperSize : 1;
+        public float DrawScale => Scale * Size;
+
         NativeBody(string dir, HdGun data, float height, float feet, string game)
         {
             Dir = dir;
@@ -36,6 +48,7 @@ namespace MphRecomp.Campaign
             Height = height;
             Feet = feet;
             Game = game;
+            _pirate = data.Anims.ContainsKey("B_ready_pirate");
             World = new Matrix4[data.BoneCount];
             _rot = new Quaternion[data.BoneCount];
             _trans = new Vector3[data.BoneCount];
@@ -282,7 +295,7 @@ namespace MphRecomp.Campaign
             turn.Row1.Xyz = Vector3.UnitY;
             turn.Row2.Xyz = lateral;
             float bottom = Fixed.ToFloat(Metadata.PlayerValues[(int)hunter].MinPickupHeight);
-            return Matrix4.CreateTranslation(0, -Feet, 0) * Matrix4.CreateScale(Scale) * turn
+            return Matrix4.CreateTranslation(0, -Feet, 0) * Matrix4.CreateScale(DrawScale) * turn
                 * Matrix4.CreateTranslation(position.X, position.Y + bottom + lift, position.Z);
         }
     }
@@ -326,6 +339,11 @@ namespace MphRecomp.Campaign
         readonly HdGun.Anim[] _mixA = new HdGun.Anim[10];
         readonly float[] _mixT = new float[10], _mixW = new float[10];
         const string LeanKey = "lean";
+        // BodyClips.FlourishSet: the flourish clip playing (null = none), the last one played (for its weight while it
+        // fades out), how long its hold-release eases (seconds)
+        string? _flourish, _lastFlourish;
+        int _playNow = BodyFlourish.PlayNow;
+        const float FlourishEase = 0.25f, FlourishFade = 0.3f;
         const float LeanTime = 0.1f;    // the direction's smoothing (seconds)
 
         public NativeBodyAnimator(NativeBody body, BodyClips map)
@@ -389,7 +407,7 @@ namespace MphRecomp.Campaign
                     _outLeft -= dt;
                     c = new BodyClips.Choice("wallout", _map.WallOut, false);
                 }
-                else c = _map.Choose(p) with { Snap = snap };
+                else c = Flourish(p, _map.Choose(p) with { Snap = snap });
                 if (_lean != null) c = Lean(p, c, move, speed, dt);
                 AnimationInfo legs = p.HostBipedModel1.AnimInfo;
                 if (_map.Fit.Contains((PlayerAnimation)legs.Index[0]) && legs.FrameCount[0] > 0 && _body.Clip(c.Clip) is HdGun.Anim fit)
@@ -399,7 +417,7 @@ namespace MphRecomp.Campaign
             }
             if (c.Walk && _body.Speeds.TryGetValue(c.Clip, out float own) && own > 0)
             {
-                c = c with { Rate = Math.Clamp(speed / (own * _body.Scale), 0.5f, 2f) };
+                c = c with { Rate = Math.Clamp(speed / (own * _body.DrawScale), 0.5f, 2f) };
             }
             Step(c, dt);
             // the wall clips own the whole body
@@ -411,6 +429,44 @@ namespace MphRecomp.Campaign
                 AnimationInfo info = p.BipedModel2.AnimInfo;
                 StepTorso((PlayerAnimation)info.Index[0], info.Frame[0], dt);
             }
+        }
+
+        // BodyClips.FlourishSet: MPH's Flourish state plays the body's own flourish at its own speed, then the idle loop.
+        // MPH's Flourish is its hunter's clip length, so when MphRead is back in Idle first the flourish still plays out;
+        // anything else (a step, a shot) cuts it with the usual cross-fade
+        BodyClips.Choice Flourish(PlayerEntity p, BodyClips.Choice c)
+        {
+            if (_map.FlourishSet == null) return c;
+            var state = (PlayerAnimation)p.HostBipedModel1.AnimInfo.Index[0];
+            // standing still: the map picked its idle loop (MPH's legs can sit at None there, as in the solo arena)
+            bool idle = state == PlayerAnimation.Idle || c.Clip == _map.ClipFor(PlayerAnimation.Idle);
+            if (idle && _playNow != BodyFlourish.PlayNow)
+            {
+                _playNow = BodyFlourish.PlayNow;
+                _flourish = BodyFlourish.Start(_body, _map.FlourishSet);
+            }
+            else if (state == PlayerAnimation.Flourish)
+            {
+                _flourish ??= BodyFlourish.Start(_body, _map.FlourishSet);
+            }
+            else if (!idle || _flourish == null || _cur?.Name != _flourish || _t >= _cur.Duration)
+            {
+                _flourish = null;
+            }
+            if (_flourish == null) return c;
+            _lastFlourish = _flourish;
+            return new BodyClips.Choice(_flourish, _flourish, false, Then: _map.ClipFor(PlayerAnimation.Idle));
+        }
+
+        // how far the flourish has the body now (BodyClips.FlourishWeight): eased in from its start and out to its end,
+        // and out with the cross-fade when something cuts it
+        float FlourishWeight()
+        {
+            if (_lastFlourish == null) return 0;
+            float W(HdGun.Anim? a, float t) => a?.Name == _lastFlourish
+                ? Math.Clamp(Math.Min(t, a.Duration - t) / FlourishEase, 0, 1) : 0;
+            if (_prev != null && _fade < 1) return W(_cur, _t) * _fade + W(_prev, _prevT) * (1 - _fade);
+            return W(_cur, _t);
         }
 
         // BodyClips.Lean: any of its 4 clips is one state ("lean") whose pose blends them by the seat's move direction
@@ -510,7 +566,7 @@ namespace MphRecomp.Campaign
                     _prevT = _t;
                     _prevLean = _curLean;
                     _fade = _prev == null || c.Snap ? 1 : 0;
-                    _fadeTime = FadeOf(_prev);
+                    _fadeTime = c.Key == _flourish ? Math.Max(FadeOf(_prev), FlourishFade) : FadeOf(_prev);
                     _cur = next;
                     _t = 0;
                 }
@@ -544,7 +600,8 @@ namespace MphRecomp.Campaign
             if (_prev != null && _fade < 1) _fade = Math.Min(1, _fade + dt / _fadeTime);
         }
 
-        float FadeOf(HdGun.Anim? from) => from != null && _map.FadeOut.TryGetValue(from.Name, out float f) && f > 0 ? f : FadeTime;
+        float FadeOf(HdGun.Anim? from) => from != null && _map.FadeOut.TryGetValue(from.Name, out float f) && f > 0 ? f
+            : from != null && from.Name == _lastFlourish ? FlourishFade : FadeTime;
 
         // the body in this seat's pose now (its World / FillPalette until the next Pose); who: the player it draws (null for
         // a standing body), for the map's AfterPose
@@ -556,6 +613,7 @@ namespace MphRecomp.Campaign
             else _body.Pose(_cur, _t);
             if (_torsoRoot >= 0 && _tcur != null && _tw > 0) _body.PoseLayer(_torsoRoot, _tcur, _tt, _tprev, _tprevT, _tfade, _tw);
             if (who != null && _aimBone >= 0) AimTwist(who);
+            _map.FlourishWeight = FlourishWeight();
             _map.AfterPose?.Invoke(_body, who);
             return true;
         }
@@ -680,6 +738,10 @@ namespace MphRecomp.Campaign
         // isn't NativeBodyAnimator.FadeTime (her uncurl ends crouched: standing up into ready takes longer)
         public readonly HashSet<PlayerAnimation> Fit = new();
         public readonly Dictionary<string, float> FadeOut = new();
+        // MPH's idle Flourish: the set its clip comes from (BodyFlourish, owner 2026-10-15; null = the Flourish state's own
+        // clip), and while it plays, how far it has the body (0..1, eased in and out: AfterPose holds let go of it)
+        public BodyFlourish.Set? FlourishSet;
+        public float FlourishWeight;
 
         // a legs-layer state's clip
         public void Set(PlayerAnimation a, string clip, bool loop) => _legs[a] = (clip, loop);
@@ -710,13 +772,18 @@ namespace MphRecomp.Campaign
                     if (f(body) is BodyClips m) return m;
                 }
             }
-            if (body.Clip("B_ready_pirate") != null) return Pirate();
+            if (body.Clip("B_ready_pirate") != null)
+            {
+                BodyFlourish.Prepare(body, BodyFlourish.Trooper, "B_ready_pirate");
+                return Pirate();
+            }
             return null;
         }
 
         static BodyClips Pirate()
         {
-            var m = new BodyClips { Idle = "B_ready_pirate", WallIn = "B_intowallhang_pirate", WallLoop = "B_wallhang_pirate", WallOut = "B_outofwallhang_pirate" };
+            var m = new BodyClips { Idle = "B_ready_pirate", WallIn = "B_intowallhang_pirate", WallLoop = "B_wallhang_pirate", WallOut = "B_outofwallhang_pirate",
+                FlourishSet = BodyFlourish.Trooper };
             void L(PlayerAnimation a, string clip, bool loop) => m._legs[a] = (clip, loop);
             foreach (PlayerAnimation a in new[] { PlayerAnimation.Idle, PlayerAnimation.Spawn, PlayerAnimation.Flourish, PlayerAnimation.Turn,
                 PlayerAnimation.Charge, PlayerAnimation.Shoot, PlayerAnimation.ChargeShoot, PlayerAnimation.Unmorph, PlayerAnimation.Morph })

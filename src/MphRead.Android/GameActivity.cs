@@ -30,6 +30,7 @@ public class GameActivity : Activity
     bool _selectHeld;
     int _hatX, _hatY, _stickX, _stickY;
     float _trigL, _trigR; // the triggers last motion event (the control customizer's capture)
+    float _stickRy; // the right stick's up / down: scrolls settings and CONTROLS (FrontendSession.ScrollStick)
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -57,6 +58,7 @@ public class GameActivity : Activity
         // IMPORT GAMES (RECOMP SETTINGS): the system's document picker, and its files read in place (never copied)
         ImportHost.Pick = (request, picked) => RunOnUiThread(() => PickImportFile(request, picked));
         ImportHost.Open = OpenImportFile;
+        ImportHost.OpenFolder = (token, marker) => ImportTreeSource.Open(Application.Context.ContentResolver!, token, marker);
         _view = new GLSurfaceView(this);
         _view.SetEGLContextClientVersion(3);
         _view.SetEGLConfigChooser(8, 8, 8, 8, 0, 0);
@@ -179,6 +181,9 @@ public class GameActivity : Activity
         case FrontendRequestKind.ShareCrashLog:
             ShareCrashLog(this);
             break;
+        case FrontendRequestKind.FirstHunt: // RECOMP SETTINGS' extras row: First Hunt's own menus (FirstHuntActivity)
+            StartActivity(new Intent(this, typeof(FirstHuntActivity)));
+            break;
         }
     }
 
@@ -187,15 +192,19 @@ public class GameActivity : Activity
     const int ImportPickRequest = 0x4d50;
     Action<ImportPicked?>? _importPicked;
 
-    // the system's document picker (any file: disc images have no MIME type of their own); the pick keeps its read
-    // access across restarts (TakePersistableUriPermission), so importing again doesn't ask for the disc again
+    // the system's document picker (any file: disc images have no MIME type of their own), or its folder picker for a
+    // game imported from its files (Prime 4's RomFS: ImportTreeSource); the pick keeps its read access across restarts
+    // (TakePersistableUriPermission), so importing again doesn't ask for the disc again
     void PickImportFile(ImportPickRequest request, Action<ImportPicked?> picked)
     {
         _importPicked?.Invoke(null); // an earlier picker that never answered
         _importPicked = picked;
-        var intent = new Intent(Intent.ActionOpenDocument);
-        intent.AddCategory(Intent.CategoryOpenable);
-        intent.SetType("*/*");
+        var intent = new Intent(request.Kind == ImportPickKind.Folder ? Intent.ActionOpenDocumentTree : Intent.ActionOpenDocument);
+        if (request.Kind != ImportPickKind.Folder)
+        {
+            intent.AddCategory(Intent.CategoryOpenable);
+            intent.SetType("*/*");
+        }
         try
         {
             StartActivityForResult(intent, ImportPickRequest);
@@ -228,7 +237,10 @@ public class GameActivity : Activity
             Log.Warn("MPHFrontend", "import: no lasting access to the picked file: " + ex.Message);
         }
         Log.Info("MPHFrontend", "import: picked " + uri);
-        picked?.Invoke(new ImportPicked(uri.ToString()!, DisplayName(uri)));
+        // (a folder's name: its own document's, under the tree)
+        bool tree = Android.Provider.DocumentsContract.IsTreeUri(uri);
+        Android.Net.Uri named = tree ? Android.Provider.DocumentsContract.BuildDocumentUriUsingTree(uri, Android.Provider.DocumentsContract.GetTreeDocumentId(uri))! : uri;
+        picked?.Invoke(new ImportPicked(uri.ToString()!, DisplayName(named)));
     }
 
     string DisplayName(Android.Net.Uri uri)
@@ -250,6 +262,7 @@ public class GameActivity : Activity
     static System.IO.Stream? OpenImportFile(string token)
     {
         if (!token.StartsWith("content://", StringComparison.Ordinal)) return ImportHost.OpenPath(token);
+        if (Android.Provider.DocumentsContract.IsTreeUri(Android.Net.Uri.Parse(token)!)) return null; // a picked folder, not a file
         ParcelFileDescriptor? pfd;
         try
         {
@@ -312,18 +325,19 @@ public class GameActivity : Activity
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
     {
         if (_renderer == null) return base.OnKeyDown(keyCode, e);
-        // the control customizer waits for a controller button (OPTIONS > CONTROLS): the first press is the answer,
-        // Back / Start / Select keep the buttons as they are; nothing reaches the menu meanwhile
+        // the control customizer waits for a controller button (OPTIONS > CONTROLS): every press and release goes to it (Select
+        // and R3 too: customizer functions since 2026-10-11), Back / Start keep the buttons as they are; nothing reaches the
+        // menu meanwhile
         if (_renderer.CaptureDevice != null)
         {
             if (e?.RepeatCount == 0)
             {
-                if (CampaignActivity.PadFor(keyCode) is PadButton b)
+                if ((keyCode == Keycode.ButtonSelect ? PadButton.Select : CampaignActivity.PadFor(keyCode)) is PadButton b)
                 {
                     string name = b.ToString();
                     _renderer.Post(s => s.Recomp.CaptureInput(name));
                 }
-                else if (keyCode is Keycode.Back or Keycode.ButtonStart or Keycode.ButtonSelect or Keycode.Escape)
+                else if (keyCode is Keycode.Back or Keycode.ButtonStart or Keycode.Escape)
                 {
                     _renderer.Post(s => s.Recomp.CancelCapture());
                 }
@@ -331,8 +345,9 @@ public class GameActivity : Activity
             return true;
         }
         if (keyCode == Keycode.ButtonSelect) _selectHeld = true;
-        // online voice chat (O8): R3 held = push to talk in an online game's lobby (the menus don't use R3)
-        if (keyCode == Keycode.ButtonThumbr && MphRecomp.Online.Voice.VoiceChat.HoldToTalk(true)) return true;
+        // online voice chat (O8): the push to talk button held (R3 unless moved) = push to talk in an online game's lobby
+        if (e?.RepeatCount == 0) LobbyTalk(keyCode, true);
+        if (keyCode == Keycode.ButtonThumbr) return true; // (the menus don't use R3)
         if (keyCode == Keycode.ButtonStart && _selectHeld && !BuildFlags.Public)
         {
             OpenDeveloperMenu();
@@ -357,8 +372,32 @@ public class GameActivity : Activity
     public override bool OnKeyUp(Keycode keyCode, KeyEvent? e)
     {
         if (keyCode == Keycode.ButtonSelect) _selectHeld = false;
-        if (keyCode == Keycode.ButtonThumbr && MphRecomp.Online.Voice.VoiceChat.HoldToTalk(false)) return true;
+        // a button let go while the customizer waits: the capture commits once every pressed button is up (combos)
+        if (_renderer?.CaptureDevice != null
+            && (keyCode == Keycode.ButtonSelect ? PadButton.Select : CampaignActivity.PadFor(keyCode)) is PadButton released)
+        {
+            string name = "-" + released;
+            _renderer.Post(s => s.Recomp.CaptureInput(name));
+            return true;
+        }
+        LobbyTalk(keyCode, false);
+        if (keyCode == Keycode.ButtonThumbr) return true;
         return KeyFor(keyCode) != MenuKeys.None || base.OnKeyUp(keyCode, e);
+    }
+
+    // a controller button that is the customizer's push to talk (RECOMP SETTINGS > CONTROLS) talks in a lobby; checked on
+    // the menus' thread, where the settings live
+    void LobbyTalk(Keycode keyCode, bool down)
+    {
+        if ((keyCode == Keycode.ButtonSelect ? PadButton.Select : CampaignActivity.PadFor(keyCode)) is not PadButton b) return;
+        string name = b.ToString();
+        _renderer?.Post(s =>
+        {
+            if (Array.IndexOf(MphRecomp.Config.ControlBinds.Get(s.Settings, false, MphRecomp.Config.ControlBinds.Talk), name) >= 0)
+            {
+                MphRecomp.Online.Voice.VoiceChat.HoldToTalk(down);
+            }
+        });
     }
 
     void Direction(int dx, int dy) => _renderer?.Post(s => s.Navigate(dx, dy));
@@ -372,14 +411,18 @@ public class GameActivity : Activity
             if (_renderer?.CaptureDevice != null)
             {
                 // the customizer's capture: a trigger past half way, or a D-pad push (the Odin's D-pad is a HAT axis)
-                string? name = l2 >= 0.5f && _trigL < 0.5f ? "L2" : r2 >= 0.5f && _trigR < 0.5f ? "R2"
-                    : hx != _hatX && hx != 0 ? (hx > 0 ? "DpadRight" : "DpadLeft")
-                    : hy != _hatY && hy != 0 ? (hy > 0 ? "DpadDown" : "DpadUp") : null;
-                if (name != null) _renderer.Post(s => s.Recomp.CaptureInput(name));
+                CampaignActivity.CaptureAxes(name => _renderer.Post(s => s.Recomp.CaptureInput(name)), l2, r2, hx, hy,
+                    _trigL, _trigR, _hatX, _hatY);
                 _hatX = hx; _hatY = hy; _trigL = l2; _trigR = r2;
                 return true;
             }
             _trigL = l2; _trigR = r2;
+            float ry = e.GetAxisValue(Axis.Rz);
+            if (Math.Abs(ry - _stickRy) > 0.05f || (Math.Abs(ry) < 0.3f) != (Math.Abs(_stickRy) < 0.3f))
+            {
+                _stickRy = ry;
+                _renderer?.Post(s => s.ScrollStick(ry));
+            }
             if (hx != _hatX && hx != 0) Direction(hx, 0);
             if (hy != _hatY && hy != 0) Direction(0, -hy);
             _hatX = hx; _hatY = hy;
@@ -396,10 +439,15 @@ public class GameActivity : Activity
 
     public override bool OnTouchEvent(MotionEvent? e)
     {
-        if (e != null && e.ActionMasked == MotionEventActions.Down && _renderer != null)
+        // down, move, up, cancel: a drag scrolls settings and CONTROLS, a tap is a tap (FrontendSession.TouchCanvas)
+        int kind = e?.ActionMasked switch
+        {
+            MotionEventActions.Down => 0, MotionEventActions.Move => 1, MotionEventActions.Up => 2, MotionEventActions.Cancel => 3, _ => -1
+        };
+        if (e != null && kind >= 0 && _renderer != null)
         {
             float x = e.GetX(), y = e.GetY();
-            _renderer.Post(s => s.TouchCanvas(x, y));
+            _renderer.Post(s => s.TouchCanvas(x, y, kind));
             return true;
         }
         return base.OnTouchEvent(e);

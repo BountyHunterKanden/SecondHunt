@@ -939,6 +939,7 @@ namespace MphRead.Formats.Sound
             Id = id;
             Offset = offset;
             SampleRate = header.SampleRate;
+            Volume = header.Volume / 127f; // recomp: the cart's own level (0-127)
             if (header.Format == 4)
             {
                 Format = WaveFormat.ADPCM;

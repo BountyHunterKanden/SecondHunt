@@ -38,8 +38,8 @@ namespace MphRead
             string converted = Path.Combine(repo, "brawl_extract", "Converted");
             string suit = args.Length >= 2 && !args[1].StartsWith("--") ? args[1] : recipe.PickSuit(converted) ?? "";
             if (suit == "") { Console.WriteLine("no suit of the recipe in " + converted); return; }
-            Vector3 eye = Arg("--eye", "") is string e && e != "" ? V3(e) : recipe.Eye;
-            Vector3 target = Arg("--target", "") is string t0 && t0 != "" ? V3(t0) : recipe.Target;
+            Vector3 eye = Arg("--eye", "") is string e && e != "" ? V3(e) : recipe.EyeFor(suit);
+            Vector3 target = Arg("--target", "") is string t0 && t0 != "" ? V3(t0) : recipe.TargetFor(suit);
             float fov = float.Parse(Arg("--fov", recipe.FovY.ToString(ci)), ci);
             int w = int.Parse(Arg("--size", "512")), h = (int)MathF.Round(w / MenuSamus.Aspect);
             string outDir = Arg("--out", FrontendTool.OutDir());
@@ -85,6 +85,13 @@ namespace MphRead
             // through TrophyToRig, not a straightened BindPos); implies --bind
             bool native = args.Contains("--native") || (recipe.AsBuilt && !args.Contains("--clip"));
             var bind = (native ? null : rig.BindPos) ?? rig.Vertices.Select(p => Vector3.TransformPosition(p, rig.TrophyToRig)).ToArray();
+            if (args.Contains("--bones")) Console.WriteLine("bones: " + string.Join(", ", sk.Names.Select((n, i) => $"{i} {n}")));
+            // the recipe's stance for this suit (as built only, as the Odin draws it; --nostand leaves it out)
+            if (native && !args.Contains("--nostand") && MenuSamus.StandOffsets(recipe.StandFor(suit), sk.Names) is { } stand)
+            {
+                for (int i = 0; i < bind.Length; i++) bind[i] = MenuSamus.Stand(bind[i], stand, rig.Bones, rig.Weights, i);
+                Console.WriteLine($"{suit}: stance " + string.Join(", ", recipe.StandFor(suit)!.Select(kv => $"{kv.Key} {kv.Value}")));
+            }
             var parts = model.Meshes.Select(p => (p, g: mats.TryGetValue(p.Material, out var gm) ? gm : null)).ToList();
             var cornerV = parts.Select(t => t.p.Positions.Select(q => rig.IndexOf(new System.Numerics.Vector3(q.X, q.Y, q.Z))).ToArray()).ToList();
             var cornerN = parts.Select((t, pi) => t.p.Normals.Select((n, i) =>

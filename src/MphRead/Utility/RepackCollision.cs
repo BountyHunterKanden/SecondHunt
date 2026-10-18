@@ -89,6 +89,12 @@ namespace MphRead.Utility
             return RepackMphCollision(data, new List<Portal>());
         }
 
+        // Host (recomp): the same with room portals (imported First Hunt arenas: their rooms are split into parts)
+        public static byte[] PackMphCollision(IReadOnlyList<CollisionDataEditor> data, IReadOnlyList<Portal> portals)
+        {
+            return RepackMphCollision(data, portals);
+        }
+
         public static byte[] RepackFhRoom(string room, RepackFilter filter = RepackFilter.All)
         {
             RoomMetadata meta = Metadata.RoomMetadata[room];

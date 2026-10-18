@@ -17,21 +17,24 @@ internal sealed class MenuSamusRender
     const string Tag = "MPHFrontend";
     const int Samples = 4;
     readonly string _hdRoot, _cacheDir;
+    readonly string? _want; // RECOMP SETTINGS "menu art"'s suit (RecompSettings.MenuArtSuit: "", "shuffle" or an id)
     readonly int _w, _h;
     MenuSamus? _recipe;
     string _cache = "";
     Task<byte[]?>? _cached;
     Task<CampaignSuit?>? _load;
     CampaignSuit? _suit;
+    string? _suitId;
     readonly System.Diagnostics.Stopwatch _clock = new();
 
     public bool Done { get; private set; }
 
     // canvasWidth: the screen's long side; the picture is two DS screens tall at up to 1536 wide
-    public MenuSamusRender(string hdRoot, string cacheDir, int canvasWidth)
+    public MenuSamusRender(string hdRoot, string cacheDir, int canvasWidth, string? want = null)
     {
         _hdRoot = hdRoot;
         _cacheDir = cacheDir;
+        _want = want;
         _w = Math.Clamp(canvasWidth, 512, 1536) & ~3;
         _h = (int)MathF.Round(_w / MenuSamus.Aspect);
     }
@@ -46,7 +49,15 @@ internal sealed class MenuSamusRender
             {
                 _clock.Start();
                 _recipe = MenuSamus.Load();
-                string? suit = _recipe.PickSuit(_hdRoot);
+                string lastFile = System.IO.Path.Combine(_cacheDir, "menu_samus_last.txt");
+                string? last = null;
+                try { if (File.Exists(lastFile)) last = File.ReadAllText(lastFile).Trim(); } catch (IOException) { }
+                string? suit = _recipe.PickSuit(_hdRoot, _want, last);
+                _suitId = suit;
+                if (suit != null && suit != last)
+                {
+                    try { Directory.CreateDirectory(_cacheDir); File.WriteAllText(lastFile, suit); } catch (IOException) { }
+                }
                 if (suit == null)
                 {
                     Log.Info(Tag, $"menu samus: none of the recipe's suits in {_hdRoot}: the DS art stays");
@@ -70,8 +81,7 @@ internal sealed class MenuSamusRender
                     Log.Info(Tag, $"menu samus: cached picture read in {_clock.ElapsedMilliseconds} ms");
                     return (_w, _h, px);
                 }
-                string suit = _recipe.PickSuit(_hdRoot)!;
-                _load = Load(suit); // an unreadable cache: render it again
+                _load = Load(_suitId!); // an unreadable cache: render it again
                 return null;
             }
             if (_load != null)
@@ -95,6 +105,12 @@ internal sealed class MenuSamusRender
                 _suit.DeleteGl(); // drawn once: its textures and buffers go (the GX program is CampaignGlCache's)
                 _suit = null;
                 if (px == null) return null;
+                if (Blank(px))
+                {
+                    // nothing drawn (a broken GL state): not cached, so the next start draws it again
+                    Log.Warn(Tag, $"menu samus: {id} drew nothing: the DS art stays, not cached");
+                    return null;
+                }
                 string cache = _cache;
                 int w = _w, h = _h;
                 Task.Run(() => WritePng(cache, px, w, h));
@@ -113,7 +129,8 @@ internal sealed class MenuSamusRender
     Task<CampaignSuit?> Load(string suit)
     {
         bool built = _recipe!.AsBuilt;
-        return Task.Run(() => CampaignSuit.TryLoad(_hdRoot, suit, asBuilt: built));
+        var stand = _recipe.StandFor(suit);
+        return Task.Run(() => CampaignSuit.TryLoad(_hdRoot, suit, asBuilt: built, stand: stand));
     }
 
     byte[]? Render(CampaignSuit suit, MenuSamus recipe)
@@ -142,7 +159,7 @@ internal sealed class MenuSamusRender
             GLES30.GlDepthMask(true);
             GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
             GLES30.GlEnable(GLES30.GlDepthTest);
-            bool drawn = suit.DrawStill(recipe.AsBuilt ? -1 : recipe.Clip, recipe.Frame, recipe.View, recipe.Projection,
+            bool drawn = suit.DrawStill(recipe.AsBuilt ? -1 : recipe.Clip, recipe.Frame, recipe.ViewFor(suit.Id), recipe.Projection,
                 recipe.HideFor(suit.Id), recipe.OpaqueFor(suit.Id));
             GLES30.GlDisable(GLES30.GlDepthTest);
             GLES30.GlDisable(GLES30.GlBlend);
@@ -174,6 +191,14 @@ internal sealed class MenuSamusRender
         }
     }
 
+    // under 1 in 1000 pixels lit on the black clear: no suit there
+    static bool Blank(byte[] px)
+    {
+        int lit = 0;
+        for (int i = 0; i < px.Length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > 24) lit++;
+        return lit < px.Length / 4 / 1000;
+    }
+
     static byte[]? ReadPng(string path)
     {
         try
@@ -197,10 +222,12 @@ internal sealed class MenuSamusRender
             if (!AppPlatform.EncodePng(tmp, px, w, h)) throw new IOException("the PNG encoder failed");
             File.Move(tmp, path, overwrite: true);
             Log.Info(Tag, $"menu samus: cached {path}");
-            // pictures of an older recipe or another size are never read again
+            // pictures of an older recipe or another size are never read again (other suits' stay: the "menu art" picker
+            // and its shuffle switch between them)
+            string keep = path[(path.LastIndexOf('_', path.LastIndexOf('_') - 1))..];
             foreach (string old in Directory.GetFiles(System.IO.Path.GetDirectoryName(path)!, "menu_samus_*.png"))
             {
-                if (old != path) File.Delete(old);
+                if (!old.EndsWith(keep, StringComparison.Ordinal)) File.Delete(old);
             }
         }
         catch (Exception ex)

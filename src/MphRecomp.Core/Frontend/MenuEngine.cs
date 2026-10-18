@@ -739,6 +739,33 @@ namespace MphRecomp.Frontend
             return false;
         }
 
+        // A tap on one item, wherever it is (a PC keyboard's key typed on the name keyboard / address keypad: the on-screen
+        // key with the same call, as Touch on its spot would run it). False when it's hidden, disabled or has no touch spot.
+        public bool TouchItem(int item)
+        {
+            if (Page == null || _pendingPage != -1 || item < 0 || item >= _items.Length) return false;
+            if (_items[item].State is MenuState.Hidden or MenuState.State5) return false;
+            MenuItem it = Page.Items[item];
+            foreach (MenuAction a in it.Actions)
+            {
+                if (!ItemRect(item, a, out _, out _, out _, out _)) continue;
+                // as Touch, for this item only
+                bool focusable = it.GetState((int)MenuState.Focused) != null && HasAction(item, MenuKeys.A);
+                bool ready = Ready(item, a);
+                if (focusable) Focus(item, byTouch: true);
+                Host?.OnAction(this, a, item);
+                if (!ready)
+                {
+                    if (!focusable) Sound(MenuSounds.Negative, $"item {item} not focusable");
+                    return true;
+                }
+                ActionSound(a, item);
+                Run(a, item);
+                return true;
+            }
+            return false;
+        }
+
         // ---- drawing ----
 
         // The page's current look as menu-space triangles, far to near.

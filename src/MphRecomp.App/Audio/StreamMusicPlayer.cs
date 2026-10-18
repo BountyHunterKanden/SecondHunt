@@ -3,26 +3,29 @@ using System.Threading;
 using MphRecomp.App.Platform;
 using MphRecomp.Arenas;
 using MphRecomp.Import.Retro;
+using MphRecomp.PrimeMusic;
 
 namespace MphRecomp.App;
 
 // Streamed music on its own PCM track, next to the sequenced music: Echoes' RS03 streams in the imported arenas
-// (ArenaMusic drives it through MphRead's Music hooks). GameMusicPlayer owns one (its Stream) and passes on its pause,
+// (ArenaMusic drives it through MphRead's Music hooks) and the Prime songs the player picked for matches and the menus
+// (Core Music/, docs/PRIME_MUSIC.md: MatchMusic, the front end's menu song), any IMusicStream. GameMusicPlayer owns one (its Stream) and passes on its pause,
 // resume, OPTIONS > AUDIO volume and disposal, so whatever pauses the music (the pause menu, the app going to the
 // background) pauses this too. A replaced stream fades out under the new one, so up to two voices mix at once.
-internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, System.IDisposable
+internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, System.IDisposable
 {
     const int ChunkFrames = 512;
 
     sealed class Voice
     {
-        public required RetroStreamReader Reader;
+        public required IMusicReader Reader;
         public required int Channels;
         public required float Gain;
         public float Level; // fade level, 0..1
         public float Step; // per frame: up while fading in, down while fading out
         public long Delay; // frames of silence before it starts
         public bool Leaving; // fading out: dropped at level 0
+        public bool Repeat; // a song that doesn't loop starts over at its end (a match's or the menu's song)
     }
 
     readonly object _gate = new();
@@ -55,7 +58,10 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, System.IDisposable
         }
     }
 
-    public void Start(RetroStream stream, float gain, float fadeIn, float delay, float oldFadeOut)
+    public void Start(RetroStream stream, float gain, float fadeIn, float delay, float oldFadeOut) =>
+        Start(new Rs03Music(stream), gain, fadeIn, delay, oldFadeOut, repeat: false);
+
+    public void Start(IMusicStream stream, float gain, float fadeIn, float delay, float oldFadeOut, bool repeat)
     {
         lock (_gate)
         {
@@ -78,6 +84,7 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, System.IDisposable
                 Level = fadeIn > 0 ? 0 : 1,
                 Step = fadeIn > 0 ? 1f / (fadeIn * rate) : 0,
                 Delay = (long)(delay * rate),
+                Repeat = repeat,
             });
             if (!_hostPaused) _track?.Play();
             _wake.Set();
@@ -224,7 +231,11 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, System.IDisposable
                     }
                 }
             }
-            if (v.Reader.Finished || (v.Leaving && v.Level <= 0))
+            if (v.Reader.Finished && v.Repeat && !v.Leaving)
+            {
+                v.Reader.Restart();
+            }
+            else if (v.Reader.Finished || (v.Leaving && v.Level <= 0))
             {
                 _voices.RemoveAt(i);
             }

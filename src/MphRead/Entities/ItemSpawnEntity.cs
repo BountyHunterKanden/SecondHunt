@@ -1,5 +1,6 @@
 using MphRead.Formats;
 using MphRead.Formats.Culling;
+using MphRead.Sound;
 using OpenTK.Mathematics;
 
 namespace MphRead.Entities
@@ -81,7 +82,7 @@ namespace MphRead.Entities
                 }
                 if (_parent != null)
                 {
-                    _invPos = Matrix.Vec3MultMtx4(Position, _parent.CollisionTransform.Inverted());
+                    _invPos = Matrix.Vec3MultMtx4(Position, DetMatrix.Inverted(_parent.CollisionTransform));
                 }
                 _linkDone = true;
             }
@@ -233,14 +234,50 @@ namespace MphRead.Entities
             AddPlaceholderModel();
         }
 
+        // recomp: First Hunt's spawning (0x2020fb4; docs/FIRST_HUNT_PORT.md P1) while a First Hunt level runs
+        // (PlayerEntity.HostFirstHunt; otherwise one item at once, as before): the first item after CooldownTime frames
+        // (0 = at once), the timer paused while the item is out, so the next comes CooldownTime after a pickup;
+        // SpawnLimit items in all (0 = no limit)
+        private ushort _fhTimer;
+        private ushort _fhCount;
+        public FhItemEntity? Item { get; private set; }
+
         public override bool Process()
         {
-            // todo: FH item spawning logic
+            if (!PlayerEntity.HostFirstHunt)
+            {
+                if (_spawn)
+                {
+                    FhItemEntity item = SpawnItem(Position, _data.ItemType, _scene);
+                    _scene.AddEntity(item);
+                    _spawn = false;
+                }
+                return base.Process();
+            }
             if (_spawn)
             {
-                FhItemEntity item = SpawnItem(Position, _data.ItemType, _scene);
-                _scene.AddEntity(item);
+                _fhTimer = (ushort)(_data.CooldownTime * 2); // todo: FPS stuff
                 _spawn = false;
+            }
+            if (Item != null && Item.PickedUp)
+            {
+                Item = null;
+            }
+            if (Item == null)
+            {
+                if (_fhTimer > 0)
+                {
+                    _fhTimer--;
+                }
+                if (_fhTimer == 0 && (_data.SpawnLimit == 0 || _fhCount < _data.SpawnLimit))
+                {
+                    Item = SpawnItem(Position, _data.ItemType, _scene);
+                    _scene.AddEntity(Item);
+                    _fhTimer = (ushort)(_data.CooldownTime * 2); // todo: FPS stuff
+                    _fhCount++;
+                    _soundSource.Update(Position, rangeIndex: 7);
+                    _soundSource.PlaySfx(SfxId.ITEM_SPAWN1); // (First Hunt's 0x18 with its sounds, P4)
+                }
             }
             return base.Process();
         }

@@ -88,29 +88,41 @@ internal sealed partial class CampaignRenderer : IGlScreen
     // scaled 0.5 + level/16) and look invert (vertical). GameControlType (stylus/dual, left/right) has no gamepad meaning.
     // Gyro aim keeps its own Gyro* settings (CampaignGyro.cs).
     float _aimScale = 1f, _mouseScale = 1f;
+    int _aimLevel = 8; // the aim sensitivity level 1-15 (the touch controls' stylus aim reads the DS's own slider values)
     bool _aimInvertY, _aimShipWasOpen;
+    bool _primeHud = true;
 
     public void ReloadAimFromSettings()
     {
         var s = MphRecomp.Config.RecompSettings.Load(SettingsPath);
         _aimScale = 0.5f + Math.Clamp(s.GameSensitivity, 1, 15) / 16f;
+        _aimLevel = Math.Clamp(s.GameSensitivity, 1, 15);
         _aimInvertY = s.GameLookInvert;
         // a PC mouse has its own sensitivity (OPTIONS > CONTROLS, KEYBOARD & MOUSE) on the Source engine's scale, and no invert
         _mouseScale = MphRecomp.Config.MouseScale.UnitsPerCount(s.MouseSens);
+        MphRecomp.Input.ZoomAim.Load(s); // the zoom's own sensitivity and its eased look (Core Input/ZoomAim.cs)
         bool statusText = s.DeveloperMode && s.StatusText;
         if (statusText != _statusText) _statusMode = statusText ? 0 : 2;
         _statusText = statusText;
-        SetThirdPerson((s.ThirdPerson && _netSession == null) || _solo); // LAN / online: first person only (owner 2026-10-10 N23) // RECOMP SETTINGS "camera" (Select's toggle until 2026-10-03; Select = map now); a dev solo run: always (SoloArena.cs)
+        ApplyCameraSetting(s);
         // the control customizer's buttons (OPTIONS > CONTROLS, the ship's OPTIONS; Config/ControlBinds.cs)
         _padBinds.Load(s);
+        _chatToggle = s.ChatToggle; // the CHAT button: hold or toggle (MatchChat.cs)
+        _primeHud = s.PrimeHud; // SECOND HUNT SETTINGS "hud": the campaign's radar + mini map (MphRead PlayerPrimeHud.cs; SetPlayerHooks)
         _keyboardMouse?.LoadBinds(s);
     }
 
-    System.Numerics.Vector2 StickAim(PadState pad) =>
-        new(pad.Rx * AimSpeed * _aimScale, (_aimInvertY ? -pad.Ry : pad.Ry) * AimSpeed * _aimScale);
+    System.Numerics.Vector2 StickAim(PadState pad)
+    {
+        float scale = MphRecomp.Input.ZoomAim.PadScale(_aimScale, AimZoomed); // zoomed: the zoom's sensitivity (ZoomAim.cs)
+        return new(pad.Rx * AimSpeed * scale, (_aimInvertY ? -pad.Ry : pad.Ry) * AimSpeed * scale);
+    }
+
+    bool AimZoomed => _host?.Player?.EquipInfo.Zoomed == true;
 
     readonly PadBindings _padBinds = new();
     readonly WeaponRingInput _weaponRing = new(); // the L2 weapon ring's stick (BuildInput)
+    bool _ringScanHold; // the weapon menu button held as the scan visor's scan (it shares scan / zoom's button; BuildInput)
 
     // a PC's keyboard and mouse (the Windows host); see BuildInput
     KeyboardMouseInput? _keyboardMouse;
@@ -124,9 +136,18 @@ internal sealed partial class CampaignRenderer : IGlScreen
         }
     }
 
+    // the touch controls' stylus aim (TOUCH AIM: STYLUS; Core Input/StylusAim.cs): the DS's slider value for the aim
+    // sensitivity level, or the zoom's own level while zoomed and unpaired (ZoomAim.cs)
+    readonly MphRecomp.Input.StylusAim _stylusAim = new();
+    System.Numerics.Vector2 StylusAimDelta(bool down, System.Numerics.Vector2 moved)
+    {
+        int level = AimZoomed && !MphRecomp.Input.ZoomAim.Paired ? MphRecomp.Input.ZoomAim.PadLevel : _aimLevel;
+        return _stylusAim.Step(down, moved, MphRecomp.Input.StylusAim.Sensitivity(level), _aimInvertY);
+    }
+
     // the mouse's own sensitivity (Config/MouseScale.cs: MphRead units per mouse count)
     System.Numerics.Vector2 PointerAim(System.Numerics.Vector2 pointer) =>
-        new(pointer.X * _mouseScale, pointer.Y * _mouseScale);
+        pointer * MphRecomp.Input.ZoomAim.MouseScaleNow(_mouseScale, AimZoomed);
     const int CullFaceCap = 0x0B44; // GL_CULL_FACE (the binding names the constant and glCullFace alike)
 
     Hunter _hunter; // a continued save plays as its own hunter (CampaignShip.cs)
@@ -231,8 +252,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
     void StartGearLoad(bool gun)
     {
         DropGearLoad();
-        // a public build holds the Prime arm cannons (owner 2026-10-07): the suit's body and ball, MPH's own gun
-        string? gunDir = gun && !MphRecomp.Config.RecompSettings.PublicBuild ? _gunDir : null, suitId = _suitId;
+        // a public build holds the Prime arm cannons (owner 2026-10-07): the suit's body and ball, MPH's own gun -- but not a
+        // skin's own gun (Beyond Sylux's Shock Coil, owner 2026-10-17; MatchSkinGun.cs loads only an imported one)
+        string? gunDir = gun && (!MphRecomp.Config.RecompSettings.PublicBuild || _skinGunOn) ? _gunDir : null, suitId = _suitId;
         string? hdRoot = _gunsRoot != null ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_gunsRoot) ?? "", "hd") : null;
         Model? samus = null;
         if (suitId != null && hdRoot != null)
@@ -362,10 +384,16 @@ internal sealed partial class CampaignRenderer : IGlScreen
     {
         PlayerEntity.HostOwnMainBiped = on && SuitShown && _suit!.HasBody;
         PlayerEntity.HostOwnMainAlt = on && SuitShown && _suit!.HasBall;
-        PlayerEntity.HostShowMainBiped = on && _thirdPerson && !ShipOpen;
+        PlayerEntity.HostShowMainBiped = on && _thirdPerson && !ShipOpen && _host?.Player.HostSeated != true; // (the seat: first person)
         PlayerEntity.HostInstantWeaponIcon = on; // the HUD's weapon icon changes with the weapon, no spin (owner 2026-10-08)
         PlayerEntity.HostWeaponRing = on; // the weapon menu as a full ring in the middle (owner queue #9, PlayerWeaponRing.cs)
         PlayerEntity.HostWallClingPose = on; // the Trooper on Weavel's DS model folds into a cling pose (PlayerWallCling.cs)
+        // the radar (PlayerPrimeHud.cs): a multiplayer match's comes with the SHOW HUNTERS ON RADAR rule, whatever the HUD
+        // setting (owner 2026-10-17: "only on the HUD in multiplayer when the enemies on radar is set to on"); the campaign's
+        // radar + mini map = SECOND HUNT SETTINGS "hud", map work: not in a public build
+        PlayerEntity.HostPrimeHud = on && (MphRead.GameState.SinglePlayer ? _primeHud && !RecompSettings.PublicBuild : MphRead.GameState.RadarPlayers);
+        PlayerEntity.HostNoHelmet = on && MainHasNoHelmet(); // Zero Suit: no helmet frame round the screen (ZeroSuitGunTip.cs)
+        if (on && !RecompSettings.PublicBuild) MphRecomp.Frontend.HudMiniMap.Install(Paths.FileSystem); // the mini map's 3D room (the pause map's model; none in a public build)
         SetSkinHooks(on); // every seat's multiplayer skin (MatchSkins.cs)
     }
 
@@ -435,9 +463,17 @@ internal sealed partial class CampaignRenderer : IGlScreen
     float _tpDist;
     const float TpBack = 2.4f, TpUp = 0.35f, TpSide = 0.5f, TpMargin = 0.3f;
 
+    // RECOMP SETTINGS' camera (Select's toggle until 2026-10-03; Select = map now): the campaign's "camera" row, a match's
+    // "match camera" row (owner 2026-10-17; bot and LAN matches; online is first person only, SetThirdPerson, owner 2026-10-10
+    // N23); a dev solo run: always (SoloArena.cs). CampaignLaunch runs it again once ConfigureMatch has said it's a match.
+    public void ReloadCameraFromSettings() => ApplyCameraSetting(MphRecomp.Config.RecompSettings.Load(SettingsPath));
+
+    void ApplyCameraSetting(MphRecomp.Config.RecompSettings s) =>
+        SetThirdPerson((_matchSettings != null ? s.MatchThirdPerson : s.ThirdPerson) || _solo && !_soloFirstPerson);
+
     public void SetThirdPerson(bool on)
     {
-        if (_netSession != null) on = false; // LAN / online: first person for every seat, whatever the setting (release 0.2.0 F3)
+        if (_netSession is MphRecomp.Multiplayer.Net.NetMatchSession) on = false; // online: first person for every seat, whatever the setting (release 0.2.0 F3); LAN may use third person (owner 2026-10-17)
         if (on == _thirdPerson) return;
         _thirdPerson = on;
         _tpDist = float.MaxValue; // the first step after turning it on puts the view straight out, not from inside the head
@@ -451,7 +487,10 @@ internal sealed partial class CampaignRenderer : IGlScreen
         PlayerEntity p = _host.Player;
         if (UpdateSoloOrbit(scene, p)) return; // a dev solo run's orbit camera (SoloArena.cs; R3)
         if (UpdateReplayCamera(scene, p)) return; // replay spectator cams: seat switch / free cam (MatchReplay.cs; R4)
-        if (!_thirdPerson || ShipOpen || p.IsAltForm || CameraSequence.Current != null)
+        if (UpdateFirstHuntPoseCam(scene, p)) return; // dev fhcam: a fixed view at the cart's camera pose (FirstHuntSession.cs)
+        // (the turret's seat: first person, its view along the barrel with the seat's HUD, as Echoes has it)
+        // (nor before the first spawn: the set view then, PlayerEntity.HostPreSpawnView)
+        if (!_thirdPerson || ShipOpen || p.IsAltForm || CameraSequence.Current != null || p.HostSeated || !p.LoadFlags.TestFlag(LoadFlags.Spawned))
         {
             _tpDist = 0;
             scene.HostCameraOffset = Vector3.Zero;
@@ -492,7 +531,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
     LayeredDraw<RenderItem>? _layers;
     Scene? _layerScene;
 
-    sealed class GpuMesh { public int Vao, Vbo, Count; public long LastUsed; }
+    // LineVao/LineVbo/LineCount: the polygons' outlines, built the first time the mesh is drawn as a wireframe (-1 = not yet)
+    sealed class GpuMesh { public int Vao, Vbo, Count, LineVao, LineVbo, LineCount = -1; public long LastUsed; }
     sealed class GpuTexture { public int Tex, Version; public long LastUsed; }
     readonly Dictionary<int, GpuMesh> _meshes = new();
     readonly Dictionary<int, GpuTexture> _textures = new();
@@ -514,6 +554,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
     {
         // a new context invalidates every GL object
         _meshes.Clear();
+        _lineWidthMax = 0;
         _textures.Clear();
         _warmScene = null; // the movie warm-up starts over (#37b)
         _u.Clear();
@@ -628,7 +669,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
                 // screen meanwhile (2026-10-03 VDO 2 Slench run)
                 StartGearLoad(gun: true);
                 StartSkinLoads(); // the match seats' skins, the same way (MatchSkins.cs)
-                if (!TryStartMatch(width, height) && !TryStartAtShip())
+                if (!TryStartFirstHunt(width, height) && !TryStartMatch(width, height) && !TryStartAtShip())
                 {
                     _host = CampaignHost.Start(_room, setupSave: _allWeapons ? GiveAllWeapons : null, hunter: _hunter,
                         collectDrawItems: true, viewWidth: width, viewHeight: height);
@@ -680,7 +721,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
             if (_host != null && !ShipOpen)
             {
                 DumpInputTrace();
-                PauseMenu?.Open();
+                if (!TryLeave()) PauseMenu?.Open(); // TRY CONTROLS: Start leaves at once (SoloArena.cs)
             }
         }
         bool menuOpen = PauseMenu?.IsOpen == true;
@@ -748,6 +789,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
                     {
                         _suit?.Tick(_host.Player);
                         TickSkins();
+                        TickTurretSfx(); // Shooting Gallery's turret in Echoes' sounds (CampaignRenderer.TurretSfx.cs)
                         UpdateThirdPerson();
                     }
                 }
@@ -775,6 +817,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
             }
             if (_host.Ended && _error == null)
             {
+                StopTurretSfx(); // its loops (CampaignRenderer.TurretSfx.cs)
                 if (!TryEndMatch()) // a match holds its results (MatchSession.cs)
                     OnHostEnded(); // boarded the ship, an ending, or quit at game over
             }
@@ -986,14 +1029,19 @@ internal sealed partial class CampaignRenderer : IGlScreen
         bool up = pad.HatY <= -0.5f || pad[PadButton.DpadUp], down = pad.HatY >= 0.5f || pad[PadButton.DpadDown];
         bool left = pad.HatX <= -0.5f || pad[PadButton.DpadLeft], right = pad.HatX >= 0.5f || pad[PadButton.DpadRight];
         bool pressA = a && !_prevA, pressB = b && !_prevB, pressR1 = r1 && !_prevR1;
+        // ZOOM STEP zoomed: zoom in / out's buttons and keys do only that (PadBindings / KeyboardMouseInput.ZoomStepping)
+        _padBinds.ZoomStepping = MphRecomp.Input.ZoomAim.Step && AimZoomed;
+        if (KeyboardMouse != null) KeyboardMouse.ZoomStepping = _padBinds.ZoomStepping;
+        _padBinds.Update(pad); // (before the chat wheel, the scoreboard and push to talk, which are customizer functions too)
         bool orbit = SoloStick(pad); // a dev solo run: R3 gives the right stick to the orbit camera (SoloArena.cs)
         orbit |= MatchChatWheel(pad); // online: Select held = the quick-message wheel has the right stick (MatchChat.cs)
+        PlayerEntity.HostScoreboardHeld = MatchScoreboardHeld(pad); // the scoreboard button held in a match (MatchChat.cs)
         // L3 cycles the status text when it is let go -- unless it was half of L3 + R3 (the gun-adjust pause)
         bool l3 = pad[PadButton.ThumbL];
-        // online voice chat (O8): R3 held (or the touch controls' TALK, a PC's V) = push to talk (owner 2026-10-09: R3 has no
-        // zoom default)
-        bool talkKey = KeyboardMouse?.TalkHeld == true;
-        bool talking = MphRecomp.Online.Voice.VoiceChat.HoldToTalk(pad[PadButton.ThumbR] || talkKey) && pad[PadButton.ThumbR];
+        // online voice chat (O8): the push to talk button held (R3 unless moved; or the touch controls' TALK, a PC's V)
+        // (owner 2026-10-09: R3 has no zoom default; 2026-10-11: push to talk is a customizer function)
+        bool talkKey = KeyboardMouse?.TalkHeld == true, talkPad = _padBinds.Held(ControlBinds.Talk);
+        bool talking = MphRecomp.Online.Voice.VoiceChat.HoldToTalk(talkPad || talkKey) && talkPad;
         if (!l3 && _prevL3)
         {
             if (!_gunComboUsed && _statusText) _statusMode = (_statusMode + 1) % 3;
@@ -1004,7 +1052,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         _prevA = a; _prevB = b; _prevR1 = r1; _prevUp = up; _prevDown = down; _prevLeft = left; _prevRight = right;
         // a dev solo run's pickup placement editor has the D-pad and Select (PickupPlacer.cs)
         bool placerDpad = PlacerStep(pad, up || down || left || right, pressUp, pressDown, pressLeft, pressRight);
-        _padBinds.Update(pad);
+        placerDpad |= SoloZoom(up, down); // the solo orbit camera's zoom (SoloArena.cs)
         bool r2 = pad.R2 >= 0.5f || pad[PadButton.R2], l2 = pad.L2 >= 0.5f || pad[PadButton.L2];
 
         var input = new CampaignInput { Move = new System.Numerics.Vector2(pad.Lx, -pad.Ly), SelectWeapon = BeamType.None };
@@ -1013,6 +1061,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
         System.Numerics.Vector2 pointer = pad.TakeAim();
         // the touch controls' stylus (T11, MatchTouchOverlay.cs): the DS touch screen's roll, flick boost and double-tap jump
         (input.TouchDown, input.TouchDx, input.TouchDy) = pad.TakeStylus();
+        // TOUCH AIM: STYLUS (owner 2026-10-16): the stylus finger's drag aims by the DS's rule (Core Input/StylusAim.cs);
+        // nothing comes in while the touch controls aim with their stick
+        System.Numerics.Vector2 stylusAim = StylusAimDelta(input.TouchDown, pad.TakeStylusAim());
         // a PC's keyboard and mouse on MphRead's own PC controls (KeyboardMouseInput.cs; null on a device without them)
         KeyboardMouseInput? km = KeyboardMouse;
         bool yesNo = _host.Dialog == DialogType.YesNo;
@@ -1020,9 +1071,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
         // dialogs (the DS's touch-screen OK / YES / NO / page arrows), same in every layout
         bool dialogClosed = _prevDialog && !_host.DialogPaused;
         _prevDialog = _host.DialogPaused;
+        HostDialogButton tapped = TakeDialogTap(); // a tap / click on the dialog's own buttons (CampaignRenderer.DialogTouch.cs)
         if (_host.DialogPaused)
         {
-            input.DialogButton = pressA ? (yesNo ? HostDialogButton.Yes : HostDialogButton.Advance)
+            input.DialogButton = tapped != HostDialogButton.None ? tapped
+                : pressA ? (yesNo ? HostDialogButton.Yes : HostDialogButton.Advance)
                 : pressB && yesNo ? HostDialogButton.No
                 : pressLeft ? HostDialogButton.Left
                 : pressRight ? HostDialogButton.Right
@@ -1035,8 +1088,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             // Metroid Prime Remastered "Dual Sticks", by button position (Odin: A bottom, B right, X left, Y top)
             // which buttons do what: the control customizer's (PadBindings; the defaults are this layout as it always was:
-            // R2 / B fire, A / L1 jump, X morph, L2 weapon ring (Y until 2026-10-09), Y scan or zoom, R3 zoom, R1 missiles / Power Beam, D-pad
-            // up scan visor, down missiles, left / right previous / next weapon)
+            // R2 / B fire, A / L1 jump, X morph, L2 weapon ring (Y until 2026-10-09), scan and zoom (owner 2026-10-17, C10: Y + L2
+            // scan, L2 zoom), R1 missiles / Power Beam, D-pad up scan visor, down missiles, left / right previous / next weapon)
             PadBindings binds = _padBinds;
             // the weapon ring (owner queue #9; WeaponRingInput.cs): hold the weapon menu button (L2), point the right stick,
             // the pick stays when the stick goes back to rest, let go to equip; a stick still leaning then doesn't aim.
@@ -1045,7 +1098,13 @@ internal sealed partial class CampaignRenderer : IGlScreen
             // a quicker tap zooms with the Imperialist (owner 2026-10-09), so the two don't fight over the button
             bool droneForm = p.HostScoutDrone && p.IsAltForm;
             bool menuHeld = binds.Held(ControlBinds.WeaponMenu);
-            bool wheel = _weaponRing.Hold(menuHeld && !droneForm, p, out bool tapZoom);
+            // (owner 2026-10-14) the weapon menu and scan on the same button (L2 by default): with the scan visor on it scans,
+            // no ring (and no tap zoom); a hold that started scanning stays a scan until it's let go, even if the visor goes
+            // off. The quick press's zoom is the zoom function's, when it shares the button (L2 by default)
+            if (!menuHeld) _ringScanHold = false;
+            else if (p.ScanVisor && binds.Shares(ControlBinds.WeaponMenu, ControlBinds.Scan)) _ringScanHold = true;
+            bool wheel = _weaponRing.Hold(menuHeld && !droneForm && !_ringScanHold, p, out bool tapZoom);
+            if (_ringScanHold || !binds.Shares(ControlBinds.WeaponMenu, ControlBinds.Zoom)) tapZoom = false;
             System.Numerics.Vector2 ring = _weaponRing.Step(wheel, new System.Numerics.Vector2(pad.Rx, -pad.Ry), p);
             if (_weaponRing.CentrePick != BeamType.None) input.SelectWeapon = _weaponRing.CentrePick; // the ring's middle: Omega (T4 N15)
             if (TakeTouchOmega()) input.SelectWeapon = BeamType.OmegaCannon; // touch OMEGA (CampaignRenderer.WeaponSelect.cs)
@@ -1062,49 +1121,57 @@ internal sealed partial class CampaignRenderer : IGlScreen
             {
                 input.AimDelta = StickAim(pad);
             }
-            if (menuHeld && droneForm)
+            if (droneForm)
             {
-                buttons |= CampaignButtons.Zoom;
+                // the Scout Drone out: its own functions (owner 2026-10-11, the customizer's SCOUT DRONE list), none of the
+                // hunter's: blasters (fire), cutting laser (Zoom, held), rise (Jump held), recall (Morph)
+                if (binds.Held(ControlBinds.DroneFire)) buttons |= CampaignButtons.Shoot;
+                if (binds.Held(ControlBinds.DroneLaser)) buttons |= CampaignButtons.Zoom;
+                if (binds.Held(ControlBinds.DroneRise)) buttons |= CampaignButtons.Jump | CampaignButtons.Boost;
+                if (binds.Held(ControlBinds.DroneDeploy)) buttons |= CampaignButtons.Morph;
             }
-            if (binds.Held(ControlBinds.Fire))
+            else
             {
-                buttons |= CampaignButtons.Shoot;
-            }
-            if (binds.Held(ControlBinds.Jump))
-            {
-                buttons |= CampaignButtons.Jump | CampaignButtons.Boost;
-            }
-            if (binds.Held(ControlBinds.Morph))
-            {
-                buttons |= CampaignButtons.Morph;
-            }
-            if (binds.Held(ControlBinds.ScanZoom))
-            {
-                buttons |= p.ScanVisor ? CampaignButtons.Scan : CampaignButtons.Zoom;
-            }
-            if (binds.Held(ControlBinds.Zoom) && !SoloTakesR3(pad) && !talking) // (a zoom the player put on R3 waits while R3 talks)
-            {
-                buttons |= CampaignButtons.Zoom;
-            }
-            // (owner 2026-10-05) the scan visor in the campaign, the Power Beam in a match (no visor there); missiles;
-            // previous / next weapon you have with ammo, as the PC's mouse wheel
-            if (binds.Pressed(ControlBinds.ScanVisor))
-            {
-                if (_host.Match == null) buttons |= CampaignButtons.ScanVisor;
-                else input.SelectWeapon = BeamType.PowerBeam;
-            }
-            if (binds.Pressed(ControlBinds.Missiles))
-            {
-                input.SelectWeapon = BeamType.Missile;
-            }
-            bool prevWeapon = binds.Pressed(ControlBinds.PrevWeapon), nextWeapon = binds.Pressed(ControlBinds.NextWeapon);
-            if ((prevWeapon || nextWeapon) && input.SelectWeapon == BeamType.None)
-            {
-                input.SelectWeapon = KeyboardMouseInput.CycleWeapon(p, nextWeapon ? 1 : -1);
-            }
-            if (binds.Pressed(ControlBinds.MissileToggle))
-            {
-                input.SelectWeapon = p.CurrentWeapon == BeamType.Missile ? BeamType.PowerBeam : BeamType.Missile;
+                if (binds.Held(ControlBinds.Fire))
+                {
+                    buttons |= CampaignButtons.Shoot;
+                }
+                if (binds.Held(ControlBinds.Jump))
+                {
+                    buttons |= CampaignButtons.Jump | CampaignButtons.Boost;
+                }
+                if (binds.Held(p.HostScoutDrone ? ControlBinds.DroneDeploy : ControlBinds.Morph)) // (the Trooper's morph = his drone)
+                {
+                    buttons |= CampaignButtons.Morph;
+                }
+                if (p.ScanVisor && binds.Held(ControlBinds.Scan)) buttons |= CampaignButtons.Scan;
+                // zoom's own buttons (on the weapon menu's, its zoom is the ring's tap zoom: not a second zoom on the press;
+                // on a scan button with the visor on, the scan), held; a zoom the player put on R3 waits while R3 talks
+                if (binds.HeldUnless(ControlBinds.Zoom, ControlBinds.WeaponMenu, p.ScanVisor ? ControlBinds.Scan : null)
+                    && !SoloTakesR3(pad) && !talking)
+                {
+                    buttons |= CampaignButtons.Zoom;
+                }
+                // (owner 2026-10-05) the scan visor in the campaign, the Power Beam in a match (no visor there); missiles;
+                // previous / next weapon you have with ammo, as the PC's mouse wheel
+                if (binds.Pressed(ControlBinds.ScanVisor))
+                {
+                    if (_host.Match == null) buttons |= CampaignButtons.ScanVisor;
+                    else input.SelectWeapon = BeamType.PowerBeam;
+                }
+                // missiles (D-down; owner 2026-10-17, C9: the controller's only weapon button, as before the keyboard's
+                // per-weapon keys)
+                if (binds.Pressed(ControlBinds.Missiles)) input.SelectWeapon = BeamType.Missile;
+                bool prevWeapon = binds.Pressed(ControlBinds.PrevWeapon), nextWeapon = binds.Pressed(ControlBinds.NextWeapon);
+                if ((prevWeapon || nextWeapon) && input.SelectWeapon == BeamType.None)
+                {
+                    input.SelectWeapon = KeyboardMouseInput.CycleWeapon(p, nextWeapon ? 1 : -1);
+                }
+                NoteBaseWeapon(p); // (on a pickup beam the toggle goes back to the one of the two you had: .MissileToggle.cs)
+                if (binds.Pressed(ControlBinds.MissileToggle))
+                {
+                    input.SelectWeapon = MissileToggleWeapon(p);
+                }
             }
         }
         else
@@ -1128,6 +1195,10 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             buttons |= CampaignButtons.AltAttack;
         }
+        // ZOOM STEP: the option (every step it's on) and its zoom in / out (the game reads them only zoomed; ZoomAim.cs)
+        if (MphRecomp.Input.ZoomAim.Step) buttons |= CampaignButtons.ZoomStep;
+        if (_padBinds.Held(ControlBinds.ZoomIn)) buttons |= CampaignButtons.ZoomIn;
+        if (_padBinds.Held(ControlBinds.ZoomOut)) buttons |= CampaignButtons.ZoomOut;
         input.Buttons = buttons;
         // the keyboard and mouse add their keys; the mouse aims (or picks in the weapon menu while that is held)
         var mouseAim = System.Numerics.Vector2.Zero;
@@ -1143,9 +1214,12 @@ internal sealed partial class CampaignRenderer : IGlScreen
         _heldFromDialog &= input.Buttons;
         input.Buttons &= ~_heldFromDialog;
         input.AimDelta += PointerAim(mouseAim);
+        input.AimDelta += stylusAim;
         System.Numerics.Vector2 gyro = GyroAimDelta(); // gyro aim, added to the stick's (CampaignGyro.cs)
         TraceInput(pad, input.AimDelta, gyro);
         input.AimDelta += gyro;
+        DevCaptureInput(ref input, p); // dev --es morphat / holdfrom (SoloArena.cs)
+        TryStep(ref input, p); // TRY CONTROLS: every weapon, full ammo (SoloArena.cs)
         return input;
     }
 
@@ -1276,6 +1350,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             MovieDraw();
             WarmSceneGl(view); // the scene's meshes/textures go up while the movie hides it (#37b)
+            PlayerEntity.WarmPrimeHud(); // the radar + mini map made ahead, a step a frame (PlayerPrimeHud.cs)
             return;
         }
         EndWarmSceneGl();
@@ -1292,13 +1367,16 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlUniform4f(U("u_fogColor"), fog.X, fog.Y, fog.Z, fog.W);
         GLES30.GlUniform1f(U("u_fogNear"), scene.FogMin);
         GLES30.GlUniform1f(U("u_fogFar"), scene.FogMax);
+        GLES30.GlUniform1i(U("u_dsModulate"), scene.Room?.Meta.FirstHunt == true ? 1 : 0); // the DS's 6-bit modulate (SceneShaderSource)
         IReadOnlyList<RenderItem> opaque = scene.OpaqueItems, decal = scene.DecalItems, trans = scene.TranslucentItems;
         _layerGl.AlphaPassLocation = U("u_alphaPass");
         UploadQuads(opaque, decal, trans);
         _perfItems = opaque.Count + decal.Count + trans.Count;
 
-        // the Prime gun replaces MPH's when MPH drew its first-person SamusGun this frame
-        _gunActive = _gun != null && _primeGun && !ShipOpen && GunViewmodel.TryMphLightColour(scene, out _gunTint);
+        // the Prime gun replaces MPH's when MPH drew its first-person SamusGun this frame (a skin's gun: the hunter's own,
+        // MatchSkinGun.cs)
+        UpdateSkinGun();
+        _gunActive = _gun != null && _primeGun && !ShipOpen && GunViewmodel.TryMphLightColour(scene, out _gunTint, MphGunModel);
         if (UpdateArmCannon(scene)) _gunActive = false; // a native body's own arm cannon instead (MatchArmCannon.cs)
 
         UpdateBodyCut(scene);
@@ -1335,6 +1413,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlDepthFunc(GLES30.GlLequal);
         GpuMark(GpuSegBehind);
         layers.BeginBackLayer();
+        // the Echoes arena's blended surfaces (glass, fluids) before the room's translucent effects, so a charge glow or
+        // a beam's impact in front of Dark Water or glass isn't blended over by it (CampaignArena.cs)
+        DrawArena(scene, 1, GLES30.GlLequal);
         layers.DrawBackLayerItems(trans);
         GpuMark(GpuSegFront);
         layers.BeginFrontLayer();
@@ -1342,7 +1423,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         layers.Finish();
         GLES30.GlDisable(CullFaceCap);
         GpuMark(GpuSegSuit);
-        DrawArena(scene, 1, GLES30.GlLequal); // the Echoes arena's blended surfaces (CampaignArena.cs)
+        DrawArenaUnderwater(scene); // the view's tint inside Echoes water (CampaignArena.cs)
         // the HD suit's see-through and glowing parts, over everything else in the room
         DrawSuit(scene, SuitPass.Translucent);
         DrawSuit(scene, SuitPass.Additive);
@@ -1353,6 +1434,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (viewWarp) EndViewWarp(scene); // the Panini warp onto the screen, under the HUD (CampaignView.cs)
         GpuMark(GpuSegHud);
         if (!ShipOpen) DrawHud(scene); // the cockpit view under the in-ship menu has no HUD (CampaignShip.cs)
+        if (!ShipOpen) DrawTurretHud(scene); // Shooting Gallery's turret seat HUD (CampaignRenderer.TurretHud.cs)
         GLES30.GlBindVertexArray(0);
     }
 
@@ -1374,6 +1456,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         for (int i = 0; i < scene.HudItemCount; i++)
         {
             Scene.HostHudItem item = scene.GetHudItem(i);
+            if (MapLiftsHelmet(item, scene)) continue; // the PRIME map draws the helmet itself, unblurred (CampaignMap.cs)
             bool textured;
             if (item.SpriteIndex >= 0)
             {
@@ -1451,6 +1534,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
     void DrawPrimeGun(Scene scene, int restoreDepthFunc, CampaignGun.GunPass pass = CampaignGun.GunPass.Full)
     {
         if (GunWaitsForWarp) return; // Panini: drawn after the warp instead, unwarped (CampaignView.cs)
+        if (_host!.Player.HostSeated) return; // the turret's seat: no gun (Echoes stops it there)
         Matrix4 model = _gun!.Viewmodel.ModelMatrix(_host!.Player, _gun.Scale, _gun.RestMuzzle);
         // GunProjection: the gun's own projection, so no view mode resizes it (CampaignView.cs)
         Matrix4 proj = GunProjection(scene);
@@ -1474,16 +1558,18 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlDepthFunc(restoreDepthFunc);
     }
 
-    // while paused: D-pad left/right = MPH's gun / the Prime gun, up/down = the Prime gun's size
+    // while paused: D-pad left = MPH's gun / the Prime gun, up/down = the Prime gun's size (right: Corruption Dark Samus's
+    // flourish, FlourishToggle.cs)
     void PausedInput()
     {
         PadState pad = Pad;
         bool up = pad.HatY <= -0.5f || pad[PadButton.DpadUp], down = pad.HatY >= 0.5f || pad[PadButton.DpadDown];
         bool left = pad.HatX <= -0.5f || pad[PadButton.DpadLeft], right = pad.HatX >= 0.5f || pad[PadButton.DpadRight];
-        bool cannon = ArmCannonInput(up && !_pPrevUp, down && !_pPrevDown, left && !_pPrevLeft || right && !_pPrevRight); // MatchArmCannon.cs
+        bool flourishRight = right && !_pPrevRight;
+        bool cannon = ArmCannonInput(up && !_pPrevUp, down && !_pPrevDown, left && !_pPrevLeft); // MatchArmCannon.cs
         if (_gun != null && !cannon)
         {
-            if (left && !_pPrevLeft || right && !_pPrevRight)
+            if (left && !_pPrevLeft)
             {
                 _primeGun = !_primeGun;
                 _statusCountdown = 0;
@@ -1501,6 +1587,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
         }
         _pPrevUp = up; _pPrevDown = down; _pPrevLeft = left; _pPrevRight = right;
         DarkSamusFloatInput(pad); // DarkSamusFloatToggle.cs
+        ZeroSuitInput(pad); // ZeroSuitToggle.cs
+        TrooperSizeInput(pad); // TrooperSizeToggle.cs
+        FlourishInput(pad, flourishRight); // FlourishToggle.cs
     }
 
     string PauseText()
@@ -1509,16 +1598,19 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (_gun != null)
         {
             text += $"\nFirst-person gun: {(_primeGun ? $"Prime ({System.IO.Path.GetFileName(_gunDir)}), size {_gun.Scale:0.000}" : "MPH")}"
-                + "  -- D-pad left/right: MPH / Prime gun, up/down: size";
+                + "  -- D-pad left: MPH / Prime gun, up/down: size";
         }
         text += ArmCannonPauseText(); // MatchArmCannon.cs
         text += DarkSamusFloatPauseText(); // DarkSamusFloatToggle.cs
+        text += ZeroSuitPauseText(); // ZeroSuitToggle.cs
+        text += TrooperSizePauseText(); // TrooperSizeToggle.cs
+        text += FlourishPauseText(); // FlourishToggle.cs
         return text;
     }
 
     void DrawItem(RenderItem item, Scene scene)
     {
-        if (_gunActive && GunViewmodel.IsMphGunItem(scene, item))
+        if (_gunActive && GunViewmodel.IsMphGunItem(scene, item, MphGunModel))
         {
             return; // drawn by the Prime gun instead
         }
@@ -1550,7 +1642,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GlNative.Uniform3f(U("u_matAmbient"), item.Ambient.X, item.Ambient.Y, item.Ambient.Z);
         GlNative.Uniform3f(U("u_matSpecular"), item.Specular.X, item.Specular.Y, item.Specular.Z);
         GlNative.Uniform3f(U("u_matEmission"), item.Emission.X, item.Emission.Y, item.Emission.Z);
-        GlNative.Uniform1f(U("u_matAlpha"), item.Alpha);
+        // a wireframe polygon (DS polygon alpha 0) draws its edges solid, whatever the material's alpha
+        GlNative.Uniform1f(U("u_matAlpha"), item.Wireframe ? 1f : item.Alpha);
         GlNative.Uniform1i(U("u_polyMode"), (int)item.PolygonMode);
         // DoTexture
         bool textured = item.HasTexture && BindTexture(item.TextureBindingId, scene);
@@ -1591,7 +1684,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (mesh)
         {
             GpuMesh? gpu = GetMesh(item.ListId, scene);
-            if (gpu != null && gpu.Count > 0)
+            if (gpu != null && gpu.Count > 0 && item.Wireframe)
+            {
+                DrawWireframe(gpu, item.ListId, scene);
+            }
+            else if (gpu != null && gpu.Count > 0)
             {
                 GlNative.BindVertexArray(gpu.Vao);
                 GlNative.DrawArrays(GLES30.GlTriangles, 0, gpu.Count);
@@ -2016,6 +2113,41 @@ internal sealed partial class CampaignRenderer : IGlScreen
         return "";
     }
 
+    // a mesh whose material is wireframe (MPH's Material.Wireframe = the DS's polygon alpha 0: only the edges are drawn,
+    // e.g. First Hunt's Regulator tunnel), as lines about one DS pixel wide at this screen's height
+    float _lineWidthMax;
+
+    void DrawWireframe(GpuMesh gpu, int listId, Scene scene)
+    {
+        if (gpu.LineCount < 0)
+        {
+            (Model model, Mesh m, bool isRoom) = scene.HostMeshes[listId - 1];
+            float[] verts = DsDisplayList.Decode(model, m, isRoom, edges: true);
+            gpu.LineCount = verts.Length / DsDisplayList.Stride;
+            if (gpu.LineCount > 0)
+            {
+                var ids = new int[1];
+                GLES30.GlGenVertexArrays(1, ids, 0); gpu.LineVao = ids[0];
+                GLES30.GlGenBuffers(1, ids, 0); gpu.LineVbo = ids[0];
+                GLES30.GlBindVertexArray(gpu.LineVao);
+                GLES30.GlBindBuffer(GLES30.GlArrayBuffer, gpu.LineVbo);
+                GLES30.GlBufferData(GLES30.GlArrayBuffer, verts.Length * 4, verts, GLES30.GlStaticDraw);
+                SetAttribs();
+            }
+        }
+        if (gpu.LineCount <= 0) return;
+        if (_lineWidthMax == 0)
+        {
+            var range = new float[2];
+            GLES30.GlGetFloatv(GLES30.GlAliasedLineWidthRange, range, 0);
+            _lineWidthMax = Math.Max(1, range[1]);
+        }
+        GLES30.GlLineWidth(Math.Clamp(_height / 192f, 1, _lineWidthMax));
+        GlNative.BindVertexArray(gpu.LineVao);
+        GlNative.DrawArrays(GLES30.GlLines, 0, gpu.LineCount);
+        GLES30.GlLineWidth(1);
+    }
+
     GpuMesh? GetMesh(int listId, Scene scene)
     {
         if (_meshes.TryGetValue(listId, out GpuMesh? gpu))
@@ -2192,6 +2324,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
             {
                 GLES30.GlDeleteBuffers(1, new[] { m.Vbo }, 0);
                 GLES30.GlDeleteVertexArrays(1, new[] { m.Vao }, 0);
+            }
+            if (m.LineVbo != 0)
+            {
+                GLES30.GlDeleteBuffers(1, new[] { m.LineVbo }, 0);
+                GLES30.GlDeleteVertexArrays(1, new[] { m.LineVao }, 0);
             }
             _meshes.Remove(id);
         }

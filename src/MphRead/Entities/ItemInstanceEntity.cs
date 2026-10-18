@@ -97,7 +97,7 @@ namespace MphRead.Entities
                 }
                 if (_parent != null)
                 {
-                    _invPos = Matrix.Vec3MultMtx4(Position, _parent.CollisionTransform.Inverted());
+                    _invPos = Matrix.Vec3MultMtx4(Position, DetMatrix.Inverted(_parent.CollisionTransform));
                 }
                 _linkDone = true;
             }
@@ -215,6 +215,46 @@ namespace MphRead.Entities
             // but 0.5f is subtracted when drawing (after the floating calculation)
             Position = data.Position.AddY(0.5f);
             SetUpModel(Metadata.FhItems[(int)data.ItemType], firstHunt: true);
+            ItemType = data.ItemType;
+            ItemPosition = data.Position.AddY(1);
+            _fhBob = _nextFhBob;
+            _nextFhBob += 0x2000;
+        }
+
+        // recomp: First Hunt's item (0x20212ec/0x202120c; docs/FIRST_HUNT_PORT.md P1) while a First Hunt level runs
+        // (PlayerEntity.HostFirstHunt): picked up within 1.35 of ItemPosition (spawner + 1.0; PlayerFirstHunt.cs), gone the
+        // frame after; never expires. No spin: it bobs, 0.125 * sin(angle) - 0.25 about that point, the angle 0x300 a frame
+        // from a start that steps 0x2000 an item
+        public FhItemType ItemType { get; }
+        public Vector3 ItemPosition { get; }
+        public bool PickedUp { get; set; }
+        private ushort _fhBob;
+        private static ushort _nextFhBob = 0;
+
+        public override bool Process()
+        {
+            if (!PlayerEntity.HostFirstHunt)
+            {
+                return base.Process();
+            }
+            if (PickedUp)
+            {
+                return false;
+            }
+            _fhBob += 0x300 / 2; // todo: FPS stuff
+            Position = ItemPosition.AddY(0.125f * MathF.Sin(_fhBob / 65536f * MathF.Tau) - 0.25f);
+            return base.Process();
+        }
+
+        protected override Matrix4 GetModelTransform(ModelInstance inst, int index)
+        {
+            if (!PlayerEntity.HostFirstHunt)
+            {
+                return base.GetModelTransform(inst, index);
+            }
+            Matrix4 transform = Matrix4.CreateScale(inst.Model.Scale);
+            transform *= Matrix4.CreateTranslation(Position);
+            return transform;
         }
     }
 

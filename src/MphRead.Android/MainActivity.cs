@@ -148,6 +148,7 @@ public class MainActivity : Activity
         _roomsShown = true;
         _selectBtn.Text = "Re-extract from another ROM…";
         AddSoloArena();
+        AddFirstHunt();
         AddHeader("Music");
         AddButton("Music A/B: original, original + fixes, HQ, HQ + tone (L2 / Select / Y next, L1 back)",
             () => StartActivity(new Intent(this, typeof(MusicTestActivity))));
@@ -351,6 +352,43 @@ public class MainActivity : Activity
             if (MpSkinsArg() is string skins) intent.PutExtra("skins", skins);
             StartActivity(intent);
         });
+        // the HEAVY TURRET kill text (owner 2026-10-17, C41): Shooting Gallery, one bot that heads straight for the turret
+        // and shoots from it (EchoesTurretBots.ForceSeat). Stand in the turret's entry box as it gets in for the entry kill
+        AddButton("Turret kill test (Shooting Gallery, 1 bot mans the turret)", () =>
+        {
+            Arenas(); // (sets the ROM paths and registers the imported Echoes arenas)
+            MphRead.RoomMetadata? gallery = MphRecomp.Multiplayer.MatchArenas.Find("ECHOES SHOOTING GALLERY");
+            if (gallery == null)
+            {
+                Toast.MakeText(this, "Shooting Gallery isn't imported (IMPORT GAMES: Echoes)", ToastLength.Long)!.Show();
+                return;
+            }
+            var intent = new Intent(this, typeof(CampaignActivity))
+                .PutExtra("match", MphRead.GameMode.Battle.ToString())
+                .PutExtra("arena", gallery.Name)
+                .PutExtra("bots", "1")
+                .PutExtra("botlevel", "2")
+                .PutExtra("hunter", CampaignHunters[_campaignHunter])
+                .PutExtra("gun", gun())
+                .PutExtra("turrettest", "1");
+            StartActivity(intent);
+        });
+        // the (SENTRY DRONE) kill text (owner 2026-10-17: "We also still need to test drone killing me"): the arena picked above,
+        // one Power Trooper bot that sends its drone at you whenever it has you targeted (PlayerEntity.HostDroneTest)
+        AddButton("Drone kill test (1 Trooper bot, drone always on)", () =>
+        {
+            var a = Arenas();
+            var intent = new Intent(this, typeof(CampaignActivity))
+                .PutExtra("match", MphRead.GameMode.Battle.ToString())
+                .PutExtra("arena", a[_mpArena % a.Count].Name)
+                .PutExtra("bots", "1")
+                .PutExtra("botlevel", "2")
+                .PutExtra("hunter", CampaignHunters[_campaignHunter])
+                .PutExtra("gun", gun())
+                .PutExtra("skins", (MpSkins[_mpSkin].Id is string mine ? "0:" + mine + "," : "") + "1:MP1PowerTrooper")
+                .PutExtra("dronetest", "1");
+            StartActivity(intent);
+        });
         // two devices on one Wi-Fi network (MatchLan.cs): the host's settings above; the joiner plays as its own "Play as"
         AddButton("Host LAN match (another device joins)", () =>
         {
@@ -421,12 +459,19 @@ public class MainActivity : Activity
     bool _soloFallback;
     bool _soloPlace; // Solo arena: the pickup placement editor (--es place 1)
     bool _soloSelfBody; // Solo arena: the Trooper's drone shots hit his own body (--es selfbody 1, T5)
+    int _soloTargets; // Solo arena: bots that stand still and never die (--es bots <n> --es targets 1)
+    bool _soloInfUa; // Solo arena: Universal Ammo never runs out (--es infua 1)
+    static readonly int[] SoloTargetCounts = { 0, 3, 5, 7 };
     static readonly (string Label, string Hunter, string? Skin)[] SoloCharacters =
     {
         ("Dark Samus (Echoes)", "Samus", "MP2DarkSamus"), ("Dark Samus (Corruption)", "Samus", "MP3DarkSamus"),
         ("Wave Trooper", "Weavel", "MP1WaveTrooper"), ("Power Trooper", "Weavel", "MP1PowerTrooper"),
         ("Ice Trooper", "Weavel", "MP1IceTrooper"), ("Plasma Trooper", "Weavel", "MP1PlasmaTrooper"),
         ("Trooper (Weavel's DS model)", "Weavel", "trooper"),
+        ("Zero Suit Samus (Corruption, Weavel's rig + gun)", "Samus", "MP3ZeroSuit"),
+        ("Zero Suit Samus (Corruption, Samus's rig, no gun)", "Samus", "MP3ZeroSuitS"),
+        ("Zero Suit Samus (Brawl, her own rig)", "Samus", "SSBBZeroSuit"),
+        ("Sylux (Prime 4 Beyond: flex / arm swipe flourish)", "Sylux", "MP4Sylux"),
         ("Samus (RECOMP SETTINGS suit)", "Samus", null), ("Kanden", "Kanden", null), ("Spire", "Spire", null),
         ("Trace", "Trace", null), ("Noxus", "Noxus", null), ("Sylux", "Sylux", null), ("Weavel", "Weavel", null),
     };
@@ -485,6 +530,17 @@ public class MainActivity : Activity
         selfBodyBtn.Click += (_, _) => { _soloSelfBody = !_soloSelfBody; SelfBodyText(); };
         SelfBodyText();
         _content.AddView(selfBodyBtn);
+        // practice targets + endless UA (owner 2026-10-12: Hyper Ball practice, SoloArena.cs)
+        var targetsBtn = new Button(this);
+        void TargetsText() => targetsBtn.Text = $"Practice targets (idle bots, endless health): {SoloTargetCounts[_soloTargets]}";
+        targetsBtn.Click += (_, _) => { _soloTargets = (_soloTargets + 1) % SoloTargetCounts.Length; TargetsText(); };
+        TargetsText();
+        _content.AddView(targetsBtn);
+        var infUaBtn = new Button(this);
+        void InfUaText() => infUaBtn.Text = $"Endless Universal Ammo: {(_soloInfUa ? "ON" : "OFF")}";
+        infUaBtn.Click += (_, _) => { _soloInfUa = !_soloInfUa; InfUaText(); };
+        InfUaText();
+        _content.AddView(infUaBtn);
         AddButton("Start solo", () =>
         {
             var a = Arenas();
@@ -501,7 +557,141 @@ public class MainActivity : Activity
             if (_soloFallback) intent.PutExtra("lookalikes", "1");
             if (_soloPlace) intent.PutExtra("place", "1");
             if (_soloSelfBody) intent.PutExtra("selfbody", "1");
+            if (SoloTargetCounts[_soloTargets] > 0) intent.PutExtra("bots", SoloTargetCounts[_soloTargets].ToString()).PutExtra("targets", "1");
+            if (_soloInfUa) intent.PutExtra("infua", "1");
             StartActivity(intent);
+        });
+        // Brawl Zero Suit Samus on her own rig (owner 2026-10-15): her Brawl idle + run, Samus's strafes / backwards / aim,
+        // aiming with her gun arm or Samus's whole upper body; the solo arena picked above, 3 idle bots to shoot at
+        foreach ((string label, string aim) in new[] { ("gun arm", "arm"), ("whole upper body", "upper") })
+        {
+            AddButton($"Brawl Zero Suit (her own rig), aim with the {label}: solo arena above, 3 idle bots", () =>
+            {
+                var a = Arenas();
+                StartActivity(new Intent(this, typeof(CampaignActivity))
+                    .PutExtra("match", "Battle")
+                    .PutExtra("solo", "1")
+                    .PutExtra("bots", "3")
+                    .PutExtra("targets", "1")
+                    .PutExtra("arena", a[_soloArena % a.Count].Name)
+                    .PutExtra("hunter", "Samus")
+                    .PutExtra("gun", "none")
+                    .PutExtra("skins", "0:SSBBZeroSuit")
+                    .PutExtra("zsaim", aim));
+            });
+        }
+        // one tap (owner 2026-10-15): Brawl Zero Suit with her Paralyzer in hand and endless ammo (it spends Universal Ammo);
+        // the solo arena and practice targets picked above
+        AddButton("Brawl Zero Suit + Paralyzer, endless ammo: solo arena + practice targets above", () =>
+        {
+            var a = Arenas();
+            int bots = SoloTargetCounts[_soloTargets];
+            var intent = new Intent(this, typeof(CampaignActivity))
+                .PutExtra("match", "Battle")
+                .PutExtra("solo", "1")
+                .PutExtra("bots", bots.ToString())
+                .PutExtra("arena", a[_soloArena % a.Count].Name)
+                .PutExtra("hunter", "Samus")
+                .PutExtra("gun", "none")
+                .PutExtra("skins", "0:SSBBZeroSuit")
+                .PutExtra("paralyzer", "1")
+                .PutExtra("infua", "1");
+            if (bots > 0) intent.PutExtra("targets", "1");
+            StartActivity(intent);
+        });
+        // one tap (owner 2026-10-16): the Character picked above in Shooting Gallery, an idle bot sitting in the turret (back
+        // in its seat each time the turret is rebuilt): bomb the slot as each hunter (SoloArena.cs, --es turretbot)
+        AddButton("Turret bomb test: Character above, Shooting Gallery, idle bot in the turret", () =>
+        {
+            var a = Arenas();
+            var gallery = a.FirstOrDefault(r => (r.InGameName ?? r.Name).Contains("SHOOTING GALLERY", StringComparison.OrdinalIgnoreCase)
+                || r.Name.Contains("SHOOTING GALLERY", StringComparison.OrdinalIgnoreCase));
+            if (gallery == null)
+            {
+                Log("turret test: no Shooting Gallery (import Echoes' multiplayer arenas)");
+                return;
+            }
+            var (_, hunter, skin) = SoloCharacters[_soloChar];
+            var intent = new Intent(this, typeof(CampaignActivity))
+                .PutExtra("match", "Battle")
+                .PutExtra("solo", "1")
+                .PutExtra("bots", "1")
+                .PutExtra("targets", "1")
+                .PutExtra("turretbot", "1")
+                .PutExtra("arena", gallery.Name)
+                .PutExtra("hunter", hunter)
+                .PutExtra("gun", skin == null && hunter == "Samus" ? "settings" : "none");
+            if (skin != null) intent.PutExtra("skins", "0:" + skin);
+            if (_soloFallback) intent.PutExtra("lookalikes", "1");
+            StartActivity(intent);
+        });
+        // one tap (owner 2026-10-12): Corruption Dark Samus's Hyper Ball against bots that stand still and never die
+        AddButton("Hyper Ball practice: Dark Samus (Corruption), Data Shrine, 5 idle bots, endless UA", () =>
+        {
+            var a = Arenas();
+            var shrine = a.FirstOrDefault(r => string.Equals(r.InGameName ?? r.Name, "Data Shrine", StringComparison.OrdinalIgnoreCase)) ?? a[0];
+            StartActivity(new Intent(this, typeof(CampaignActivity))
+                .PutExtra("match", "Battle")
+                .PutExtra("solo", "1")
+                .PutExtra("bots", "5")
+                .PutExtra("targets", "1")
+                .PutExtra("infua", "1")
+                .PutExtra("arena", shrine.Name)
+                .PutExtra("hunter", "Samus")
+                .PutExtra("gun", "none")
+                .PutExtra("skins", "0:MP3DarkSamus"));
+        });
+    }
+
+    // First Hunt, the whole game (docs/FIRST_HUNT_PORT.md, step 2; App FirstHunt/FirstHuntSession.cs): its levels loaded
+    // natively from the game imported under <data>/firsthunt/AMFE (MphRecomp.FirstHunt.FirstHuntGame). P0: Samus alone in
+    // a level. Import: from <data>/firsthunt.nds (the user's own cart dump, pushed by hand until IMPORT GAMES takes it)
+    static readonly (string Room, string Label)[] FirstHuntLevels =
+    {
+        ("Level SP Regulator", "Regulator (training)"), ("Level SP Morphball", "Morph Ball (training)"),
+        ("Level SP Survivor", "Survivor (training)"), ("Level MP1", "Trooper Module"), ("Level MP2", "Assault Cradle"),
+        ("Level MP3", "Ancient Vestige"), ("Level MP5", "MP5 (unused)"),
+    };
+    int _fhLevel;
+
+    void AddFirstHunt()
+    {
+        AddHeader("First Hunt (whole game, in progress: levels only)");
+        string data = GetExternalFilesDir(null)?.AbsolutePath ?? FilesDir!.AbsolutePath;
+        AddButton("Import First Hunt from firsthunt.nds", () =>
+        {
+            string nds = System.IO.Path.Combine(data, "firsthunt.nds");
+            if (!System.IO.File.Exists(nds)) { Log("First Hunt: no " + nds); return; }
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    var rom = new MphRecomp.Import.NdsRom(System.IO.File.ReadAllBytes(nds));
+                    int n = MphRecomp.FirstHunt.FirstHuntGame.Import(rom, data, line => RunOnUiThread(() => Log(line)));
+                    RunOnUiThread(() => Log($"First Hunt imported: {n} files"));
+                }
+                catch (Exception ex)
+                {
+                    RunOnUiThread(() => Log("First Hunt import failed: " + ex.Message));
+                }
+            });
+        });
+        AddButton("Start First Hunt (title screen, menus)", () =>
+        {
+            if (!MphRecomp.FirstHunt.FirstHuntGame.Available(data)) { Log("First Hunt isn't imported yet"); return; }
+            StartActivity(new Intent(this, typeof(FirstHuntActivity)));
+        });
+        AddSelector(d =>
+        {
+            _fhLevel = Wrap(_fhLevel + d, FirstHuntLevels.Length);
+            return $"Level: {FirstHuntLevels[_fhLevel].Label}";
+        });
+        AddButton("Start First Hunt level", () =>
+        {
+            if (!MphRecomp.FirstHunt.FirstHuntGame.Available(data)) { Log("First Hunt isn't imported yet"); return; }
+            StartActivity(new Intent(this, typeof(CampaignActivity))
+                .PutExtra("fhlevel", FirstHuntLevels[_fhLevel].Room)
+                .PutExtra("gun", "none"));
         });
     }
 

@@ -19,8 +19,10 @@ namespace MphRecomp.Anim
             ["Darksuit"] = Hunter.Samus, ["Darksamus"] = Hunter.Samus, ["Phazonsuit"] = Hunter.Samus, ["SzerosuitR1"] = Hunter.Samus,
             // Retro's own suit models from the owner's Prime 1 / Echoes discs (prime_to_trophy.py): bind pose, Retro's skin
             ["MP1PowerSuit"] = Hunter.Samus, ["MP1GravitySuit"] = Hunter.Samus, ["MP1VariaSuit"] = Hunter.Samus, ["MP1FusionSuit"] = Hunter.Samus,
+            // the beta Phazon Suit: an unused suit model on the Prime 1 disc, on the final Phazon Suit's skin (HdRecipe "model")
+            ["MP1BetaPhazonSuit"] = Hunter.Samus,
             ["MP2VariaSuit"] = Hunter.Samus, ["MP2DarkSuit"] = Hunter.Samus, ["MP2LightSuit"] = Hunter.Samus, ["MP2DarkSamus"] = Hunter.Samus, ["MP1FusionTubes"] = Hunter.Samus,
-            ["MP3VariaSuit"] = Hunter.Samus, ["MP3ZeroSuit"] = Hunter.Samus, ["MP3DarkSamus"] = Hunter.Samus, ["MP3PEDSuit"] = Hunter.Samus,
+            ["MP3VariaSuit"] = Hunter.Samus, ["MP3DarkSamus"] = Hunter.Samus, ["MP3PEDSuit"] = Hunter.Samus,
             // Metroid Prime 4: Beyond (the owner's own dump, Prime 4 Model Dumper glTF -> mp4_to_trophy.py): bind pose, Retro's skin
             ["MP4Sylux"] = Hunter.Sylux,
             ["MP4DefaultSuit"] = Hunter.Samus, ["MP4PsychicSuit"] = Hunter.Samus, ["MP4PsychicGlove"] = Hunter.Samus,
@@ -33,6 +35,14 @@ namespace MphRecomp.Anim
             ["MP1SpacePirate"] = Hunter.Weavel, ["MP1PowerTrooper"] = Hunter.Weavel, ["MP1IceTrooper"] = Hunter.Weavel, ["MP1WaveTrooper"] = Hunter.Weavel,
             ["MP1PlasmaTrooper"] = Hunter.Weavel, ["MP2PirateTrooper"] = Hunter.Weavel, ["MP2DarkPirateTrooper"] = Hunter.Weavel, ["MP2PirateCommando"] = Hunter.Weavel,
             ["MP2DarkCommando"] = Hunter.Weavel,
+            // Zero Suit Samus (Prime 3's "Samus_BlueSuit"), a hunter of her own on WEAVEL's rig and clips (docs/ZERO_SUIT_SAMUS.md)
+            ["MP3ZeroSuit"] = Hunter.Weavel,
+            // dev comparison (owner 2026-10-12, "curious what she looks like on samus's rig"): the same body on SAMUS's rig and
+            // clips, from the 09-28 Samus-rig import pushed as hd/MP3ZeroSuitS; never shipped (no recipe)
+            ["MP3ZeroSuitS"] = Hunter.Samus,
+            // Brawl Zero Suit on her OWN skeleton (bodies/SSBBZeroSuit, Core Campaign/BrawlZeroSuitBody.cs): no HD rig; listed
+            // so a seat can wear her (Characters.Normalize) as Samus, the hunter she plays as
+            ["SSBBZeroSuit"] = Hunter.Samus,
         };
         // the Space Pirates fire one-handed (gun arm only): their off (blade) arm keeps the legs layer's clip while firing
         public static bool OffHandStaysDown(string trophy) =>

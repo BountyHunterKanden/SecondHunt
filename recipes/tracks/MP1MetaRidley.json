@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Meta Ridley",
+  "group": "Shared",
+  "role": "boss",
+  "files": [
+    { "name": "Audio/over-ridleyL.dsp", "sha1": "c0589c80eea7b4fc8f910f8f8367a97eb2827c52" },
+    { "name": "Audio/over-ridleyR.dsp", "sha1": "8d0eb6f761602d963931c6da1f1a526a156493a8" }
+  ],
+  "gain": 0.405
+}

@@ -323,7 +323,7 @@ namespace MphRecomp.Frontend
 
         private bool RoomSeen(AreaMapModel.Part room) => room.RoomId >= 0 && _info.Visited(room.RoomId);
 
-        private static bool Touches(AreaMapModel.Part a, AreaMapModel.Part b)
+        internal static bool Touches(AreaMapModel.Part a, AreaMapModel.Part b)
         {
             const float Reach = 1.5f;
             return a.Min.X <= b.Max.X + Reach && a.Max.X >= b.Min.X - Reach && a.Min.Y <= b.Max.Y + Reach && a.Max.Y >= b.Min.Y - Reach
@@ -393,7 +393,7 @@ namespace MphRecomp.Frontend
             foreach (Entity e in RoomEntities(room.Name))
             {
                 if (e.Type != EntityType.Door || e is not Entity<DoorEntityData> door) continue;
-                Vector3 pos = e.Position + room.Origin + s.Offset;
+                Vector3 pos = DoorPoint(e, door.Data, room.Name) + room.Origin + s.Offset;
                 if (_doors.Any(d => (d.Pos - pos).LengthSquared < 0.01f)) continue;
                 int state = _info.RoomState(room.RoomId, e.EntityId);
                 bool coloured = state >= 1 || (state < 0 && door.Data.Locked != 0);
@@ -403,7 +403,20 @@ namespace MphRecomp.Frontend
             }
         }
 
-        private static Matrix3 Basis(Vector3 facing, Vector3 up)
+        // a door marker's room-space point as ov8 0x21328f4 builds it: the door's lock (its position + up x the type's lock
+        // offset, ov2 0x21209fc = MphRead's DoorMetadata), then the room's Y stretch -- two Celestial Archives rooms are
+        // squashed in the map model (ov8 0x2132818: UNIT2_C2 x 0x20cc, UNIT2_C3 x 0x14e1, fx32)
+        internal static Vector3 DoorPoint(Entity e, DoorEntityData door, string room)
+        {
+            int type = (int)door.DoorType;
+            float lift = type >= 0 && type < MphRead.Metadata.Doors.Count ? MphRead.Metadata.Doors[type].LockOffset : 0;
+            Vector3 p = e.Position + e.UpVector * lift;
+            if (room.Equals("UNIT2_C2", StringComparison.OrdinalIgnoreCase)) p.Y *= 0x20cc / 4096f;
+            else if (room.Equals("UNIT2_C3", StringComparison.OrdinalIgnoreCase)) p.Y *= 0x14e1 / 4096f;
+            return p;
+        }
+
+        internal static Matrix3 Basis(Vector3 facing, Vector3 up)
         {
             Vector3 f = facing.LengthSquared > 1e-6f ? facing.Normalized() : -Vector3.UnitZ;
             Vector3 u = up.LengthSquared > 1e-6f ? up.Normalized() : Vector3.UnitY;
@@ -1151,7 +1164,7 @@ namespace MphRecomp.Frontend
 
         // ---------------------------------------------------------------- the marker / door models
 
-        private sealed class SmallModel
+        internal sealed class SmallModel
         {
             public Model Model = null!;
             public List<Vector3> Corners = new();

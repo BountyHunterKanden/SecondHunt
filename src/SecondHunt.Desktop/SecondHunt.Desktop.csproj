@@ -39,6 +39,22 @@
     <Using Remove="System.Drawing" />
   </ItemGroup>
 
+  <!-- First-run compile hitches (2026-10-14, owner: dips at the Celestial Gateway spawn). A plain build is IL only, so
+       every method was JIT-compiled the first time it ran: PC -landingperf jit, first step after the landing movie =
+       323 methods, 40 ms. A Release build now also precompiles itself (ReadyToRun) into its own output folder, as the
+       public build (Publish-Windows.ps1) already did: the same step 5 ms, 20 methods. Costs ~6 s a rebuild. JIT stays
+       available as a fallback, so nothing can break. -p:MphJitOnly=true skips it. -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained Condition=" '$(SelfContained)' == '' ">false</SelfContained>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+  <Target Name="MphReadyToRun" AfterTargets="Build"
+          Condition=" '$(Configuration)' == 'Release' And '$(_IsPublishing)' != 'true' And '$(MphJitOnly)' != 'true' ">
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Publish"
+             Properties="NoBuild=true;_IsPublishing=true;PublishReadyToRun=true;PublishDir=$(OutDir)" />
+  </Target>
+
   <PropertyGroup Condition=" '$(MphPublic)' == 'true' ">
     <DefineConstants>$(DefineConstants);MPH_PUBLIC</DefineConstants>
   </PropertyGroup>

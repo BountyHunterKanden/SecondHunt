@@ -17,6 +17,11 @@ namespace MphRecomp.Campaign
             int viewWidth = 256, int viewHeight = 192)
         {
             settings.Validate();
+            if (MatchSettings.IsFirstHuntArena(settings.Arena))
+            {
+                return StartFirstHuntMatch(settings, collectDrawItems, viewWidth, viewHeight); // recomp: First Hunt (FirstHuntStart.cs)
+            }
+            PlayerEntity.HostFirstHunt = false; // (a First Hunt game before: its values, before the players initialize)
             Scene.Headless = true;
             Scene.CollectDrawItems = collectDrawItems;
             MphRead.Music.Init(); // see Start: the arena's music setup needs the tables
@@ -37,6 +42,7 @@ namespace MphRecomp.Campaign
             host = new CampaignHost(scene) { Match = settings };
             PlayerEntity.MainPlayerIndex = settings.LocalSeat;
             PlayerEntity.NetClient = settings.IsClient;
+            PlayerEntity.HostNoLocalSeat = settings.ServedHost && !settings.IsClient; // (a served match host: docs/DEDICATED_SERVERS.md)
             int[]? teams = MatchSettings.IsTeamMode(settings.Mode) ? settings.TeamAssignment() : null;
             settings.AssignRecolors(); // (the same hunter twice: palettes 0-3; every device and replay works it out the same)
             // the Trooper's Wall Cling + Scout Drone (Characters.cs, MphRead PlayerWallCling.cs / PlayerScoutDrone.cs; the
@@ -54,10 +60,21 @@ namespace MphRecomp.Campaign
                 player.HostWallCling = abilities && Characters.HasWallCling(seat);
                 player.HostWallClingJumpRule = settings.WallClingJumpRule ?? true;
                 player.HostDronePadArc = settings.DronePadArc ?? true;
+                player.HostDroneBodyHeadshots = settings.DroneBodyHeadshots ?? true;
+                player.HostContinuousHeadshots = settings.ContinuousHeadshots ?? true;
+                player.HostShockCoilGrace = settings.ShockCoilGrace ?? true;
+                player.HostVanillaZoom = settings.VanillaZoom ?? true;
                 player.HostHoverWalk = Characters.IsDarkSamus(seat) && (settings.HoverWalk ?? true);
+                bool hyperBall = Characters.IsDarkSamus(seat) && (settings.HyperBall ?? true); // her ball hop + Hyper Ball
+                player.HostBallJump = hyperBall;
+                player.HostHyperBall = hyperBall;
+                player.HostHyperBallCorruption = hyperBall && (settings.HyperBallCorruption ?? true);
+                player.HostSoloUa = settings.Solo; // the dev solo run: full UA for her Hyper Ball (no pickups to grab first)
                 player.HostPirateBlasterKey = settings.PirateBlasterKey ?? true;
+                player.HostTeamHitsIgnored = settings.TeamHitsIgnored ?? true; // friendly fire off: no hit at all (old replays: vanilla's)
                 player.HostScoutDrone = abilities && Characters.HasScoutDrone(seat);
                 player.HostAffinityBeam = Characters.AffinityBeamFor(settings, seat); // recomp: the Trooper's Pirate Blaster
+                player.HostHealthPercent = Characters.HealthPercentFor(settings, seat); // Zero Suit: 90 (no armour)
                 PlayerEntity.HostAnyShieldWall |= player.HostShieldWall;
                 player.IsBot = seat.Bot;
                 player.HostRemote = seat.Remote;
@@ -73,13 +90,19 @@ namespace MphRecomp.Campaign
             }
             // Echoes arenas' weapon crates join the room's entities as it loads (off in LAN matches and old replays)
             MphRecomp.Arenas.EchoesCrates.Enabled = MphRecomp.Arenas.EchoesCrates.For(settings);
+            MphRecomp.Arenas.EchoesCrates.Blaster = (settings.CrateBlaster ?? true) && (settings.PirateBlaster ?? true);
             MphRecomp.Arenas.EchoesBreakables.Enabled = MphRecomp.Arenas.EchoesBreakables.For(settings);
             MphRecomp.Arenas.EchoesBreakables.Mirror = settings.IsClient; // (a client follows the host's, Net/NetWorld.cs)
+            // and Shooting Gallery's turret (old replays: off; a client follows the host's, Net/NetWorld.cs)
+            MphRecomp.Arenas.EchoesTurret.Enabled = MphRecomp.Arenas.EchoesTurret.For(settings);
+            MphRecomp.Arenas.EchoesTurret.Mirror = settings.IsClient;
+            MphRecomp.Arenas.EchoesTurretBots.On = settings.EchoesTurretBots ?? true;   // (old replays: off)
             // and Echoes movement there (double jump, water, Gravity Boost, spider ball; old replays: off)
             MphRecomp.Arenas.EchoesMovement.Enabled = MphRecomp.Arenas.EchoesMovement.For(settings);
             MphRecomp.Arenas.EchoesMovement.LedgeJump = settings.EchoesLedgeJump ?? true;
             MphRecomp.Arenas.EchoesMovement.PadNoFall = settings.EchoesPadNoFall ?? true;
             MphRecomp.Arenas.EchoesMovement.BotMoves = settings.EchoesBotMoves ?? true;   // T7
+            PlayerEntity.HostBotTickPace = settings.BotTickPace ?? true;   // bots at vanilla's tick pace (old replays: off)
             // and UA pickups there (old replays: none)
             MphRecomp.Arenas.EchoesAmmo.Enabled = MphRecomp.Arenas.EchoesAmmo.For(settings);
             // and the owner's baked pickup placements in any arena, with EXTRA PICKUPS (old replays: none)

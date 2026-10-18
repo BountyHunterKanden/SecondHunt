@@ -19,7 +19,7 @@ namespace MphRecomp.Media
     // one), with a 60-block audio ring; Update copies every new audio block out of that ring into this player's own
     // queue, so a slow audio consumer can never read samples the decoder has since overwritten. MphRead has two decoder
     // instances (top / bottom screen), so one movie plays at a time: opening another disposes the current one.
-    public sealed class MoviePlayer : IDisposable
+    public sealed class MoviePlayer : IMoviePlayback, IDisposable
     {
         public const int Width = 256;
         public const int Height = 192;

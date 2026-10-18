@@ -559,7 +559,7 @@ namespace MphRead.Entities
         }
     }
 
-    public class FhDoorEntity : EntityBase
+    public partial class FhDoorEntity : EntityBase
     {
         private readonly FhDoorEntityData _data;
 

@@ -60,6 +60,23 @@ namespace MphRecomp.Assets
         // a model without a .brres (GxJson): its UV matrix as is (column-major mat3, replaces the Maya transform), and a
         // steady UV scroll per second (Retro's scrolling glow layers) -- added at draw time
         public float[]? UvMtx; public Vector2 ScrollPerSec;
+        // Retro's filmstrip (UV animation mode 4/5): [mode, scale, frames, step, offset], the texture stepped by whole frames
+        public float[]? Strip;
+        public bool Moves => ScrollPerSec != Vector2.Zero || Strip != null;
+        // the UV shift at `seconds` (added to the matrix's translation): the scroll, wrapped, plus the filmstrip's frame
+        // (PrimeDecomp CCubeMaterial HandleAnimatedUV 4/5: trunc(frac((offset + t) x scale x step) x frames) x step, across
+        // for 4, down for 5; V as is: negated, the turret bars pulsed the wrong way, owner 10-16)
+        public Vector2 UvShift(double seconds)
+        {
+            var d = new Vector2((float)(ScrollPerSec.X * seconds % 1.0), (float)(ScrollPerSec.Y * seconds % 1.0));
+            if (Strip is { Length: 5 } s)
+            {
+                double v = (s[4] + seconds % 900) * s[1] * s[3];
+                float shift = (float)(Math.Truncate((v - Math.Truncate(v)) * s[2]) * s[3]);
+                d += s[0] == 4 ? new Vector2(shift, 0) : new Vector2(0, shift);
+            }
+            return d;
+        }
     }
 
     public sealed class GxMaterial

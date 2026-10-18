@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Boss Approach (prelude)",
+  "group": "Shared",
+  "role": "boss",
+  "files": [
+    { "name": "Audio/swanp-mae32.dsp", "sha1": "e00b1ec8eacf04c5dbfc2bbda79b1c46665a7d3b" }
+  ],
+  "gain": 1.187
+}

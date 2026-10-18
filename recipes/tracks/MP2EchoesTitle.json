@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Echoes Title",
+  "group": "Menus \u0026 Endings",
+  "role": "menu",
+  "files": [
+    { "name": "Audio/echoes-select2-32.dsp", "sha1": "29b23328b6aa93d9ed25b413c0c3f10f3f00fc66" }
+  ],
+  "gain": 0.704
+}

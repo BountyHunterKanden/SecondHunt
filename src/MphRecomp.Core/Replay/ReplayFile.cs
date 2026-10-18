@@ -92,14 +92,45 @@ namespace MphRecomp.Replay
     //   skip items they can't get (Settings.EchoesBotMoves); older files read it as off, so they play exactly.
     //   Format 29 (0.2.0): the same layout; with EXTRA PICKUPS on, arenas carry the owner's baked pickup placements
     //   (Settings.PlacedPickups, Arenas/PlacedPickups.cs); older files read it as off, so they play exactly.
+    //   Format 30: the same layout; bots think at vanilla's 30 Hz pace (aim turn step halved per frame, per-tick random
+    //   rolls on tick frames, shot leading by the beam's per-tick speed: Settings.BotTickPace); older files read it as off.
+    //   Format 31: the same layout; with friendly fire off a teammate's hit is no hit at all (no knockback, invulnerability,
+    //   hurt sound or bot reaction: Settings.TeamHitsIgnored); older files read it as off, so they play exactly.
+    //   Format 32: the same layout; Dark Samus's morph ball hops on the jump button and holds the bomb button for the Hyper
+    //   Ball instead of bombs (Settings.HyperBall, docs/DARK_SAMUS_HYPER.md); older files read it as off, so they play exactly.
+    //   Format 33: the same layout; Zero Suit Samus's affinity weapon is the Paralyzer (its charged shot stuns) and she has
+    //   90 health (Settings.Paralyzer, docs/ZERO_SUIT_SAMUS.md section 7); older files read it as off, so they play exactly.
+    //   Format 34: the same layout; Dark Samus's Hyper Ball plays by Corruption's rules (every enemy in reach zapped in turn,
+    //   the ball kicked by its arcs: Settings.HyperBallCorruption); older files read it as off, so they play exactly.
+    //   Format 35: the same layout; the Trooper's standing body (drone out) takes headshots in the same zone as any hunter
+    //   (Settings.DroneBodyHeadshots); older files read it as off, so they play exactly.
+    //   Format 36: the same layout; with EXTRA PICKUPS on, Echoes arenas' weapon crates can also drop the Pirate Blaster
+    //   (Settings.CrateBlaster, Arenas/EchoesCrates.cs); older files read it as off, so they play exactly.
+    //   Format 37: the same layout; Shooting Gallery's manned turret and bomb slot (Settings.EchoesTurret,
+    //   Arenas/EchoesTurret.cs); older files read it as off, so they play exactly.
+    //   Format 38: the same layout; continuous shots (Shock Coil) scale their headshot damage like their damage, as the game
+    //   does (Settings.ContinuousHeadshots, PlayerEntity.HostContinuousHeadshots); older files read it as off, so they play exactly.
+    //   Format 39: the same layout; the zoom as the game does it: zoomed aim speed, zoom step and ease (Settings.VanillaZoom,
+    //   PlayerEntity.HostVanillaZoom); older files read it as off, so they play exactly.
+    //   Format 40: the same layout; the Shock Coil's ramp kept through one missed tick as the game does (Settings.ShockCoilGrace,
+    //   PlayerEntity.HostShockCoilGrace); older files read it as off, so they play exactly.
+    //   Format 41: the same layout; bots use Shooting Gallery's turret: they sometimes get in and shoot from it, and roll into
+    //   its bomb slot against an enemy in it (Settings.EchoesTurretBots, Arenas/EchoesTurret.cs EchoesTurretBots); older
+    //   files read it as off, so they play exactly.
+    //   Format 42: the same layout; each step's checksum also covers Shooting Gallery's turret (state, occupant, health,
+    //   aim, shots: ReplayState.AddTurret); older files' checksums were taken without it (OldTurretHash), so they verify.
+    //   Format 43: the same layout; same-hunter recolours count per character + skin (Settings.RecolorPerSkin,
+    //   LookAlikes.SameLookKey); older files read it as off (per look / hunter), so they play exactly.
     public sealed class ReplayFile
     {
-        public const int FormatVersion = 29;
+        public const int FormatVersion = 43;
         // Bump when a code change alters how a match plays: an old replay then is refused instead of drifting.
         // (R2c: golden replays checked on every build say when.)
         // 2 (R1): matches play with Scene.HostDrawFreeSim (Spire's rocks placed whether or not a frame draws).
         // 3 (R2b): matches play with DetMathF.HostDeterministic (the same trig on every device, MphRead/Utility/DetMath.cs).
-        public const int CurrentSimVersion = 3;
+        // 4 (2026-10-17): entity collision inverts its transform the same way on every device (DetMatrix.Inverted: OpenTK
+        //    used SSE3 on PCs, plain arithmetic on ARM), and Shooting Gallery's turret is in each step's checksum (format 42).
+        public const int CurrentSimVersion = 4;
         private static ReadOnlySpan<byte> Magic => "MPHRPLY\0"u8;
 
         public int SimVersion { get; set; } = CurrentSimVersion;
@@ -108,6 +139,8 @@ namespace MphRecomp.Replay
         public bool OldTrooper { get; private set; }
         // read from a format 13-15 file of Pipeline with Echoes movement on (older water / boost): refused like OldTrooper
         public bool OldEchoesWater { get; private set; }
+        // read from a file older than format 42: its checksums leave out the turret (ReplayState.Capture turretState)
+        public bool OldTurretHash { get; private set; }
         public string Build { get; set; } = "";
         public string Platform { get; set; } = DescribePlatform();
         public MatchSettings Settings { get; set; } = new();
@@ -353,6 +386,20 @@ namespace MphRecomp.Replay
             file.Settings.PirateBlasterKey = format >= 27 ? null : false; // not written: on from format 27
             file.Settings.EchoesBotMoves = format >= 28 ? null : false; // not written: on from format 28
             file.Settings.PlacedPickups = format >= 29 ? null : false; // not written: on from format 29
+            file.Settings.BotTickPace = format >= 30 ? null : false; // not written: on from format 30
+            file.Settings.TeamHitsIgnored = format >= 31 ? null : false; // not written: on from format 31
+            file.Settings.HyperBall = format >= 32 ? null : false; // not written: on from format 32
+            file.Settings.Paralyzer = format >= 33 ? null : false; // not written: on from format 33
+            file.Settings.HyperBallCorruption = format >= 34 ? null : false; // not written: on from format 34
+            file.Settings.DroneBodyHeadshots = format >= 35 ? null : false; // not written: on from format 35
+            file.Settings.CrateBlaster = format >= 36 ? null : false; // not written: on from format 36
+            file.Settings.EchoesTurret = format >= 37 ? null : false; // not written: on from format 37
+            file.Settings.ContinuousHeadshots = format >= 38 ? null : false; // not written: on from format 38
+            file.Settings.VanillaZoom = format >= 39 ? null : false; // not written: on from format 39
+            file.Settings.ShockCoilGrace = format >= 40 ? null : false; // not written: on from format 40
+            file.Settings.EchoesTurretBots = format >= 41 ? null : false; // not written: on from format 41
+            file.Settings.RecolorPerSkin = format >= 43 ? null : false; // not written: on from format 43
+            file.OldTurretHash = format < 42;
             file.OldEchoesWater = format < 16 && file.Settings.EchoesMoves != false
                 && file.Settings.Arena == MphRecomp.Arenas.EchoesArena.Find("M04_Pipeline")?.Room;
             if (format >= 17)
@@ -459,6 +506,19 @@ namespace MphRecomp.Replay
             copy.PirateBlasterKey = s.PirateBlasterKey; // format 27 (not written)
             copy.EchoesBotMoves = s.EchoesBotMoves; // format 28 (not written)
             copy.PlacedPickups = s.PlacedPickups; // format 29 (not written)
+            copy.BotTickPace = s.BotTickPace; // format 30 (not written)
+            copy.TeamHitsIgnored = s.TeamHitsIgnored; // format 31 (not written)
+            copy.HyperBall = s.HyperBall; // format 32 (not written)
+            copy.Paralyzer = s.Paralyzer; // format 33 (not written)
+            copy.HyperBallCorruption = s.HyperBallCorruption; // format 34 (not written)
+            copy.DroneBodyHeadshots = s.DroneBodyHeadshots; // format 35 (not written)
+            copy.CrateBlaster = s.CrateBlaster; // format 36 (not written)
+            copy.EchoesTurret = s.EchoesTurret; // format 37 (not written)
+            copy.ContinuousHeadshots = s.ContinuousHeadshots; // format 38 (not written)
+            copy.VanillaZoom = s.VanillaZoom; // format 39 (not written)
+            copy.ShockCoilGrace = s.ShockCoilGrace; // format 40 (not written)
+            copy.EchoesTurretBots = s.EchoesTurretBots; // format 41 (not written)
+            copy.RecolorPerSkin = s.RecolorPerSkin; // format 43 (not written)
             copy.Abilities = s.Abilities; // after the Skins (format 22)
             copy.PirateBlaster = s.PirateBlaster; // after Abilities (format 23)
             copy.ExtraCharacters = s.ExtraCharacters; // (not recorded: the seats already have them stripped)

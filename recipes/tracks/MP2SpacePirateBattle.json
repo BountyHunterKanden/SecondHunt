@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Space Pirate Battle",
+  "group": "Shared",
+  "role": "battle",
+  "files": [
+    { "name": "Audio/pirates_kyu-3-32.dsp", "sha1": "ce8a6a792ebb0adbd92421f2150ee9d1b6cbc1b8" }
+  ],
+  "gain": 0.658
+}

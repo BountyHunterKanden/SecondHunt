@@ -48,6 +48,12 @@ namespace SecondHunt.Server
                     Console.WriteLine($"{_pass} passed, {_fail} failed");
                     return _fail == 0 ? 0 : 1;
                 }
+                if (Environment.GetEnvironmentVariable("SELFTEST_ONLY") == "served")
+                {
+                    await ServedTests(dir);
+                    Console.WriteLine($"{_pass} passed, {_fail} failed");
+                    return _fail == 0 ? 0 : 1;
+                }
                 if (Environment.GetEnvironmentVariable("SELFTEST_ONLY") == "safety")
                 {
                     await Safety(dir);
@@ -60,6 +66,7 @@ namespace SecondHunt.Server
                 await TurnTests(dir);
                 await Safety(dir);
                 await Records(dir); // (T3 0.7.0: friend OR rival, head to head: SelfTestRecords.cs)
+                await ServedTests(dir); // (0.8.0: served games, HubServed.cs: SelfTestServed.cs)
             }
             catch (Exception ex)
             {

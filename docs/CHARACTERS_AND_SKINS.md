@@ -276,7 +276,7 @@ Players in one match can have different imports. The rule:
 - **Owner decision D7:** the roster and scoreboard show the picked character's name (TROOPER, DARK SAMUS), drawn as the
   recoloured look-alike.
 
-## Network matches: seat character + skin (2026-10-08 ~18:05, thread "Seat character + skin online", PC-verified)
+## Network matches: seat character + skin (2026-10-08, PC-verified)
 
 - **What travels:** each seat's `MatchPlayer.Character` + `Skin` (ids only, "" = none) in LAN protocol **7** and online match protocol **2**: the JOIN (the joiner's own pick: `LanSession.Join` / `NetMatchSession.Join` take `character:` / `skin:`) and every seat in WELCOME + START (`LanSession.WriteSettings`, shared by both). `MatchClient.ForSeat` copies both, so every device's match names the same character + skin per seat. The vanilla menu's lobby keeps a LAN joiner's pick into START (`MultiplayerMenu` Seat.Skin/Character). An id from another device is kept only if it's letters/digits/_/- (max 64): a skin names a folder under hd/. `MatchSetupText` (local matches) gained seat field 9 = character.
 - **Drawing:** unchanged. `MatchSkins` draws each seat from its Skin; a skin this device hasn't imported draws MphRead's own model (the D5 look-alike isn't built yet).
@@ -290,7 +290,7 @@ Players in one match can have different imports. The rule:
   doesn't play"). Banned: the picker greys them; whoever builds the match (menus, LanSession.Build, NetMatchSession.Build)
   runs `Characters.ApplyExtraRules`, so their seats play the base hunter in its own look. Replays are never touched.
 
-### Trooper abilities in network matches (as built, 2026-10-09 ~21:45, thread "Pirate Blaster + Trooper abilities online", PC-verified)
+### Trooper abilities in network matches (as built, 2026-10-09, PC-verified)
 - **Switch:** `MatchSettings.Abilities` (bool?). The LAN and online hosts set it true in `Build`; it travels at the end of
   `LanSession.WriteSettings` (WELCOME/START/lobby, shared by both) = **LAN protocol 9, online protocol 8**; `MatchClient.ForSeat`
   and the host-migration template copy it. `Characters.AbilitiesFor` = network match ? `Abilities == true` : true, so the

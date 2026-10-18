@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Ruined Courtyard",
+  "group": "Phendrana Drifts",
+  "role": "area",
+  "files": [
+    { "name": "Audio/ice_shorelinesL.dsp", "sha1": "6d484e2fe6be75774ed60f5452b283052a87286c" },
+    { "name": "Audio/ice_shorelinesR.dsp", "sha1": "a6804825f13956da274246669fe7160d13d7ddb3" }
+  ],
+  "gain": 0.907
+}

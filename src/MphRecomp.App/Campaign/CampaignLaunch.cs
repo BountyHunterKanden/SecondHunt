@@ -65,8 +65,11 @@ internal sealed partial class CampaignRenderer
         // in-game cutscenes (CampaignMovie.cs); movies off skips them
         ConfigureMovies(args);
         renderer.PlacementDir = Path.Combine(dataDir, "placements"); // dev pickup placement editor (PickupPlacer.cs)
+        renderer.MapReportPath = Path.Combine(dataDir, "map_reports.json"); // the PRIME map's split reports (PrimeMap.Report.cs)
         // a multiplayer match with bots instead of the campaign (MatchSession.cs)
         renderer.ConfigureMatch(args);
+        renderer.ReloadCameraFromSettings(); // a match takes the match camera setting, not the campaign's (CampaignRenderer)
+        renderer.ConfigureFirstHunt(args); // dev fhlevel: a First Hunt level (FirstHunt/FirstHuntSession.cs)
         if (explicitGun == null) renderer.DropSettingsSuitInMatch(); // matches don't wear RECOMP SETTINGS' suit
         // its seats' multiplayer skins (MatchSkins.cs; dev: --es skins)
         renderer.ConfigureSkins(args);

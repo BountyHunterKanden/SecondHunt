@@ -38,7 +38,7 @@ namespace MphRecomp.Campaign
 
         public bool Emitting = true;
         public uint Texture => _d.Texture;
-        public bool Additive => _d.Flag("AALP");
+        public bool Additive => _d.Flag("AALP") || (_d["SBDM"]?.I ?? 0) != 0; // Corruption: SBDM, a blend mode (0 alpha)
         // drawn by this runner (SIDE 3, no spline, at least two points)
         public bool Drawable { get; }
         // IsSystemDeletable

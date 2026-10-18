@@ -384,8 +384,21 @@ namespace MphRead
             public readonly int BannerOffset;
         }
 
+        // a server's match host (SecondHunt.MatchHost, docs/DEDICATED_SERVERS.md section 3) keeps no arm9/overlay files:
+        // the tables read from them are sound ids and the font, which it never plays or draws
+        public static bool NoCodeFiles { get; set; }
+
         public static void LoadRuntimeData()
         {
+            if (NoCodeFiles)
+            {
+                // a blank font, every glyph 8 wide (HUD messages still wrap; nothing is drawn)
+                byte[] blankWidths = new byte[480];
+                Array.Fill(blankWidths, (byte)8);
+                Text.Font.Normal.SetData(blankWidths, new byte[480], new byte[0x4000], minChar: 32);
+                Metadata.SetNoSfxData();
+                return;
+            }
             if (!_romData.TryGetValue(Paths.MphKey, out RomData? data))
             {
                 return;

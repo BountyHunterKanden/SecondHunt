@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Space Pirates - Warning",
+  "group": "Shared",
+  "role": "battle",
+  "files": [
+    { "name": "Audio/pirates_zencyo.dsp", "sha1": "101618f6823558d18cf1937d93b2648b0574dc49" }
+  ],
+  "gain": 0.864
+}

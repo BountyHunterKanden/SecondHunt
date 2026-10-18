@@ -19,6 +19,8 @@ namespace MphRead.Entities
     //     the same one every 3 s), and the nodes she gave up on stay off every node pick until she leaves the spot
     //   - MphRead's jump toward a node ends when she lands (Echoes' double jump left it holding L for good), and a node on
     //     a jump pad counts as reached when the pad throws her (she was never on the ground there)
+    //   - the clock (jumps, drifts, give-up) runs only while she is trying to move, and the node she
+    //     falls back to is never the one she stands on (2026-10-17: Kanden circling a node in Shooting Gallery)
     //   - hands off the stick from a pad's launch until she lands; held up below her node, the drift goes away from it,
     //     down off the slope (2026-10-10, once the graph had the pads and Spider Complex's top)
     // T7 (owner 2026-10-10), on with HostBotMoves (Core: an Echoes arena with the unstick rule, in a match recorded from
@@ -92,11 +94,17 @@ namespace MphRead.Entities
             private bool UnstickAbove => _node40 != null && _node40.Position.Y - _player.Position.Y > 1;
             // her node is out of MphRead's reach (IsNodeInRange's distance, from half a unit up: 1.12 across the floor
             // but 0.2 up a curb is out of it, and no jump came: Crossfire Chaos, 2026-10-10)
-            private bool UnstickAway => _node40 != null && (_node40.Position - _player.Position.AddY(_player.IsAltForm
+            private bool UnstickAway => _node40 != null && !UnstickAt(_node40);
+            private bool UnstickAt(NodeData3 node) => (node.Position - _player.Position.AddY(_player.IsAltForm
                 ? Fixed.ToFloat(_player.Values.AltColYPos) - Fixed.ToFloat(_player.Values.AltColRadius) : -0.5f)).LengthSquared
-                >= _node40.MaxDistance * _node40.MaxDistance;
+                < node.MaxDistance * node.MaxDistance;
             // her node is out of reach across the floor (the drift: a jump straight over the node is not stuck)
             private bool UnstickAwayXz => _node40 != null && (_node40.Position - _player.Position).Xz.LengthSquared > 1.5f * 1.5f;
+            // this step's stick (A/B/X/Y walk; in the ball without strafe the d-pad rolls) or off the ground (held up on an
+            // edge, no stick: Func2140094 steers only from the ground). End of Process: ProcessInput hasn't taken them yet
+            private bool UnstickTrying => _buttons.A.IsDown || _buttons.B.IsDown || _buttons.X.IsDown || _buttons.Y.IsDown
+                || _player.IsAltForm && (_buttons.Up.IsDown || _buttons.Down.IsDown || _buttons.Left.IsDown || _buttons.Right.IsDown)
+                || !UnstickGrounded;
             private bool UnstickGrounded => _player.Flags1.TestFlag(PlayerFlags1.Grounded) || _player.EchoesSubmerged;
 
             // every AI step (end of Process, whatever the bot is doing): how long she has stayed in one spot (her target
@@ -133,6 +141,14 @@ namespace MphRead.Entities
                     return;
                 }
                 BotUnstickSteer();
+                // only the steps she is trying to move (UnstickTrying): a bot standing to shoot isn't stuck, but her stale
+                // node counted it. Shooting Gallery 2026-10-16: Kanden fired from one spot for 5 s (3
+                // jumps in place), then the node picked as he landed was given up the next step and he circled the one he
+                // stood on for 21 s, "shaking around wildly and firing at seemingly nothing"
+                if (!UnstickTrying)
+                {
+                    return;
+                }
                 if (++_unstickFrames % UnstickFrames != 0 || _unstickClimb > 0 || _unstickDrift > 0 || !(UnstickAbove || UnstickAway))
                 {
                     return;
@@ -280,7 +296,11 @@ namespace MphRead.Entities
                 {
                     NodeData3 node = _nodeList[i];
                     float dist = Vector3.DistanceSquared(node.Position, _player.Position);
-                    if (dist >= bestDist || System.Array.IndexOf(_field7A, (ushort)i, 0, _field78) >= 0 || UnstickAvoided(i))
+                    // not the node she stands on: she "reaches" it at once, the route sends her on to the node she gave
+                    // up on, and the avoid list sends her back (Shooting Gallery 2026-10-16: Kanden on node 82, 83 given up,
+                    // a half-unit circle round 82 for 21 s)
+                    if (dist >= bestDist || System.Array.IndexOf(_field7A, (ushort)i, 0, _field78) >= 0 || UnstickAvoided(i)
+                        || UnstickAt(node))
                     {
                         continue;
                     }

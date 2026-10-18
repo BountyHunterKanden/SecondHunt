@@ -65,6 +65,7 @@ namespace SecondHunt.Server
         {
             _safetyTimer?.Dispose();
             _findTimer?.Dispose();
+            StopMatchHosts(); // (served games, HubServed.cs)
         }
 
         private static DateTime Now => DateTime.UtcNow;

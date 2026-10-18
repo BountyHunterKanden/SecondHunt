@@ -87,6 +87,13 @@ namespace MphRead.Entities
             {
                 return; // recomp: the app plays Prime's shot per bolt (CampaignRenderer.BlasterFx.cs)
             }
+            if (beam == BeamType.Paralyzer && HostOwnParalyzerSfx)
+            {
+                // recomp: the app plays Brawl's shot (CampaignRenderer.ParalyzerFx.cs)
+                HostParalyzerShots++;
+                HostParalyzerLastCharged = charged;
+                return;
+            }
             if (continuous)
             {
                 amountA = homing ? amountA + 0x3FFF : 0;
@@ -124,6 +131,10 @@ namespace MphRead.Entities
 
         private void PlayBeamChargeSfx(BeamType beam)
         {
+            if (beam == BeamType.Paralyzer && HostOwnParalyzerSfx)
+            {
+                return; // recomp: the app plays Brawl's charge hum (CampaignRenderer.ParalyzerFx.cs)
+            }
             int sfx = GetBeamChargeSfx(beam);
             if (sfx != -1)
             {

@@ -16,6 +16,8 @@ namespace MphRead
     //   touch roll: a slow drag up rolls the ball forward, a drag right rolls it right, and it rolls on after the lift;
     //     no boost from it
     //   touch boost: a flick (> 90 px over 8 frames) boosts once; holding on and flicking again doesn't; after a lift it does
+    //   stylus aim (TOUCH AIM: STYLUS, Core Input/StylusAim.cs): nothing until the hold passes 10 frames; then a pixel of
+    //     drag turns 4 x 2211/4096 x sensitivity degrees of yaw (1138/4096 of pitch) in all, measured on Samus in the arena
     internal static class TouchTest
     {
         private static int _fails;
@@ -49,6 +51,7 @@ namespace MphRead
             Roll(arena);
             Boost(arena);
             Remote(arena);
+            Aim(arena);
             Console.WriteLine(_fails == 0 ? "PASS" : $"FAIL ({_fails})");
         }
 
@@ -188,6 +191,50 @@ namespace MphRead
             Vector3 moved = Flat(seat.Position - p0);
             Console.WriteLine($"    remote seat: alt form {seat.IsAltForm}, moved {moved.Length:0.000} ({Vector3.Dot(moved, aim):0.000} along)");
             Check("remote seat: its stylus rolls its ball forward", seat.IsAltForm && moved.Length > 0.05f && Vector3.Dot(moved, aim) > 0.8f * moved.Length);
+        }
+
+        // stylus aim: the DS's rule (rev 1 arm9 0x02024308), through CampaignInput.AimDelta as CampaignRenderer sends it
+        private static void Aim(string arena)
+        {
+            float sens = MphRecomp.Input.StylusAim.Sensitivity(7); // the DS's default slider spot (1.2)
+            Check($"sensitivity level 7 = 1.2 (got {sens:0.000}), 1 = 0.6, 15 = 2.0",
+                MathF.Abs(sens - 1.2f) < 1e-5f && MathF.Abs(MphRecomp.Input.StylusAim.Sensitivity(1) - 0.6f) < 1e-5f
+                && MathF.Abs(MphRecomp.Input.StylusAim.Sensitivity(15) - 2.0f) < 1e-5f);
+            var aim = new MphRecomp.Input.StylusAim();
+            float early = 0;
+            for (int f = 0; f < 10; f++) early += MathF.Abs(aim.Step(true, new System.Numerics.Vector2(5, 5), sens, false).X);
+            Check($"no aim for the first 10 frames of a hold (got {early})", early == 0);
+            aim.Reset();
+            using CampaignHost host = Start(arena, morph: false);
+            PlayerEntity me = PlayerEntity.Main;
+            float Yaw() => MathHelper.RadiansToDegrees(MathF.Atan2(me.NetAimVector.X, me.NetAimVector.Z));
+            float Pitch() => MathHelper.RadiansToDegrees(MathF.Asin(Math.Clamp(me.NetAimVector.Y, -1, 1)));
+            void Drag(float dx, float dy, int frames)
+            {
+                for (int f = 0; f < frames; f++)
+                {
+                    System.Numerics.Vector2 delta = aim.Step(true, new System.Numerics.Vector2(dx, dy), sens, false);
+                    host.Step(new CampaignInput { SelectWeapon = BeamType.None, AimDelta = delta });
+                }
+            }
+            Drag(0, 0, 12); // the press and the hold
+            float yaw0 = Yaw(), pitch0 = Pitch();
+            Drag(1, 0, 20); // 20 px right
+            Drag(0, 0, 10); // the 4-tick sum runs out
+            float turned = yaw0 - Yaw(); // (a drag right turns right: yaw goes down)
+            float want = 20 * 4 * MphRecomp.Input.StylusAim.YawFactor * sens;
+            Console.WriteLine($"    stylus aim: 20 px right turned {turned:0.00} deg (DS rule {want:0.00})");
+            Check("stylus aim: a drag right turns right by the DS's angle", MathF.Abs(turned - want) < 0.05f * want);
+            Drag(0, 1, 10); // 10 px down
+            Drag(0, 0, 10);
+            float dipped = pitch0 - Pitch();
+            float wantPitch = 10 * 4 * MphRecomp.Input.StylusAim.PitchFactor * sens;
+            Console.WriteLine($"    stylus aim: 10 px down looked {dipped:0.00} deg down (DS rule {wantPitch:0.00})");
+            Check("stylus aim: a drag down looks down by the DS's angle", MathF.Abs(dipped - wantPitch) < 0.05f * wantPitch);
+            float before = Yaw();
+            aim.Step(false, default, sens, false);
+            host.Step(new CampaignInput { SelectWeapon = BeamType.None, AimDelta = aim.Step(true, new System.Numerics.Vector2(30, 0), sens, false) });
+            Check("stylus aim: a new press doesn't turn", MathF.Abs(Yaw() - before) < 0.01f);
         }
 
         private static void Boost(string arena)

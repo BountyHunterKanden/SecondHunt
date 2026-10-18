@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Great Temple Music A",
+  "group": "Great Temple",
+  "role": "area",
+  "files": [
+    { "name": "Audio/Ruminas-after2-32.dsp", "sha1": "e771548615139ad4106a29e2754ccff837202240" }
+  ],
+  "gain": 0.835
+}

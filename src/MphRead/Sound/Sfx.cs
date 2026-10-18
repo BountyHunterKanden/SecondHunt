@@ -57,6 +57,7 @@ namespace MphRead.Sound
             float recency = -1, bool sourceOnly = false, bool cancellable = false,
             float amountA = 0, float amountB = 0)
         {
+            id = FirstHuntSounds.Remap(id); // recomp: First Hunt's own sounds while one of its levels runs
             if (id >= 0)
             {
                 if ((id & 0x8000) != 0)
@@ -76,6 +77,7 @@ namespace MphRead.Sound
 
         public int PlayFreeSfx(int id)
         {
+            id = FirstHuntSounds.Remap(id);
             if (id >= 0)
             {
                 Debug.Assert((id & 0x8000) == 0);
@@ -113,6 +115,7 @@ namespace MphRead.Sound
 
         public void StopSfx(int id)
         {
+            id = FirstHuntSounds.Remap(id);
             Sfx.Instance.StopSoundFromSource(this, id);
         }
 
@@ -123,6 +126,7 @@ namespace MphRead.Sound
 
         public void StopFreeSfx(int id)
         {
+            id = FirstHuntSounds.Remap(id);
             Sfx.Instance.StopSoundById(id);
         }
 

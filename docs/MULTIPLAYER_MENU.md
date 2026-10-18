@@ -21,8 +21,7 @@ takes it: `RejoinHost`), as vanilla - `-mpmenu lan Kanden [addr] again`; R3 page
 (MenuLayout.Keypad / Keyboard, owner ~22:27); R4 explained (arenas imported before M5 had no picture; the owner's
 re-import made them); R5 answered (a fresh profile: 3 hunters, 9 ROM arenas + 6 Echoes).
 Old lobby screens (decision 7): retired after the owner has played M3 on two devices (owner 12:40).
-Thread: session "Vanilla multiplayer menu rebuild"
-(board row "Vanilla multiplayer menu"). Parent plans: `docs/REPLAY_MODE.md` (P-MP, "Menus" decision 5) and
+Parent plans: `docs/REPLAY_MODE.md` (P-MP, "Menus" decision 5) and
 `docs/MULTIPLAYER.md` ("the ROM's multiplayer menu pages stay with the UI session ... wired to this code later").
 
 Sources, all from the ROM and our own tools (no owner screenshots):
@@ -240,7 +239,7 @@ player's own (the fill reads G+0x230 per player), as ours. Ours with `-mpmenu re
 36 -> 39, the host's lobby shows the joiner and START hands the session to the match. Today's LAN limits enforced
 (section 3). The Windows address row (decision 6). Then the old lobby screens go (decision 7).
 *Accept:* Odin hosts, Samsung joins, and the other way round; PC <-> Android; a full Battle both ways.
-*Built 2026-10-07 (on the Odin 12:06), session "Vanilla multiplayer menu (cont.)":* the host lobby (38) is listed on the
+*Built 2026-10-07 (on the Odin 12:06):* the host lobby (38) is listed on the
 network while it can take a player (today's limits: Battle, no team play, no bots; a host who adds a bot stops being
 listed, ADD BOT with a joiner seated says why in the game's message box). CREATE OR JOIN (26) listens on entry; its
 AVAILABLE GAMES rows (the red bars, calls 95-98) show up to 4 games by the host's nickname (lower case; two with the same
@@ -255,7 +254,7 @@ Android holds Wi-Fi's multicast lock while listening (`MphRead.Android/MenuLan.c
 PC: Tools `-mpmenu lan [hunter]` = host menus here + joiner menus in a second process, real UDP on this PC, a full Battle
 (the joiner hunts), both RESULTS (3 runs pass; shots `extract_out/frontend/lan_*.png` with MP_SHOTS=1); `-mpmenu check`
 12/12 and `-mpmenu results` unchanged.
-*Join by address, built 2026-10-07 13:00, session "Vanilla multiplayer menu (cont. 2)" (decision 6; owner 12:40 chose
+*Join by address, built 2026-10-07 13:00 (decision 6; owner 12:40 chose
 the ROM's keypad):* on every platform since 13:26 (`MultiplayerMenu.JoinByAddress`, was Windows only; owner 13:26: Android
 too, the way in when a network blocks the hosts' beacons)
 AVAILABLE GAMES' 4th row always reads "enter address" (the list shows up to 3 games) and opens ENTER NEW CODE (page 61, the

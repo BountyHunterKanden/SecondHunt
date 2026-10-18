@@ -300,7 +300,7 @@ namespace MphRead.Entities
         }
     }
 
-    public class FhAreaVolumeEntity : EntityBase
+    public partial class FhAreaVolumeEntity : EntityBase
     {
         private readonly FhAreaVolumeEntityData _data;
 

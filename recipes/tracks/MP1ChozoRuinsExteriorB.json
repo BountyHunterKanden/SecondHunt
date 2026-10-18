@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Chozo Ruins Music C",
+  "group": "Chozo Ruins",
+  "role": "area",
+  "files": [
+    { "name": "Audio/Ruins-soto-BL.dsp", "sha1": "01bbff9783445f260bd396165eb55a4dfe5b4f79" },
+    { "name": "Audio/Ruins-soto-BR.dsp", "sha1": "61149a003787c03cc7842265f3fddadc10b0c991" }
+  ],
+  "gain": 1.014
+}

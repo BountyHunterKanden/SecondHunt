@@ -31,7 +31,7 @@ namespace MphRecomp.Multiplayer.Net
     {
         public const int GamePort = 47770;
         public const int BeaconPort = 47771;
-        private const byte Protocol = 17; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
+        private const byte Protocol = 21; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
                                          // 5: JOIN carries the game logic version (Replay ReplayFile.CurrentSimVersion);
                                          // 6: JOIN and the players carry the Hunter License rank level;
                                          // 7: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
@@ -51,6 +51,13 @@ namespace MphRecomp.Multiplayer.Net
                                          // 17: SNAPSHOT starts with the joiner's input ack (u16, 0xFFFF none) + frames held
                                          //     on it (u8): LAN guests predict + reconcile like online ones (0.2.0 owner
                                          //     2026-10-11: rubber banding on the Odin as a LAN guest over Wi-Fi)
+                                         // 18: Dark Samus's ball hop + Hyper Ball (sim); SeatAbilities carry the Hyper
+                                         //     Ball (2 bytes a seat; docs/DARK_SAMUS_HYPER.md)
+                                         // 19: Zero Suit's Paralyzer + 90 health (sim); SeatAbilities carry each seat's
+                                         //     Paralyzer stun (1 byte a seat; docs/ZERO_SUIT_SAMUS.md section 7)
+                                         // 20: the Trooper's Squad Mark; SeatAbilities carry each seat's marks (1 byte a
+                                         //     seat: the marking seats, PlayerEntity.NetSquadMark)
+                                         // 21: Shooting Gallery's turret on; snapshots carry it (NetWorld.Turret, 14 bytes)
         private const byte MsgBeacon = 1, MsgJoin = 2, MsgWelcome = 3, MsgRefuse = 4, MsgInput = 5, MsgSnapshot = 6, MsgBye = 7,
             MsgStart = 8, MsgLobby = 9;
         // SNAPSHOT: type, the joiner's input ack (u16), frames held on it (u8), then the snapshot (protocol 17)
@@ -651,7 +658,7 @@ namespace MphRecomp.Multiplayer.Net
 
         // buttons whose short press must survive being folded into a later input
         private const CampaignButtons PressButtons = CampaignButtons.Shoot | CampaignButtons.Jump | CampaignButtons.Morph
-            | CampaignButtons.Boost | CampaignButtons.AltAttack | CampaignButtons.Zoom | CampaignButtons.NextWeapon
+            | CampaignButtons.Boost | CampaignButtons.AltAttack | CampaignButtons.Zoom | CampaignButtons.ZoomIn | CampaignButtons.ZoomOut | CampaignButtons.NextWeapon
             | CampaignButtons.PrevWeapon | CampaignButtons.AffinitySlot;
 
         // (under _inputLock) the next input in sequence, like NetMatchSession.TryTakeInput. Nothing new = false: the seat

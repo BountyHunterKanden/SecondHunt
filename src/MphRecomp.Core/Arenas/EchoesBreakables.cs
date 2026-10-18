@@ -117,6 +117,10 @@ namespace MphRecomp.Arenas
         // a bomb's hit: 15 points (90); a grate breaks to any bomb
         public const int BombDamage = 15 * Unit;
 
+        // recomp: the app draws a grate's break in Echoes' own debris and plays its sound (the arena import's turret_fx,
+        // CampaignRenderer.TurretFx.cs; turret_grate.wav): MPH's stand-in still runs but isn't drawn or heard
+        public static bool HostOwnGrateBreak { get; set; }
+
         // a box as MPH entity collision about its centre: 6 faces, outward, wound counter-clockwise about their normals
         internal static CollisionInstance Box(Vector3 half, string name)
         {
@@ -166,6 +170,8 @@ namespace MphRecomp.Arenas
         public Vector3 Min { get; }
         public Vector3 Max { get; }
         public bool Up { get; private set; } = true;
+        // a grate (any bomb breaks it; Echoes' own break: EchoesBreakables.HostOwnGrateBreak), not a wall
+        public bool Grate => _anyBomb;
         public int Hp => _hp;
         public int FullHp => _full;
         public int Breaks { get; private set; }
@@ -274,6 +280,13 @@ namespace MphRecomp.Arenas
             }
         }
 
+        // how far a point is from its box (0 inside)
+        public float DistanceTo(Vector3 p)
+        {
+            Vector3 local = Local(p);
+            return (Vector3.Clamp(local, -_half, _half) - local).Length;
+        }
+
         // damage in breakable health (EchoesBreakables.Damage / BombDamage); breaks at 0
         public void Hit(int damage)
         {
@@ -291,6 +304,8 @@ namespace MphRecomp.Arenas
             EntityCollision[0]!.Collision.Active = false;
             _timer = _respawn;
             // MPH's mechanical death (the crates' break) across the box, and its sound
+            bool own = _anyBomb && EchoesBreakables.HostOwnGrateBreak;
+            _scene.HostSpawnHidden = own;
             Vector3 size = _half * 2;
             int nx = Math.Clamp((int)MathF.Round(size.X / 3), 1, 3), nz = Math.Clamp((int)MathF.Round(size.Z / 3), 1, 3);
             int ny = Math.Clamp((int)MathF.Round(size.Y / 3), 1, 3);
@@ -305,8 +320,9 @@ namespace MphRecomp.Arenas
                     }
                 }
             }
+            _scene.HostSpawnHidden = false;
             int sfx = Metadata.EnemyDeathSfx[(int)EnemyType.ForceFieldLock];
-            if (sfx != -1)
+            if (sfx != -1 && !own)
             {
                 _soundSource.PlaySfx(sfx & ~0xA0000, noUpdate: true, recency: (sfx & 0x20000) != 0 ? Single.MaxValue : (sfx & 0x80000) != 0 ? 0 : -1,
                     sourceOnly: (sfx & 0x20000) != 0);

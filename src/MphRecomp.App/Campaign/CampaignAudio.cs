@@ -33,6 +33,11 @@ internal sealed partial class CampaignRenderer
         MusicPlayer.Host = _music;
         // Echoes' streamed music in the imported arenas, through Music's room hook (Core Arenas/ArenaMusic.cs)
         MphRecomp.Arenas.ArenaMusic.Attach(_music.Stream, m => Log.Info("MPHAudio", m));
+        // ... and in front of it the player's own match song (RECOMP SETTINGS / the rules pages' MUSIC row; Core Music/)
+        MphRecomp.PrimeMusic.MatchMusic.Choice = settings?.MatchMusic ?? "";
+        MphRecomp.PrimeMusic.MatchMusic.Hidden = settings?.HiddenSongs;
+        MphRecomp.PrimeMusic.MatchMusic.ImportRoot = SettingsPath != null ? System.IO.Path.GetDirectoryName(SettingsPath) : null;
+        MphRecomp.PrimeMusic.MatchMusic.Attach(_music.Stream, m => Log.Info("MPHAudio", m));
         _sfx = new GameSfxPlayer();
         _sfx.LoadTables();
         // OPTIONS > AUDIO's volumes (Frontend/AudioOptions.cs), as the DS applies its saved ones to the whole game
@@ -86,7 +91,19 @@ internal sealed partial class CampaignRenderer
         TraceFrameGap();
         // RECOMP SETTINGS > MUSIC from the pause menu switches live (one compare a frame; GameAudio.cs SetQuality): the
         // room's song carries on in the new mode once the music resumes
-        if (PauseMenu?.IsOpen == true) _music?.SetQuality(PauseMenu.Settings.Music);
+        if (PauseMenu?.IsOpen == true)
+        {
+            var s = PauseMenu.Settings;
+            _music?.SetQuality(s.Music);
+            // ... and the volumes (OPTIONS > AUDIO, SECOND HUNT SETTINGS > SOUND), as the frontend applies them
+            float musicGain = GameMusicPlayer.MasterGain(s.MusicVolume);
+            if (_music != null) _music.MasterVolume = musicGain;
+            if (_sfx != null)
+            {
+                _sfx.SfxMasterVolume = GameMusicPlayer.MasterGain(s.SfxVolume);
+                _sfx.StreamMasterVolume = musicGain;
+            }
+        }
         // while the cursor is on that row the paused music plays, so a change is heard as it's made (owner 2026-10-05);
         // the sound effects stay paused
         bool musicPaused = paused && PauseMenu?.MusicRowFocused != true;

@@ -100,7 +100,7 @@ namespace MphRead.Entities
                 if (!_invSetUp)
                 {
                     _parent.GetDrawInfo(); // force update transforms
-                    _invPos = Matrix.Vec3MultMtx4(Position, _parent.CollisionTransform.Inverted());
+                    _invPos = Matrix.Vec3MultMtx4(Position, DetMatrix.Inverted(_parent.CollisionTransform));
                     _invSetUp = true;
                 }
                 Position = Matrix.Vec3MultMtx4(_invPos, _parent.CollisionTransform);

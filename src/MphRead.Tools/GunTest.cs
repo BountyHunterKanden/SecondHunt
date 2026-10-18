@@ -40,6 +40,27 @@ namespace MphRead
                 Colours();
                 return;
             }
+            if (args.Length >= 2 && args[1] == "beamtint")
+            {
+                BeamTint(args.Length >= 3 ? Enum.Parse<Hunter>(args[2]) : Hunter.Sylux, args.Length >= 4 ? args[3] : null);
+                return;
+            }
+            if (args.Length >= 2 && args[1] == "vanillabeams")
+            {
+                VanillaBeams(args.Length >= 3 ? Enum.Parse<Hunter>(args[2]) : Hunter.Sylux);
+                return;
+            }
+            if (args.Length >= 2 && args[1] == "vanilla")
+            {
+                Vanilla(args.Length >= 3 ? Enum.Parse<Hunter>(args[2]) : Hunter.Sylux);
+                return;
+            }
+            if (args.Length >= 3 && args[1] == "clips")
+            {
+                Clips(args[2], args.Length >= 4 ? Enum.Parse<Hunter>(args[3]) : Hunter.Sylux, args.Length >= 5 ? args[4] : "MP3 PROVING GROUND",
+                    args.Length >= 6 ? args[5] : "");
+                return;
+            }
             string room = args.Length >= 2 ? args[1] : "UNIT2_LAND";
             string dir = args.Length >= 3 ? args[2] : DefaultGunDir;
             string scaleArg = args.Length >= 4 ? args[3] : "cfg";
@@ -140,6 +161,7 @@ namespace MphRead
                 (2, 0, BeamType.Battlehammer, "battlehammer"), (70, 0, BeamType.None, ""),
                 (2, 0, BeamType.Judicator, "judicator"), (70, 0, BeamType.None, ""),
                 (2, 0, BeamType.ShockCoil, "shock coil"), (70, 0, BeamType.None, ""),
+                (90, CampaignButtons.Shoot, BeamType.None, "shock coil held"), (60, 0, BeamType.None, "released"),
                 (2, 0, BeamType.Imperialist, "imperialist"), (70, 0, BeamType.None, "")
             };
             using var gx = new PcGx(gun, dir, W, H);
@@ -214,6 +236,369 @@ namespace MphRead
             string file = Path.Combine(outDir, "gun_test.gif");
             gif.SaveAsGif(file);
             Console.WriteLine($"  wrote {file} ({gif.Frames.Count} frames)");
+        }
+
+        // -guntest beamtint [hunter]: a match as the hunter, each beam equipped in turn; the light colour the app tints a Prime
+        // gun's glow with (GunViewmodel.TryMphLightColour on the hunter's own MPH gun) per beam; with a gun dir, that Prime gun
+        // at rest in first person per beam, as extract_out/campaign/gun_clips/beamtint/<NN_beam>.png
+        private static void BeamTint(Hunter hunter, string? dir)
+        {
+            W = 800;
+            H = 450;
+            var settings = MphRecomp.Multiplayer.MatchSettings.Quick(GameMode.Battle, "MP3 PROVING GROUND", hunter, 1);
+            settings.Players[1].BotLevel = 0;
+            using CampaignHost host = CampaignHost.StartMatch(settings, collectDrawItems: true, viewWidth: 1920, viewHeight: 1080);
+            var input = new CampaignInput();
+            int alive = 0;
+            for (int i = 0; i < 3000 && !host.Ended && alive < 90; i++)
+            {
+                host.Step(input);
+                alive = host.Player.Health > 0 ? alive + 1 : 0;
+            }
+            PlayerEntity player = host.Player;
+            string mphGun = Metadata.HunterModels[player.Hunter][3];
+            HdGun? gun = dir != null ? HdGun.Load(Path.Combine(dir, "gun.bin")) : null;
+            GunViewmodel? vm = gun != null ? new GunViewmodel(gun) : null;
+            using PcGx? gx = gun != null ? new PcGx(gun, dir!, W, H) : null;
+            string? outDir = gun != null ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "campaign", "gun_clips", "beamtint")) : null;
+            if (outDir != null) Directory.CreateDirectory(outDir);
+            var ammo = (int[])typeof(PlayerEntity).GetField("_ammo", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(player)!;
+            foreach (BeamType beam in new[] { BeamType.PowerBeam, BeamType.VoltDriver, BeamType.Missile, BeamType.Battlehammer, BeamType.Imperialist,
+                BeamType.Judicator, BeamType.Magmaul, BeamType.ShockCoil, BeamType.OmegaCannon })
+            {
+                player.AvailableWeapons[beam] = true;
+                ammo[0] = ammo[1] = 100;
+                bool ok = player.HostEquipWeapon(beam);
+                for (int i = 0; i < 40; i++) host.Step(input);
+                bool drawn = GunViewmodel.TryMphLightColour(host.Scene, out Vector3 tint, mphGun);
+                Console.WriteLine($"  {beam,-13} equipped {ok,-5} gun drawn {drawn,-5} tint {tint.X * 255:0},{tint.Y * 255:0},{tint.Z * 255:0}");
+                if (gx != null && vm != null)
+                {
+                    vm.Update(player, 1 / 60f);
+                    vm.PoseClip("powerBasePosition", 0);
+                    Matrix4 model = vm.ModelMatrix(player, vm.Gun.Scale, vm.RestMuzzle());
+                    using var panel = new Image<Rgba32>(W, H, new Rgba32(22, 24, 28));
+                    gx.Render(vm, model, host.Scene.ViewMatrix, host.Scene.PerspectiveMatrix, tint, 0, panel, 0);
+                    panel.SaveAsPng(Path.Combine(outDir!, $"{(int)beam:00}_{beam}.png"));
+                }
+            }
+        }
+
+        // -guntest vanillabeams [hunter]: what the per-beam gun animations (GunAnimationIds columns 1-9, the Idle row) change on
+        // the hunter's MPH gun model: which materials they recolour (diffuse at frame 0) and which they swap textures on
+        private static void VanillaBeams(Hunter hunter)
+        {
+            string gunName = Metadata.HunterModels[hunter][3];
+            ModelInstance inst = Read.GetModelInstance(gunName, noCache: true);
+            Model model = inst.Model;
+            Console.WriteLine($"  {gunName} materials:");
+            foreach (Material m in model.Materials)
+            {
+                Console.WriteLine($"    {m.Name,-24} diffuse {m.Diffuse.Red},{m.Diffuse.Green},{m.Diffuse.Blue}");
+            }
+            for (int c = 1; c < 10; c++)
+            {
+                int id = Metadata.GunAnimationIds[(int)hunter, (int)GunAnimation.Idle, c];
+                var beam = (BeamType)(c - 1);
+                if (id < 0)
+                {
+                    Console.WriteLine($"  {beam,-13} (none)");
+                    continue;
+                }
+                MaterialAnimationGroup mg = model.AnimationGroups.Material[id];
+                TextureAnimationGroup tg = model.AnimationGroups.Texture[id];
+                TexcoordAnimationGroup cg = model.AnimationGroups.Texcoord[id];
+                inst.SetAnimation(id, slot: 0, SetFlags.Material | SetFlags.Texture | SetFlags.Texcoord);
+                inst.AnimInfo.Frame[0] = 0;
+                model.AnimateMaterials(inst.AnimInfo);
+                var parts = new List<string>();
+                foreach (string name in mg.Animations.Keys.OrderBy(x => x))
+                {
+                    Material m = model.Materials.First(x => x.Name == name);
+                    Vector3 d = m.CurrentDiffuse * 255;
+                    parts.Add($"{name}=({d.X:0},{d.Y:0},{d.Z:0})");
+                }
+                Console.WriteLine($"  {beam,-13} anim {id,2}: colour {string.Join(" ", parts)}" +
+                    $"{(tg.Animations.Count > 0 ? " | textures on " + string.Join(",", tg.Animations.Keys) : "")}" +
+                    $"{(cg.Animations.Count > 0 ? " | uv on " + string.Join(",", cg.Animations.Keys) : "")}");
+            }
+        }
+
+        // -guntest clips <gun dir> [hunter=Sylux] [arena="MP3 PROVING GROUND"] [animation name (default: all)]: every animation in gun.bin played alone on
+        // Prime's clock (30 fps), for judging each one by eye: per animation a folder of 1600x900 frames under
+        // extract_out/campaign/gun_clips/<gun>/<animation>/ -- top: MPH's own gun of that hunter (flat, its size and place)
+        // | the Prime gun where the device draws it (a match, first person); bottom: the Prime gun from its right side and
+        // from the front, cameras fixed on its resting pose. ffmpeg makes the videos.
+        // -guntest vanilla [hunter]: the hunter's own MPH first-person gun model (SyluxGun ...) playing each of its 13 gun
+        // states (Metadata.GunAnimationIds column 0: the node motion; the per-beam columns only recolour), flat shaded from
+        // two fixed sides, as extract_out/campaign/gun_clips/vanilla_<gun>/<NN_state>/NNNN.png; then which states are the
+        // same motion (every node matrix, every frame, within 1e-4)
+        private static void Vanilla(Hunter hunter)
+        {
+            W = 800;
+            H = 450;
+            string gunName = Metadata.HunterModels[hunter][3];
+            ModelInstance inst = Read.GetModelInstance(gunName, noCache: true);
+            Model model = inst.Model;
+            var nodeIdx = model.Nodes.Select((x, i) => (x, i)).ToDictionary(p => p.x, p => p.i);
+            var states = Enum.GetValues<GunAnimation>().OrderBy(x => (int)x).ToArray();
+            int[] ids = states.Select(st => Metadata.GunAnimationIds[(int)hunter, (int)st, 0]).ToArray();
+            // per state: every frame's node matrices and posed triangles (gun model space)
+            var nodeMats = new List<Matrix4[]>[states.Length];
+            var frames = new List<List<Tri>>[states.Length];
+            for (int si = 0; si < states.Length; si++)
+            {
+                nodeMats[si] = new List<Matrix4[]>();
+                frames[si] = new List<List<Tri>>();
+                if (ids[si] < 0) continue;
+                inst.SetAnimation(ids[si], slot: 0, SetFlags.Node);
+                AnimationInfo info = inst.AnimInfo;
+                int n = Math.Max(1, info.FrameCount[0]);
+                for (int f = 0; f < n; f++)
+                {
+                    info.Frame[0] = f;
+                    model.ComputeNodeMatrices(0);
+                    model.AnimateNodes(0, false, Matrix4.Identity, model.Scale, info);
+                    model.UpdateMatrixStack();
+                    nodeMats[si].Add(model.Nodes.Select(x => x.Animation).ToArray());
+                    var tris = new List<Tri>();
+                    IReadOnlyList<float> stack = model.MatrixStackValues;
+                    foreach (Node node in model.Nodes)
+                    {
+                        if (!node.Enabled) continue;
+                        for (int mi = node.MeshId / 2; mi < node.MeshId / 2 + node.MeshCount; mi++)
+                        {
+                            float[] v = DsDisplayList.Decode(model, model.Meshes[mi], false);
+                            int stride = DsDisplayList.Stride;
+                            for (int i = 0; i + 3 * stride <= v.Length; i += 3 * stride)
+                            {
+                                var t = new Tri();
+                                for (int k = 0; k < 3; k++)
+                                {
+                                    int o = i + k * stride;
+                                    Matrix4 m = node.Animation;
+                                    if (model.NodeMatrixIds.Count > 0)
+                                    {
+                                        int sIdx = (int)(v[o + 12] + 0.5f) * 16;
+                                        if (sIdx + 15 < stack.Count)
+                                        {
+                                            m = new Matrix4(stack[sIdx], stack[sIdx + 1], stack[sIdx + 2], stack[sIdx + 3], stack[sIdx + 4], stack[sIdx + 5],
+                                                stack[sIdx + 6], stack[sIdx + 7], stack[sIdx + 8], stack[sIdx + 9], stack[sIdx + 10], stack[sIdx + 11],
+                                                stack[sIdx + 12], stack[sIdx + 13], stack[sIdx + 14], stack[sIdx + 15]);
+                                        }
+                                    }
+                                    t.V[k] = (new Vector4(v[o], v[o + 1], v[o + 2], 1) * m).Xyz;
+                                }
+                                // lit by its model-space normal (the raster's screen-space shade flattens a model this small), each
+                                // node its own hue so the parts that move stand apart
+                                Vector3 fn = Vector3.Cross(t.V[1] - t.V[0], t.V[2] - t.V[0]);
+                                float lit = fn.LengthSquared > 1e-20f ? 0.45f + 0.55f * MathF.Abs(Vector3.Dot(fn.Normalized(), new Vector3(0.4f, 0.8f, -0.45f).Normalized())) : 0.6f;
+                                float hue = (nodeIdx[node] * 0.618034f) % 1f;
+                                Vector3 rgb = new Vector3(0.55f + 0.45f * MathF.Cos(6.2832f * hue), 0.55f + 0.45f * MathF.Cos(6.2832f * (hue - 0.333f)), 0.55f + 0.45f * MathF.Cos(6.2832f * (hue - 0.667f)));
+                                t.Colour = new Rgba32((byte)(255 * rgb.X * lit), (byte)(255 * rgb.Y * lit), (byte)(255 * rgb.Z * lit));
+                                tris.Add(t);
+                            }
+                        }
+                    }
+                    frames[si].Add(tris);
+                }
+                Console.WriteLine($"  {(int)states[si],2} {states[si],-18} anim {ids[si],2}: {n} frames ({n / 30f:0.00} s at 30 fps)");
+            }
+            // fixed cameras around the idle pose
+            int idle = Array.IndexOf(states, GunAnimation.Idle);
+            (Vector3 lo, Vector3 hi) = Bounds(frames[idle][0].SelectMany(t => t.V));
+            Vector3 c = (lo + hi) / 2;
+            float r = (hi - lo).Length / 2;
+            Matrix4 proj = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(30), W / (float)H, r * 0.05f, r * 40);
+            Matrix4 sideVp = Matrix4.LookAt(c + new Vector3(2.6f * r, 0.5f * r, 0), c, Vector3.UnitY) * proj;
+            Matrix4 threeVp = Matrix4.LookAt(c + new Vector3(-1.4f * r, 1.0f * r, -2.2f * r), c, Vector3.UnitY) * proj;
+            string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "campaign", "gun_clips", "vanilla_" + gunName));
+            for (int si = 0; si < states.Length; si++)
+            {
+                if (frames[si].Count == 0) continue;
+                string d = Path.Combine(root, $"{si + 1:00}_{states[si]}");
+                Directory.CreateDirectory(d);
+                int n = frames[si].Count;
+                int total = n == 1 ? 60 : n + 15;
+                for (int k = 0; k < total; k++)
+                {
+                    List<Tri> tris = frames[si][Math.Min(k, n - 1)];
+                    var img = new Image<Rgba32>(2 * W, H, new Rgba32(22, 24, 28));
+                    var panel = new Image<Rgba32>(W, H, new Rgba32(22, 24, 28));
+                    Raster(panel, 0, tris, sideVp);
+                    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) img[x, y] = panel[x, y];
+                    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) panel[x, y] = new Rgba32(22, 24, 28);
+                    Raster(panel, 0, tris, threeVp);
+                    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) img[W + x, y] = panel[x, y];
+                    img.SaveAsPng(Path.Combine(d, $"{k:0000}.png"));
+                }
+            }
+            // which states are the same motion
+            Console.WriteLine("  identical motion (every node, every frame, within 1e-4, forwards or reversed):");
+            for (int a = 0; a < states.Length; a++)
+            {
+                for (int b = a + 1; b < states.Length; b++)
+                {
+                    if (nodeMats[a].Count == 0 || nodeMats[b].Count == 0) continue;
+                    string same;
+                    if (ids[a] == ids[b]) same = "SAME ANIMATION (same id)";
+                    else if (nodeMats[a].Count != nodeMats[b].Count) continue;
+                    else
+                    {
+                        // forwards, and backwards (one state the other played in reverse)
+                        int n = nodeMats[a].Count;
+                        float fwd = 0, rev = 0;
+                        for (int f = 0; f < n; f++)
+                            for (int j = 0; j < nodeMats[a][f].Length; j++)
+                                for (int q = 0; q < 16; q++)
+                                {
+                                    fwd = MathF.Max(fwd, MathF.Abs(nodeMats[a][f][j][q / 4, q % 4] - nodeMats[b][f][j][q / 4, q % 4]));
+                                    rev = MathF.Max(rev, MathF.Abs(nodeMats[a][f][j][q / 4, q % 4] - nodeMats[b][n - 1 - f][j][q / 4, q % 4]));
+                                }
+                        if (fwd <= 1e-4f) same = $"identical (max {fwd:0.######})";
+                        else if (rev <= 1e-4f) same = $"the same motion in reverse (max {rev:0.######})";
+                        else continue;
+                    }
+                    Console.WriteLine($"    {states[a]} = {states[b]}: {same}");
+                }
+            }
+            // and how far each moves at all (a state that never leaves the idle pose)
+            Matrix4[] rest = nodeMats[idle][0];
+            for (int si = 0; si < states.Length; si++)
+            {
+                float max = 0;
+                foreach (Matrix4[] fm in nodeMats[si])
+                    for (int j = 0; j < fm.Length; j++) max = MathF.Max(max, (fm[j].ExtractTranslation() - rest[j].ExtractTranslation()).Length);
+                Console.WriteLine($"    {states[si],-18} furthest any node gets from the idle pose: {max:0.####}");
+            }
+            Console.WriteLine($"  wrote {root}");
+        }
+
+        private static void Clips(string dir, Hunter hunter, string arena, string only)
+        {
+            W = 800;
+            H = 450;
+            HdGun gun = HdGun.Load(Path.Combine(dir, "gun.bin"));
+            var vm = new GunViewmodel(gun);
+            var settings = MphRecomp.Multiplayer.MatchSettings.Quick(GameMode.Battle, arena, hunter, 1);
+            settings.Players[1].BotLevel = 0;
+            using CampaignHost host = CampaignHost.StartMatch(settings, collectDrawItems: true, viewWidth: 1920, viewHeight: 1080);
+            var input = new CampaignInput();
+            int alive = 0;
+            for (int i = 0; i < 3000 && !host.Ended && alive < 90; i++)
+            {
+                host.Step(input);
+                alive = host.Player.Health > 0 ? alive + 1 : 0;
+            }
+            PlayerEntity player = host.Player;
+            Scene scene = host.Scene;
+            string mphGun = Metadata.HunterModels[player.Hunter][3];
+            vm.Update(player, 1 / 60f);
+            Vector3 restMuzzle = vm.RestMuzzle();
+            Matrix4 model = vm.ModelMatrix(player, gun.Scale, restMuzzle);
+            // GUNCLIPS_AIM="yaw pitch [size]": the gun turned about its muzzle (degrees) and resized, for trying a placement
+            if (Environment.GetEnvironmentVariable("GUNCLIPS_AIM") is { Length: > 0 } aim)
+            {
+                float[] v = aim.Split(' ').Select(x => Single.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                var m = new Vector3(0, 0, Fixed.ToFloat(player.Values.MuzzleOffset));
+                Matrix4 toGun = player.GunDrawTransform.Inverted();
+                model = model * toGun * Matrix4.CreateTranslation(-m) * Matrix4.CreateScale(v.Length > 2 ? v[2] : 1)
+                    * Matrix4.CreateRotationX(MathHelper.DegreesToRadians(v[1])) * Matrix4.CreateRotationY(MathHelper.DegreesToRadians(v[0]))
+                    * Matrix4.CreateTranslation(m) * player.GunDrawTransform;
+            }
+            Matrix4 viewProj = scene.ViewMatrix * scene.PerspectiveMatrix;
+            List<Tri> mph = MphGunTriangles(scene, player, world: true, gunModel: mphGun);
+            GunViewmodel.TryMphLightColour(scene, out Vector3 tint, mphGun);
+            // the side cameras: around the resting gun, in the player's view axes
+            (Vector3 lo, Vector3 hi) = Bounds(SkinnedTriangles(vm, model).SelectMany(t => t.V));
+            Vector3 c = (lo + hi) / 2;
+            float r = (hi - lo).Length / 2;
+            Matrix4 camWorld = scene.ViewMatrix.Inverted();
+            Vector3 right = camWorld.Row0.Xyz.Normalized(), up = camWorld.Row1.Xyz.Normalized(), back = camWorld.Row2.Xyz.Normalized();
+            Matrix4 sideProj = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(30), W / (float)H, r * 0.05f, r * 40);
+            Matrix4 sideView = Matrix4.LookAt(c + right * 2.3f * r + up * 0.4f * r, c, up);
+            Matrix4 frontView = Matrix4.LookAt(c - back * 1.9f * r - right * 0.9f * r + up * 0.7f * r, c, up);
+            // both guns in gun space (MPH's gun matrix undone), for placing a Prime gun over the hunter's own
+            {
+                Matrix4 toGun = player.GunDrawTransform.Inverted();
+                List<Vector3> mg = MphGunTriangles(scene, player, gunModel: mphGun).SelectMany(t => t.V).ToList();
+                List<Vector3> pg = SkinnedTriangles(vm, model * toGun).SelectMany(t => t.V).ToList();
+                (Vector3 a0, Vector3 a1) = Bounds(mg);
+                (Vector3 b0, Vector3 b1) = Bounds(pg);
+                Console.WriteLine($"  gun space: MPH {mphGun} min {a0} max {a1}; Prime min {b0} max {b1}; MPH muzzle z {Fixed.ToFloat(player.Values.MuzzleOffset):0.####}");
+                foreach (float z in new[] { 0.6f, 0.4f, 0.2f, 0f, -0.2f, -0.4f, -0.6f })
+                {
+                    List<Vector3> sl = mg.Where(v => MathF.Abs(v.Z - z) < 0.05f).ToList();
+                    if (sl.Count == 0) continue;
+                    (Vector3 s0, Vector3 s1) = Bounds(sl);
+                    Console.WriteLine($"    MPH slice z {z,5:0.0}: x [{s0.X:0.###}, {s1.X:0.###}] y [{s0.Y:0.###}, {s1.Y:0.###}]");
+                }
+                Console.WriteLine($"    principal axis: MPH {Axis(mg)}, Prime {Axis(pg)}");
+                static Vector3 Axis(List<Vector3> pts)
+                {
+                    Vector3 m = Vector3.Zero;
+                    foreach (Vector3 v in pts) m += v;
+                    m /= pts.Count;
+                    var c = new double[9];
+                    foreach (Vector3 v in pts)
+                    {
+                        Vector3 d = v - m;
+                        float[] e = { d.X, d.Y, d.Z };
+                        for (int r = 0; r < 9; r++) c[r] += e[r / 3] * e[r % 3];
+                    }
+                    Vector3 ax = Vector3.UnitZ;
+                    for (int i = 0; i < 100; i++) ax = new Vector3((float)(c[0] * ax.X + c[1] * ax.Y + c[2] * ax.Z), (float)(c[3] * ax.X + c[4] * ax.Y + c[5] * ax.Z), (float)(c[6] * ax.X + c[7] * ax.Y + c[8] * ax.Z)).Normalized();
+                    return ax.Z < 0 ? -ax : ax;
+                }
+            }
+            Console.WriteLine($"  {player.Hunter} ({mphGun}): {mph.Count} MPH gun tris; Prime gun {gun.BoneCount} bones, scale {gun.Scale}, "
+                + $"rest size {hi - lo}; {gun.Anims.Count} animations");
+            string outRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "campaign",
+                "gun_clips", Path.GetFileName(dir.TrimEnd('\\', '/'))));
+            using var gx = new PcGx(gun, dir, W, H);
+            var panel = new Image<Rgba32>(W, H);
+            foreach (HdGun.Anim a in gun.Anims.Values)
+            {
+                if (only.Length > 0 && a.Name != only) continue;
+                string clipDir = Path.Combine(outRoot, a.Name);
+                if (Directory.Exists(clipDir)) Directory.Delete(clipDir, recursive: true);
+                Directory.CreateDirectory(clipDir);
+                // a held pose: 2 s; a clip: its length, then half a second on its last frame
+                int n = a.Keys <= 1 ? 60 : (int)MathF.Ceiling(a.Duration * 30) + 1 + 15;
+                for (int k = 0; k < n; k++)
+                {
+                    float t = MathF.Min(k / 30f, a.Duration);
+                    vm.PoseClip(a.Name, t);
+                    // GUNCLIPS_BIND=1: every bone at its bind pose instead (the mesh as authored, as the third-person body shows it)
+                    // (moved rigidly so the forearm joint sits where the clip puts it)
+                    if (Environment.GetEnvironmentVariable("GUNCLIPS_BIND") == "1")
+                    {
+                        int fa = vm.Gun.BoneIndex("arm_R0_forearm_jnt");
+                        Matrix4 move = fa >= 0 ? vm.Gun.InvBind[fa] * vm.World[fa] : Matrix4.Identity;
+                        for (int b = 0; b < vm.World.Length; b++) vm.World[b] = vm.Gun.InvBind[b].Inverted() * move;
+                    }
+                    var img = new Image<Rgba32>(2 * W, 2 * H, new Rgba32(22, 24, 28));
+                    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) panel[x, y] = new Rgba32(22, 24, 28);
+                    Raster(panel, 0, mph, viewProj);
+                    Crosshair(panel, 0);
+                    Blit(panel, img, 0, 0);
+                    gx.Render(vm, model, scene.ViewMatrix, scene.PerspectiveMatrix, tint, t, panel, 0);
+                    Crosshair(panel, 0);
+                    Blit(panel, img, W, 0);
+                    gx.Render(vm, model, sideView, sideProj, tint, t, panel, 0);
+                    Blit(panel, img, 0, H);
+                    gx.Render(vm, model, frontView, sideProj, tint, t, panel, 0);
+                    Blit(panel, img, W, H);
+                    img.SaveAsPng(Path.Combine(clipDir, $"{k:0000}.png"));
+                    img.Dispose();
+                }
+                Console.WriteLine($"  {a.Name}: {a.Keys} keys, {a.Duration:0.00} s -> {n} frames");
+            }
+            Console.WriteLine($"  wrote {outRoot}");
+            static void Blit(Image<Rgba32> src, Image<Rgba32> dst, int ox, int oy)
+            {
+                for (int y = 0; y < src.Height; y++) for (int x = 0; x < src.Width; x++) dst[ox + x, oy + y] = src[x, y];
+            }
         }
 
         // -guntest colours: MPH's SamusGun per weapon -- every material's colours as drawn (the per-weapon material
@@ -601,7 +986,7 @@ namespace MphRead
         }
 
         // MPH's own first-person gun as drawn this frame: world space, or gun space (MPH's gun matrix undone)
-        private static List<Tri> MphGunTriangles(Scene scene, PlayerEntity player, bool world = false)
+        private static List<Tri> MphGunTriangles(Scene scene, PlayerEntity player, bool world = false, string gunModel = "SamusGun")
         {
             var tris = new List<Tri>();
             Matrix4 toGun = player.GunDrawTransform.Inverted();
@@ -614,7 +999,7 @@ namespace MphRead
                         continue;
                     }
                     (Model model, Mesh mesh, bool isRoom) = scene.HostMeshes[item.ListId - 1];
-                    if (model.Name != "SamusGun")
+                    if (model.Name != gunModel)
                     {
                         continue;
                     }

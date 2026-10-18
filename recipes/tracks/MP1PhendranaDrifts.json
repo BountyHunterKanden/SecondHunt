@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Phendrana Drifts",
+  "group": "Phendrana Drifts",
+  "role": "area",
+  "files": [
+    { "name": "Audio/ice_worldmainL.dsp", "sha1": "9bd8fca68759700ec8ba42234dd6cea3949ce9cb" },
+    { "name": "Audio/ice_worldmainR.dsp", "sha1": "172ccf3b2e6768e11403090af01dd6cd25bc6ca4" }
+  ],
+  "gain": 1.016
+}

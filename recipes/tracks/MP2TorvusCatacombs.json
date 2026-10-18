@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Torvus Catacombs",
+  "group": "Torvus Bog",
+  "role": "area",
+  "files": [
+    { "name": "Audio/swanp-chika32.dsp", "sha1": "d8ecdcda8a034f427c16ab056355aa13ab6eca94" }
+  ],
+  "gain": 0.687
+}

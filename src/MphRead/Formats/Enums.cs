@@ -106,7 +106,9 @@ namespace MphRead
         Deathalt = 20,
         AffinityWeapon = 21,
         PickWpnMissile = 22,
-        PirateBlaster = 23 // recomp: the Prime 1 pirate beam pickup (Metadata/PirateBlaster.cs)
+        PirateBlaster = 23, // recomp: the Prime 1 pirate beam pickup (Metadata/PirateBlaster.cs)
+        // (24 = the Hyper Beam's, reserved: docs/DARK_SAMUS_HYPER.md)
+        Paralyzer = 25 // recomp: Zero Suit Samus's Paralyzer pickup (Metadata/Paralyzer.cs)
     }
 
     public enum FhItemType : int
@@ -138,7 +140,10 @@ namespace MphRead
         Enemy = 10,
         // recomp: the Prime 1 pirate beam (multiplayer pickup, the Trooper's affinity weapon; Metadata/PirateBlaster.cs).
         // After Enemy so vanilla's numbers (ROM tables, the +9 affinity rows, Platform = "no beam" online) stay as they were
-        PirateBlaster = 11
+        PirateBlaster = 11,
+        // (12 = the Hyper Beam's, reserved: docs/DARK_SAMUS_HYPER.md)
+        // recomp: Zero Suit Samus's Paralyzer (multiplayer pickup, her affinity weapon; Metadata/Paralyzer.cs)
+        Paralyzer = 13
     }
 
     [Flags]
@@ -153,7 +158,8 @@ namespace MphRead
         Magmaul = 1 << BeamType.Magmaul,
         ShockCoil = 1 << BeamType.ShockCoil,
         OmegaCannon = 1 << BeamType.OmegaCannon,
-        PirateBlaster = 1 << BeamType.PirateBlaster // recomp
+        PirateBlaster = 1 << BeamType.PirateBlaster, // recomp
+        Paralyzer = 1 << BeamType.Paralyzer // recomp
     }
 
     public enum BombType : byte

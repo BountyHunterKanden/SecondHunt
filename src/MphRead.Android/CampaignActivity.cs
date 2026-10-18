@@ -78,9 +78,31 @@ public class CampaignActivity : Activity
         HideSystemUi();
     }
 
+    TextView? _panel; // the centred text panel (the ship's save prompt, game over, a match's results)
+
+    // the panel's line (of its text, by newlines) under window pixel (x, y); null off its text
+    int? PanelLine(float x, float y)
+    {
+        TextView? p = _panel;
+        if (p == null || p.Visibility != ViewStates.Visible || p.Layout is not Android.Text.Layout layout)
+        {
+            return null;
+        }
+        var at = new int[2];
+        p.GetLocationInWindow(at);
+        float px = x - at[0] - p.TotalPaddingLeft, py = y - at[1] - p.TotalPaddingTop + p.ScrollY;
+        if (px < 0 || py < 0 || px >= layout.Width || py >= layout.Height)
+        {
+            return null;
+        }
+        string text = p.Text ?? "";
+        int start = Math.Min(layout.GetLineStart(layout.GetLineForVertical((int)py)), text.Length);
+        return text.AsSpan(0, start).Count('\n');
+    }
+
     void AttachPanel(FrameLayout root)
     {
-        var panel = new TextView(this) { TextSize = 17f, Visibility = ViewStates.Gone };
+        var panel = _panel = new TextView(this) { TextSize = 17f, Visibility = ViewStates.Gone };
         panel.SetTypeface(Typeface.Monospace, TypefaceStyle.Normal);
         panel.SetTextColor(Color.Rgb(200, 255, 220));
         panel.SetBackgroundColor(Color.Argb(215, 4, 18, 24));
@@ -94,10 +116,46 @@ public class CampaignActivity : Activity
         });
         _renderer.ExitSink = () => RunOnUiThread(() =>
         {
-            StartActivity(new Intent(this, typeof(MainActivity)).AddFlags(ActivityFlags.ClearTop | ActivityFlags.SingleTop));
+            // a First Hunt game started from its own menus (FirstHuntActivity) goes back to them
+            if (Intent?.GetStringExtra("fhmenu") == null)
+                StartActivity(new Intent(this, typeof(MainActivity)).AddFlags(ActivityFlags.ClearTop | ActivityFlags.SingleTop));
             Finish();
         });
         _renderer.ChatBoxRequested = () => RunOnUiThread(ShowChatBox); // an online match's typed chat (MatchChat.cs)
+        _renderer.MapTextRequested = (hint, done) => RunOnUiThread(() => ShowNameBox(hint, done)); // PRIME map split reports
+    }
+
+    // the PRIME map's split report (PrimeMap.Report.cs): a name typed with the soft keyboard; done gets the text, or null
+    // when cancelled (on this thread: the map picks it up on its next tick)
+    void ShowNameBox(string hint, Action<string?> done)
+    {
+        var edit = new EditText(this) { Hint = hint };
+        edit.SetSingleLine(true);
+        edit.ImeOptions = Android.Views.InputMethods.ImeAction.Done;
+        edit.SetFilters(new Android.Text.IInputFilter[] { new Android.Text.InputFilterLengthFilter(32) });
+        string? typed = null;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .SetView(edit)!
+            .SetPositiveButton("OK", (_, _) => typed = edit.Text)!
+            .SetNegativeButton("CANCEL", (_, _) => { })!
+            .Create()!;
+        edit.EditorAction += (_, e) =>
+        {
+            e.Handled = e.ActionId == Android.Views.InputMethods.ImeAction.Done
+                || e.Event?.KeyCode is Keycode.Enter && e.Event.Action == KeyEventActions.Down;
+            if (!e.Handled) return;
+            typed = edit.Text;
+            dialog.Dismiss();
+        };
+        dialog.DismissEvent += (_, _) =>
+        {
+            done(typed);
+            HideSystemUi();
+        };
+        dialog.Window!.SetGravity(GravityFlags.Top);
+        dialog.Window.SetSoftInputMode(SoftInput.StateAlwaysVisible);
+        dialog.Show();
+        edit.RequestFocus();
     }
 
     // an online match's typed chat (Social O7, MatchChat.cs: a short Select / CHAT tap): one line with the soft keyboard, at the
@@ -151,6 +209,7 @@ public class CampaignActivity : Activity
 
     int _menuHatX, _menuHatY, _menuStickX, _menuStickY;
     float _menuTrigL, _menuTrigR; // the triggers while the pause menu is open (the control customizer's capture)
+    float _menuStickRy; // the right stick's up / down there: scrolls settings and CONTROLS (PauseOverlay.ScrollStick)
 
     static int Step(float v, float threshold) => v >= threshold ? 1 : v <= -threshold ? -1 : 0;
 
@@ -167,14 +226,18 @@ public class CampaignActivity : Activity
                 if (_renderer.PauseMenu?.CaptureDevice != null)
                 {
                     // the control customizer's capture: a trigger past half way, or a D-pad push (HAT on the Odin)
-                    string? name = l2 >= 0.5f && _menuTrigL < 0.5f ? "L2" : r2 >= 0.5f && _menuTrigR < 0.5f ? "R2"
-                        : hx != _menuHatX && hx != 0 ? (hx > 0 ? "DpadRight" : "DpadLeft")
-                        : hy != _menuHatY && hy != 0 ? (hy > 0 ? "DpadDown" : "DpadUp") : null;
-                    if (name != null) _renderer.PauseMenuInput(p => p.CaptureInput(name));
+                    CaptureAxes(name => _renderer.PauseMenuInput(p => p.CaptureInput(name)), l2, r2, hx, hy,
+                        _menuTrigL, _menuTrigR, _menuHatX, _menuHatY);
                     _menuHatX = hx; _menuHatY = hy; _menuStickX = sx; _menuStickY = sy; _menuTrigL = l2; _menuTrigR = r2;
                     return true;
                 }
                 _menuTrigL = l2; _menuTrigR = r2;
+                float ry = e.GetAxisValue(Axis.Rz);
+                if (Math.Abs(ry - _menuStickRy) > 0.05f || (Math.Abs(ry) < 0.3f) != (Math.Abs(_menuStickRy) < 0.3f))
+                {
+                    _menuStickRy = ry;
+                    _renderer.PauseMenuInput(p => p.ScrollStick(ry));
+                }
                 if (hx != _menuHatX && hx != 0) _renderer.PauseMenuInput(p => p.Navigate(hx, 0));
                 if (hy != _menuHatY && hy != 0) _renderer.PauseMenuInput(p => p.Navigate(0, -hy));
                 if (sx != _menuStickX && sx != 0) _renderer.PauseMenuInput(p => p.Navigate(sx, 0));
@@ -199,6 +262,25 @@ public class CampaignActivity : Activity
         return base.OnGenericMotionEvent(e);
     }
 
+    // the customizer's capture from the motion axes: each trigger crossing half way and each D-pad (HAT) push is a press,
+    // and going back is its release ("-" + name), so held buttons make a combo that commits once all are let go
+    internal static void CaptureAxes(Action<string> send, float l2, float r2, int hx, int hy, float prevL2, float prevR2,
+        int prevHx, int prevHy)
+    {
+        if ((l2 >= 0.5f) != (prevL2 >= 0.5f)) send(l2 >= 0.5f ? "L2" : "-L2");
+        if ((r2 >= 0.5f) != (prevR2 >= 0.5f)) send(r2 >= 0.5f ? "R2" : "-R2");
+        if (hx != prevHx)
+        {
+            if (prevHx != 0) send(prevHx > 0 ? "-DpadRight" : "-DpadLeft");
+            if (hx != 0) send(hx > 0 ? "DpadRight" : "DpadLeft");
+        }
+        if (hy != prevHy)
+        {
+            if (prevHy != 0) send(prevHy > 0 ? "-DpadDown" : "-DpadUp");
+            if (hy != 0) send(hy > 0 ? "DpadDown" : "DpadUp");
+        }
+    }
+
     // the controller buttons the game reads (Start, Select and Back are handled on their own)
     internal static PadButton? PadFor(Keycode k) => k switch
     {
@@ -221,32 +303,30 @@ public class CampaignActivity : Activity
 
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
     {
-        // the control customizer (from the ship's OPTIONS or RECOMP SETTINGS) waits for a controller button: the first
-        // press is the answer, Back / Start / Select keep the buttons as they are
+        // the control customizer (from the ship's OPTIONS or RECOMP SETTINGS) waits for a controller button: every
+        // press and release goes to it, held buttons make a combo (Select and R3 too since 2026-10-11), Back / Start keep the buttons as
+        // they are
         if (_renderer.PauseMenu?.CaptureDevice != null)
         {
             if (e?.RepeatCount == 0)
             {
-                if (PadFor(keyCode) is PadButton b)
+                if ((keyCode == Keycode.ButtonSelect ? PadButton.Select : PadFor(keyCode)) is PadButton b)
                 {
                     string name = b.ToString();
                     _renderer.PauseMenuInput(p => p.CaptureInput(name));
                 }
-                else if (keyCode is Keycode.Back or Keycode.ButtonStart or Keycode.ButtonSelect)
+                else if (keyCode is Keycode.Back or Keycode.ButtonStart)
                 {
                     _renderer.PauseMenuInput(p => p.CancelCapture());
                 }
             }
             return true;
         }
-        // Select ("View"): the pause map (CampaignMap.cs; owner 2026-10-03 -- first / third person is a RECOMP SETTINGS row now)
+        // Select ("View"), held: the customizer's "map / scoreboard" unless moved -- the pause map in the campaign
+        // (CampaignMap.MapFrame), a match's live scoreboard (MatchChat.cs MatchScoreboardHeld)
         if (keyCode == Keycode.ButtonSelect)
         {
-            if (e?.RepeatCount == 0 && !_renderer.PauseMenuOpen)
-            {
-                _renderer.SelectPressed();
-            }
-            _renderer.Pad.Set(PadButton.Select, true); // held: an online match's quick-message wheel (MatchChat.cs)
+            _renderer.Pad.Set(PadButton.Select, true);
             return true;
         }
         // Android's Back button / gesture never leaves the game (owner 2026-10-04): B in the pause menu, the ship's
@@ -320,10 +400,13 @@ public class CampaignActivity : Activity
 
     public override bool OnTouchEvent(MotionEvent? e)
     {
-        if (e != null && e.ActionMasked == MotionEventActions.Down && _renderer.PauseMenuOpen)
+        if (e != null && _renderer.PauseMenuOpen && e.ActionMasked is MotionEventActions.Down or MotionEventActions.Move
+            or MotionEventActions.Up or MotionEventActions.Cancel)
         {
+            // down, move, up, cancel: a drag scrolls settings and CONTROLS, a tap is a tap (FrontendSession.TouchCanvas)
             float x = e.GetX(), y = e.GetY();
-            _renderer.PauseMenuInput(p => p.Touch(x, y));
+            int kind = e.ActionMasked switch { MotionEventActions.Down => 0, MotionEventActions.Move => 1, MotionEventActions.Up => 2, _ => 3 };
+            _renderer.PauseMenuInput(p => p.Touch(x, y, kind));
             return true;
         }
         if (e != null && _renderer.MapOpen && e.ActionMasked is MotionEventActions.Down or MotionEventActions.Move or MotionEventActions.Up)
@@ -352,6 +435,25 @@ public class CampaignActivity : Activity
             }
             return true;
         }
+        // a match's results panel ("tap: back to the menu"; the touch controls do this while they are shown)
+        if (e != null && e.ActionMasked == MotionEventActions.Down && _renderer.MatchOver)
+        {
+            _renderer.RequestMatchContinue();
+            return true;
+        }
+        // the panel's rows: the ship's save prompt YES / NO, game over's rows (CampaignShip.cs ShipPanelTap; the touch
+        // controls pass these taps on)
+        if (e != null && e.ActionMasked == MotionEventActions.Down && _renderer.ShipPanelUp
+            && PanelLine(e.GetX(), e.GetY()) is int line && _renderer.ShipPanelTap(_panel!.Text ?? "", line))
+        {
+            return true;
+        }
+        // a dialog's own OK / YES / NO / page arrows (CampaignRenderer.DialogTouch.cs; the touch controls test them first
+        // while they are shown)
+        if (e != null && e.ActionMasked == MotionEventActions.Down && _renderer.DialogTouch(e.GetX(), e.GetY()))
+        {
+            return true;
+        }
         // taps during play belong to the touch controls (MatchTouchOverlay.cs, a view above the game: they never get
         // here while it is shown); the view stays WIDE (CampaignView.cs, board #30a)
         return base.OnTouchEvent(e);
@@ -359,6 +461,14 @@ public class CampaignActivity : Activity
 
     public override bool OnKeyUp(Keycode keyCode, KeyEvent? e)
     {
+        // a button let go while the customizer waits: the capture commits once every pressed button is up (combos)
+        if (_renderer.PauseMenu?.CaptureDevice != null
+            && (keyCode == Keycode.ButtonSelect ? PadButton.Select : PadFor(keyCode)) is PadButton released)
+        {
+            string name = "-" + released;
+            _renderer.PauseMenuInput(p => p.CaptureInput(name));
+            return true;
+        }
         if (PadFor(keyCode) is PadButton up)
         {
             _renderer.Pad.Set(up, false);

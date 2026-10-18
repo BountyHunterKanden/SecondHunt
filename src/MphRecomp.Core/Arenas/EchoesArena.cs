@@ -53,11 +53,36 @@ namespace MphRecomp.Arenas
         static EchoesArena()
         {
             MphRead.Entities.JumpPadEntity.HostSameArcBit = ArenaCannons.SameArcBit;
-            // (then the owner's baked pickup placements, any arena: PlacedPickups, last so the ids before them stay)
+            // (then the owner's baked pickup placements, any arena: PlacedPickups, so the ids before them stay; then
+            // Shooting Gallery's turret, after them so their ids stay too: EchoesTurret)
             SceneSetup.HostExtraEntities = (scene, room, entities) =>
-                PlacedPickups.Extra(scene, room, EchoesMovement.Extra(scene, room, EchoesBreakables.Extra(scene, room,
-                    EchoesCrates.Extra(scene, room, EchoesAmmo.Extra(scene, room, entities)))));
-            MphRead.Formats.CollisionDetection.HostEntityCollision = e => e is EchoesBreakableEntity;
+                EchoesTurret.Extra(scene, room, PlacedPickups.Extra(scene, room, EchoesMovement.Extra(scene, room, EchoesBreakables.Extra(scene, room,
+                    EchoesCrates.Extra(scene, room, EchoesAmmo.Extra(scene, room, entities))))));
+            MphRead.Formats.CollisionDetection.HostEntityCollision = e => e is EchoesBreakableEntity || e is EchoesTurretEntity || e is EchoesTurretBaseEntity;
+            MphRead.Entities.BeamProjectileEntity.HostHitPush = EchoesTurret.Knock;   // (only the turret's shots)
+            // the view before a match's first spawn (these rooms have no intro sequence): the arena picture's lens
+            MphRead.Entities.PlayerEntity.HostPreSpawnView = PreSpawnView;
+        }
+
+        // room name -> the arena picture's lens (ArenaThumbnail.ReadView); none yet (a picture still being drawn again
+        // in the background: RefreshStale) is looked for again a second later
+        static readonly Dictionary<string, ((Vector3 Eye, Vector3 Target)? View, long At)> _views = new();
+
+        static (Vector3 Eye, Vector3 Target)? PreSpawnView(Scene scene)
+        {
+            if (scene.Room?.Meta is not { } meta || HdDir(meta.Name) is not string hd) return null;
+            long now = Environment.TickCount64;
+            lock (_views)
+            {
+                if (_views.TryGetValue(hd, out var known) && (known.View != null || now - known.At < 1000)) return known.View;
+            }
+            (Vector3, Vector3)? view = null;
+            if (ArenaThumbnail.ReadView(hd) is { } v)
+            {
+                view = (new Vector3(v.Eye.X, v.Eye.Y, v.Eye.Z), new Vector3(v.Target.X, v.Target.Y, v.Target.Z));
+            }
+            lock (_views) _views[hd] = (view, now);
+            return view;
         }
 
         public sealed class Info
@@ -94,6 +119,9 @@ namespace MphRecomp.Arenas
             // pillars; T6 N3 2026-10-10): drawn in their own passes (EchoesStatics); absent in arenas without them
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             public List<StaticSpot>? Statics { get; set; }
+            // Shooting Gallery's manned turret and bomb slot (EchoesTurret); absent in arenas without one
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public TurretSpot? Turret { get; set; }
             public List<string> Notes { get; set; } = new();
         }
 
@@ -250,16 +278,18 @@ namespace MphRecomp.Arenas
         const uint NeedSkyId = 0x95D4BEE7, OverrideSkyId = 0xD208C9FA;   // AreaAttributes
 
         // into the MPH file system under root; the jump pads' launches are solved here when root is the game's own
-        public static Info Import(Pak metroid6, Def def, string root, float scale = DefaultScale, Action<string>? log = null)
-            => Import(metroid6, def, Layout.FileSystem(root, def), scale, null, log, fsRoot: root);
+        public static Info Import(Pak metroid6, Def def, string root, float scale = DefaultScale, Action<string>? log = null, Pak? audio = null, Pak? hud = null)
+            => Import(metroid6, def, Layout.FileSystem(root, def), scale, null, log, fsRoot: root, audio: audio, hud: hud);
 
         // tuned: the jump pads as a recipe holds them, one per cannon in ArenaCannons.Find's order (what a tuning run
         // left in arena.json's Cannons); null = solve them with MphRead's own player physics, which needs the arena
         // written into the game's file system (fsRoot == Paths.FileSystem). crates: the crates' weapons (null:
-        // CratePools'; empty: no crates). progress: (fraction, message)
+        // CratePools'; empty: no crates). progress: (fraction, message). audio: the disc's AudioGrp.pak (its sound lookup:
+        // the turret's sounds, EchoesTurret.ImportSounds; null: none). hud: the disc's NoARAM.pak (the turret HUD's textures,
+        // EchoesTurret.ImportHud; null: none)
         public static Info Import(Pak metroid6, Def def, Layout files, float scale, IReadOnlyList<ArenaCannons.Cannon>? tuned,
             Action<string>? log = null, Action<float, string>? progress = null, string? fsRoot = null, CancellationToken ct = default,
-            IReadOnlyList<ItemType>? crates = null)
+            IReadOnlyList<ItemType>? crates = null, Pak? audio = null, Pak? hud = null)
         {
             var info = new Info { Key = def.Key, Scale = scale };
             progress?.Invoke(0, $"{def.InGameName}: collision and objects");
@@ -376,6 +406,7 @@ namespace MphRecomp.Arenas
             // Echoes lights it at its centre; each pool's box and surface
             var placed = new List<ArenaHdWriter.Placed>();
             var fluids = new List<ArenaHdWriter.Fluid>();
+            TurretLook? turretLook = null;
             {
                 List<Mrea.Light>? breakLights = null;
                 foreach (Mrea.ScriptObject o in scripts.Where(o => o.Active && o.Layer == 0))
@@ -479,7 +510,11 @@ namespace MphRecomp.Arenas
                 }
                 breakLights ??= area.ReadLights()[0];
                 AddStatics(area, scripts, metroid6, Map, tris, ray, breakLights, info, placed);
+                // the turret, its hologram and the slot's ring (EchoesTurret.ImportLook): placed passes after the statics'
+                turretLook = EchoesTurret.ImportLook(metroid6, scripts, Map, scale, placed, p => EchoesCrates.Lighting(breakLights, p, Map, ray), info.Notes);
             }
+            // Shooting Gallery's turret and bomb slot (EchoesTurret): the disc's values, its collision mesh and its lift
+            info.Turret = EchoesTurret.Import(metroid6, scripts, Map, scale, info.Notes);
             // orb cannons -> jump pads (launch solved below, once the arena loads)
             List<ArenaCannons.Cannon> cannons = ArenaCannons.Find(scripts, ray, Map, scale, info.KillHeight, info.Notes);
             foreach (ArenaCannons.Cannon c in cannons) c.EntityId = id++;
@@ -491,7 +526,7 @@ namespace MphRecomp.Arenas
             progress?.Invoke(0.15f, $"{def.InGameName}: bot navigation");
             List<Vector3> anchors = ents.OfType<PlayerSpawnEntityEditor>().Select(e => e.Position).ToList();
             // the grates are solid (CollisionDetection.HostEntityCollision): bots walk on them, so the graph has no nodes on
-            // the pool floors under them that a bot on top can't reach (Echoes bot jitter [b71a8a])
+            // the pool floors under them that a bot on top can't reach
             ArenaRaycaster navRay = info.Breakables?.Any(b => b.Kind == "grate") == true
                 ? new ArenaRaycaster(tris.Concat(info.Breakables.Where(b => b.Kind == "grate").SelectMany(GrateTris)).ToList()) : ray;
             // the water's floors are left with the Gravity Boost (ArenaNav version 3)
@@ -516,6 +551,12 @@ namespace MphRecomp.Arenas
                 {
                     sky = os.U32;
                 }
+                // the turret's effects first: the models their particles draw join the placed passes (with the generated
+                // layer: the grates' break pieces are only there). An arena with grates and no turret (Sidehopper Station)
+                // gets the grates' break alone, in a turret.json of no pieces (no turret: that comes from the arena's spot)
+                List<Mrea.ScriptObject> withGenerated = area.ReadScripts(includeGenerated: true);
+                TurretLook? fxLook = turretLook ?? (EchoesTurret.GrateGenerator(withGenerated) != null ? new TurretLook() : null);
+                List<TurretFx>? turretFx = fxLook != null ? EchoesTurret.ImportFx(metroid6, withGenerated, Map, files.HdDir, info.Notes, placed, fxLook, gratesOnly: turretLook == null) : null;
                 ArenaHdWriter.Result hd = ArenaHdWriter.Write(area, metroid6, Map, files.HdDir, sky,
                     info.Crates.Count > 0 ? CrateModel : uint.MaxValue, CrateActorScale, placed, fluids);
                 info.HdTriangles = hd.Triangles;
@@ -528,6 +569,15 @@ namespace MphRecomp.Arenas
                         ? $"({hd.PropTriangles} triangles, {hd.PropMin.Y:0.00}..{hd.PropMax.Y:0.00} units about its origin)" : "NOT found"));
                 }
                 if (placed.Count > 0) info.Notes.Add($"breakable models: {hd.PlacedTriangles} triangles in {placed.Count} placements");
+                string turretFile = Path.Combine(files.HdDir, EchoesTurret.LookFile);
+                foreach (string old in Directory.GetFiles(files.HdDir, EchoesTurret.SoundFile("*"))) File.Delete(old);
+                if (turretLook != null) turretLook.Sounds = EchoesTurret.ImportSounds(metroid6, audio, scripts, scale, files.HdDir, info.Notes);
+                else if (fxLook != null) fxLook.Sounds = EchoesTurret.ImportSounds(metroid6, audio, withGenerated, scale, files.HdDir, info.Notes, gratesOnly: true);
+                if (fxLook != null) fxLook.Fx = turretFx;
+                if (turretLook != null) turretLook.Hud = EchoesTurret.ImportHud(hud, files.HdDir, info.Notes);
+                if (fxLook != null) File.WriteAllText(turretFile, JsonSerializer.Serialize(fxLook));
+                else if (File.Exists(turretFile)) File.Delete(turretFile);
+                if (fxLook == null && Directory.Exists(Path.Combine(files.HdDir, EchoesTurret.FxDir))) Directory.Delete(Path.Combine(files.HdDir, EchoesTurret.FxDir), true);
                 // the multiplayer menu's ARENA picture (Vanilla multiplayer menu M5): rendered from the HD look just
                 // written, aimed at the spawns and pickups (thumb.png beside it)
                 progress?.Invoke(0.75f, $"{def.InGameName}: the arena's picture");
@@ -536,7 +586,8 @@ namespace MphRecomp.Arenas
                     // (as the entity file stores them, so the PC tool's -mpmenu thumbs reading it back aims the same)
                     static float Fx(float v) => Fixed.ToFloat(Fixed.ToInt(v));
                     var focus = ents.Select(e => new System.Numerics.Vector3(Fx(e.Position.X), Fx(e.Position.Y), Fx(e.Position.Z))).ToList();
-                    if (ArenaThumbnail.Write(files.HdDir, focus, log: log, inside: true) == null) info.Notes.Add("thumbnail not written");
+                    // (with the breakables, static actors and crates as this import places them: arena.json comes after)
+                    if (ArenaThumbnail.Write(files.HdDir, focus, log: log, inside: true, extras: ArenaThumbnail.Extras(info)) == null) info.Notes.Add("thumbnail not written");
                 }
                 catch (Exception ex)
                 {
@@ -902,10 +953,21 @@ namespace MphRecomp.Arenas
                 if (folder && !MphRecomp.Import.ImportedContent.Usable(Path.GetDirectoryName(dir), d.Key)) continue;
                 Info? info = JsonSerializer.Deserialize<Info>(File.ReadAllText(json));
                 if (info == null) continue;
-                Metadata.AddHostRoom(Room(d, info, folder ? dir : null));
-                lock (_hdDirs) _hdDirs[d.Room] = folder ? dir : Path.Combine(dir, ArenaHdWriter.Dir);
+                RoomMetadata meta = Room(d, info, folder ? dir : null);
+                Metadata.AddHostRoom(meta);
+                string hd = folder ? dir : Path.Combine(dir, ArenaHdWriter.Dir);
+                lock (_hdDirs) _hdDirs[d.Room] = hd;
+                // a picture from before the thumbnail's current look: drawn again in the background, aimed at the spawns and
+                // pickups as the import aims it
+                if (ArenaThumbnail.Stale(hd) && meta.EntityPath is string entities)
+                {
+                    ArenaThumbnail.RefreshStale(hd, () => Read.GetEntities(entities, 0, firstHunt: false)
+                        .Where(e => e.Type is EntityType.PlayerSpawn or EntityType.ItemSpawn)
+                        .Select(e => new System.Numerics.Vector3(e.Position.X, e.Position.Y, e.Position.Z)).ToList());
+                }
                 EchoesCrates.SetRoom(d.Id, info);
                 EchoesBreakables.SetRoom(d.Id, info);
+                EchoesTurret.SetRoom(d.Id, info);
                 EchoesStatics.SetRoom(d.Id, info);
                 EchoesMovement.SetRoom(d.Id, info);
                 ArenaNav.SetRoom(d.Id, info);
@@ -991,6 +1053,7 @@ namespace MphRecomp.Arenas
                 lock (_hdDirs) _hdDirs.Remove(d.Room);
                 EchoesCrates.SetRoom(d.Id, null);
                 EchoesBreakables.SetRoom(d.Id, null);
+                EchoesTurret.SetRoom(d.Id, null);
                 EchoesStatics.SetRoom(d.Id, null);
                 EchoesMovement.SetRoom(d.Id, null);
                 ArenaNav.SetRoom(d.Id, null);

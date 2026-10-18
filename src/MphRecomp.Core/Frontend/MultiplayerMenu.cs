@@ -91,17 +91,31 @@ namespace MphRecomp.Frontend
         // leaves for `back` (the online page it came from) without the wireless question. Off again on CHOOSE MULTIPLAYER TYPE
         // and CREATE OR JOIN. SELECT HUNTER on its own (not fresh: "change hunter", a joiner's pick) keeps its MODE / RULES tabs
         // as steps only, as the LAN joiner's page does: that game's setup isn't this player's to change there.
+        // edit: the HOST's "change hunter" from its online lobby (owner 2026-10-15: once the game was made the host couldn't
+        // change anything): SELECT HUNTER with its MODE / RULES tabs live; back or a pick returns to the lobby, which takes
+        // the mode, arena and rules when a mode / rules page was opened (TakeOnlineRulesEdit, OnlineMenus.cs)
         private static int s_onlineNext = -1, s_onlineBack = -1;
-        private static bool s_onlineHunterOnly;
+        private static bool s_onlineHunterOnly, s_onlineEdit, s_onlineRulesEdited;
+        public static bool TakeOnlineRulesEdit()
+        {
+            bool edited = s_onlineRulesEdited;
+            s_onlineRulesEdited = false;
+            return edited;
+        }
         public static bool InOnlineSetup => s_onlineNext >= 0;
+        // SELECT HUNTER on its own ended in a pick (not back): RecompMenus' TRY CONTROLS (RecompMenus.ZoomAim.cs)
+        public static bool OnlineHunterPicked { get; private set; }
         private static int AfterHunter => s_onlineNext >= 0 ? s_onlineNext : LobbyPage;
 
         // fresh: a new game as CREATE GAME's (the boxes empty, no bots) from the mode page; else SELECT HUNTER only
-        public void BeginOnlineSetup(MenuEngine menu, int next, int back, bool fresh)
+        public void BeginOnlineSetup(MenuEngine menu, int next, int back, bool fresh, bool edit = false)
         {
             s_onlineNext = next;
             s_onlineBack = back;
-            s_onlineHunterOnly = !fresh;
+            s_onlineHunterOnly = !fresh && !edit;
+            s_onlineEdit = edit && !fresh;
+            s_onlineRulesEdited = false;
+            OnlineHunterPicked = false;
             if (!fresh)
             {
                 menu.GoTo(HunterPage);
@@ -118,7 +132,7 @@ namespace MphRecomp.Frontend
         public static void EndOnlineSetup()
         {
             s_onlineNext = s_onlineBack = -1;
-            s_onlineHunterOnly = false;
+            s_onlineHunterOnly = s_onlineEdit = false;
         }
 
         // the game as set up, for WHO CAN JOIN's YOUR GAME box: mode, arena, then the mode's rules as its page labels them
@@ -263,7 +277,7 @@ namespace MphRecomp.Frontend
             set => _pendingReturn = value;
         }
 
-        // ONLINE PLAY's matches (OnlineMenus.cs, Online play menus thread 2026-10-09): counted as vanilla's Wi-Fi ones (owner
+        // ONLINE PLAY's matches (OnlineMenus.cs, 2026-10-09): counted as vanilla's Wi-Fi ones (owner
         // 2026-10-07: Wi-Fi = internet battles) and back on RESULTS like a LAN match; its PLAY AGAIN and QUIT go to
         // OnlineResultsDone (a match left without results: `returnPage`, the online hub). -1 = not an online match.
         private static int s_onlineResultsReturn = -1;
@@ -392,6 +406,8 @@ namespace MphRecomp.Frontend
             BindStarBars(file);
             BindSeats8(file, strings); // (P8: after the star bars, which the copies take)
             BindExtraRules(file, strings); // (the ADVANCED box's EXTRA PICKUPS / EXTRA CHARACTERS rows)
+            BindMatchMusic(file, strings); // (the rules pages' MUSIC row, MultiplayerMenu.MatchMusic.cs)
+            BindModeDescriptions(file); // (in a box under the mode panel, MultiplayerMenu.ModeDescription.cs)
             BindDoors(file, strings, type);
             BindReplays(file, strings, type);
             _resultsBound = BindResults(file, strings);
@@ -641,7 +657,7 @@ namespace MphRecomp.Frontend
             try
             {
                 // (the ADVANCED box's EXTRA ARENAS rule off: none; a joiner's setup shows the host's game, whatever its own)
-                imported = MatchArenas.All.Where(r => r.Id > MatchArenas.LastId && (_setupFromHost || s_extraRules.Arenas)).ToList();
+                imported = MatchArenas.All.Where(r => r.Id > MatchArenas.LastId && (_setupFromHost || s_extraRules.Arenas) && !MphRecomp.Arenas.FirstHuntArena.IsDevRoom(r.Name)).ToList();
             }
             catch (Exception ex)
             {
@@ -815,6 +831,7 @@ namespace MphRecomp.Frontend
             s.Fill(_advWeapons, Word(_setup.Affinity ? "affinity weapons" : "default weapons"));
             s.Fill(_advFriendlyFire, (_setup.FriendlyFire ? Word("on") : Word("off")).ToUpperInvariant());
             FillExtraRules(s, rules);
+            FillMatchMusic(s);
             // PLAYERS: every used seat, in seat order (the lobby's name texts are the same strings; P8: seats 5-8 too)
             for (int r = 0; r < _setup.Seats.Length; r++)
             {
@@ -864,6 +881,7 @@ namespace MphRecomp.Frontend
             Panel8(menu); // (P8: 5-8 seats, the PLAYERS box in two columns)
             UpdateLocks();
             if (page is TypePage or CreateJoinPage) EndOnlineSetup(); // (ONLINE PLAY's CREATE left)
+            if (s_onlineEdit && page >= ModePage && page < HunterPage) s_onlineRulesEdited = true; // (the host's lobby takes them)
             if (s_onlineHunterOnly && page >= ModePage && page < HunterPage)
             {
                 menu.GoTo(HunterPage); // (ONLINE PLAY's SELECT HUNTER on its own: a step tab the data still leads away)
@@ -887,6 +905,7 @@ namespace MphRecomp.Frontend
             if (page == LicensePage) EnterCard(menu);
             if (page >= CreateJoinPage && page <= JoinLobbyPage)
             {
+                ShowMatchMusic(menu, page); // (before FillStrings: its text is cut with the menu's font)
                 FillStrings();
                 Tabs(menu, p, page);
                 Preview(menu, p);
@@ -1306,6 +1325,7 @@ namespace MphRecomp.Frontend
                 _setup.FriendlyFire = !_setup.FriendlyFire;
             }
             else if (OnExtraRulesCall(b)) { }
+            else if (OnMatchMusicCall(b)) { }
             else
             {
                 return false;
@@ -1395,6 +1415,7 @@ namespace MphRecomp.Frontend
             {
                 if (!HunterOpen(HunterOrder[b - 132])) return true; // (its icon is hidden; a focus that still lands there)
                 _setup.Seats[0].Hunter = _setup.MyHunter = HunterOrder[b - 132];
+                OnlineHunterPicked = true;
                 menu.GoTo(AfterHunter);
                 return true;
             }
@@ -2027,9 +2048,9 @@ namespace MphRecomp.Frontend
         {
             LanSession? lan = Lan;
             int max = _addressRow >= 0 ? _addressRow : 4;
-            // (a match already running is listed only for the players whose seats it holds: theirs to rejoin, release test T1)
+            // (a match already running is listed only for the players whose seats it holds: theirs to rejoin, release test T1; First Hunt games are listed only in First Hunt: FhLobby)
             LanHostInfo[] hosts = lan == null || lan.IsHost ? Array.Empty<LanHostInfo>()
-                : lan.Hosts.Where(h => !h.Running || h.HeldFor(_setup.Nickname)).Take(max).ToArray();
+                : lan.Hosts.Where(h => h.RomKey != MphRecomp.FirstHunt.FhLobby.RomKey && (!h.Running || h.HeldFor(_setup.Nickname))).Take(max).ToArray();
             _rows = hosts;
             for (int k = 0; k < 4; k++)
             {
@@ -3038,10 +3059,10 @@ namespace MphRecomp.Frontend
             if (b >= FirstKeyCall && b < FirstKeyCall + KeysLower.Length)
             {
                 int k = b - FirstKeyCall;
-                char c = _shift ? KeysShift[k] : KeysLower[k];
-                if (_caps && !_shift && char.IsLetter(c)) c = char.ToUpperInvariant(c);
+                char c = _typedChar ?? (_shift ? KeysShift[k] : KeysLower[k]);
+                if (_typedChar == null && _caps && !_shift && char.IsLetter(c)) c = char.ToUpperInvariant(c);
                 Type(c);
-                if (_shift)
+                if (_shift && _typedChar == null)
                 {
                     _shift = false; // (one key)
                     Layout(menu);
@@ -3108,6 +3129,61 @@ namespace MphRecomp.Frontend
             {
                 if (_name.Length < NameMax) _name += c;
             }
+        }
+
+        // ---- A PC keyboard on the name keyboard and the address keypad (owner 2026-10-16: "actual keyboard support for
+        //      Windows") ----
+        //
+        // A typed character is a tap on the on-screen key that makes it (its sound and call, the key focused as a tap
+        // leaves it); the character itself goes in as typed, whatever CAPS / SHIFT show (a key the screen doesn't have, e.g.
+        // a " or an accented letter, is refused). Backspace is the screen's backspace / delete key, Enter its ENTER / OK
+        // (the keypad's OK only once it shows: a whole address). B / CANCEL stay where they were (Esc on Windows).
+
+        public bool TypingPage(int page) => page == NamePage && _keyboard || page == AddressPage && _keypad;
+
+        private char? _typedChar; // OnNameCall: the character typed on a PC keyboard, in place of the key's own
+
+        public bool TypeChar(MenuEngine menu, char c)
+        {
+            if (menu.Page == null || !TypingPage(menu.Page.Index)) return false;
+            if (menu.Page.Index == AddressPage)
+            {
+                if (c == '.') return TouchCall(menu, DotCall);
+                foreach ((int call, char digit) in _keyDigits) if (digit == c) return TouchCall(menu, call);
+                return false;
+            }
+            int k = KeysLower.IndexOf(c);
+            if (k < 0) k = KeysShift.IndexOf(c);
+            if (k < 0 && c != ' ') return false;
+            _typedChar = c;
+            try
+            {
+                return TouchCall(menu, c == ' ' ? SpaceCall : FirstKeyCall + k);
+            }
+            finally
+            {
+                _typedChar = null;
+            }
+        }
+
+        // Backspace (true) or Enter (false)
+        public bool TypeKey(MenuEngine menu, bool backspace)
+        {
+            if (menu.Page == null || !TypingPage(menu.Page.Index)) return false;
+            if (menu.Page.Index == AddressPage) return TouchCall(menu, backspace ? _deleteCall : _okCall);
+            return TouchCall(menu, backspace ? BackspaceCall : EnterCall);
+        }
+
+        // a tap on the page's shown item that makes `call`
+        private static bool TouchCall(MenuEngine menu, int call)
+        {
+            if (call < 0) return false;
+            IReadOnlyList<MenuItem> items = menu.Page!.Items;
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (Calls(items[i]).Contains(call) && menu.TouchItem(i)) return true;
+            }
+            return false;
         }
 
         // OK / CANCEL: back where the keyboard was opened from; to the card at once, whole and on the same tab (it was behind
@@ -3422,7 +3498,7 @@ namespace MphRecomp.Frontend
             };
         }
 
-        // ONLINE PLAY's HUNTER LICENSE view (OnlineMenus.License.cs, Online play menus thread, 2026-10-09): another hunter's card
+        // ONLINE PLAY's HUNTER LICENSE view (OnlineMenus.License.cs, 2026-10-09): another hunter's card
         // as this page draws it, from their uploaded license: the top screen's items (the card and its tabs) shown and filled as
         // EnterCard / CardTab would for `l` (no EDIT NAME), each at its look's first frame, into `output` in menu space, far to
         // near. `name` is the server's (word-filtered) name, never the license's. False when page 60 isn't the card.

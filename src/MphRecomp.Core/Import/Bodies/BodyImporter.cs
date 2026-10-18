@@ -105,6 +105,33 @@ namespace MphRecomp.Import.Bodies
                 ulong aid = ids[nm];
                 src.Animations.Add((nm, () => Anim3.Load(res.Get(aid))));
             }
+            // clips borrowed from another CHAR of the same paks, put on this skeleton by bone name ("clips")
+            foreach (HdRecipe.Borrow b in h.Borrows)
+            {
+                (string bname, List<(string Type, ulong Id)> bparts) = Char3.CharIds(res.Get(b.Char), res.TypeOf);
+                ulong bk = bparts.Where(x => x.Type == "CINF").Select(x => (ulong?)x.Id).FirstOrDefault()
+                    ?? throw new InvalidDataException($"CHAR {b.Char:x16} names no CINF");
+                Cinf bskel = Cinf.Load(res.Get(bk));
+                var bids = new Dictionary<string, ulong>(StringComparer.Ordinal);
+                foreach ((string nm, Char3.Meta meta) in Char3.Animations(res.Get(b.Char), id => res.TypeOf(id) == "ANIM"))
+                {
+                    List<Char3.Meta> ps = Char3.Prims(meta);
+                    if (ps.Count == 1) bids.TryAdd(nm, ps[0].AnimId);
+                }
+                foreach (string nm in b.Names)
+                {
+                    if (!bids.TryGetValue(nm, out ulong aid)) throw new InvalidDataException($"{h.Name}: {bname} has no single clip '{nm}'");
+                    if (ids.ContainsKey(nm)) continue;
+                    ids[nm] = aid; order.Add(nm);
+                    src.Animations.Add((nm, () => BodyClipRetarget.Retarget(bskel, skel, Anim3.Load(res.Get(aid)), RootBone)));
+                }
+            }
+            // ... and her own bind pose as a clip ("bind": arms straight out), for an arm held straight along the aim
+            if (h.Borrows.Length > 0 && !ids.ContainsKey(BodyClipRetarget.BindClip))
+            {
+                order.Add(BodyClipRetarget.BindClip);
+                src.Animations.Add((BodyClipRetarget.BindClip, () => BodyClipRetarget.Bind(skel)));
+            }
             progress?.Invoke(0.05f, $"{cname}: model {Of("CMDL"):x16} ({m3.TriangleCount} tris, {m3.Materials.Length} materials), {skel.Bones.Count} bones, {order.Count} clips");
             return Write(src, skel, h, outDir, progress, ct);
         }
@@ -246,17 +273,40 @@ namespace MphRecomp.Import.Bodies
         public IEnumerable<(string Path, string Sha1)> Sources(ImportRecipe recipe)
         {
             HdRecipe h = HdRecipe.From(recipe);
+            if (h.Game == "mp4") yield break;   // Prime 4: the assets themselves are checked as they're read (BeyondBody)
             foreach (HdRecipe.PakRef p in h.Paks) yield return (p.Name, p.Sha1);
         }
 
         public void Run(ImportContext ctx, ImportRecipe recipe, string outDir, Action<float, string> progress, CancellationToken ct)
         {
             HdRecipe h = HdRecipe.From(recipe);
+            if (h.Game == "mp4")
+            {
+                // Prime 4: the RomFS paks read in place, our clean-room readers (Import/Beyond)
+                var archives = new List<Beyond.BeyondArchive>();
+                try
+                {
+                    foreach (HdRecipe.PakRef p in h.Paks)
+                    {
+                        if (!ctx.Source.Contains(p.Name)) throw new FileNotFoundException($"{p.Name} is not in these files");
+                        archives.Add(new Beyond.BeyondArchive(ctx.Source.OpenRead(p.Name), p.Name));
+                    }
+                    BeyondBody.Export(archives, h, outDir, progress, ct, recipe.OptStr("part") ?? "body"); // "lockjaw": Sylux's alt form
+                }
+                finally
+                {
+                    foreach (Beyond.BeyondArchive a in archives) a.Dispose();
+                }
+                return;
+            }
             if (h.Game is not ("mp1" or "mp2" or "mp3")) throw new NotSupportedException($"{recipe.Id}: bodies from game '{h.Game}' are not importable yet");
             if (h.Game == "mp3")
             {
-                var set = new Pak3Set(h.Paks.Select(p => ctx.Shared("pak3:" + p.Name, () => new Pak3(ctx.File(p.Name), p.Name))));
+                // read in place (only the resources asked for): a Hyper effects pak can be huge (InGameAudio.pak, ~740 MB on
+                // the standalone disc)
+                var set = new Pak3Set(h.Paks.Select(p => ctx.Shared("pak3:" + p.Name, () => new Pak3(ctx.Source.OpenRead(p.Name), p.Name, leaveOpen: false))));
                 BodyImporter.Export3(set, h, outDir, progress, ct);
+                MphRecomp.Import.Effects.HyperFx.Export(set, recipe, outDir); // Dark Samus's Hyper Mode effects ("hyperfx")
                 return;
             }
             Pak[] paks = h.Paks.Select(p => ctx.Pak(p.Name)).ToArray();

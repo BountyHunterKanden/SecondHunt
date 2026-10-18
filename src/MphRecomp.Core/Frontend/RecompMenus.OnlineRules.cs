@@ -6,7 +6,7 @@ using System.Collections.Generic;
 // corner (owner 2026-10-10, was under the back arrow, lower left).
 // A tap (touch or mouse) asks the host for the rules page (FrontendRequestKind.OnlineRules: the credits viewer showing
 // docs/ONLINE_RULES_IN_APP.md, embedded as "online.md"). Social O7; hooks in RecompMenus.cs (AddOptionsButtons, the call
-// switch, DrawOptions) logged on the board. ONLINE PLAY's hub carries the age line itself (OnlineMenus.DrawHub).
+// switch, DrawOptions). ONLINE PLAY's hub carries the age line itself (OnlineMenus.DrawHub).
 namespace MphRecomp.Frontend
 {
     public sealed partial class RecompMenus

@@ -118,7 +118,8 @@ namespace MphRecomp.Import
         public static string? Locate(string folder, string marker)
         {
             folder = Path.GetFullPath(folder);
-            var candidates = new List<string> { folder, Path.Combine(folder, "files"), Path.Combine(folder, "DATA", "files") };
+            // (a Switch title's dump: its romfs/ folder)
+            var candidates = new List<string> { folder, Path.Combine(folder, "files"), Path.Combine(folder, "DATA", "files"), Path.Combine(folder, "romfs") };
             string? up = Path.GetDirectoryName(folder);
             if (up != null) candidates.Add(up);
             foreach (string c in candidates)

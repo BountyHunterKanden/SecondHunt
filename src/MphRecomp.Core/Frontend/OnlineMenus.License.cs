@@ -9,7 +9,7 @@ using MphRecomp.Multiplayer;
 using MphRecomp.Multiplayer.Net;
 using MphRecomp.Online;
 
-// ONLINE PLAY's HUNTER LICENSE view (Online play menus thread, owner 2026-10-09: pick 10 "tap any name -> their Hunter License,
+// ONLINE PLAY's HUNTER LICENSE view (owner 2026-10-09: pick 10 "tap any name -> their Hunter License,
 // everywhere", pick 11 the vanilla card + head to head + actions, mockup V_A "card + side panel"). A name opens it from
 // FRIENDS AND RIVALS (every tab), FIND A HUNTER's rows, a game's details (HOST LICENSE and its seats) and the lobby's seat
 // cards, and the names on RESULTS after an online match; back returns there (from the lobby the game stays: hosting or waiting

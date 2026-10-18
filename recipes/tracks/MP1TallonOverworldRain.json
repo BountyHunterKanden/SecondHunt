@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Tallon Overworld Music B",
+  "group": "Tallon Overworld",
+  "role": "area",
+  "files": [
+    { "name": "Audio/over-worldL.dsp", "sha1": "6943ce106745a899a2ee2b1693c1ecf7aef18c13" },
+    { "name": "Audio/over-worldR.dsp", "sha1": "208ea73bf50ee584095a956b5bb15b2c372615e3" }
+  ],
+  "gain": 0.960
+}

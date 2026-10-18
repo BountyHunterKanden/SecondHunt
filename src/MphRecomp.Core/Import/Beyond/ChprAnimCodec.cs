@@ -422,10 +422,73 @@ namespace MphRecomp.Import.Beyond
             return new[] { k.Has(0) ? k.V0 * sc : 0.0, k.Has(1) ? k.V1 * sc : 0.0, k.Has(2) ? k.V2 * sc : 0.0 };
         }
 
+        // A rotation track's keys with any component that overflowed its w-bit range put back. Some tracks are stored a bit
+        // short: a finger joint's quaternion z on 21 bits at 2^-21 holds +-0.5, and the fist in taunt_flex_sylux curls it to
+        // ~0.51-0.59, which wraps the stored value to ~-0.49 for those keys (the finger flicking the other way and back as
+        // the hand opens, owner 10-17: "both flourishes have an unexpected finger movement towards the end"). Per key, a
+        // component one whole range up or down is taken instead when that is still a quaternion (|xyz| <= 1) and turns
+        // far less from the key before (so real snaps and sign flips stay as stored). Translations are left alone: their
+        // snaps (a missile ring jumping back a segment) look the same as a wrap, and no limit tells them apart.
+        public static List<Key> Unwrap(Track t, List<Key> keys)
+        {
+            if (!t.IsQuaternion || keys.Count < 2 || t.Width <= 1 || t.Width >= 62) return keys;
+            double sc = Math.Pow(2.0, -t.Exponent);
+            long range = 1L << t.Width;
+            var o = new List<Key>(keys.Count) { keys[0] };
+            double[] prev = Dequant(t, keys[0]);
+            var v = new long[3];
+            var best = new long[3];
+            for (int i = 1; i < keys.Count; i++)
+            {
+                Key k = keys[i];
+                double[] at = Dequant(t, k);
+                double bestDot = Math.Abs(Dot4(prev, at)), keepDot = bestDot;
+                bool shifted = false;
+                // every mix of -1 / 0 / +1 ranges on the stored components
+                for (int m = 0; m < 27; m++)
+                {
+                    int code = m;
+                    bool any = false;
+                    for (int c = 0; c < 3; c++, code /= 3)
+                    {
+                        int step = code % 3 - 1;
+                        if (step != 0 && !k.Has(c)) goto next;
+                        v[c] = k[c] + step * range;
+                        any |= step != 0;
+                    }
+                    if (!any) continue;
+                    {
+                        double x = v[0] * sc, y = v[1] * sc, z = v[2] * sc, s2 = x * x + y * y + z * z;
+                        if (s2 > 1.0) continue;
+                        double[] q = Dequant(t, new Key(k.Frame, k.Flags, v, k.Mask));
+                        double d = Math.Abs(Dot4(prev, q));
+                        if (d > bestDot)
+                        {
+                            bestDot = d;
+                            Array.Copy(v, best, 3);
+                            shifted = true;
+                        }
+                    }
+                next:;
+                }
+                if (shifted && bestDot - keepDot > 0.05)
+                {
+                    k = new Key(k.Frame, k.Flags, best, k.Mask);
+                    at = Dequant(t, k);
+                }
+                o.Add(k);
+                prev = at;
+            }
+            return o;
+        }
+
+        static double Dot4(double[] a, double[] b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+
         // per-frame values: normalised lerp between quaternion keys (shortest way), linear between vector keys, the end
         // keys held outside them
         public static double[][] SampleTrack(Track t, List<Key> keys, int frames)
         {
+            keys = Unwrap(t, keys);
             int nk = keys.Count;
             var fr = new int[nk];
             var vals = new double[nk][];

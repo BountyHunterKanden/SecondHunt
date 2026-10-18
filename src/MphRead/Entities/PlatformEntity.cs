@@ -1605,7 +1605,7 @@ namespace MphRead.Entities
         Waiting = 2
     }
 
-    public class FhPlatformEntity : EntityBase
+    public partial class FhPlatformEntity : EntityBase
     {
         private readonly FhPlatformEntityData _data;
         private readonly float _speed;
@@ -1642,7 +1642,8 @@ namespace MphRead.Entities
 
         public override bool Process()
         {
-            // todo: collision and stuff
+            // recomp: last frame's transform for a rider (PlayerInput's _standingEntCol), as PlatformEntity.Process does
+            UpdateLinkedInverse(0);
             Vector3 position = _position;
             position += _velocity;
             if (_moveTimer > 0)
@@ -1651,7 +1652,11 @@ namespace MphRead.Entities
             }
             else
             {
-                if (_state == MoveState.Sleep)
+                if (_state == MoveState.Sleep && !FirstHuntActivated())
+                {
+                    // recomp: First Hunt's platforms idle until a trigger activates their group (FirstHunt/FhWorldEntities.cs)
+                }
+                else if (_state == MoveState.Sleep)
                 {
                     // todo: must be active
                     // --> which specifically means a trigger volume needs to send an Activate message to this group this frame

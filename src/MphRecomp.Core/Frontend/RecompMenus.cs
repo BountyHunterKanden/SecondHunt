@@ -27,13 +27,13 @@ namespace MphRecomp.Frontend
     {
         // our callback ids (the game's are below 1000)
         private const int OpenMods = 1000, OpenSettings = 1001;
-        private const int PauseResume = 1010, PauseSettings = 1011, PauseModSettings = 1012, PauseQuit = 1013;
+        private const int PauseResume = 1010, PauseSettings = 1011, PauseModSettings = 1012, PauseQuit = 1013, PauseChatCall = 1014;
         private const int DeleteAllCall = 1020; // a rows page's DELETE ALL button (RowsPage.DeleteAll)
         // RowNext / RowPrev: A / Start and the touch arrows; RowRight / RowLeft: the D-pad (a value row steps, an
         // action row ignores it); RowTap: a tap on the value box (an action row runs; a value row ignores it); RowDelete:
         // a tap on the X box beside it (RowModel.Delete)
         private const int RowNext = 1100, RowPrev = 1200, RowAlt = 1300, PageNext = 1400, PagePrev = 1401;
-        private const int RowRight = 1500, RowLeft = 1600, RowTap = 1700, RowDelete = 1800;
+        private const int RowRight = 1500, RowLeft = 1600, RowTap = 1700, RowDelete = 1800, RowRemove = 2900;
         // D-pad down on a page with DELETE ALL: the next live row, from the last one DELETE ALL; up from DELETE ALL: the
         // last live row (the engine's own D-pad finds neither: the rows' boxes have no rectangle, so it compares their
         // item offsets with the button's touch rectangle)
@@ -62,27 +62,33 @@ namespace MphRecomp.Frontend
         private readonly string? _settingsPath;
         private readonly List<ModEntry> _mods = new();
 
-        public int SettingsPage => _settingsRows?.Page ?? -1;
+        public int SettingsPage => _gamePage?.Page ?? -1; // SECOND HUNT SETTINGS: its first tab (RecompMenus.SettingsPages.cs)
         public int ModsPage => _modsRows?.Page ?? -1;
         public int ModSettingsPage => _modSettingRows?.Page ?? -1;
-        public int PausePage { get; private set; } = -1;
+        // the in-game pause menu's page: an online match's has CHAT (PauseChat, OnlineMenus.Chat.cs)
+        public int PausePage => PauseChat != null && _pauseChatPage >= 0 ? _pauseChatPage : _pausePage;
+        private int _pausePage = -1, _pauseChatPage = -1;
+        internal int PauseChatPageForTools => _pauseChatPage; // (MphRead.Tools -feflow FE_START=pausechat)
         public int ImportPage => _importRows?.Page ?? -1;
 
-        private RowsPage? _settingsRows, _modsRows, _modSettingRows, _controlRows;
+        private RowsPage? _modsRows, _modSettingRows;
         // IMPORT GAMES: the games, and the game open on the second page
         private RowsPage? _importRows, _importGameRows;
         private string _importGame = "mp1";
         private int _importBackPage = -1; // where IMPORT GAMES' back goes (-1 = RECOMP SETTINGS)
         private bool _inPause; // the call being answered came from the in-game pause menu
-        // set by the in-game pause of a LAN / online match: rows that can't apply there (camera) are greyed
+        // set by the in-game pause of a LAN / online match: rows that can't apply there (zoom) are hidden
         public bool InNetMatch { get; set; }
-        // the control customizer: the keyboard & mouse (else the controller); opened by the game (the ship's OPTIONS),
-        // so its back closes it; the function waiting for a button, as its first or (add) second, since when
-        private bool _controlsKeys, _controlsFromHost, _captureAdd;
-        private int _controlsBackPage = ControlsPage; // where the customizer's back goes (CONTROLS or RECOMP SETTINGS)
+        // set by the in-game pause of an online match: the match camera row is greyed (online is first person; LAN isn't, owner 2026-10-17)
+        public bool InOnlineMatch { get; set; }
+        // CONTROLS (RecompMenus.Controls.cs): the keyboard & mouse's (else the controller's); opened by the game (the ship's
+        // OPTIONS), so its back closes it; the function waiting for a button, since when, and the buttons pressed / still
+        // held meanwhile (a combo: what was held together, taken when the last of them is let go)
+        private bool _controlsKeys, _controlsFromHost;
         private MenuEngine? _stepMenu; // the menu of the call running a row's Step
         private string? _captureId;
         private long _captureStart;
+        private readonly List<string> _capturePressed = new(), _captureHeld = new();
         // OPTIONS > CONTROLS: the game's control-type items (boxes, labels, DS pictures, descriptions) and ours (the
         // customizer's buttons with their labels and descriptions); SENSITIVITY / LOOK INVERT values as ours show them
         private readonly List<int> _controlTypeItems = new(), _controlsButtonItems = new();
@@ -110,15 +116,27 @@ namespace MphRecomp.Frontend
         {
             public string Label = "";
             public string Description = "";
+            public Func<string>? Describe; // in place of Description: the hint of the option it's on (CONTROLS, C17)
+            public string Hint => Describe?.Invoke() ?? Description;
             public Func<string> Value = () => "";
             public Action<int> Step = _ => { };
             public Action? Alt; // X
+            public Action? Remove; // Y (the customizer: take one button away)
             public bool Action; // runs something (credits, ...) instead of cycling a value: no arrows, D-pad ignored
             // greyed (the game's own State5 look, its rumble row without a Rumble Pak): no focus, no touch, no press
             public Func<bool>? Disabled;
             // deletes what the row made (IMPORT GAMES' imported entries): an X in a small orange box beside the value box
             // (owner 2026-10-07), and X on the controller when the row has no Alt; null = no X
             public Action? Delete;
+            // CONTROLS' sections (RecompMenus.Controls.cs): a checkbox in place of the value (ticked or not); a box drawn
+            // round this row and the next while true (C3: aim sensitivity + imperialist, paired); a RESET beside the value
+            // (C6), dim while AtDefault
+            public Func<bool>? Check;
+            public Func<bool>? GroupWithNext;
+            public Action? Reset;
+            public Func<bool>? AtDefault;
+            // SECOND HUNT SETTINGS' category (owner 2026-10-17): its rows start a page of their own, its name in the title
+            public string? Section;
         }
 
         // a page of up to six rows fed from a list that may be longer (L / R page through it)
@@ -136,6 +154,7 @@ namespace MphRecomp.Frontend
             public Func<List<RowModel>> Source = () => new();
             public List<RowModel> Rows = new();
             public int Offset;
+            public List<int> Starts = new() { 0 }; // where each page starts (RowsPages): every six rows and at each new Section
             public Action? Entered; // runs as its page comes in, before the rows are read (REPLAYS reads its folder then)
         }
 
@@ -248,7 +267,7 @@ namespace MphRecomp.Frontend
         private static readonly Dictionary<string, string> SuitCodes = new(StringComparer.OrdinalIgnoreCase)
         {
             ["MP1PowerSuit"] = "PWR", ["MP1VariaSuit"] = "VAR", ["MP1GravitySuit"] = "GRA", ["MP1FusionSuit"] = "FUS",
-            ["Phazonsuit"] = "PHZ", ["MP2VariaSuit"] = "VAR", ["MP2DarkSuit"] = "DRK", ["MP2LightSuit"] = "LGT",
+            ["Phazonsuit"] = "PHZ", ["MP1BetaPhazonSuit"] = "BPZ", ["MP2VariaSuit"] = "VAR", ["MP2DarkSuit"] = "DRK", ["MP2LightSuit"] = "LGT",
             ["MP3VariaSuit"] = "VAR", ["MP3PEDSuit"] = "PED", ["MP4DefaultSuit"] = "DEF", ["MP4PsychicSuit"] = "PSY",
             ["MP4PsychicGlove"] = "GLV", ["MP4ViolaSuit"] = "VLA", ["MP4ViolaSuitIC"] = "VIC", ["MP4LegacySuit"] = "LEG",
             ["MP2DarkSamus"] = "DSA", ["MP3DarkSamus"] = "DSA", ["MP3ZeroSuit"] = "ZER",
@@ -257,7 +276,7 @@ namespace MphRecomp.Frontend
         // left out of the suit row: HD models on Samus's rig the owner dropped (2026-10-01: "ditch mp3 zero suit for now"),
         // and guns/mp1, the first export of P1 PWR's gun (no body of its own: "P1 MP" played as MPH's Samus; the setting
         // reads it as MP1PowerSuit, see RecompSettings.SamusSuit)
-        private static readonly HashSet<string> NotSuits = new(StringComparer.OrdinalIgnoreCase) { "MP3ZeroSuit", "mp1" };
+        private static readonly HashSet<string> NotSuits = new(StringComparer.OrdinalIgnoreCase) { "MP3ZeroSuit", "MP3ZeroSuitS", "mp1" };
 
         // a Brawl trophy on Samus's rig (hd/Samus, ...): no MP<n> prefix, and not Prime 1's Phazonsuit
         private static bool IsBrawl(string suit) =>
@@ -279,19 +298,54 @@ namespace MphRecomp.Frontend
 
         public RecompSettings Settings => _settings;
 
-        // the RECOMP SETTINGS row the cursor is on (its label, e.g. "music"), or null off that page: the pause menu plays
-        // the paused music while it's on the music row, so a change is heard live (CampaignAudio.UpdateAudioPause)
+        // ---- "menu art" (owner 2026-10-13): a chooser of the lobby's skin icons (MultiplayerMenu.OpenArtChooser) ----
+
+        // FrontendSession's: the backdrop is drawn again for a new pick
+        public Action? MenuArtChanged { get; set; }
+
+        // (the chooser's own: tools point both at their HD models)
+        private string? HdRoot => MultiplayerMenu.CharacterHdRoot
+            ?? (_settingsPath != null ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_settingsPath) ?? "", "hd") : null);
+
+        // the chooser's entry for the setting: original, shuffle, the picked suit, else the one the recipe's order gives
+        private string MenuArtChoice()
+        {
+            if (!_settings.MenuArtHd) return MphRecomp.Multiplayer.Characters.Original;
+            if (_settings.MenuArtSuit == RecompSettings.MenuArtShuffle) return MultiplayerMenu.ShuffleChoice;
+            string? hd = HdRoot;
+            if (hd == null) return MphRecomp.Multiplayer.Characters.Original;
+            if (_settings.MenuArtSuit != "" && MenuSamus.Has(hd, _settings.MenuArtSuit)) return _settings.MenuArtSuit;
+            try { return MenuSamus.Load().PickSuit(hd) ?? MphRecomp.Multiplayer.Characters.Original; }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { return MphRecomp.Multiplayer.Characters.Original; }
+        }
+
+        private string MenuArtValue()
+        {
+            string c = MenuArtChoice();
+            return MphRecomp.Multiplayer.Characters.IsOriginal(c) ? "ORIGINAL" : c == MultiplayerMenu.ShuffleChoice ? "SHUFFLE" : SuitValue(c);
+        }
+
+        private void OpenMenuArt()
+        {
+            if (_stepMenu is not { } menu || Multiplayer == null) return;
+            Multiplayer.OpenArtChooser(menu, MenuArtChoice(), pick =>
+            {
+                bool hd = !MphRecomp.Multiplayer.Characters.IsOriginal(pick);
+                _settings.MenuArtHd = hd;
+                if (hd) _settings.MenuArtSuit = pick == MultiplayerMenu.ShuffleChoice ? RecompSettings.MenuArtShuffle : pick;
+                _settings.Save(_settingsPath);
+                RefreshSettingsPages();
+                MenuArtChanged?.Invoke();
+            });
+        }
+
+        // the LOOK or SOUND row the cursor is on (its label, e.g. "music\nquality"), or null off those pages: the pause menu
+        // plays the paused music while it's on a music row, so a change is heard live (CampaignAudio.UpdateAudioPause)
         public string? FocusedSetting(MenuEngine menu)
         {
-            RowsPage? p = _settingsRows;
-            if (p == null || menu.Page?.Index != p.Page) return null;
-            for (int r = 0; r < p.Box.Length; r++)
-            {
-                if (menu.ItemState(p.Box[r]) != MenuState.Focused) continue;
-                int i = p.Offset + r;
-                return i < p.Rows.Count ? p.Rows[i].Label : null;
-            }
-            return null;
+            SectionPage? sp = menu.Page?.Index == _soundPage?.Page ? _soundPage : _lookPage;
+            if (sp == null || menu.Page?.Index != sp.Page || sp.Focus < 0 || sp.Focus >= sp.Entries.Count) return null;
+            return sp.Entries[sp.Focus].Row?.Label;
         }
 
         // write the settings file now (OPTIONS > AUDIO's changes, AudioOptions)
@@ -363,9 +417,9 @@ namespace MphRecomp.Frontend
             _p = FindPieces(options, controls);
             if (_p.ChoiceBoxes.Length < 4 || _p.ChoiceTexts.Length < 4) throw new InvalidOperationException("Controls page: no control-type boxes");
 
-            // 7 rows now that "samus suit" joined the other six -- L / R page through them like MODS / MOD SETTINGS
-            _settingsRows = BuildRowsPage(controls, "SECOND HUNT SETTINGS", OptionsPage, PagingActions(), null);
-            _settingsRows.Source = SettingRows;
+            // SECOND HUNT SETTINGS' pages and CONTROLS, in sections (RecompMenus.SettingsPages.cs, RecompMenus.Controls.cs):
+            // first, as the pages below go back to them
+            InstallSectionMenus();
 
             _modsRows = BuildRowsPage(controls, "MANAGE MODS", OptionsPage, PagingActions(),
                 "no mods installed.\n\ncopy each mod's folder (with its mod.json) into\n" + (RecompSettings.DesktopHost
@@ -395,16 +449,13 @@ namespace MphRecomp.Frontend
                 string everything = $"everything from {ImportGames.Row(id).Title.ToLowerInvariant()}";
                 return () => Import.Clear(id, all, everything);
             };
+            InstallMusicPages(controls); // a game's song list, RECOMP SETTINGS' song list (RecompMenus.Music.cs)
             InstallImportCards(); // IMPORT GAMES' page as five game cards (RecompMenus.ImportCards.cs)
 
-            PausePage = BuildPausePage(controls, options);
+            _pausePage = BuildPausePage(controls, options, chat: false);
+            _pauseChatPage = BuildPausePage(controls, options, chat: true);
             AddOptionsButtons(options);
 
-            // the control customizer (owner 2026-10-05): a function a row, A then the new button
-            // (value boxes wide enough for two buttons on one line: "LCLICK / MCLICK" is 91 px, -fecanvas FE_MEASURE)
-            _controlRows = BuildRowsPage(controls, "CONTROLLER", ControlsPage, PagingActions(), null, backCall: ControlsBack,
-                valueGrow: 66);
-            _controlRows.Source = ControlRows;
             InstallReplays(); // REPLAYS (RecompMenus.Replays.cs; the multiplayer menu's REPLAYS button)
             InstallOnline(); // ONLINE PLAY (OnlineMenus.cs; the multiplayer menu's ONLINE PLAY door)
             AddControlsButtons(controls); // last: the pages above are cloned from the Controls page as the ROM has it
@@ -413,11 +464,21 @@ namespace MphRecomp.Frontend
             foreach (RowsPage p in AllRowPages()) Refresh(p);
         }
 
-        private IEnumerable<RowsPage> AllRowPages() => new[] { _settingsRows, _modsRows, _modSettingRows, _controlRows, _importRows, _importGameRows }
+        private IEnumerable<RowsPage> AllRowPages() => new[] { _modsRows, _modSettingRows, _importRows, _importGameRows,
+                _songRows, _songFilterRows }
             .Where(p => p != null)!;
 
         private static IEnumerable<MenuAction> PagingActions()
             => new[] { Call(MenuKeys.R, PageNext), Call(MenuKeys.L, PagePrev) };
+
+        private RowModel VolumeRow(string label, Func<int> get, Action<int> set) => new()
+        {
+            Label = label,
+            Value = () => Math.Clamp(get(), 0, 9).ToString(),
+            Step = s => set(Math.Clamp(get() + s, 0, 9)),
+            Reset = () => set(9),
+            AtDefault = () => get() == 9,
+        };
 
         private List<RowModel> SettingRows()
         {
@@ -439,9 +500,10 @@ namespace MphRecomp.Frontend
                 new()
                 {
                     Label = "menu\nart",
-                    Description = "hd: samus behind the menus drawn from your own imported prime suit (echoes' varia first). original: the ds picture.",
-                    Value = () => _settings.MenuArtHd ? "HD" : "ORIGINAL",
-                    Step = _ => _settings.MenuArtHd = !_settings.MenuArtHd
+                    Description = "samus behind the menus: one of your imported suits, shuffle (another one each time the game starts), or original (the ds picture).",
+                    Value = MenuArtValue,
+                    Step = _ => OpenMenuArt(),
+                    Action = true
                 },
                 new()
                 {
@@ -458,9 +520,14 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.RedrawArt ? "SMOOTH" : "PIXEL",
                     Step = _ => _settings.RedrawArt = !_settings.RedrawArt
                 },
+                // OPTIONS > AUDIO's volumes here too (owner 2026-10-17: "we should also get all the sound settings from the
+                // audio menu in here as well. the sfx volume, music volume, and quality"), steps 0-9 as that page's, heard
+                // at once (FrontendRenderer / CampaignAudio read the saved values); RESET puts back 9
+                VolumeRow("sfx\nvolume", () => _settings.SfxVolume, v => _settings.SfxVolume = v),
+                VolumeRow("music\nvolume", () => _settings.MusicVolume, v => _settings.MusicVolume = v),
                 new()
                 {
-                    Label = "music",
+                    Label = "music\nquality",
                     // not the first row (owner 2026-10-05): in the pause menu the paused music plays while the cursor is
                     // on this row (FocusedSetting), and the first row has the cursor as soon as the page opens.
                     // all four are the game's own sequences (GameAudio.cs MusicMode); a change applies live, mid-song
@@ -538,10 +605,18 @@ namespace MphRecomp.Frontend
                 new()
                 {
                     Label = "camera",
-                    Description = "first person is the game's own view. third person follows samus from behind, wearing her suit's body. lan and online matches are always first person.",
-                    Value = () => _settings.ThirdPerson && !InNetMatch ? "THIRD" : "FIRST",
-                    Step = _ => _settings.ThirdPerson = !_settings.ThirdPerson,
-                    Disabled = () => InNetMatch // a LAN / online match's pause: first person only, nothing to change
+                    Description = "the campaign's camera. first person is the game's own view. third person follows samus from behind, wearing her suit's body.",
+                    Value = () => _settings.ThirdPerson ? "THIRD" : "FIRST",
+                    Step = _ => _settings.ThirdPerson = !_settings.ThirdPerson
+                },
+                // multiplayer matches' own camera (owner 2026-10-17): bot and LAN matches; online is first person only
+                new()
+                {
+                    Label = "match\ncamera",
+                    Description = "the camera in multiplayer matches. third person follows your hunter from behind in bot and lan matches. online matches are always first person.",
+                    Value = () => _settings.MatchThirdPerson && !InOnlineMatch ? "THIRD" : "FIRST",
+                    Step = _ => _settings.MatchThirdPerson = !_settings.MatchThirdPerson,
+                    Disabled = () => InOnlineMatch // an online match's pause: first person only, nothing to change
                 },
                 // the pause map (Select in the campaign; Core Frontend/PauseMap.cs)
                 new()
@@ -558,6 +633,14 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.MapPrime ? "PRIME" : "HUNTERS",
                     Step = _ => _settings.MapPrime = !_settings.MapPrime
                 },
+                // the in-play HUD (owner 2026-10-14; MphRead PlayerPrimeHud.cs): live, the game reads it back after the pause
+                new()
+                {
+                    Label = "hud",
+                    Description = "prime: in the campaign a radar plus a mini map of the room you're in. ds: the game's own.",
+                    Value = () => _settings.PrimeHud ? "PRIME" : "DS",
+                    Step = _ => _settings.PrimeHud = !_settings.PrimeHud
+                },
                 // OPTIONS > CONTROLS' copy (owner 2026-10-05: "controls" here, the same page inside RECOMP SETTINGS)
                 new()
                 {
@@ -566,7 +649,9 @@ namespace MphRecomp.Frontend
                     Value = () => "OPEN",
                     Step = _ =>
                     {
-                        if (_controlsCopyPage >= 0) _stepMenu?.GoTo(_controlsCopyPage);
+                        // CONTROLS in sections (RecompMenus.Controls.cs), or with CLASSIC controls the game's page's copy
+                        int to = s_controlsPage >= 0 && !ClassicControls ? s_controlsPage : _controlsCopyPage;
+                        if (to >= 0) _stepMenu?.GoTo(to);
                     },
                     Action = true
                 },
@@ -585,6 +670,16 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.GyroSensitivity + "%",
                     Step = s => _settings.GyroSensitivity = Next(RecompSettings.GyroSensitivities, _settings.GyroSensitivity, s)
                 },
+                // C6: a reset wherever a sensitivity is (greyed while it's at the default)
+                new()
+                {
+                    Label = "reset\ngyro speed",
+                    Description = "gyro speed back to its default, " + DefaultSettings.GyroSensitivity + "%.",
+                    Action = true,
+                    Value = () => "RESET",
+                    Step = _ => _settings.GyroSensitivity = DefaultSettings.GyroSensitivity,
+                    Disabled = () => _settings.GyroSensitivity == DefaultSettings.GyroSensitivity
+                },
                 new()
                 {
                     Label = "gyro\naxis",
@@ -599,6 +694,14 @@ namespace MphRecomp.Frontend
                     Description = "on-screen controls in the campaign and in matches. auto shows them only while no controller is connected.",
                     Value = () => _settings.TouchControls.ToUpperInvariant(),
                     Step = s => _settings.TouchControls = Next(RecompSettings.TouchModes, _settings.TouchControls, s)
+                },
+                // stylus aim (owner 2026-10-16): the touch controls' right-hand finger aims like the DS stylus
+                new()
+                {
+                    Label = "touch\naim",
+                    Description = "how the right-hand finger aims. stylus: drag to turn the view, as on the ds. stick: a floating stick.",
+                    Value = () => _settings.TouchAim.ToUpperInvariant(),
+                    Step = s => _settings.TouchAim = Next(RecompSettings.TouchAimModes, _settings.TouchAim, s)
                 },
                 // replays (added by the replay session, board rule 2; docs/REPLAY_MODE.md R2): every local match against
                 // bots recorded, the last ten kept (App Campaign/MatchReplay.cs)
@@ -617,6 +720,16 @@ namespace MphRecomp.Frontend
                     Description = "multiplayer hunters and arenas. vanilla: earned as in the original game. all: every one open.",
                     Value = () => _settings.UnlockEverything ? "ALL" : "VANILLA",
                     Step = _ => AskUnlockEverything()
+                },
+                // First Hunt (added by the First Hunt session, board rule 2; owner 2026-10-14: it lives under EXTRAS): the
+                // imported cart's own game, its title screen first; Android dev builds only while the port is in progress
+                new()
+                {
+                    Label = "extras",
+                    Description = "first hunt: the demo cart you imported, played as its own game from its title screen.",
+                    Value = () => "FIRST HUNT",
+                    Step = _ => Requested?.Invoke(FrontendRequestKind.FirstHunt),
+                    Action = true
                 },
                 new()
                 {
@@ -656,11 +769,20 @@ namespace MphRecomp.Frontend
                     Action = true
                 },
             };
+            // the Prime songs' rows under the music quality row (owner 2026-10-14, RecompMenus.Music.cs); not in a public build
+            // (owner 2026-10-17: not in the next release)
+            if (!RecompSettings.PublicBuild) rows.InsertRange(rows.FindIndex(r => r.Label == "music\nquality") + 1, MusicSettingRows());
             // a public build leaves out the rows for what it doesn't ship: imported HD suits, the HD menu art and the
             // developer tools (the music quality row stays: owner 2026-10-05, all four modes are the game's own music)
             if (RecompSettings.PublicBuild) rows.RemoveAll(r => HiddenInPublic.Contains(r.Label));
+            if (RecompSettings.PublicBuild || RecompSettings.DesktopHost || !MphRecomp.FirstHunt.FirstHuntGame.Available(
+                _settingsPath != null ? System.IO.Path.GetDirectoryName(_settingsPath) : null))
+            {
+                rows.RemoveAll(r => r.Label == "extras");
+            }
             if (RecompSettings.DesktopHost) rows.RemoveAll(r => HiddenOnDesktop.Contains(r.Label));
             if (!_settings.DeveloperMode) rows.RemoveAll(r => r.Label == "dev\ntools" || r.Label == "status\ntext");
+            // (in categories, each its own page: RecompMenus.SettingsPages.cs)
             return rows;
         }
 
@@ -669,12 +791,15 @@ namespace MphRecomp.Frontend
         private static readonly HashSet<string> HiddenInPublic = new(StringComparer.Ordinal)
         {
             "developer", "dev\ntools", "controls\npage",
+            // the campaign's Prime radar + mini map (owner 2026-10-17: map work, not in the next release; a
+            // multiplayer match's radar comes with the SHOW HUNTERS ON RADAR rule instead, every build)
+            "hud",
         };
 
         // a PC has no gyroscope, and its mouse is the pointer (no on-screen controls)
         private static readonly HashSet<string> HiddenOnDesktop = new(StringComparer.Ordinal)
         {
-            "gyro\naim", "gyro\nspeed", "gyro\naxis", "touch\ncontrols",
+            "gyro\naim", "gyro\nspeed", "reset\ngyro speed", "gyro\naxis", "touch\ncontrols",
         };
 
 
@@ -697,7 +822,7 @@ namespace MphRecomp.Frontend
                 if (!yes) return;
                 _settings.UnlockEverything = true;
                 _settings.Save(_settingsPath);
-                if (_settingsRows != null) Refresh(_settingsRows);
+                RefreshSettingsPages();
             });
         }
 
@@ -841,6 +966,17 @@ namespace MphRecomp.Frontend
                 Step = _ => Import.ImportAll(id),
                 Action = true
             });
+            int stale = g.Items.Count(ImportGames.NeedsUpdate);
+            rows.Add(new RowModel
+            {
+                Label = "update\nall",
+                Description = stale == 0 ? "nothing needs an update: everything imported is up to date."
+                    : $"imports again the {stale} an update changed (the red badge), from your disc.",
+                Value = () => stale == 0 ? "NONE" : "START",
+                Step = _ => Import.UpdateAll(id),
+                Action = true,
+                Disabled = () => stale == 0
+            });
             if (Import.TakesWiiDiscs(id))   // Prime 3, and Prime 1 / Echoes from a Trilogy disc
             {
                 // greyed while the picked disc needs no key (owner 2026-10-07: a GameCube disc; an .rvz / .wia neither)
@@ -882,7 +1018,8 @@ namespace MphRecomp.Frontend
         private void OnImportChanged()
         {
             ScanSuits();
-            foreach (RowsPage? p in new[] { _settingsRows, _importRows, _importGameRows })
+            RefreshSettingsPages(); // (the suit row's list)
+            foreach (RowsPage? p in new[] { _importRows, _importGameRows, _songRows, _songFilterRows })
             {
                 if (p == null) continue;
                 Refresh(p);
@@ -896,7 +1033,7 @@ namespace MphRecomp.Frontend
         // button and B run that callback instead of going to `back` (it decides where back is); `valueGrow`: how much wider
         // than SENSITIVITY's the value boxes are.
         private RowsPage BuildRowsPage(MenuPage controls, string title, int back, IEnumerable<MenuAction> extraActions, string? empty,
-            int backCall = -1, float valueGrow = ValueGrow, string? deleteAll = null)
+            int backCall = -1, float valueGrow = ValueGrow, string? deleteAll = null, bool removeKey = false, float labelGrow = 0)
         {
             int BackItem = _p.Frame.Length + 1; // after the frame items and the header
             int backPage = back == -1 ? ModsPage : back;
@@ -943,7 +1080,9 @@ namespace MphRecomp.Frontend
             int delString = _strings.Add("X");
             for (int r = 0; r < RowsPerPage; r++)
             {
-                float dx = -60, dy = 74 - RowPitch * r;
+                // labelGrow: a wider label column (long names, e.g. the song lists): the label's wrap grows by it about its
+                // centre and the value side (box, arrows, X) moves right by half of it, into the panel's spare room
+                float dx = -60 + labelGrow / 2, dy = 74 - RowPitch * r;
                 int label = _strings.Add(""), value = _strings.Add(""), desc = _strings.Add("");
                 int descItem = page.AddItem(i => Clone(_p.Desc, i, 0, 0, stringId: desc, init: MenuState.Hidden)).Index;
                 page.AddItem(i => Clone(_p.Arrows, i, dx, dy, stretchX: valueGrow));
@@ -955,8 +1094,8 @@ namespace MphRecomp.Frontend
                     {
                         Call(MenuKeys.A, RowNext + row), Call(MenuKeys.Start, RowPrev + row),
                         Call(MenuKeys.Right, RowRight + row), Call(MenuKeys.Left, RowLeft + row), Call(MenuKeys.X, RowAlt + row)
-                    }.Concat(deleteAll != null ? new[] { Call(MenuKeys.Down, RowDown + row) } : Array.Empty<MenuAction>()).ToArray())).Index;
-                page.AddItem(i => Clone(_p.Label, i, dx - valueGrow / 2, dy, stringId: label, greyed: GreyLabel));
+                    }.Concat(removeKey ? new[] { Call(MenuKeys.Y, RowRemove + row) } : Array.Empty<MenuAction>()).Concat(deleteAll != null ? new[] { Call(MenuKeys.Down, RowDown + row) } : Array.Empty<MenuAction>()).ToArray())).Index;
+                page.AddItem(i => Clone(_p.Label, i, dx - labelGrow / 2 - valueGrow / 2, dy, stringId: label, wrapGrow: (int)labelGrow, greyed: GreyLabel));
                 // a tap on the value box (what an action row has instead of arrows): a touch-only rect (kind 0, the
                 // ROM's own "on arrive None" + rect) on the value text, not on the box -- a box with a rect would get
                 // the host's focus frame. The box as drawn is x 134..190 y 147..163 (-fecanvas FE_TRIS), the value
@@ -1020,8 +1159,9 @@ namespace MphRecomp.Frontend
             return result;
         }
 
-        // PAUSED: the Controls page's four control-type boxes, centred, as a list of four choices
-        private int BuildPausePage(MenuPage controls, MenuPage options)
+        // PAUSED: the Controls page's four control-type boxes, centred, as a list of four choices. chat: an online match's,
+        // CHAT under RESUME (the lobby's CHAT page: OnlineMenus.Chat.cs), five boxes at the same spacing, centred on the old four
+        private int BuildPausePage(MenuPage controls, MenuPage options, bool chat)
         {
             MenuPage page = _file.AddPage(index => new MenuPage
             {
@@ -1037,26 +1177,42 @@ namespace MphRecomp.Frontend
                 Actions = new[] { Call(MenuKeys.B | MenuKeys.Start, PauseResume) },
                 Timers = Array.Empty<MenuTimer>()
             });
+            // (five rows: the panel's top goes up a row and it grows back down to where it was; no PAUSED title there: it would
+            // sit on the first row (higher is the top screen's strip), and an online match runs on under this menu anyway)
+            int n = _p.ChoiceBoxes.Length;
+            float step = n >= 2 ? _p.ChoiceBoxes[n - 1].Y - _p.ChoiceBoxes[n - 2].Y : 0; // (one box to the next)
+            float up = chat ? -step : 0;
             foreach (MenuItem it in _p.Frame.Where(it => HasWidget(it, "blackdrop") || HasWidget(it, "topdrop"))) // backdrop, top band
             {
-                page.AddItem(i => Clone(it, i, 0, 0));
+                bool panel = HasWidget(it, "blackdrop");
+                page.AddItem(i => Clone(it, i, 0, panel ? up : 0, stretchDown: panel ? MathF.Abs(up) : 0));
             }
-            int title = _strings.Add("PAUSED");
-            page.AddItem(i => Clone(_p.OptHeader, i, 0, 0, stringId: title));
-            (string Text, int Call)[] choices =
+            if (!chat)
+            {
+                int title = _strings.Add("PAUSED");
+                page.AddItem(i => Clone(_p.OptHeader, i, 0, 0, stringId: title));
+            }
+            var choices = new List<(string Text, int Call)>
             {
                 ("resume", PauseResume), ("second hunt\nsettings", PauseSettings), ("mod\nsettings", PauseModSettings), ("quit to\nmain menu", PauseQuit)
             };
+            if (chat) choices.Insert(1, ("chat", PauseChatCall));
             const float dx = 66; // the boxes span x 8..116 on the Controls page; centred on the touch screen
-            for (int k = 0; k < choices.Length; k++)
+            float shift = up;
+            for (int k = 0; k < choices.Count; k++)
             {
-                MenuItem box = _p.ChoiceBoxes[k], text = _p.ChoiceTexts[k];
+                int from = Math.Min(k, n - 1); // past the ROM's four: the last one's, a step further each
+                MenuItem box = _p.ChoiceBoxes[from];
+                float dy = (k - from) * step + shift;
                 MenuAction? rect = box.Actions.FirstOrDefault(a => MenuEngine.TryRect(a, null, out _, out _, out _, out _));
                 int call = choices[k].Call;
-                page.AddItem(i => Clone(box, i, dx, 0, init: k == 0 ? MenuState.Focused : MenuState.Idle,
+                page.AddItem(i => Clone(box, i, dx, dy, init: k == 0 ? MenuState.Focused : MenuState.Idle,
                     actions: new[] { rect != null ? CallRect(rect, MenuKeys.A, call) : Call(MenuKeys.A, call) }));
                 int s = _strings.Add(choices[k].Text);
-                page.AddItem(i => Clone(text, i, dx, 0, stringId: s));
+                // (a one-line label in a two-line row's place (CHAT): RESUME's text, centred in its box, a row further each)
+                int textFrom = chat && !choices[k].Text.Contains('\n') ? 0 : from;
+                float textDy = (k - textFrom) * step + shift;
+                page.AddItem(i => Clone(_p.ChoiceTexts[textFrom], i, dx, textDy, stringId: s));
             }
             return page.Index;
         }
@@ -1146,9 +1302,9 @@ namespace MphRecomp.Frontend
         // from the importer doesnt make any noise"); RECOMP SETTINGS' copy of CONTROLS sounds like CONTROLS, item for item.
         public void ApplySounds(MenuSounds sounds)
         {
-            if (_settingsRows == null) return; // not installed
+            if (_modsRows == null) return; // not installed
             int backItem = _p.Frame.Length + 1; // (BuildRowsPage's)
-            foreach (RowsPage? rows in new[] { _settingsRows, _modsRows, _modSettingRows, _controlRows, _importRows, _importGameRows })
+            foreach (RowsPage? rows in new[] { _modsRows, _modSettingRows, _importRows, _importGameRows })
             {
                 if (rows != null) sounds.ItemLike(rows.Page, backItem, ControlsPage, _p.Back.Index);
             }
@@ -1377,7 +1533,7 @@ namespace MphRecomp.Frontend
             _strings.Fill(_titleString, classic ? _titleClassic : "ADJUST CONTROL OPTIONS");
             if (_sensDescString >= 0)
             {
-                _strings.Fill(_sensDescString, classic ? _sensDescClassic : "how quickly you turn and aim with the right stick.");
+                _strings.Fill(_sensDescString, classic ? _sensDescClassic : ControlHints.For("sensitivity"));
             }
         }
 
@@ -1417,99 +1573,18 @@ namespace MphRecomp.Frontend
             return true;
         }
 
-        // ---- the control customizer ----
-
-        // a row a function (its buttons in the value box), then RESET TO DEFAULTS; A (or a tap) on a row waits for the new
-        // button, X for a second one
-        private List<RowModel> ControlRows()
-        {
-            bool keys = _controlsKeys;
-            var rows = new List<RowModel>();
-            foreach (ControlBinds.Function f in ControlBinds.Functions(keys))
-            {
-                string id = f.Id;
-                rows.Add(new RowModel
-                {
-                    Label = f.Label,
-                    Description = _captureId != id ? f.Description + " a: change. x: add a second button."
-                        : (_captureAdd ? "press a second button for this. " : "press the new button for this. ")
-                            + (keys ? "esc keeps it as it is." : "wait to keep it as it is."),
-                    Value = () => _captureId == id ? "PRESS" : ControlBinds.Value(ControlBinds.Get(_settings, keys, id)),
-                    Step = _ => BeginCapture(id, add: false),
-                    Alt = () => BeginCapture(id, add: true),
-                    Action = true
-                });
-            }
-            rows.Add(new RowModel
-            {
-                Label = "reset to\ndefaults",
-                Description = "puts every " + (keys ? "key and mouse button" : "button") + " back the way it started.",
-                Value = () => ControlBinds.IsDefault(_settings, keys) ? "DONE" : "RESET",
-                Step = _ => ControlBinds.Reset(_settings, keys),
-                Action = true
-            });
-            return rows;
-        }
-
-        // the customizer is waiting for a button: "pad" (a controller's) or "keys" (a PC's keys and mouse buttons), else
-        // null. The host sends its next press to CaptureInput instead of the menu.
-        public string? CaptureDevice => _captureId == null ? null : _controlsKeys ? "keys" : "pad";
-
-        private void BeginCapture(string id, bool add)
-        {
-            _captureId = id;
-            _captureAdd = add;
-            _captureStart = Environment.TickCount64;
-            if (_controlRows != null) Refresh(_controlRows);
-        }
-
-        // the host's press while CaptureDevice is set, as a ControlBinds button name; a fixed button keeps it waiting
-        public void CaptureInput(string button)
-        {
-            if (_captureId == null || !ControlBinds.Allowed(_controlsKeys, button)) return;
-            if (!ControlBinds.Assign(_settings, _controlsKeys, _captureId, button, _captureAdd, out string? only))
-            {
-                Import.Popup?.Inform($"that's {only}'s only button.\n\ngive {only} another button first."); // (Voice O8: zoom has none to swap)
-            }
-            _settings.Save(_settingsPath);
-            EndCapture();
-        }
-
-        public void CancelCapture()
-        {
-            if (_captureId != null) EndCapture();
-        }
-
-        private void EndCapture()
-        {
-            _captureId = null;
-            if (_controlRows != null) Refresh(_controlRows);
-        }
-
         // every menu frame
         public void Tick()
         {
             Import.Tick();
             TickReplays(); // REPLAYS: PLAY's launch waits for the file-start sound (RecompMenus.Replays.cs)
             TickOnline(); // ONLINE PLAY: the network's results and the server's pushes (OnlineMenus.cs)
-            if (_captureId != null && Environment.TickCount64 - _captureStart > CaptureMs) EndCapture();
-        }
-
-        // the game opens the customizer itself (the ship's OPTIONS): its back closes it (FrontendRequestKind.ControlsDone)
-        public void OpenControls(MenuEngine menu, bool keys)
-        {
-            if (_controlRows == null) return;
-            _controlsFromHost = true;
-            ShowControls(menu, keys);
-        }
-
-        private void ShowControls(MenuEngine menu, bool keys)
-        {
-            _controlsKeys = keys;
-            _captureId = null;
-            _controlRows!.Title = keys ? "KEYBOARD & MOUSE" : "CONTROLLER";
-            if (_controlsFromHost) menu.Enter(_controlRows.Page);
-            else menu.GoTo(_controlRows.Page);
+            if (_captureId != null && Environment.TickCount64 - _captureStart > CaptureMs)
+            {
+                // nobody answered: nothing changes; buttons still held (a release the host never sent) are the answer
+                if (_capturePressed.Count > 0) CommitCapture();
+                else EndCapture();
+            }
         }
 
         // ---- runtime ----
@@ -1521,8 +1596,7 @@ namespace MphRecomp.Frontend
             RowsPage? rows = RowsFor(page);
             if (rows != null)
             {
-                // back from the customizer to RECOMP SETTINGS: the same page of rows as before
-                if (!(rows == _settingsRows && (_lastPage == _controlRows?.Page || _lastPage == _importRows?.Page))) rows.Offset = 0;
+                rows.Offset = 0;
                 rows.Entered?.Invoke();
                 Refresh(rows);
                 ShowRows(menu, rows);
@@ -1530,12 +1604,13 @@ namespace MphRecomp.Frontend
             EnterReplays(menu, page); // REPLAYS' list and details pages (RecompMenus.Replays.cs)
             EnterOnline(menu, page); // ONLINE PLAY's pages (OnlineMenus.cs)
             EnterImportCards(menu, page); // IMPORT GAMES' cards (RecompMenus.ImportCards.cs)
+            EnterSections(menu, page); // CONTROLS (RecompMenus.Controls.cs)
             if (IsControlsPage(page) && _controlsButtonItems.Count > 0) EnterControls(menu);
             if (_hiddenItems.TryGetValue(page, out List<int>? hide))
             {
                 foreach (int i in hide) menu.SetState(i, MenuState.Hidden);
             }
-            if (page != _controlRows?.Page) _captureId = null;
+            if (page != s_controlsPage) _captureId = null;
             UpdateModsCount();
             _lastPage = page;
         }
@@ -1550,24 +1625,17 @@ namespace MphRecomp.Frontend
             if (ReplayCall(menu, call)) return true; // REPLAYS (RecompMenus.Replays.cs)
             if (OnlineCall(menu, call)) return true; // ONLINE PLAY (OnlineMenus.cs)
             if (ImportCardsCall(menu, call)) return true; // IMPORT GAMES' cards (RecompMenus.ImportCards.cs)
+            if (SectionCall(menu, call)) return true; // CONTROLS (RecompMenus.Controls.cs)
             switch (call)
             {
             case OpenPadControls:
             case OpenKeyControls:
+                // (the old OPTIONS > CONTROLS buttons: CONTROLS on that device)
                 _controlsFromHost = false;
-                _controlsBackPage = menu.Page?.Index ?? ControlsPage; // OPTIONS > CONTROLS or its RECOMP SETTINGS copy
-                ShowControls(menu, call == OpenKeyControls);
+                _controlsKeys = call == OpenKeyControls;
+                if (s_controlsPage >= 0) menu.GoTo(s_controlsPage);
                 return true;
             case ControlsNoop:
-                return true;
-            case ControlsBack:
-                _captureId = null;
-                if (_controlsFromHost)
-                {
-                    _controlsFromHost = false;
-                    Requested?.Invoke(FrontendRequestKind.ControlsDone);
-                }
-                else menu.GoTo(_controlsBackPage);
                 return true;
             case OpenMods:
                 menu.GoTo(ModsPage);
@@ -1592,8 +1660,16 @@ namespace MphRecomp.Frontend
             case PauseResume:
                 Requested?.Invoke(FrontendRequestKind.Resume);
                 return true;
+            case PauseChatCall:
+                if (PauseChat != null && s_onChat >= 0) menu.GoTo(s_onChat); // (OnlineMenus.Chat.cs)
+                return true;
             case PauseQuit:
-                Requested?.Invoke(FrontendRequestKind.QuitToMenu);
+                // (asked first, in every pause menu; TRY CONTROLS' Start stays one press)
+                if (Import.Popup == null) Requested?.Invoke(FrontendRequestKind.QuitToMenu);
+                else Import.Popup.Ask("quit to the main menu?", yes =>
+                {
+                    if (yes) Requested?.Invoke(FrontendRequestKind.QuitToMenu);
+                });
                 return true;
             case DeleteAllCall:
                 // its ask box; the page updates on Import.Changed
@@ -1610,11 +1686,11 @@ namespace MphRecomp.Frontend
                 return true;
             case PageNext:
             case PagePrev:
-                if (menu.Page != null && RowsFor(menu.Page.Index) is RowsPage p && p.Rows.Count > RowsPerPage)
+                if (menu.Page != null && RowsFor(menu.Page.Index) is RowsPage p && PageCount(p) > 1)
                 {
                     // wraps round (R on the last page -> the first), so both icons always do something
                     int pages = PageCount(p);
-                    p.Offset = (p.Offset / RowsPerPage + (call == PageNext ? 1 : pages - 1)) % pages * RowsPerPage;
+                    p.Offset = p.Starts[(PageIndex(p) + (call == PageNext ? 1 : pages - 1)) % pages];
                     Refresh(p);
                     ShowRows(menu, p);
                 }
@@ -1624,7 +1700,7 @@ namespace MphRecomp.Frontend
             int row = call - kind;
             if (row < 0 || row >= RowsPerPage || menu.Page == null) return false;
             RowsPage? rows = RowsFor(menu.Page.Index);
-            if (rows == null || rows.Offset + row >= rows.Rows.Count) return true;
+            if (rows == null || row >= RowsShown(rows)) return true;
             if (kind == RowDown)
             {
                 int next = LiveRows(rows).FirstOrDefault(r => r > row, -1);
@@ -1640,6 +1716,13 @@ namespace MphRecomp.Frontend
                 model.Delete?.Invoke();
                 return true;
             }
+            if (kind == RowRemove)
+            {
+                model.Remove?.Invoke();
+                Refresh(rows);
+                ShowDisabled(menu, rows);
+                return true;
+            }
             if (kind == RowAlt)
             {
                 model.Alt();
@@ -1648,14 +1731,19 @@ namespace MphRecomp.Frontend
                 return true;
             }
             if (kind == RowTap && !model.Action) return true; // a value row's box: the touch arrows step it
-            if (kind == RowPrev && rows == _controlRows) return true; // Start there is the pause menu's own key
             if (kind is RowRight or RowLeft && model.Action) return true; // no arrows: the D-pad doesn't run it
             int count = rows.Rows.Count;
             model.Step(kind is RowPrev or RowLeft ? -1 : 1);
             _settings.Save(_settingsPath);
             Refresh(rows);
             if (rows.Rows.Count != count) ShowRows(menu, rows); // DEVELOPER on/off adds/removes the dev tools row
-            else ShowDisabled(menu, rows);
+            else
+            {
+                ShowDisabled(menu, rows);
+                // a row that greys itself (a reset, at the default now): the focus goes up to the live row above (what it reset)
+                int up = model.Disabled?.Invoke() == true ? LiveRows(rows).LastOrDefault(r => r < row, -1) : -1;
+                if (up >= 0) menu.SetState(rows.Box[up], MenuState.Focused);
+            }
             UpdateModsCount();
             return true;
         }
@@ -1665,7 +1753,7 @@ namespace MphRecomp.Frontend
         // are no rows at all, the L / R icons when there's more than one page
         private static void ShowRows(MenuEngine menu, RowsPage p)
         {
-            int shown = Math.Max(0, Math.Min(RowsPerPage, p.Rows.Count - p.Offset));
+            int shown = RowsShown(p);
             for (int r = 0; r < RowsPerPage; r++)
             {
                 int box = p.Box[r];
@@ -1693,7 +1781,7 @@ namespace MphRecomp.Frontend
         // is greyed the focus moves to the first one that isn't; the X boxes of the rows that have one; DELETE ALL
         private static void ShowDisabled(MenuEngine menu, RowsPage p)
         {
-            int shown = Math.Max(0, Math.Min(RowsPerPage, p.Rows.Count - p.Offset));
+            int shown = RowsShown(p);
             int firstOn = -1;
             for (int r = 0; r < shown; r++)
             {
@@ -1730,23 +1818,47 @@ namespace MphRecomp.Frontend
             }
         }
 
-        private static int PageCount(RowsPage p) => Math.Max(1, (p.Rows.Count + RowsPerPage - 1) / RowsPerPage);
+        private static int PageCount(RowsPage p) => p.Starts.Count;
+        private static int PageIndex(RowsPage p) => Math.Max(0, p.Starts.IndexOf(p.Offset));
+
+        // how many rows this page shows: up to six, up to the next page's start (a new section)
+        private static int RowsShown(RowsPage p)
+        {
+            int i = PageIndex(p);
+            int end = i + 1 < p.Starts.Count ? p.Starts[i + 1] : p.Rows.Count;
+            return Math.Max(0, Math.Min(RowsPerPage, end - p.Offset));
+        }
+
+        // the pages' starts for the list as it is now; the offset onto the start of the page it was in
+        private static void PageStarts(RowsPage p)
+        {
+            p.Starts.Clear();
+            p.Starts.Add(0);
+            for (int i = 1; i < p.Rows.Count; i++)
+            {
+                if (i - p.Starts[^1] >= RowsPerPage || p.Rows[i].Section != p.Rows[i - 1].Section) p.Starts.Add(i);
+            }
+            if (!p.Starts.Contains(p.Offset)) p.Offset = p.Starts.LastOrDefault(s => s <= p.Offset);
+        }
 
         // the shown rows that aren't greyed, top to bottom
-        private static IEnumerable<int> LiveRows(RowsPage p) => Enumerable.Range(0, Math.Max(0, Math.Min(RowsPerPage, p.Rows.Count - p.Offset)))
+        private static IEnumerable<int> LiveRows(RowsPage p) => Enumerable.Range(0, RowsShown(p))
             .Where(r => p.Rows[p.Offset + r].Disabled?.Invoke() != true);
 
         private void Refresh(RowsPage p)
         {
             p.Rows = p.Source();
-            int pages = PageCount(p);
-            if (p.Header >= 0) _strings.Set(p.Header, pages > 1 ? $"{p.Title} {p.Offset / RowsPerPage + 1}/{pages}" : p.Title);
+            PageStarts(p);
+            int pages = PageCount(p), shown = RowsShown(p);
+            string? section = shown > 0 ? p.Rows[p.Offset].Section : null;
+            string title = section != null ? $"{p.Title} - {section}" : p.Title;
+            if (p.Header >= 0) _strings.Set(p.Header, pages > 1 ? $"{title} {PageIndex(p) + 1}/{pages}" : title);
             for (int r = 0; r < RowsPerPage; r++)
             {
-                RowModel? m = p.Offset + r < p.Rows.Count ? p.Rows[p.Offset + r] : null;
+                RowModel? m = r < shown ? p.Rows[p.Offset + r] : null;
                 _strings.Set(p.Label[r], m?.Label ?? "");
                 _strings.Set(p.Value[r], m?.Value() ?? "");
-                _strings.Set(p.Desc[r], m?.Description ?? "");
+                _strings.Set(p.Desc[r], m?.Hint ?? "");
             }
         }
 

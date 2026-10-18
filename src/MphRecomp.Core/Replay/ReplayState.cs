@@ -55,7 +55,9 @@ namespace MphRecomp.Replay
 
         public const int TypeSlots = 32; // EntityType values below 32 (all of MPH's); First Hunt types share the last
 
-        public static ReplayStateParts Capture(Scene scene)
+        // turretState: Shooting Gallery's turret in the checksum (AddTurret); off only to verify files older than format 42
+        // (ReplayFile.OldTurretHash), whose checksums were taken without it
+        public static ReplayStateParts Capture(Scene scene, bool turretState = true)
         {
             var parts = new ReplayStateParts
             {
@@ -114,6 +116,10 @@ namespace MphRecomp.Replay
                 else
                 {
                     AddEntity(ref game, entity);
+                    if (turretState && entity is MphRecomp.Arenas.EchoesTurretEntity turret)
+                    {
+                        AddTurret(ref game, turret);
+                    }
                 }
             }
             parts.Entities = game.Finish();
@@ -164,7 +170,18 @@ namespace MphRecomp.Replay
                     sb.Append($" {(EntityType)i}:{byType[i] & 0xFFFFFFFF:x8}");
                 }
             }
+            foreach (EntityBase entity in scene.Entities)
+            {
+                if (entity is MphRecomp.Arenas.EchoesTurretEntity t)
+                {
+                    sb.Append($"\n  turret state {(int)t.State} in {Seat(t.Occupant)} held {Seat(t.Held)} hp {t.Hp} "
+                        + $"armed {(t.Armed ? 1 : 0)} shots {t.Shots} yaw {Bits(t.Yaw)} pitch {Bits(t.Pitch)} "
+                        + $"since {Bits(t.SinceShot)} time {Bits(t.StateTime)}");
+                }
+            }
             return sb.ToString();
+
+            static int Seat(PlayerEntity? p) => p?.SlotIndex ?? -1;
 
             static string Bits(float f) => $"{BitConverter.SingleToInt32Bits(f):x8}";
             static string V(OpenTK.Mathematics.Vector3 v) => $"{Bits(v.X)},{Bits(v.Y)},{Bits(v.Z)}";
@@ -219,6 +236,21 @@ namespace MphRecomp.Replay
 
         // type, active and position only: ids of spawned entities (projectiles, bombs, effects) come from shared
         // counters, so a cosmetic spawn would shift every later id without changing the match
+        // Shooting Gallery's manned turret (format 42): AddEntity sees only where it stands, which never changes; who is in
+        // it, its health and aim decide the match (shots, the bomb slot), so a drift there failed only later, elsewhere
+        private static void AddTurret(ref Hash h, MphRecomp.Arenas.EchoesTurretEntity t)
+        {
+            h.Add((uint)t.State | (t.Armed ? 0x100u : 0));
+            h.Add(t.Occupant?.SlotIndex ?? -1);
+            h.Add(t.Held?.SlotIndex ?? -1);
+            h.Add(t.Hp);
+            h.Add(t.Shots);
+            h.Add(t.Yaw);
+            h.Add(t.Pitch);
+            h.Add(t.SinceShot);
+            h.Add(t.StateTime);
+        }
+
         private static void AddEntity(ref Hash h, EntityBase entity)
         {
             h.Add((uint)entity.Type | (entity.Active ? 0x10000u : 0) | (entity.Initialized ? 0x20000u : 0));

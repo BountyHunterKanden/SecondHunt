@@ -30,6 +30,17 @@ internal sealed partial class CampaignRenderer
         return _frame - seen.Frame <= PhazonHoldFrames;
     }
 
+    // a phazon glow's colour on this seat: its blue, or on a team seat the team's colour (its white core kept)
+    Vector4 PhazonColor(PlayerEntity p, float r, float g, float b, float a)
+    {
+        int i = p.SlotIndex;
+        LookAlikes.Variant v = i >= 0 && i < _seatVariant.Length ? _seatVariant[i] : LookAlikes.Variant.First;
+        if (v is not (LookAlikes.Variant.OrangeTeam or LookAlikes.Variant.GreenTeam)) return new Vector4(r, g, b, a);
+        var c = LookAlikes.TeamColor(v, darkSamus: true);
+        float w = MathF.Min(r, MathF.Min(g, b));
+        return new Vector4(c.R + (1 - c.R) * w, c.G + (1 - c.G) * w, c.B + (1 - c.B) * w, a);
+    }
+
     // DrawSkins (MatchSkins.cs), after DrawDroneFallback
     void DrawLookAlikeFx(Scene scene, SuitPass pass)
     {
@@ -61,9 +72,9 @@ internal sealed partial class CampaignRenderer
                 float ts = t + side * 23;
                 float pulse = 0.85f + 0.15f * MathF.Sin(ts * 0.11f) * MathF.Sin(ts * 0.047f + 1);
                 // (owner 10-09: dimmer than first built: between the v2 and v3 pictures)
-                Glow(ref n, vp, right, up, at, 1.25f * pulse, new Vector4(0.30f, 0.62f, 1f, 0.31f * a));
-                Glow(ref n, vp, right, up, at, 0.70f * pulse, new Vector4(0.45f, 0.82f, 1f, 0.41f * a));
-                Glow(ref n, vp, right, up, at, 0.30f * pulse, new Vector4(0.80f, 0.95f, 1f, 0.38f * a));
+                Glow(ref n, vp, right, up, at, 1.25f * pulse, PhazonColor(p, 0.30f, 0.62f, 1f, 0.31f * a));
+                Glow(ref n, vp, right, up, at, 0.70f * pulse, PhazonColor(p, 0.45f, 0.82f, 1f, 0.41f * a));
+                Glow(ref n, vp, right, up, at, 0.30f * pulse, PhazonColor(p, 0.80f, 0.95f, 1f, 0.38f * a));
                 // motes: a few close around the pad in the camera's plane, each seen only as it flares (owner 10-09: kept on
                 // the shoulders, not floating off her)
                 for (int i = 0; i < PhazonMotes; i++)
@@ -73,7 +84,7 @@ internal sealed partial class CampaignRenderer
                     float f = MathF.Sin(ts * 0.21f + i * 1.7f);
                     float flare = f > 0 ? f * f : 0;
                     Vector3 mote = at + (right * MathF.Cos(ang) + up * MathF.Sin(ang)) * r;
-                    Glow(ref n, vp, right, up, mote, 0.075f + 0.045f * flare, new Vector4(0.60f, 0.92f, 1f, (0.12f + 0.73f * flare) * a));
+                    Glow(ref n, vp, right, up, mote, 0.075f + 0.045f * flare, PhazonColor(p, 0.60f, 0.92f, 1f, (0.12f + 0.73f * flare) * a));
                 }
             }
         }

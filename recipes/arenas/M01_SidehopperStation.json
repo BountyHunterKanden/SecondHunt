@@ -4,6 +4,8 @@
   "pak": "Metroid6.pak",
   "pakSha1": "b8b92af37dc772ecd8234fb1ce664be0493188f6",
   "scale": 0.5925926,
+  "audioPak": "AudioGrp.pak",
+  "audioPakSha1": "8d0282eec11ea74288772bd4b7ee795ca913bab1",
   "crates": [
     "Imperialist",
     "Judicator",

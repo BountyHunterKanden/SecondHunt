@@ -110,6 +110,8 @@ internal sealed partial class CampaignRenderer
     // the screen on ExitSink.
     void ConfigureShip(string savesDir, LaunchArgs args)
     {
+        // the map's seen corridors/chambers are static: a run without a save starts with none (AdoptSave sets a save's)
+        MphRecomp.Frontend.CorridorMap.Adopt(Array.Empty<string>(), null);
         _saves = new CampaignSaves(savesDir);
         // slot <n>: the file a NEW game saves to (the front end's files A/B/C = slots 1/2/3)
         if (Int32.TryParse(args.Get("slot"), out int newSlot) && newSlot > 0)
@@ -178,6 +180,7 @@ internal sealed partial class CampaignRenderer
         _shipNotStarted = !file.Started;
         _knownAreas = file.KnownAreas ?? file.Story.Areas;
         MapAdoptConnectors(file.MapConnectors);
+        MphRecomp.Frontend.CorridorMap.Adopt(file.MapPieces, file.Story);
         _playFrames = file.PlaySeconds * 60;
         _shipUnsaved = false;
     }
@@ -261,6 +264,26 @@ internal sealed partial class CampaignRenderer
     // kind: 0 down, 1 move, 2 up
     public void ShipTouch(float x, float y, int kind = 0) => _shipTouches.Enqueue((x, y, kind));
     public bool ShipMenuOpen => _shipPage is ShipPage.Menu or ShipPage.Briefing or ShipPage.PlanetSelect;
+
+    // the text panel's pages with rows to choose (the save prompt's YES / NO, game over's LOAD / NEW GAME / QUIT): a tap
+    // on a row chooses it as A would (owner 2026-10-14: everything that looks tappable is). text: the panel's text as
+    // shown; line: the tapped line of it (UI thread -> ShipInput)
+    public bool ShipPanelUp => _shipPage is ShipPage.SavePrompt or ShipPage.GameOver;
+    int _shipPanelTap = -1;
+
+    public bool ShipPanelTap(string text, int line)
+    {
+        string[] lines = text.Split('\n');
+        if (!ShipPanelUp || line < 0 || line >= lines.Length || !IsPanelRow(lines[line]))
+        {
+            return false;
+        }
+        int row = lines.Take(line).Count(IsPanelRow);
+        System.Threading.Volatile.Write(ref _shipPanelTap, row);
+        return true;
+        // ShipText's rows: "  > YES", "    NO" (two spaces, the cursor or a space, a space)
+        static bool IsPanelRow(string l) => l.Length > 4 && l.StartsWith("  ") && l[2] is ('>' or ' ') && l[3] == ' ' && l[4] != ' ';
+    }
 
     void OpenShipMenu()
     {
@@ -801,6 +824,7 @@ internal sealed partial class CampaignRenderer
                 Cleared = _shipCleared,
                 KnownAreas = _knownAreas,
                 MapConnectors = MapConnectorsForSave(),
+                MapPieces = MphRecomp.Frontend.CorridorMap.ForSave(),
                 Story = copy
             });
             _shipUnsaved = false;
@@ -1013,6 +1037,15 @@ internal sealed partial class CampaignRenderer
             }
             else if (_takeoff.Finished) EndTakeoff();
             return;
+        }
+        int tapRow = System.Threading.Interlocked.Exchange(ref _shipPanelTap, -1);
+        if (tapRow >= 0 && ShipPanelUp)
+        {
+            // a tapped row (ShipPanelTap): the cursor goes there and A chooses it
+            _shipCursor = tapRow;
+            move = 0;
+            pressA = true;
+            pressB = false;
         }
         if (move == 0 && !pressA && !pressB)
         {

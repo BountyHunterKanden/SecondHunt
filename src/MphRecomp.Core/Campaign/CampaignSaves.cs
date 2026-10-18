@@ -32,6 +32,9 @@ namespace MphRecomp.Campaign
         // the connectors walked through, for the Prime-style pause map (AreaMapIndex: vanilla's save +0x30 layout, a word
         // per area half). null (saves without the field) = seeded from the visited rooms on first use
         public uint[]? MapConnectors { get; set; }
+        // the door-bounded room pieces (corridors, chambers) Samus has been in, for the maps (MphRecomp.Frontend.CorridorMap
+        // keys). null (saves without the field) = every piece of a visited room
+        public string[]? MapPieces { get; set; }
         public StorySave Story { get; set; } = null!;
     }
 
@@ -244,6 +247,12 @@ namespace MphRecomp.Campaign
                     foreach (uint word in connectors) w.WriteNumberValue(word);
                     w.WriteEndArray();
                 }
+                if (file.MapPieces is string[] pieces)
+                {
+                    w.WriteStartArray("MapPieces");
+                    foreach (string piece in pieces) w.WriteStringValue(piece);
+                    w.WriteEndArray();
+                }
                 w.WritePropertyName("Story");
                 WriteStory(w, file.Story);
                 w.WriteEndObject();
@@ -275,6 +284,8 @@ namespace MphRecomp.Campaign
                 KnownAreas = root.TryGetProperty("KnownAreas", out JsonElement known) ? known.GetInt32() : null,
                 MapConnectors = root.TryGetProperty("MapConnectors", out JsonElement cons) && cons.ValueKind == JsonValueKind.Array
                     ? cons.EnumerateArray().Select(e => e.GetUInt32()).ToArray() : null,
+                MapPieces = root.TryGetProperty("MapPieces", out JsonElement pieces) && pieces.ValueKind == JsonValueKind.Array
+                    ? pieces.EnumerateArray().Select(e => e.GetString() ?? "").ToArray() : null,
                 Story = story
             };
         }

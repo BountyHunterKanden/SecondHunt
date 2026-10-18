@@ -69,7 +69,7 @@ namespace MphRecomp.Frontend
 
         private int FreedSeats(OnlineMatch m)
         {
-            if (m != _hosting) return 0;
+            if (m != Runner) return 0;
             if (_freedFor != m)
             {
                 _freedFor = m;
@@ -78,13 +78,13 @@ namespace MphRecomp.Frontend
             return _freed;
         }
 
-        private bool CanAddBot(List<LobbySeat> seats) => _hosting?.Net.Settings is MatchSettings s && s.Players.Count < MaxSeats
+        private bool CanAddBot(List<LobbySeat> seats) => Runner?.Net.Settings is MatchSettings s && s.Players.Count < MaxSeats
             && seats.Count < MaxSeats;
 
         // ShowLobby: the boxes that apply (the host's bots and open seats; the other set of cards' boxes hidden)
         private void ShowLobbyBots(MenuEngine menu, List<LobbySeat> seats)
         {
-            bool host = _hosting != null, eight = LobbyEight(seats.Count), add = CanAddBot(seats);
+            bool host = Runner != null, eight = LobbyEight(seats.Count), add = CanAddBot(seats);
             for (int k = 0; k < LobbySeats8; k++)
             {
                 LobbySeat? seat = k < seats.Count ? seats[k] : null;
@@ -108,7 +108,7 @@ namespace MphRecomp.Frontend
         {
             List<LobbySeat> seats = SeatsNow();
             int k = (call - OnLbLevelCall) % 10;
-            if (_hosting is not OnlineMatch hm || k >= seats.Count) return;
+            if (Runner is not OnlineMatch hm || k >= seats.Count) return;
             LobbySeat seat = seats[k];
             switch (call)
             {
@@ -136,7 +136,7 @@ namespace MphRecomp.Frontend
         // a tap on the host's bot card: the next hunter (one no other seat plays, if there is one)
         private void StepBotHunter(LobbySeat seat)
         {
-            if (_hosting is not OnlineMatch hm || seat is not { Kind: SeatKind.Bot, Player: MatchPlayer p } || hm.Net.Settings is not MatchSettings s) return;
+            if (Runner is not OnlineMatch hm || seat is not { Kind: SeatKind.Bot, Player: MatchPlayer p } || hm.Net.Settings is not MatchSettings s) return;
             hm.Net.ReplaceBot(seat.Index, MultiplayerMenu.OnlineBot(NextBotHunter(s, p.Hunter), p.BotLevel));
         }
 

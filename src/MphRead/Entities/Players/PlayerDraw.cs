@@ -45,6 +45,8 @@ namespace MphRead.Entities
         public Vector3 HostShootPoint { get; private set; }
         public Vector3? HostFxShootOffset { get; set; }
         public bool HostOwnAlt { get; set; }
+        // recomp: the alt form's turn as MphRead draws it (its rotation rows), for an alt form the host draws (Beyond Lockjaw)
+        public Matrix4 HostAltTurn => _modelTransform;
 
         // recomp: the main player's first-person charge glow, muzzle flash and gun smoke at this point of MPH's gun space
         // (world units: X left, Y up, Z forward) instead of the muzzle (0, 0, MuzzleOffset) -- the host's first-person arm
@@ -57,7 +59,7 @@ namespace MphRead.Entities
         // skin's own, e.g. Dark Samus's blue); null = MPH's
         public Vector3? HostTrailColor { get; set; }
         // recomp: a no-import look-alike's palette set (D5, Read.HostExtraRecolors) for this seat's body and alt models; -1 =
-        // Recolor. Drawing only (the gun keeps Recolor).
+        // Recolor. Drawing only (the gun: HostGunLookRecolor).
         public int HostLookRecolor { get; set; } = -1;
         // recomp: the seat's picked character's name (D7: TROOPER, DARK SAMUS) for the target health bar; null = the hunter's
         public string? HostCharacterName { get; set; }
@@ -75,6 +77,16 @@ namespace MphRead.Entities
             }
             HostTrackedPoses++;
         }
+        // recomp: the same for the first-person gun (a look-alike's set on the gun model: the Trooper's / Dark Samus's
+        // stand-in arm cannon in the seat's colours); -1 = Recolor
+        public int HostGunLookRecolor { get; set; } = -1;
+        // recomp: this player's bombs in a host colour (the 5th-8th seat with the same hunter, MphRecomp HunterColours;
+        // Recolor stays MPH's 0-3): Kanden's tail bomb model's palette set, Sylux's Lockjaw glow colour (its bombStartSylux
+        // effect's glow element) and trail (arcWelder1's set). -1 / null = Recolor's. Drawing only
+        public int HostBombLookRecolor { get; set; } = -1;
+        public Vector3? HostSyluxBombColor { get; set; }
+        public int HostSyluxTrailRecolor { get; set; } = -1;
+
         internal int BodyRecolor(ModelInstance inst, int recolor)
             => HostLookRecolor >= 0 && HostLookRecolor < inst.Model.Recolors.Count ? HostLookRecolor : recolor;
 
@@ -168,6 +180,7 @@ namespace MphRead.Entities
                     {
                         DrawMorphBallTrail();
                     }
+                    DrawHyperBall(); // recomp: Dark Samus's Hyper Ball stand-in (PlayerHyperBall.cs)
                     _modelTransform.Row3.Xyz = Vector3.Zero;
                     Flags2 |= PlayerFlags2.DrawnThirdPerson;
                 }
@@ -280,10 +293,11 @@ namespace MphRead.Entities
                     }
                     Flags2 |= PlayerFlags2.DrawnThirdPerson;
                 }
-                else if (AttachedEnemy == null && !_field6D0 && Hunter != Hunter.Guardian)
+                else if (AttachedEnemy == null && !_field6D0 && Hunter != Hunter.Guardian && !HostSeated) // recomp: no gun in the turret's seat (PlayerEchoesSeat.cs)
                 {
                     Matrix4 transform = GunDrawTransform; // recomp: turned with a replay's view (HostFirstPersonSeat)
-                    UpdateTransforms(_gunModel, transform, Recolor);
+                    UpdateTransforms(_gunModel, transform, HostGunLookRecolor >= 0 && HostGunLookRecolor < _gunModel.Model.Recolors.Count
+                        ? HostGunLookRecolor : HostFirstHunt ? 0 : Recolor); // recomp: HostGunLookRecolor; First Hunt's gun has one
                     GetDrawItems(_gunModel, _gunModel.Model.Nodes[0], _curAlpha);
                     if (Flags1.TestFlag(PlayerFlags1.DrawGunSmoke))
                     {
@@ -326,7 +340,7 @@ namespace MphRead.Entities
                 _altModel.Model.Nodes[i].Animation = _kandenSegMtx[i];
             }
             _altModel.Model.UpdateMatrixStack();
-            UpdateMaterials(_altModel, Recolor);
+            UpdateMaterials(_altModel, BodyRecolor(_altModel, Recolor)); // recomp: HostLookRecolor
             GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
         }
 
@@ -360,7 +374,7 @@ namespace MphRead.Entities
                 node.Animation = animation;
             }
             _altModel.Model.UpdateMatrixStack();
-            UpdateMaterials(_altModel, Recolor);
+            UpdateMaterials(_altModel, BodyRecolor(_altModel, Recolor)); // recomp: HostLookRecolor
             GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
         }
 

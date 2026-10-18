@@ -1,41 +1,42 @@
-# MphRead TODO list
+﻿# MphRead TODO list
 
 MphRead marks every unfinished or uncertain spot in its code with a `todo` comment. Some are things the original game does that MphRead doesn't do yet, some are open questions about how the original works, and many are notes about the code itself, like a field whose purpose isn't known yet. This page lists every one of them from MphRead's own code, and crosses off the ones Second Hunt has fixed.
 
-As of 2026-10-11: **1457** TODOs in MphRead, **27** fixed, **1425** still open (of those, 5 partly fixed and 1 to check), and **5** kept on purpose because they're bugs in the original game that MphRead copies.
+As of 2026-10-12: **1457** TODOs in MphRead, **41** fixed, **1400** still open (of those, 5 partly fixed and 1 to check), **5** kept on purpose because they're bugs in the original game that MphRead copies, and **11** checked against the original game and already matching it.
 
 How to read it:
 - Each line is one TODO: where it is, the method it's in, and the comment as MphRead wrote it.
 - ~~Crossed off~~ means it's fixed. The note after it says what changed and where that's written down.
 - "partly fixed" means part of it is done and the rest is still open.
 - "kept on purpose" means the original game has the bug too, so it stays.
+- "checked" means the question in the comment was answered from the original game's code and MphRead already does what it does, so nothing changes. The comment stays in the code.
 - "needs a check" means the comment is gone from the code but no fix is written down for it yet.
 - Line numbers point at the code as it is today. A TODO that's no longer in the code points at MphRead's original line instead (marked "upstream line").
 - Most of the frame rate TODOs are exact already: MphRead runs the game at 60 Hz instead of the original's 30, and marks every timer, speed and step it converted. They stay open here until each one is checked.
 
 ## Summary
 
-| Area | TODOs | Fixed | Open | Kept on purpose |
-|---|---:|---:|---:|---:|
-| [Frame rate](#frame-rate) | 831 | 11 | 820 | 0 |
-| [Naming](#naming) | 173 | 0 | 173 | 0 |
-| [Rendering](#rendering) | 35 | 0 | 35 | 0 |
-| [Wi-Fi rules](#wi-fi-rules) | 21 | 0 | 21 | 0 |
-| [Viewer and debug tools](#viewer-and-debug-tools) | 15 | 0 | 15 | 0 |
-| [Bots](#bots) | 13 | 0 | 13 | 0 |
-| [HUD and menus](#hud-and-menus) | 12 | 0 | 12 | 0 |
-| [Multiplayer license](#multiplayer-license) | 11 | 7 | 4 | 0 |
-| [Sound and music](#sound-and-music) | 9 | 0 | 9 | 0 |
-| [Saves](#saves) | 5 | 0 | 5 | 0 |
-| [Rumble](#rumble) | 2 | 0 | 2 | 0 |
-| [Everything else](#everything-else) | 330 | 9 | 316 | 5 |
-| **All** | **1457** | **27** | **1425** | **5** |
+| Area | TODOs | Fixed | Open | Kept on purpose | Checked |
+|---|---:|---:|---:|---:|---:|
+| [Frame rate](#frame-rate) | 831 | 24 | 805 | 0 | 2 |
+| [Naming](#naming) | 173 | 0 | 173 | 0 | 0 |
+| [Rendering](#rendering) | 35 | 0 | 35 | 0 | 0 |
+| [Wi-Fi rules](#wi-fi-rules) | 21 | 0 | 21 | 0 | 0 |
+| [Viewer and debug tools](#viewer-and-debug-tools) | 15 | 0 | 15 | 0 | 0 |
+| [Bots](#bots) | 13 | 0 | 13 | 0 | 0 |
+| [HUD and menus](#hud-and-menus) | 12 | 0 | 12 | 0 | 0 |
+| [Multiplayer license](#multiplayer-license) | 11 | 7 | 4 | 0 | 0 |
+| [Sound and music](#sound-and-music) | 9 | 0 | 9 | 0 | 0 |
+| [Saves](#saves) | 5 | 0 | 5 | 0 | 0 |
+| [Rumble](#rumble) | 2 | 0 | 2 | 0 | 0 |
+| [Everything else](#everything-else) | 330 | 10 | 306 | 5 | 9 |
+| **All** | **1457** | **41** | **1400** | **5** | **11** |
 
 An area is picked from the words in each comment ("FPS stuff" is frame rate, "names" is naming, "wifi" is the Wi-Fi rules, and so on), so a few TODOs sit in a neighbouring area.
 
 ## Fixed so far
 
-27 fixed and 5 partly fixed. Each one also appears in its area below.
+41 fixed and 5 partly fixed. Each one also appears in its area below.
 
 - [x] ~~[PlayerCamera.cs:206](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Players/PlayerCamera.cs#L206) (upstream line) in `PlayerEntity.UpdateCameraThird1`: sktodo: FPS stuff?~~ (fixed: morph ball camera follow matches the original per tick, measured; docs/ACCURACY.md A3)
 - [x] ~~[PlayerCamera.cs:555](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Players/PlayerCamera.cs#L555) (upstream line) in `PlayerEntity.UpdateCameraThird2`: sktodo: FPS stuff?~~ (fixed: morph ball camera follow matches the original per tick, measured; docs/ACCURACY.md A3)
@@ -55,8 +56,8 @@ An area is picked from the words in each comment ("FPS stuff" is frame rate, "na
 - [x] ~~[GameState.cs:262](../src/MphRead/GameState.cs#L262) in `GameState.UpdateTime`: todo: update license info etc.~~ (fixed: match time goes to the license (HostLicenseTime); docs/MULTIPLAYER_MENU.md "Counting")
 - [x] ~~[GameState.cs:299](../src/MphRead/GameState.cs#L299) in `GameState.ProcessFrame`: todo: update MP playtime to license info~~ (fixed: match time goes to the license (HostLicenseTime); docs/MULTIPLAYER_MENU.md "Counting")
 - [x] ~~[GameState.cs:1237](../src/MphRead/GameState.cs#L1237) in `GameState.UpdateState`: todo: update license info~~ (fixed: wins, places, streaks and arena counts are counted after the match like the original; docs/MULTIPLAYER_MENU.md "Counting")
-- [x] ~~[28_Gorea1B.cs:1028](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1028) in `Enemy28Entity.Behavior02`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
-- [x] ~~[31_Gorea2.cs:946](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L946) in `Enemy31Entity.State17`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
+- [x] ~~[28_Gorea1B.cs:1039](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1039) in `Enemy28Entity.Behavior02`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
+- [x] ~~[31_Gorea2.cs:958](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L958) in `Enemy31Entity.State17`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
 - [x] ~~[PlayerEntity.cs:2127](../src/MphRead/Entities/Players/PlayerEntity.cs#L2127) in `PlayerEntity.TakeDamage`: todo: unlock hunter for multiplayer~~ (fixed: multiplayer hunters unlock from the campaign saves like the original; docs/MULTIPLAYER_MENU.md "UNLOCKS")
 - [x] ~~[PlayerInput.cs:1177](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Players/PlayerInput.cs#L1177) (upstream line) in `PlayerEntity.ProcessAlt`: todo?: if touch movement for alt form was a thing, this would need extra conditions~~ (fixed: touch controls built from the original's code (PlayerTouch.cs); PlayerTouch.cs; board release T11 (touch check passed 2026-10-10))
 - [x] ~~[PlayerInput.cs:1346](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Players/PlayerInput.cs#L1346) (upstream line) in `PlayerEntity.ProcessAlt`: todo: touch roll~~ (fixed: touch roll built from the original's code (PlayerTouch.cs); PlayerTouch.cs; board release T11 (touch check passed 2026-10-10))
@@ -72,10 +73,24 @@ Partly fixed:
 - [ ] [EntityBase.cs:462](../src/MphRead/Entities/EntityBase.cs#L462) in `EntityBase.GetDrawInfo`: todo: hide attached effects (partly fixed: the gunship hides its thruster flames when hidden; other entities still to do; README "What's been fixed", PlatformEntity.cs)
 - [ ] [GameState.cs:445](../src/MphRead/GameState.cs#L445) in `GameState.ProcessFrame`: todo: update license info, stop SFX (partly fixed: license counted after the match; stopping sounds still to do; docs/MULTIPLAYER_MENU.md "Counting")
 - [ ] [GameState.cs:515](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/GameState.cs#L515) (upstream line) in `GameState.ModeStateAdventure`: todo: game timer/boss record stuff (partly fixed: Gorea 1 and 2 times are kept and saved; boss records still to do (new TODO in GameState.cs); docs/ENDINGS.md section 3)
+- [x] ~~[31_Gorea2.cs:546](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L546) (upstream line) in `Enemy31Entity`: todo: this is pretty jerky~~ (fixed: Gorea 2 hovered at twice the original speed with twice the jitter; now the original 30 Hz rate, rev 1 0x213D58C; docs/ACCURACY.md)
+- [x] ~~[28_Gorea1B.cs:494](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L494) in `Enemy28Entity.Func213B678`: sktodo: FPS stuff?~~ (fixed: the grapple reeled the player in twice as fast (step per 30 Hz tick applied every 60 Hz frame); rev 1 0x213B640; docs/ACCURACY.md)
+- [x] ~~[28_Gorea1B.cs:630](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/28_Gorea1B.cs#L630) (upstream line) in `Enemy28Entity.State07`: sktodo: FPS stuff~~ (fixed: the grapple swing added Gorea's speed at half the original rate; rev 1 0x2139AEC; docs/ACCURACY.md)
+- [x] ~~[31_Gorea2.cs:773](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L773) (upstream line) in `Enemy31Entity.State08`: todo: FPS stuff~~ (fixed: the timer clamp was `Max` (at least 15 ticks) where the original takes `Min` (at most 15); rev 1 0x213F124; docs/ACCURACY.md)
+- [x] ~~[31_Gorea2.cs:1007](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L1007) (upstream line) in `Enemy31Entity.Func213D80C`: todo: FPS stuff~~ (fixed: the snap distance was halved like a per-frame step, but it is a distance (0x555 = 1/3); rev 1 0x213D7C8; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:302](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L302) in `Enemy24Entity.EnemyInitialize`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:302](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L302) in `Enemy24Entity.EnemyInitialize`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:562](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L562) in `Enemy24Entity.State00`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:923](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L923) in `Enemy24Entity.State13`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:924](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L924) in `Enemy24Entity.State13`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:1435](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1435) in `Enemy24Entity.Behavior20`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:1477](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1477) in `Enemy24Entity.Behavior21`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[31_Gorea2.cs:144](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L144) (upstream line) in `Enemy31Entity.CheckPlayerCollision`: todo: FPS stuff~~ (fixed: the push went up and down too (the original zeroes Y) and stacked twice per tick on held contact; rev 1 0x2140854; docs/ACCURACY.md)
+- [x] ~~[31_Gorea2.cs:292](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L292) (upstream line) in `Enemy31Entity.UpdateLaserTargeting`: todo: FPS stuff~~ (fixed: 1/24 per frame is not the original's 1/12 per tick (it closes the gap geometrically); now 1 - sqrt(1 - 341/4096) per frame; rev 1 0x213F614; docs/ACCURACY.md)
 
 ## Frame rate
 
-831 TODOs: 11 fixed, 820 open.
+831 TODOs: 24 fixed, 805 open, 2 checked.
 
 ### AreaVolumeEntity.cs
 
@@ -392,43 +407,43 @@ Partly fixed:
 - [ ] [24_Gorea1A.cs:102](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L102) in `GoreaEnemyEntityBase.SeekTargetFacing`: todo: FPS stuff
 - [ ] [24_Gorea1A.cs:202](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L202) in `GoreaEnemyEntityBase.IsAtEndFrame`: todo: FPS stuff
 - [ ] [24_Gorea1A.cs:302](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L302) in `Enemy24Entity.EnemyInitialize`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:303](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L303) in `Enemy24Entity.EnemyInitialize`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:304](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L304) in `Enemy24Entity.EnemyInitialize`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:487](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L487) in `Enemy24Entity.IncrementAllMaterialColors`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:561](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L561) in `Enemy24Entity.State00`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:626](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L626) in `Enemy24Entity.State02`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:635](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L635) in `Enemy24Entity.State03`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:690](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L690) in `Enemy24Entity.CheckTargeting`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:700](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L700) in `Enemy24Entity.CheckTargeting`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:839](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L839) in `Enemy24Entity.State08`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:891](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L891) in `Enemy24Entity.State12`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:919](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L919) in `Enemy24Entity.State13`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:920](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L920) in `Enemy24Entity.State13`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:921](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L921) in `Enemy24Entity.State13`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1014](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1014) in `Enemy24Entity.Behavior04`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1030](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1030) in `Enemy24Entity.Behavior05`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1036](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1036) in `Enemy24Entity.Behavior05`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1048](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1048) in `Enemy24Entity.Behavior06`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1077](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1077) in `Enemy24Entity.Behavior07`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1108](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1108) in `Enemy24Entity.StopAndSetUp`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1109](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1109) in `Enemy24Entity.StopAndSetUp`: todo: FPS stuff
+- [x] ~~[24_Gorea1A.cs:302](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L302) in `Enemy24Entity.EnemyInitialize`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:302](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L302) in `Enemy24Entity.EnemyInitialize`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [ ] [24_Gorea1A.cs:488](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L488) in `Enemy24Entity.IncrementAllMaterialColors`: todo: FPS stuff
+- [x] ~~[24_Gorea1A.cs:562](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L562) in `Enemy24Entity.State00`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [ ] [24_Gorea1A.cs:627](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L627) in `Enemy24Entity.State02`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:636](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L636) in `Enemy24Entity.State03`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:691](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L691) in `Enemy24Entity.CheckTargeting`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:701](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L701) in `Enemy24Entity.CheckTargeting`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:842](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L842) in `Enemy24Entity.State08`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:894](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L894) in `Enemy24Entity.State12`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:922](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L922) in `Enemy24Entity.State13`: todo: FPS stuff
+- [x] ~~[24_Gorea1A.cs:923](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L923) in `Enemy24Entity.State13`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [x] ~~[24_Gorea1A.cs:924](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L924) in `Enemy24Entity.State13`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [ ] [24_Gorea1A.cs:1017](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1017) in `Enemy24Entity.Behavior04`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1033](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1033) in `Enemy24Entity.Behavior05`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1039](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1039) in `Enemy24Entity.Behavior05`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1051](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1051) in `Enemy24Entity.Behavior06`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1080](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1080) in `Enemy24Entity.Behavior07`: todo: FPS stuff
 - [ ] [24_Gorea1A.cs:1111](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1111) in `Enemy24Entity.StopAndSetUp`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1130](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1130) in `Enemy24Entity.StartShots`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1132](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1132) in `Enemy24Entity.StartShots`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1112](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1112) in `Enemy24Entity.StopAndSetUp`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1114](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1114) in `Enemy24Entity.StopAndSetUp`: todo: FPS stuff
 - [ ] [24_Gorea1A.cs:1133](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1133) in `Enemy24Entity.StartShots`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1134](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1134) in `Enemy24Entity.StartShots`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1153](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1153) in `Enemy24Entity.StartShots`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1154](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1154) in `Enemy24Entity.StartShots`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1221](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1221) in `Enemy24Entity.Behavior08`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1321](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1321) in `Enemy24Entity.TrySprintingRoomInVolume`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1337](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1337) in `Enemy24Entity.Behavior12`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1375](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1375) in `Enemy24Entity.Behavior15`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1408](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1408) in `Enemy24Entity.Behavior18`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1432](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1432) in `Enemy24Entity.Behavior20`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1459](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1459) in `Enemy24Entity.RegenerateArms`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1474](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1474) in `Enemy24Entity.Behavior21`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1530](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1530) in `Enemy24Entity.DrawArmRegen`: todo: FPS stuff
-- [ ] [24_Gorea1A.cs:1552](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1552) in `Enemy24Entity.UpdateArmMaterials`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1135](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1135) in `Enemy24Entity.StartShots`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1136](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1136) in `Enemy24Entity.StartShots`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1137](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1137) in `Enemy24Entity.StartShots`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1156](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1156) in `Enemy24Entity.StartShots`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1157](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1157) in `Enemy24Entity.StartShots`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1224](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1224) in `Enemy24Entity.Behavior08`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1324](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1324) in `Enemy24Entity.TrySprintingRoomInVolume`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1340](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1340) in `Enemy24Entity.Behavior12`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1378](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1378) in `Enemy24Entity.Behavior15`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1411](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1411) in `Enemy24Entity.Behavior18`: todo: FPS stuff
+- [x] ~~[24_Gorea1A.cs:1435](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1435) in `Enemy24Entity.Behavior20`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [ ] [24_Gorea1A.cs:1462](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1462) in `Enemy24Entity.RegenerateArms`: todo: FPS stuff
+- [x] ~~[24_Gorea1A.cs:1477](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1477) in `Enemy24Entity.Behavior21`: todo: FPS stuff~~ (fixed: these timers count down to -1 in the original (N + 1 ticks); now + 1 frame at 60 Hz instead of half a tick early; rev 1 0x2134484; docs/ACCURACY.md)
+- [ ] [24_Gorea1A.cs:1533](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1533) in `Enemy24Entity.DrawArmRegen`: todo: FPS stuff
+- [ ] [24_Gorea1A.cs:1555](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1555) in `Enemy24Entity.UpdateArmMaterials`: todo: FPS stuff
 
 ### 26_GoreaArm.cs
 
@@ -452,34 +467,34 @@ Partly fixed:
 - [ ] [28_Gorea1B.cs:373](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L373) in `Enemy28Entity.UpdateGrappleDrawInt`: todo: FPS stuff
 - [ ] [28_Gorea1B.cs:375](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L375) in `Enemy28Entity.UpdateGrappleDrawInt`: todo: FPS stuff
 - [ ] [28_Gorea1B.cs:390](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L390) in `Enemy28Entity.Func213B90C`: todo: FPS stuff // sktodo: confirm
-- [ ] [28_Gorea1B.cs:494](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L494) in `Enemy28Entity.Func213B678`: sktodo: FPS stuff?
-- [ ] [28_Gorea1B.cs:537](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L537) in `Enemy28Entity.Func213C624`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:564](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L564) in `Enemy28Entity.Func213C4DC`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:575](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L575) in `Enemy28Entity.Func213C4DC`: sktodo: FPS stuff // sktodo: confirm
-- [ ] [28_Gorea1B.cs:603](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L603) in `Enemy28Entity.TickGrappleDamage`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:630](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L630) in `Enemy28Entity.State07`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:639](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L639) in `Enemy28Entity.State07`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:745](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L745) in `Enemy28Entity.State11`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:780](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L780) in `Enemy28Entity.Func213B2B4`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:849](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L849) in `Enemy28Entity.Func213AF2C`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:855](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L855) in `Enemy28Entity.Func213AF2C`: sktodo: FPS stuff?
-- [ ] [28_Gorea1B.cs:873](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L873) in `Enemy28Entity.Func213AF2C`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:894](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L894) in `Enemy28Entity.Func213B188`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:929](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L929) in `Enemy28Entity.State12`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:949](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L949) in `Enemy28Entity.Deactivate`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1001](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1001) in `Enemy28Entity.Behavior00`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1079](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1079) in `Enemy28Entity.Behavior03`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1090](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1090) in `Enemy28Entity.Behavior04`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:1123](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1123) in `Enemy28Entity.Behavior06`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1151](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1151) in `Enemy28Entity.Behavior09`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1152](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1152) in `Enemy28Entity.Behavior09`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1157](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1157) in `Enemy28Entity.Behavior09`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1226](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1226) in `Enemy28Entity.Behavior12`: sktodo: FPS stuff
-- [ ] [28_Gorea1B.cs:1246](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1246) in `Enemy28Entity.Behavior14`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:1257](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1257) in `Enemy28Entity.Behavior15`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:1328](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1328) in `Enemy28Entity.EnemyGetDrawInfo`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:1343](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1343) in `Enemy28Entity.EnemyGetDrawInfo`: todo: FPS stuff
-- [ ] [28_Gorea1B.cs:1365](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1365) in `Enemy28Entity.DrawMindTricks`: todo: FPS stuff
+- [x] ~~[28_Gorea1B.cs:494](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L494) in `Enemy28Entity.Func213B678`: sktodo: FPS stuff?~~ (fixed: the grapple reeled the player in twice as fast (step per 30 Hz tick applied every 60 Hz frame); rev 1 0x213B640; docs/ACCURACY.md)
+- [ ] [28_Gorea1B.cs:538](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L538) in `Enemy28Entity.Func213C624`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:565](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L565) in `Enemy28Entity.Func213C4DC`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:576](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L576) in `Enemy28Entity.Func213C4DC`: sktodo: FPS stuff // sktodo: confirm
+- [ ] [28_Gorea1B.cs:604](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L604) in `Enemy28Entity.TickGrappleDamage`: todo: FPS stuff
+- [x] ~~[28_Gorea1B.cs:630](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/28_Gorea1B.cs#L630) (upstream line) in `Enemy28Entity.State07`: sktodo: FPS stuff~~ (fixed: the grapple swing added Gorea's speed at half the original rate; rev 1 0x2139AEC; docs/ACCURACY.md)
+- [ ] [28_Gorea1B.cs:642](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L642) in `Enemy28Entity.State07`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:748](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L748) in `Enemy28Entity.State11`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:783](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L783) in `Enemy28Entity.Func213B2B4`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:852](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L852) in `Enemy28Entity.Func213AF2C`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:858](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L858) in `Enemy28Entity.Func213AF2C`: sktodo: FPS stuff? (checked: the original moves the Trocra by Gorea's per-tick speed (rev 1 0x213AF34); `_speed` is already per 60 Hz frame)
+- [ ] [28_Gorea1B.cs:884](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L884) in `Enemy28Entity.Func213AF2C`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:905](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L905) in `Enemy28Entity.Func213B188`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:940](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L940) in `Enemy28Entity.State12`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:960](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L960) in `Enemy28Entity.Deactivate`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1012](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1012) in `Enemy28Entity.Behavior00`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1090](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1090) in `Enemy28Entity.Behavior03`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1101](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1101) in `Enemy28Entity.Behavior04`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:1134](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1134) in `Enemy28Entity.Behavior06`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1162](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1162) in `Enemy28Entity.Behavior09`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1163](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1163) in `Enemy28Entity.Behavior09`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1168](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1168) in `Enemy28Entity.Behavior09`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1237](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1237) in `Enemy28Entity.Behavior12`: sktodo: FPS stuff
+- [ ] [28_Gorea1B.cs:1257](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1257) in `Enemy28Entity.Behavior14`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:1268](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1268) in `Enemy28Entity.Behavior15`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:1339](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1339) in `Enemy28Entity.EnemyGetDrawInfo`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:1354](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1354) in `Enemy28Entity.EnemyGetDrawInfo`: todo: FPS stuff
+- [ ] [28_Gorea1B.cs:1376](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1376) in `Enemy28Entity.DrawMindTricks`: todo: FPS stuff
 
 ### 29_GoreaSealSphere1.cs
 
@@ -497,38 +512,38 @@ Partly fixed:
 
 `src/MphRead/Entities/Enemies/31_Gorea2.cs`
 
-- [ ] [31_Gorea2.cs:91](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L91) in `Enemy31Entity.EnemyInitialize`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:92](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L92) in `Enemy31Entity.EnemyInitialize`: todo: FPS stuff
 - [ ] [31_Gorea2.cs:93](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L93) in `Enemy31Entity.EnemyInitialize`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:144](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L144) in `Enemy31Entity.CheckPlayerCollision`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:188](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L188) in `Enemy31Entity.UpdateChestMaterial`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:247](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L247) in `Enemy31Entity.HandleMessage`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:263](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L263) in `Enemy31Entity.Teleport`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:292](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L292) in `Enemy31Entity.UpdateLaserTargeting`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:311](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L311) in `Enemy31Entity.UpdateLaserTargeting`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:362](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L362) in `Enemy31Entity.UpdateMaterialColors`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:452](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L452) in `Enemy31Entity.Func213D3C8`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:463](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L463) in `Enemy31Entity.Func213D3C8`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:486](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L486) in `Enemy31Entity.Func213D30C`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:503](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L503) in `Enemy31Entity.Func213D30C`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:514](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L514) in `Enemy31Entity.Func213D204`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:531](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L531) in `Enemy31Entity.Func213D204`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:543](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L543) in `Enemy31Entity.Func213D5D0`: todo: FPS stuff?
-- [ ] [31_Gorea2.cs:596](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L596) in `Enemy31Entity.State01`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:655](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L655) in `Enemy31Entity.State04`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:717](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L717) in `Enemy31Entity.State06`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:747](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L747) in `Enemy31Entity.State07`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:758](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L758) in `Enemy31Entity.State08`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:763](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L763) in `Enemy31Entity.State08`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:773](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L773) in `Enemy31Entity.State08`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:871](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L871) in `Enemy31Entity.State09`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:988](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L988) in `Enemy31Entity.InitTrigger`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:1007](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1007) in `Enemy31Entity.Func213D80C`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:1010](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1010) in `Enemy31Entity.Func213D80C`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:1017](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1017) in `Enemy31Entity.Func213D80C`: sktodo: FPS stuff?
-- [ ] [31_Gorea2.cs:1277](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1277) in `Enemy31Entity.Behavior09`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:1390](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1390) in `Enemy31Entity.Func2140390`: todo: FPS stuff
-- [ ] [31_Gorea2.cs:1448](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1448) in `Enemy31Entity.Behavior17`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:94](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L94) in `Enemy31Entity.EnemyInitialize`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:95](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L95) in `Enemy31Entity.EnemyInitialize`: todo: FPS stuff
+- [x] ~~[31_Gorea2.cs:144](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L144) (upstream line) in `Enemy31Entity.CheckPlayerCollision`: todo: FPS stuff~~ (fixed: the push went up and down too (the original zeroes Y) and stacked twice per tick on held contact; rev 1 0x2140854; docs/ACCURACY.md)
+- [ ] [31_Gorea2.cs:192](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L192) in `Enemy31Entity.UpdateChestMaterial`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:251](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L251) in `Enemy31Entity.HandleMessage`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:267](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L267) in `Enemy31Entity.Teleport`: todo: FPS stuff
+- [x] ~~[31_Gorea2.cs:292](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L292) (upstream line) in `Enemy31Entity.UpdateLaserTargeting`: todo: FPS stuff~~ (fixed: 1/24 per frame is not the original's 1/12 per tick (it closes the gap geometrically); now 1 - sqrt(1 - 341/4096) per frame; rev 1 0x213F614; docs/ACCURACY.md)
+- [ ] [31_Gorea2.cs:316](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L316) in `Enemy31Entity.UpdateLaserTargeting`: todo: FPS stuff (checked: the original steps a fixed 0x155 along the laser per tick (rev 1 0x213F758), so half per frame is right)
+- [ ] [31_Gorea2.cs:367](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L367) in `Enemy31Entity.UpdateMaterialColors`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:457](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L457) in `Enemy31Entity.Func213D3C8`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:468](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L468) in `Enemy31Entity.Func213D3C8`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:491](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L491) in `Enemy31Entity.Func213D30C`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:508](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L508) in `Enemy31Entity.Func213D30C`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:519](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L519) in `Enemy31Entity.Func213D204`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:536](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L536) in `Enemy31Entity.Func213D204`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:548](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L548) in `Enemy31Entity.Func213D5D0`: todo: FPS stuff?
+- [ ] [31_Gorea2.cs:607](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L607) in `Enemy31Entity.State01`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:666](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L666) in `Enemy31Entity.State04`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:728](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L728) in `Enemy31Entity.State06`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:758](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L758) in `Enemy31Entity.State07`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:769](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L769) in `Enemy31Entity.State08`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:774](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L774) in `Enemy31Entity.State08`: todo: FPS stuff
+- [x] ~~[31_Gorea2.cs:773](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L773) (upstream line) in `Enemy31Entity.State08`: todo: FPS stuff~~ (fixed: the timer clamp was `Max` (at least 15 ticks) where the original takes `Min` (at most 15); rev 1 0x213F124; docs/ACCURACY.md)
+- [ ] [31_Gorea2.cs:883](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L883) in `Enemy31Entity.State09`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:1000](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1000) in `Enemy31Entity.InitTrigger`: todo: FPS stuff
+- [x] ~~[31_Gorea2.cs:1007](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L1007) (upstream line) in `Enemy31Entity.Func213D80C`: todo: FPS stuff~~ (fixed: the snap distance was halved like a per-frame step, but it is a distance (0x555 = 1/3); rev 1 0x213D7C8; docs/ACCURACY.md)
+- [ ] [31_Gorea2.cs:1023](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1023) in `Enemy31Entity.Func213D80C`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:1030](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1030) in `Enemy31Entity.Func213D80C`: sktodo: FPS stuff?
+- [ ] [31_Gorea2.cs:1291](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1291) in `Enemy31Entity.Behavior09`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:1404](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1404) in `Enemy31Entity.Func2140390`: todo: FPS stuff
+- [ ] [31_Gorea2.cs:1462](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1462) in `Enemy31Entity.Behavior17`: todo: FPS stuff
 
 ### 32_GoreaSealSphere2.cs
 
@@ -540,14 +555,14 @@ Partly fixed:
 
 `src/MphRead/Entities/Enemies/33_GoreaMeteor.cs`
 
-- [ ] [33_GoreaMeteor.cs:73](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L73) in `Enemy33Entity.EnemyInitialize`: todo: FPS stuff
 - [ ] [33_GoreaMeteor.cs:74](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L74) in `Enemy33Entity.EnemyInitialize`: todo: FPS stuff
 - [ ] [33_GoreaMeteor.cs:75](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L75) in `Enemy33Entity.EnemyInitialize`: todo: FPS stuff
-- [ ] [33_GoreaMeteor.cs:80](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L80) in `Enemy33Entity.EnemyInitialize`: todo: FPS stuff
-- [ ] [33_GoreaMeteor.cs:140](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L140) in `Enemy33Entity.UpdateSpeed`: todo: FPS stuff
-- [ ] [33_GoreaMeteor.cs:186](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L186) in `Enemy33Entity.EnemyTakeDamage`: todo: FPS stuff
-- [ ] [33_GoreaMeteor.cs:233](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L233) in `Enemy33Entity.SpawnItemDrop`: todo: FPS stuff
-- [ ] [33_GoreaMeteor.cs:305](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L305) in `Enemy33Entity.EnemyGetDrawInfo`: todo: FPS stuff
+- [ ] [33_GoreaMeteor.cs:76](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L76) in `Enemy33Entity.EnemyInitialize`: todo: FPS stuff
+- [ ] [33_GoreaMeteor.cs:81](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L81) in `Enemy33Entity.EnemyInitialize`: todo: FPS stuff
+- [ ] [33_GoreaMeteor.cs:141](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L141) in `Enemy33Entity.UpdateSpeed`: todo: FPS stuff
+- [ ] [33_GoreaMeteor.cs:192](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L192) in `Enemy33Entity.EnemyTakeDamage`: todo: FPS stuff
+- [ ] [33_GoreaMeteor.cs:239](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L239) in `Enemy33Entity.SpawnItemDrop`: todo: FPS stuff
+- [ ] [33_GoreaMeteor.cs:311](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L311) in `Enemy33Entity.EnemyGetDrawInfo`: todo: FPS stuff
 
 ### 35_Voldrum.cs
 
@@ -1277,61 +1292,61 @@ Partly fixed:
 - [ ] [28_Gorea1B.cs:29](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L29) in `Enemy28Entity`: sktodo: field names, documentation, whatever (grapple segments)
 - [ ] [28_Gorea1B.cs:106](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L106) in `Enemy28Entity.EnemyInitialize`: sktodo: field names (stretching speed and/or things those lines)
 - [ ] [28_Gorea1B.cs:154](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L154) in `Enemy28Entity.EnemyProcess`: sktodo: variable name
-- [ ] [28_Gorea1B.cs:247](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L247) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:258](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L258) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:258](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L258) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:286](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L286) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:316](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L316) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:368](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L368) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:382](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L382) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:382](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L382) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:385](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L385) in `Enemy28Entity.Func213B90C`: sktodo: variable name
 - [ ] [28_Gorea1B.cs:426](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L426) in `Enemy28Entity.Func213B90C`: sktodo: variable names
-- [ ] [28_Gorea1B.cs:437](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L437) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:443](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L443) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:458](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L458) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:462](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L462) in `Enemy28Entity.Func213BC3C`: sktodo: variable names
+- [ ] [28_Gorea1B.cs:443](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L443) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:486](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L486) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:497](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L497) in `Enemy28Entity.Func213BC3C`: sktodo: variable names
+- [ ] [28_Gorea1B.cs:526](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L526) in `Enemy28Entity`: sktodo: member name
 - [ ] [28_Gorea1B.cs:497](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L497) in `Enemy28Entity.Func213B678`: sktodo: variable names
-- [ ] [28_Gorea1B.cs:514](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L514) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:525](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L525) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:543](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L543) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:560](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L560) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:583](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L583) in `Enemy28Entity`: sktodo: member name (note: this is copied from Quadtroid)
-- [ ] [28_Gorea1B.cs:754](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L754) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:785](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L785) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:839](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L839) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:883](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L883) in `Enemy28Entity`: sktodo: member name
-- [ ] [28_Gorea1B.cs:1421](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1421) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:561](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L561) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:584](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L584) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:544](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L544) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:561](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L561) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:584](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L584) in `Enemy28Entity`: sktodo: member name (note: this is copied from Quadtroid)
+- [ ] [28_Gorea1B.cs:757](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L757) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:788](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L788) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:842](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L842) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:894](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L894) in `Enemy28Entity`: sktodo: member name
+- [ ] [28_Gorea1B.cs:1432](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1432) in `Enemy28Entity`: sktodo: member name
 
 ### 31_Gorea2.cs
 
 `src/MphRead/Entities/Enemies/31_Gorea2.cs`
 
-- [ ] [31_Gorea2.cs:316](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L316) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:406](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L406) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:445](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L445) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:479](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L479) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:507](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L507) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:539](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L539) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:686](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L686) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:993](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L993) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1002](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1002) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1026](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1026) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1039](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1039) in `Enemy31Entity`: todo: member name (note: this is copied from Quadtroid)
-- [ ] [31_Gorea2.cs:1045](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1045) in `Enemy31Entity`: todo: member name (note: this is copied from Quadtroid)
-- [ ] [31_Gorea2.cs:1070](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1070) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1085](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1085) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:321](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L321) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:411](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L411) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:450](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L450) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:484](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L484) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:512](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L512) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:544](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L544) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:697](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L697) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1005](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1005) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1014](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1014) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1039](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1039) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1052](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1052) in `Enemy31Entity`: todo: member name (note: this is copied from Quadtroid)
+- [ ] [31_Gorea2.cs:1058](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1058) in `Enemy31Entity`: todo: member name (note: this is copied from Quadtroid)
+- [ ] [31_Gorea2.cs:1083](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1083) in `Enemy31Entity`: todo: member name
 - [ ] [31_Gorea2.cs:1098](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1098) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1123](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1123) in `Enemy31Entity`: todo: member name, flag names
-- [ ] [31_Gorea2.cs:1303](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1303) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1379](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1379) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1399](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1399) in `Enemy31Entity`: todo: member name
-- [ ] [31_Gorea2.cs:1406](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1406) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1111](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1111) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1136](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1136) in `Enemy31Entity`: todo: member name, flag names
+- [ ] [31_Gorea2.cs:1317](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1317) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1393](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1393) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1413](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1413) in `Enemy31Entity`: todo: member name
+- [ ] [31_Gorea2.cs:1420](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1420) in `Enemy31Entity`: todo: member name
 
 ### 33_GoreaMeteor.cs
 
 `src/MphRead/Entities/Enemies/33_GoreaMeteor.cs`
 
-- [ ] [33_GoreaMeteor.cs:199](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L199) in `Enemy33Entity`: todo: member name
+- [ ] [33_GoreaMeteor.cs:205](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L205) in `Enemy33Entity`: todo: member name
 
 ### 37_Quadtroid.cs
 
@@ -1539,7 +1554,7 @@ Partly fixed:
 
 `src/MphRead/Entities/Enemies/31_Gorea2.cs`
 
-- [ ] [31_Gorea2.cs:358](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L358) in `Enemy31Entity`: todo: once material colors (and alpha) are all using floats early, update these functions to use floats
+- [ ] [31_Gorea2.cs:363](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L363) in `Enemy31Entity`: todo: once material colors (and alpha) are all using floats early, update these functions to use floats
 
 ### 49_ForceFieldLock.cs
 
@@ -1929,7 +1944,7 @@ Partly fixed:
 
 `src/MphRead/Entities/Enemies/24_Gorea1A.cs`
 
-- [ ] [24_Gorea1A.cs:801](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L801) in `Enemy24Entity.PlayBeamShotSfx`: todo: this is a hack so the Shock Coil SFX doesn't play every frame. I'm not sure what
+- [ ] [24_Gorea1A.cs:804](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L804) in `Enemy24Entity.PlayBeamShotSfx`: todo: this is a hack so the Shock Coil SFX doesn't play every frame. I'm not sure what (checked 2026-10-11, still open: the original game's sound code would restart it too (rev 1 0x20741B8), which disagrees with MphRead's author's ear; to settle by listening in an emulator; docs/ACCURACY.md)
 
 ### PlayerInput.cs
 
@@ -1996,7 +2011,7 @@ Partly fixed:
 
 ## Everything else
 
-330 TODOs: 9 fixed, 316 open, 5 kept on purpose.
+330 TODOs: 10 fixed, 306 open, 5 kept on purpose, 9 checked.
 
 ### BeamProjectileEntity.cs
 
@@ -2104,53 +2119,53 @@ Partly fixed:
 
 `src/MphRead/Entities/Enemies/24_Gorea1A.cs`
 
-- [ ] [24_Gorea1A.cs:435](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L435) in `Enemy24Entity`: todo: bugfix: the tracks for Battlehammer and Shock Coil are swapped (kept on purpose: the original game has this bug too; docs/ACCURACY.md D)
-- [ ] [24_Gorea1A.cs:469](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L469) in `Enemy24Entity.EnemyProcess`: todo?: this seems much better aligned with the offset in X instead of Z. add a bugifx?
-- [ ] [24_Gorea1A.cs:510](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L510) in `Enemy24Entity`: sktodo: this is the same as the leg with the values baked in -- share code?
-- [ ] [24_Gorea1A.cs:619](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L619) in `Enemy24Entity`: sktodo (document): walking
-- [ ] [24_Gorea1A.cs:631](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L631) in `Enemy24Entity`: sktodo (document): sprinting
-- [ ] [24_Gorea1A.cs:836](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L836) in `Enemy24Entity`: sktodo: (document) slam attack
-- [ ] [24_Gorea1A.cs:888](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L888) in `Enemy24Entity`: sktodo: (document) swipe attack?
-- [ ] [24_Gorea1A.cs:907](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L907) in `Enemy24Entity`: sktodo: (document) switching to Gorea1B
-- [ ] [24_Gorea1A.cs:1131](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1131) in `Enemy24Entity.StartShots`: todo: is it a bug that ShotCooldown is used for the right arm instead of AutofireCooldown?
-- [ ] [24_Gorea1A.cs:1179](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1179) in `Enemy24Entity.SetShotAnimation`: todo: is it a bug that only one arm's flags are updated?
-- [ ] [24_Gorea1A.cs:1301](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1301) in `Enemy24Entity.Behavior11`: sktodo: is this timer ever set?
-- [ ] [24_Gorea1A.cs:1412](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1412) in `Enemy24Entity`: sktodo: (document) at least one use is timer for giving up on turning to face the player in state 1
-- [ ] [24_Gorea1A.cs:1413](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1413) in `Enemy24Entity`: sktodo: also timer for stopping when initially walking toward player in state 2 (called via Behavior22)
-- [ ] [24_Gorea1A.cs:1510](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1510) in `Enemy24Entity.EnemyGetDrawInfo`: sktodo: does this happen?
+- [ ] [24_Gorea1A.cs:436](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L436) in `Enemy24Entity`: todo: bugfix: the tracks for Battlehammer and Shock Coil are swapped (kept on purpose: the original game has this bug too; docs/ACCURACY.md D)
+- [ ] [24_Gorea1A.cs:470](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L470) in `Enemy24Entity.EnemyProcess`: todo?: this seems much better aligned with the offset in X instead of Z. add a bugifx? (checked: the original game uses the same Z offset (rev 1 0x21344FC))
+- [ ] [24_Gorea1A.cs:511](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L511) in `Enemy24Entity`: sktodo: this is the same as the leg with the values baked in -- share code?
+- [ ] [24_Gorea1A.cs:620](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L620) in `Enemy24Entity`: sktodo (document): walking
+- [ ] [24_Gorea1A.cs:632](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L632) in `Enemy24Entity`: sktodo (document): sprinting
+- [ ] [24_Gorea1A.cs:839](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L839) in `Enemy24Entity`: sktodo: (document) slam attack
+- [ ] [24_Gorea1A.cs:891](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L891) in `Enemy24Entity`: sktodo: (document) swipe attack?
+- [ ] [24_Gorea1A.cs:910](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L910) in `Enemy24Entity`: sktodo: (document) switching to Gorea1B
+- [ ] [24_Gorea1A.cs:1134](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1134) in `Enemy24Entity.StartShots`: todo: is it a bug that ShotCooldown is used for the right arm instead of AutofireCooldown? (checked: the original game does the same, both arms take their cooldown from the weapon table +0x10 (rev 1 0x2136C5C))
+- [ ] [24_Gorea1A.cs:1182](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1182) in `Enemy24Entity.SetShotAnimation`: todo: is it a bug that only one arm's flags are updated? (checked: the original game does the same (rev 1 0x2136DD8))
+- [ ] [24_Gorea1A.cs:1304](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1304) in `Enemy24Entity.Behavior11`: sktodo: is this timer ever set? (checked: the original game never sets this timer either (rev 1 0x21346F4, 0x2136A24))
+- [ ] [24_Gorea1A.cs:1415](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1415) in `Enemy24Entity`: sktodo: (document) at least one use is timer for giving up on turning to face the player in state 1
+- [ ] [24_Gorea1A.cs:1416](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1416) in `Enemy24Entity`: sktodo: also timer for stopping when initially walking toward player in state 2 (called via Behavior22)
+- [ ] [24_Gorea1A.cs:1513](../src/MphRead/Entities/Enemies/24_Gorea1A.cs#L1513) in `Enemy24Entity.EnemyGetDrawInfo`: sktodo: does this happen? (checked: never happens, 1A is hidden before 1B shows and the other way round, as in the original game)
 
 ### 28_Gorea1B.cs
 
 `src/MphRead/Entities/Enemies/28_Gorea1B.cs`
 
 - [ ] [28_Gorea1B.cs:42](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L42) in `Enemy28Entity`: sktodo: grapple timer?
-- [ ] [28_Gorea1B.cs:173](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L173) in `Enemy28Entity.CheckPlayerCollision`: todo: is it a bug that this doesn't normalize the vector like 1A and legs do?
+- [ ] [28_Gorea1B.cs:173](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L173) in `Enemy28Entity.CheckPlayerCollision`: todo: is it a bug that this doesn't normalize the vector like 1A and legs do? (checked: the original game doesn't normalize it either (rev 1 0x213BC90-0x213BDC4))
 - [ ] [28_Gorea1B.cs:269](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L269) in `Enemy28Entity.Func2139FE8`: sktodo: (document) rotating the vector to the end point by +/-3 degrees, then updating all the other vecs
 - [ ] [28_Gorea1B.cs:287](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L287) in `Enemy28Entity`: sktodo: (document) setting up equal segments in a straight line between first and (updated) last
 - [ ] [28_Gorea1B.cs:350](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L350) in `Enemy28Entity.UpdateGrappleDrawMatrix`: todo: implement "count\_1" to support multiple grapple beams?
-- [ ] [28_Gorea1B.cs:401](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L401) in `Enemy28Entity.Func213B90C`: sktodo: add a bugfix
+- [ ] [28_Gorea1B.cs:401](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L401) in `Enemy28Entity.Func213B90C`: sktodo: add a bugfix (checked: the original game never writes the clamped vector back (rev 1 0x213B86C-0x213BB84); MphRead's fix is already in and makes no visible difference, left as is)
 - [ ] [28_Gorea1B.cs:444](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L444) in `Enemy28Entity`: sktodo: (document) interpolating vector based on "index and percentage to next index" from e.g. field38
-- [ ] [28_Gorea1B.cs:499](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L499) in `Enemy28Entity.Func213B678`: todo?: consider fx32 math in some places? discrepancies accumulate over time,
-- [ ] [28_Gorea1B.cs:627](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L627) in `Enemy28Entity.State07`: sktodo: I'm not changing the multiplication by 0.04 since I think the above will usually cause \_field10 to get a fresh value every frame?
-- [ ] [28_Gorea1B.cs:865](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L865) in `Enemy28Entity.Func213AF2C`: sktodo (document): throwing after timer
-- [x] ~~[28_Gorea1B.cs:1028](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1028) in `Enemy28Entity.Behavior02`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
-- [ ] [28_Gorea1B.cs:1422](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1422) in `Enemy28Entity`: sktodo: (document) coming up with successive vectors based on the fractional index
-- [ ] [28_Gorea1B.cs:1441](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1441) in `Enemy28Entity`: sktodo: parameter and variable names
+- [ ] [28_Gorea1B.cs:500](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L500) in `Enemy28Entity.Func213B678`: todo?: consider fx32 math in some places? discrepancies accumulate over time,
+- [ ] [28_Gorea1B.cs:629](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L629) in `Enemy28Entity.State07`: sktodo: I'm not changing the multiplication by 0.04 since I think the above will usually cause \_field10 to get a fresh value every frame? (checked: the stale value and the x0.04 (163/4096) are the original game's (rev 1 0x21399F8); the push direction next to it was wrong and is fixed, see docs/ACCURACY.md)
+- [ ] [28_Gorea1B.cs:876](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L876) in `Enemy28Entity.Func213AF2C`: sktodo (document): throwing after timer
+- [x] ~~[28_Gorea1B.cs:1039](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1039) in `Enemy28Entity.Behavior02`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
+- [ ] [28_Gorea1B.cs:1433](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1433) in `Enemy28Entity`: sktodo: (document) coming up with successive vectors based on the fractional index
+- [ ] [28_Gorea1B.cs:1452](../src/MphRead/Entities/Enemies/28_Gorea1B.cs#L1452) in `Enemy28Entity`: sktodo: parameter and variable names
 
 ### 31_Gorea2.cs
 
 `src/MphRead/Entities/Enemies/31_Gorea2.cs`
 
-- [ ] [31_Gorea2.cs:546](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L546) in `Enemy31Entity`: todo: this is pretty jerky
-- [x] ~~[31_Gorea2.cs:946](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L946) in `Enemy31Entity.State17`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
-- [ ] [31_Gorea2.cs:1438](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1438) in `Enemy31Entity`: todo: this is the same as Behavior09, except a different
+- [x] ~~[31_Gorea2.cs:546](https://github.com/NoneGiven/MphRead/blob/26cd8a6fe93dc5e525d1a1bb304fe96001111e55/src/MphRead/Entities/Enemies/31_Gorea2.cs#L546) (upstream line) in `Enemy31Entity`: todo: this is pretty jerky~~ (fixed: Gorea 2 hovered at twice the original speed with twice the jitter; now the original 30 Hz rate, rev 1 0x213D58C; docs/ACCURACY.md)
+- [x] ~~[31_Gorea2.cs:958](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L958) in `Enemy31Entity.State17`: todo: credits~~ (fixed: the credits and results after the ending are built in the menus (Second Hunt 0.2.0); docs/ENDINGS.md section 3)
+- [ ] [31_Gorea2.cs:1452](../src/MphRead/Entities/Enemies/31_Gorea2.cs#L1452) in `Enemy31Entity`: todo: this is the same as Behavior09, except a different
 
 ### 33_GoreaMeteor.cs
 
 `src/MphRead/Entities/Enemies/33_GoreaMeteor.cs`
 
-- [ ] [33_GoreaMeteor.cs:302](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L302) in `Enemy33Entity.EnemyGetDrawInfo`: todo: when shot once with the Power Beam, the meteor stays red, add bugfix?
-- [ ] [33_GoreaMeteor.cs:366](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L366) in `Enemy33Entity`: todo: this is the same as Behavior00 except field1B6 is used
+- [ ] [33_GoreaMeteor.cs:308](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L308) in `Enemy33Entity.EnemyGetDrawInfo`: todo: when shot once with the Power Beam, the meteor stays red, add bugfix? (checked: the original game keeps it red too (rev 1 0x2140DC4))
+- [ ] [33_GoreaMeteor.cs:372](../src/MphRead/Entities/Enemies/33_GoreaMeteor.cs#L372) in `Enemy33Entity`: todo: this is the same as Behavior00 except field1B6 is used
 
 ### 35_Voldrum.cs
 

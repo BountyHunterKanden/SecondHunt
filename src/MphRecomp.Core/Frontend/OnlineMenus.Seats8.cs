@@ -91,7 +91,7 @@ namespace MphRecomp.Frontend
             bool teams = (_hosting ?? _joined)?.Net.Settings is MatchSettings ms && MatchSettings.IsTeamMode(ms.Mode);
             // (a host's bot card: LEVEL there and REMOVE where the check goes, OnlineMenus.LobbyBots.cs; release 0.2.0 F2)
             bool botBoxes = host && seat.Kind == SeatKind.Bot && seat.Index >= 0;
-            string third = you ? (teams ? "tap to change" : "tap to change hunter")
+            string third = you ? (host ? "" : teams ? "tap to change" : "tap to change hunter") // (the host's: EDIT RULES, GAME panel)
                 : seat.Kind != SeatKind.Bot || botBoxes ? "" : host ? $"bot level {seat.Player!.BotLevel + 1}" : "bot";
             if (third.Length > 0) TextS(third, Mx(cx + 165), My(cy + 102), 0, you ? Pale : OnGrey, tag, SizeX);
             else if (ping >= 0) Ping(Mx(cx + 165), My(cy + 100), Mw(30), ping, tag);

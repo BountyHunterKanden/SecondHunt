@@ -1,6 +1,7 @@
 {
   "game": "mp4",
   "pak": "universeRoom.pak",
+  "paks": ["Worlds/Suits/universeRoom.pak", "Preload/DuplicateData.pak"],
   "chpr": "7238eaad-21a1-4966-83fb-7fb7d1173bf6",
   "chprSha1": "dd0180b990769f0d350f4a25fc107e576c22eb02",
   "model": "ca0e9110-352e-4c16-b0c5-80fc5871586d",

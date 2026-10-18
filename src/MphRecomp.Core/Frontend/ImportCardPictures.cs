@@ -10,16 +10,20 @@ namespace MphRecomp.Frontend
     // the ROM's results-screen gold medal by SuitFromMedal's recipe: its blades poke out of the disc as they poke out of
     // the medal), a morph ball seen at an angle (a seam through it, its round side plate shaded), a skull (characters), a
     // radar (maps), two beamed notes (music); and the cards' emblems: a game disc (its number goes on it in the menu
-    // font), three discs (the trilogy), a padlock (not yet); a key (a game page's wii key box). Shapes are in a 64 x 64
+    // font), three discs (the trilogy), a padlock (not yet); a key (a game page's wii key box); and the import-again badge
+    // (owner 2026-10-16: a red disc with a white "!" in a card's upper left corner when an update made some of its imports
+    // stale -- not the orange icon style, so it stands out). Shapes are in a 64 x 64
     // grid (y down), painted in order, each over the ones before; `size` texels a side, `samples` x `samples` per texel
     // for smooth edges.
     internal static class ImportCardPictures
     {
         public const string Suit = "suit", Ball = "ball", Creature = "creature", Radar = "radar", Music = "music";
         public const string Disc = "disc", Discs3 = "discs3", Lock = "lock", Key = "key";
+        public const string Alert = "alert";
 
         private static readonly (byte R, byte G, byte B) Orange = (230, 99, 16), Rim = (189, 82, 8), Dark = (206, 90, 8),
             Black = (8, 0, 0), Brown = (74, 33, 0);
+        private static readonly (byte R, byte G, byte B) AlertRed = (220, 24, 24), AlertRim = (90, 0, 0), White = (255, 255, 255);
 
         // ---- the suits' S: made from the player's own ROM (results/medalgold, the results screen's gold medal) ----
         // A recipe, not a picture (owner 2026-10-10, ship-safe audit): ten straight edges of the medal's S, each given
@@ -161,6 +165,17 @@ namespace MphRecomp.Frontend
 
         private static List<(Shape, (byte, byte, byte))> Layers(string name, (float X, float Y)[]? suit)
         {
+            if (name == Alert)
+            {
+                // the badge: a dark rim so it reads on the orange edges and the renders, a red face, a white "!"
+                return new List<(Shape, (byte, byte, byte))>
+                {
+                    (Ellipse(1, 1, 63, 63), AlertRim),
+                    (Ellipse(5, 5, 59, 59), AlertRed),
+                    (RoundedRect(27, 11, 37, 40, 4), White),
+                    (Ellipse(27, 44, 37, 54), White),
+                };
+            }
             var l = new List<(Shape, (byte, byte, byte))>
             {
                 (Ellipse(1, 1, 63, 63), Rim),

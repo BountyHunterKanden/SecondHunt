@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Space Pirates",
+  "group": "Shared",
+  "role": "battle",
+  "files": [
+    { "name": "MP3/Audio/Shared/space_pirates.fsb", "sha1": "faa5b0a9b22dc7c99b2eb15789bc587c26f1845c" }
+  ],
+  "gain": 0.575
+}

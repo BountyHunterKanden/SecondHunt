@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Chozo Ruins",
+  "group": "Chozo Ruins",
+  "role": "area",
+  "files": [
+    { "name": "Audio/rui_samusL.dsp", "sha1": "cff3708f3622385f6fe442c3a83ecfe98c099260" },
+    { "name": "Audio/rui_samusR.dsp", "sha1": "1200826cf7eef532b9cf8c5983b8b17a9f7c9118" }
+  ],
+  "gain": 1.000
+}

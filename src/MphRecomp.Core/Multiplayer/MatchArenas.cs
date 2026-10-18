@@ -36,6 +36,7 @@ namespace MphRecomp.Multiplayer
             get
             {
                 MphRecomp.Arenas.EchoesArena.EnsureRegistered();
+                MphRecomp.Arenas.FirstHuntArena.EnsureRegistered();
                 return Metadata.HostRooms.Count == 0 ? _retail : _retail.Concat(Metadata.HostRooms.Where(r => r.Multiplayer)).ToList();
             }
         }

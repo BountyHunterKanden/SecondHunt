@@ -517,6 +517,11 @@ namespace MphRead
 
         public static Vector3 ToEulerAngles(Quaternion q) => DetMathF.HostDeterministic ? EulerAngles(q) : q.ToEulerAngles();
 
+        // Matrix4.Inverted(): OpenTK inverts with SSE3 where the CPU has it (PCs) and with plain arithmetic elsewhere (ARM
+        // phones), and the two round differently. Always the plain one here, so a device gets the same bits a PC does
+        // (2026-10-17: Shooting Gallery's turret, the first entity collision turned by any angle, made replays drift there)
+        public static Matrix4 Inverted(Matrix4 m) => DetMathF.HostDeterministic ? (m.Determinant != 0 ? Invert(m) : m) : m.Inverted();
+
         // ---- the OpenTK bodies, given sin and cos (internal: Tools checks them bit for bit against OpenTK's) ----
 
         internal static Matrix4 RotationX(float sin, float cos)
@@ -546,6 +551,61 @@ namespace MphRead
             result.Row0.Y = sin;
             result.Row1.X = -sin;
             result.Row1.Y = cos;
+            return result;
+        }
+
+        // Matrix4.InvertFallback (the non-SSE path), step for step
+        internal static Matrix4 Invert(Matrix4 mat)
+        {
+            float a = mat.M11, b = mat.M21, c = mat.M31, d = mat.M41;
+            float e = mat.M12, f = mat.M22, g = mat.M32, h = mat.M42;
+            float i = mat.M13, j = mat.M23, k = mat.M33, l = mat.M43;
+            float m = mat.M14, n = mat.M24, o = mat.M34, p = mat.M44;
+            float kp_lo = k * p - l * o;
+            float jp_ln = j * p - l * n;
+            float jo_kn = j * o - k * n;
+            float ip_lm = i * p - l * m;
+            float io_km = i * o - k * m;
+            float in_jm = i * n - j * m;
+            float a11 = +(f * kp_lo - g * jp_ln + h * jo_kn);
+            float a12 = -(e * kp_lo - g * ip_lm + h * io_km);
+            float a13 = +(e * jp_ln - f * ip_lm + h * in_jm);
+            float a14 = -(e * jo_kn - f * io_km + g * in_jm);
+            float det = a * a11 + b * a12 + c * a13 + d * a14;
+            if (System.MathF.Abs(det) < float.Epsilon)
+            {
+                throw new InvalidOperationException("Matrix is singular and cannot be inverted.");
+            }
+            float invDet = 1.0f / det;
+            Matrix4 result;
+            result.Row0 = new Vector4(a11, a12, a13, a14) * invDet;
+            result.Row1 = new Vector4(
+                -(b * kp_lo - c * jp_ln + d * jo_kn),
+                +(a * kp_lo - c * ip_lm + d * io_km),
+                -(a * jp_ln - b * ip_lm + d * in_jm),
+                +(a * jo_kn - b * io_km + c * in_jm)) * invDet;
+            float gp_ho = g * p - h * o;
+            float fp_hn = f * p - h * n;
+            float fo_gn = f * o - g * n;
+            float ep_hm = e * p - h * m;
+            float eo_gm = e * o - g * m;
+            float en_fm = e * n - f * m;
+            result.Row2 = new Vector4(
+                +(b * gp_ho - c * fp_hn + d * fo_gn),
+                -(a * gp_ho - c * ep_hm + d * eo_gm),
+                +(a * fp_hn - b * ep_hm + d * en_fm),
+                -(a * fo_gn - b * eo_gm + c * en_fm)) * invDet;
+            float gl_hk = g * l - h * k;
+            float fl_hj = f * l - h * j;
+            float fk_gj = f * k - g * j;
+            float el_hi = e * l - h * i;
+            float ek_gi = e * k - g * i;
+            float ej_fi = e * j - f * i;
+            result.Row3 = new Vector4(
+                -(b * gl_hk - c * fl_hj + d * fk_gj),
+                +(a * gl_hk - c * el_hi + d * ek_gi),
+                -(a * fl_hj - b * el_hi + d * ej_fi),
+                +(a * fk_gj - b * ek_gi + c * ej_fi)) * invDet;
             return result;
         }
 

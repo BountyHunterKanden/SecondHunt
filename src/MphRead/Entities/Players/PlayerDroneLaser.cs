@@ -35,6 +35,9 @@ namespace MphRead.Entities
         public bool HostOwnDroneLaserSfx { get; set; }
         public bool HostOwnDroneShotSfx { get; set; }
 
+        // set while the laser deals its damage (TakeDamage's source is the drone's player, as any direct hit)
+        private static bool _droneLaserApplying;
+
         private const int _droneLaserFrames = 134; // A_cuttinglaser_drone, 2.233 s
         private const int _droneLaserOnAt = 57; // its DamageOn, 0.95 s
         private const int _droneLaserSlideFrames = 60; // Prime's sweep timer, 1 s from DamageOn
@@ -218,7 +221,15 @@ namespace MphRead.Entities
                             damage = damage * 150 / 100;
                         }
                         DamageFlags flags = DamageFlags.NoDmgInvuln | (half ? DamageFlags.Halfturret : DamageFlags.None);
-                        hit.TakeDamage((uint)damage, flags, dir, this);
+                        _droneLaserApplying = true; // its kill message: (SENTRY DRONE) (PlayerScoutDrone.DroneHit)
+                        try
+                        {
+                            hit.TakeDamage((uint)damage, flags, dir, this);
+                        }
+                        finally
+                        {
+                            _droneLaserApplying = false;
+                        }
                     }
                 }
                 _droneLaserOrigin = origin;

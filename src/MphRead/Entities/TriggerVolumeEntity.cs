@@ -283,7 +283,7 @@ namespace MphRead.Entities
         IncludeBots = 0x1000
     }
 
-    public class FhTriggerVolumeEntity : EntityBase
+    public partial class FhTriggerVolumeEntity : EntityBase
     {
         private readonly FhTriggerVolumeEntityData _data;
         private EntityBase? _parent = null;

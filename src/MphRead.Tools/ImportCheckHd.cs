@@ -11,7 +11,7 @@ using MphRecomp.Import.Hd;
 
 namespace MphRead
 {
-    // -importcheck hd [Name|all] [--out dir] [--mp1 disc.iso] [--mp2 disc.iso] [--mp3 folder|disc] [--recipes dir|embedded] [-v]
+    // -importcheck hd [Name|all] [--out dir] [--mp1 disc.iso] [--mp2 disc.iso] [--mp3 folder|disc] [--mp4 romfs] [--recipes dir|embedded] [-v]
     // The golden check (docs/IMPORT_PIPELINE.md rule 4) for the HD model folders (docs/CLEANROOM_QUEUE.md CR1): runs the
     // in-app "hd" importer (MphRecomp.Import.Hd, the same code the device runs) on the owner's own discs, then compares
     // every file with today's reference in brawl_extract/Converted/<Name> (made by prime_to_trophy.py):
@@ -47,6 +47,8 @@ namespace MphRead
                 ["mp2"] = Arg("--mp2", Path.Combine(repo, "brawl_extract", "prime", "echoes_retail.rvz")),
                 // Prime 3: the Trilogy disc's extracted file tree (DATA/files, holding MP3/*.pak), or its image
                 ["mp3"] = Arg("--mp3", Path.Combine(repo, "brawl_extract", "prime", "trilogy", "DATA", "files")),
+                // Prime 4: the RomFS folder of the owner's own dump (eden's Dump RomFS)
+                ["mp4"] = Arg("--mp4", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "eden", "dump", "010019A01E2F2000", "romfs")),
             };
             string recipeArg = Arg("--recipes", Path.Combine(repo, "recipes"));
             RecipeStore store = recipeArg == "embedded" || !Directory.Exists(recipeArg) ? RecipeStore.Embedded() : RecipeStore.FromDirectory(recipeArg);
@@ -224,6 +226,15 @@ namespace MphRead
             }
             int pngs = Directory.GetFiles(outDir, "*.png").Length;
             Console.WriteLine($"    {pngs} PNGs checked" + (later > 0 ? $"; PC-ONLY {later} (parts.npz, base rig, dev-viewer variants)" : ""));
+            // the app-made Prime 4 flourish (BeyondFlourish): no reference pipeline makes one, so it only has to load
+            foreach (string flo in outFiles.Where(x => x.EndsWith(MphRecomp.Anim.TrophyFlourish.Suffix, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                outFiles.Remove(flo);
+                MphRecomp.Anim.TrophyFlourish? fl = MphRecomp.Anim.TrophyFlourish.Load(Path.Combine(outDir, flo));
+                bool ok = fl != null && fl.Clips.Count > 0;
+                Console.WriteLine($"    {(ok ? "PASS" : "FAIL")} {flo}: app-made (no reference); " + (ok ? $"{fl!.Bones.Length} bones, " + string.Join(", ", fl.Clips.Select(c => $"{c.Name} {c.Frames} frames")) : "does not load"));
+                all &= ok;
+            }
             foreach (string extra in outFiles.OrderBy(x => x, StringComparer.Ordinal))
             {
                 Console.WriteLine($"    FAIL {extra}: produced but not in the reference");

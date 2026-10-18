@@ -46,7 +46,7 @@ internal sealed partial class CampaignRenderer
     {
         if (!_armShots || !_cannonOn || !_cannon3p || _host == null || beam.Owner is not PlayerEntity p
             || p.HostFxShootOffset is not Vector3 off || !p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson)) return;
-        if (!_armShotsAll && BodyOf(p)?.Id.Contains("Trooper") != true) return;
+        if (!_armShotsAll && BodyOf(p)?.Id.Contains("Trooper") != true && !HasHeldGun(p)) return; // (+ Brawl Zero Suit's gun: ZeroSuitGunTip.cs)
         var ahead = new Vector3(p.Field70, 0, p.Field74);
         if (ahead.LengthSquared < 1e-12f) return;
         ahead.Normalize();

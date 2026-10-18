@@ -12,12 +12,12 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Arenas
 {
-    // Dev pickup placement editor (owner 2026-10-10, thread "Pickup placement editor"): in a solo arena run the owner
+    // Dev pickup placement editor (owner 2026-10-10): in a solo arena run the owner
     // walks about and places pickups -- the Pirate Blaster, the affinity weapon, any item -- and, in an Echoes arena, the
     // affinity weapon's crates, where they want them; and deletes what they don't like, the arena's own pickups and crates
     // included. Each one is a live entity at once (an item spawner MphRead runs as any other, or an Echoes crate holding
     // the affinity weapon), so they can run over it, break it, take it. Every change is saved straight away to
-    // <data>/placements/<room>.json, which the Pickups thread reads to bake the picks into the match data (docs/PICKUPS.md).
+    // <data>/placements/<room>.json, which are read to bake the picks into the match data (docs/PICKUPS.md).
     // Nothing here runs in a real match: the solo run (SoloArena.cs) is dev only and never recorded or networked.
     public sealed class PickupPlacement
     {

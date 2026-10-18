@@ -211,7 +211,7 @@ internal sealed class LobbyScreen : PageScreen
         if (_mode == Mode.Joining && _session != null && Environment.TickCount64 - _hostsAt > 1000)
         {
             _hostsAt = Environment.TickCount64;
-            var hosts = _session.Hosts.ToList();
+            var hosts = _session.Hosts.Where(h => h.RomKey != MphRecomp.FirstHunt.FhLobby.RomKey).ToList(); // First Hunt games: FhLobby only
             if (hosts.Count != _hosts.Count || hosts.Where((h, i) => h.Label != _hosts[i].Label).Any())
             {
                 _hosts = hosts;

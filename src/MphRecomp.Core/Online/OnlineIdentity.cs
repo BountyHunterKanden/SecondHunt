@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -45,10 +46,26 @@ namespace MphRecomp.Online
         public static OnlineIdentity? FromBackupCode(string? code)
             => BackupCodes.TryDecode(code, out byte[] seed) ? new OnlineIdentity(seed) : null;
 
+        // true once the platform's ECDSA failed to take the private key (Wine: NTE_NOT_SUPPORTED), or set by tests: then
+        // every login is signed by the managed P-256 code instead
+        public static bool ManagedSign { get; set; }
+
         public byte[] Sign(byte[] data)
         {
-            using var key = ECDsa.Create(_key);
-            return key.SignData(data, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            if (!ManagedSign)
+            {
+                try
+                {
+                    using var key = ECDsa.Create(_key);
+                    return key.SignData(data, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+                }
+                catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
+                {
+                    Console.Error.WriteLine($"online identity: platform ECDSA failed ({ex.Message}), signing in managed code");
+                    ManagedSign = true;
+                }
+            }
+            return P256.Sign(new BigInteger(_key.D, isUnsigned: true, isBigEndian: true), data);
         }
 
         public static bool Verify(byte[] publicKey, byte[] data, byte[] signature)

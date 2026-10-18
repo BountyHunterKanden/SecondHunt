@@ -19,6 +19,11 @@ namespace MphRead.Entities
 
         // host hook: no reticle (a replay watched from anywhere but the main player's own eyes). Default off.
         public static bool HostHideReticle { get; set; }
+        public static bool HostHideScore { get; set; } // recomp: TRY CONTROLS (owner 10-17: no points counter)
+
+        // recomp host hook: no helmet or visor frame round the screen (the helmet's back and front layers, and the visor
+        // tint outside the scan visor) -- a main player without a helmet (Zero Suit). Default off.
+        public static bool HostNoHelmet { get; set; }
 
         // recomp host hook (a replay watching another seat, MatchReplay.cs; drawing only): whose HUD MphRead draws. That
         // seat's HUD is set up the first time and updated after the main player's each frame (Renderer); the match never
@@ -87,6 +92,12 @@ namespace MphRead.Entities
 
         private ModelInstance _filterModel = null!;
         private bool _showScoreboard = false;
+        // recomp: the host's own "show the scoreboard" button (Select held; the game's is START held, which the host doesn't
+        // send): vanilla's live scoreboard, for the drawn player only. Read on the HUD side so it also shows for a LAN/online
+        // joiner, whose player may not run ProcessInput
+        public static bool HostScoreboardHeld = false;
+        private bool ShowScoreboard => _showScoreboard || HostScoreboardHeld && GameState.Multiplayer
+            && !Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen);
         private int _iceLayerBindingId = -1;
         private int _helmetBindingId = -1;
         private int _helmetDropBindingId = -1;
@@ -563,7 +574,7 @@ namespace MphRead.Entities
             {
                 if (!IsAltForm && !IsMorphing && !IsUnmorphing)
                 {
-                    if (!Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && !_showScoreboard
+                    if (!Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && !ShowScoreboard
                         && GameState.MatchState == MatchState.InProgress)
                     {
                         if (_drawIceLayer)
@@ -576,7 +587,7 @@ namespace MphRead.Entities
                         }
                         // helmet back
                         _scene.Layer3Info.BindingId = _helmetDropBindingId;
-                        _scene.Layer3Info.Alpha = Features.HelmetOpacity;
+                        _scene.Layer3Info.Alpha = HostNoHelmet || HostSeated ? 0 : Features.HelmetOpacity; // recomp: HostNoHelmet, the turret's seat
                         _scene.Layer3Info.ScaleX = 2;
                         _scene.Layer3Info.ScaleY = 256 / 192f;
                         // visor
@@ -590,12 +601,12 @@ namespace MphRead.Entities
                             _scene.Layer1Info.BindingId = _visorBindingId;
                             _scene.Layer1Info.MaskId = -1;
                         }
-                        _scene.Layer1Info.Alpha = Features.VisorOpacity;
+                        _scene.Layer1Info.Alpha = (HostNoHelmet || HostSeated) && !ScanVisor ? 0 : Features.VisorOpacity; // recomp: HostNoHelmet, the turret's seat
                         _scene.Layer1Info.ScaleX = 1;
                         _scene.Layer1Info.ScaleY = 256 / 192f;
                         // helmet front
                         _scene.Layer2Info.BindingId = _helmetBindingId;
-                        _scene.Layer2Info.Alpha = Features.HelmetOpacity;
+                        _scene.Layer2Info.Alpha = HostNoHelmet || HostSeated ? 0 : Features.HelmetOpacity; // recomp: HostNoHelmet, the turret's seat
                         _scene.Layer2Info.ScaleX = 2;
                         _scene.Layer2Info.ScaleY = 256 / 192f;
                         _scene.Layer1Info.ShiftX = _hudShiftX / 256f;
@@ -612,7 +623,7 @@ namespace MphRead.Entities
                     _ammoBarMeter.BarInst.Enabled = true;
                     _weaponIconInst.Enabled = true;
                 }
-                else if (HostScoutDrone && IsAltForm && !IsMorphing && !_showScoreboard
+                else if (HostScoutDrone && IsAltForm && !IsMorphing && !ShowScoreboard
                     && GameState.MatchState == MatchState.InProgress)
                 {
                     UpdateDroneReticle(); // recomp: the Trooper's drone aims its blasters (PlayerScoutDrone.cs)
@@ -1115,7 +1126,7 @@ namespace MphRead.Entities
                     _scene.DrawHudObject(_weaponSelectInsts[i], mode: 1);
                 }
             }
-            else if (_showScoreboard)
+            else if (ShowScoreboard)
             {
                 DrawMatchTime();
                 DrawScoreboard();
@@ -1128,7 +1139,8 @@ namespace MphRead.Entities
                 {
                     DrawEscapeTime();
                 }
-                if (Health > 0)
+                // recomp: the turret's seat has its own HUD in place of the combat HUD (CampaignRenderer.TurretHud.cs)
+                if (Health > 0 && !HostSeated)
                 {
                     if (!GameState.DialogPause)
                     {
@@ -1140,6 +1152,10 @@ namespace MphRead.Entities
                                 _targetCircleInst.Alpha = Features.ReticleOpacity;
                                 _scene.DrawHudObject(_targetCircleInst);
                             }
+                            if (HostScoutDrone)
+                            {
+                                DrawDroneDials(); // recomp: the drone's attack waits (PlayerDroneHud.cs)
+                            }
                         }
                         else if (!ScanVisor)
                         {
@@ -1148,12 +1164,17 @@ namespace MphRead.Entities
                             _weaponIconInst.PositionY = (_hudObjects.WeaponIconPosY + _objShiftY) / 192f;
                             _weaponIconInst.Alpha = Features.HudOpacity;
                             _scene.DrawHudObject(_weaponIconInst);
-                            _targetCircleInst.Alpha = Features.ReticleOpacity;
+                            // recomp: faint until ZOOM STEP's target zoom is ready (PlayerZoomReady.cs)
+                            _targetCircleInst.Alpha = Features.ReticleOpacity * ZoomReadyReticleAlpha();
                             if (!HostHideReticle) _scene.DrawHudObject(_targetCircleInst); // recomp: a replay's other views
                         }
                         DrawModeHud();
                         DrawDoubleDamageHud();
                         DrawCloakHud();
+                        if (HostPrimeHud)
+                        {
+                            DrawPrimeHud(); // recomp: the radar and mini map (PlayerPrimeHud.cs)
+                        }
                     }
                     // todo: once we have masking that can account for various things (in this case, not drawing the scan lines
                     // on top of the layer for the scan log title box), call DrawModeHud when dialog pause is active
@@ -1179,13 +1200,13 @@ namespace MphRead.Entities
             {
                 _scene.DrawHudFilterModel(_filterModel, alpha: 12 / 31f);
             }
-            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) || _showScoreboard || GameState.MatchState == MatchState.Ending)
+            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) || ShowScoreboard || GameState.MatchState == MatchState.Ending)
             {
                 _scene.DrawHudFilterModel(_filterModel);
             }
             else
             {
-                if (_health > 0)
+                if (_health > 0 && !HostSeated) // recomp: the turret's seat (its own HUD)
                 {
                     DrawLocatorIcons();
                 }
@@ -1713,6 +1734,7 @@ namespace MphRead.Entities
         {
             _locatorInfo.Clear();
             ProcessOpponent();
+            ProcessHudSquadMark(); // recomp: the Trooper's Squad Mark, through walls (PlayerSquadMark.cs)
             if (GameState.Mode == GameMode.Survival || GameState.Mode == GameMode.SurvivalTeams)
             {
                 ProcessHudSurvival();
@@ -2134,7 +2156,7 @@ namespace MphRead.Entities
 
         private void DrawHudBattle()
         {
-            DrawModeScore(212, FormatModeScore(MainPlayerIndex)); // points
+            if (!HostHideScore) DrawModeScore(212, FormatModeScore(MainPlayerIndex)); // points (recomp: HostHideScore)
         }
 
         private void DrawHudSurvival()

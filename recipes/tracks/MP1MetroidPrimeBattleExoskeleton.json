@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Metroid Prime Battle (Exoskeleton)",
+  "group": "Impact Crater",
+  "role": "boss",
+  "files": [
+    { "name": "Audio/cra_mprime1L.dsp", "sha1": "6aa00a8cf610dc171cdc0e359da31c82e969e113" },
+    { "name": "Audio/cra_mprime1R.dsp", "sha1": "f2dfa3c3da29f9dfb5bbe196fa970726d8362a24" }
+  ],
+  "gain": 0.442
+}

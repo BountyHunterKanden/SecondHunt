@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Berserker",
+  "group": "Shared",
+  "role": "boss",
+  "files": [
+    { "name": "MP3/Audio/Shared/Boss_BerzerkerBoss.fsb", "sha1": "0b74565f7f9d531ee84f04a66a622281a17ce1b1" }
+  ],
+  "gain": 0.448
+}

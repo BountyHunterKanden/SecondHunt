@@ -1,0 +1,32 @@
+{
+  "game": "mp4",
+  "paks": [
+    {
+      "name": "Preload/DuplicateData.pak"
+    },
+    {
+      "name": "Worlds/Suits/Chrono Tower/ct_2020_bossArena.pak"
+    },
+    {
+      "name": "Worlds/Suits/Chrono Tower/zone_chronoTower.pak"
+    }
+  ],
+  "smdl": "2c3f75c5-19e0-430e-bf24-7d8d0a19651f",
+  "chpr": "91605ed3-3323-519e-9862-f84fbe77f781",
+  "char": "Sylux (MP4 Beyond, own skeleton)",
+  "assetsSha1": "39c150bfeff8e3028f3d877a49f13bdc4240ef65",
+  "flourish": {
+    "chpr": "8a7fecc9-914f-405b-864b-41a4ef508734",
+    "chprSha1": "d2b60ea5e1205a4cc61084153ea687046612d85d",
+    "idle": "idle_sylux",
+    "clips": [
+      "taunt_flex_sylux",
+      "taunt_armSwipe_sylux"
+    ]
+  },
+  "look": {
+    "spec": 1.5,
+    "glint": 1.0,
+    "msat": 1.35
+  }
+}

@@ -121,7 +121,8 @@ internal sealed partial class CampaignRenderer
             TakeCheckpoint(played);
             return played;
         }
-        bool keep = ReplayDataDir != null && RecompSettings.Load(SettingsPath).RecordReplays;
+        bool keep = ReplayDataDir != null && RecompSettings.Load(SettingsPath).RecordReplays
+            && !MphRecomp.Multiplayer.MatchSettings.IsFirstHuntArena(settings.Arena); // (First Hunt's deathmatches aren't MPH replays)
         // a network match is recorded by its host only (a guest gets the host's file: StartReplayLink)
         bool record = keep && (_netSession == null || _netSession.IsHost)
             && !settings.Solo; // the dev launcher's solo run (SoloArena.cs) isn't a match worth keeping
@@ -937,7 +938,7 @@ internal sealed partial class CampaignRenderer
         // how to reach the buttons: over the time pills (the marks have the bar's own width)
         font.EmitCanvas(K("D-PAD LEFT / RIGHT + A: PICK", "ARROWS + ENTER: PICK"), left, scrubTop - 8 * u,
             0, small, HudPale.R, HudPale.G, HudPale.B, 0.75f, list);
-        font.EmitCanvas(K("START: MENU", "TAB: MENU"), left + clusterW, scrubTop - 8 * u,
+        font.EmitCanvas(K("START: MENU", "ESC: MENU"), left + clusterW, scrubTop - 8 * u,
             1, small, HudPale.R, HudPale.G, HudPale.B, 0.75f, list);
 
         // the watched player's kills (an orange diamond) and deaths (a white cross) along the bar, Fortnite style

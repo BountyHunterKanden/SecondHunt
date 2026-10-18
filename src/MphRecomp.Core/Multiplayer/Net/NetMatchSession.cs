@@ -25,9 +25,9 @@ namespace MphRecomp.Multiplayer.Net
     // lobby; the host's SetTeam sets a seat's team. After a match the session goes on (EndMatch, from the match screen for
     // RESULTS): back in the lobby the same players play again (PLAY AGAIN), each joiner counted back by its LOOK; KICK
     // takes out one that didn't come back when the host starts without it.
-    public sealed class NetMatchSession : IMatchNet, IDisposable
+    public sealed partial class NetMatchSession : IMatchNet, IDisposable
     {
-        private const byte Protocol = 15; // 2: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
+        private const byte Protocol = 19; // 2: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
                                          // 3: snapshots carry the mode's state (NetObjective: octoliths, nodes, timers);
                                          // 4: the lobby (LOBBY, LOOK, KICK) and back to it after a match;
                                          // 5 (O5): delta snapshots per joiner at 30 Hz (20 on a weak link) with its input
@@ -44,6 +44,13 @@ namespace MphRecomp.Multiplayer.Net
                                          // 14: no wire change; the arenas carry the baked pickups (Arenas/PlacedPickups.cs)
                                          // 15: the match carries Crates + Breakables; snapshots carry the Echoes crates +
                                          //     breakables (Snapshot.World, Net/NetWorld.cs; 0.2.0 owner 2026-10-11)
+                                         // 16: Dark Samus's ball hop + Hyper Ball (sim); SeatAbilities carry the Hyper
+                                         //     Ball (2 bytes a seat; docs/DARK_SAMUS_HYPER.md)
+                                         // 17: Zero Suit's Paralyzer + 90 health (sim); SeatAbilities carry each seat's
+                                         //     Paralyzer stun (1 byte a seat; docs/ZERO_SUIT_SAMUS.md section 7)
+                                         // 18: the Trooper's Squad Mark; SeatAbilities carry each seat's marks (1 byte a
+                                         //     seat: the marking seats, PlayerEntity.NetSquadMark)
+                                         // 19: Shooting Gallery's turret on; snapshots carry it (NetWorld.Turret, 14 bytes)
         private const byte MsgJoin = 2, MsgWelcome = 3, MsgRefuse = 4, MsgInput = 5, MsgSnapshot = 6, MsgBye = 7, MsgStart = 8,
             MsgLobby = 9, MsgLook = 10, MsgKick = 11, MsgRehost = 12;
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("MPHO");
@@ -210,6 +217,10 @@ namespace MphRecomp.Multiplayer.Net
         {
             get
             {
+                if (!IsHost && IsOwner)
+                {
+                    return OwnerOthers().Count; // (a served game's owner: NetMatchOwner.cs)
+                }
                 lock (_lock)
                 {
                     return _joiners.Count(j => !j.Left);
@@ -229,7 +240,8 @@ namespace MphRecomp.Multiplayer.Net
                 OctolithReset = t.OctolithReset, RadarPlayers = t.RadarPlayers, AffinityWeapons = t.AffinityWeapons,
                 Crates = t.Crates, Breakables = t.Breakables,
                 Abilities = true, // the Trooper's Wall Cling + Scout Drone (owner 2026-10-09)
-                PirateBlaster = t.PirateBlaster, ExtraCharacters = t.ExtraCharacters
+                PirateBlaster = t.PirateBlaster, ExtraCharacters = t.ExtraCharacters,
+                ServedHost = t.ServedHost // a served match host: no human in the template, every player a joiner
             };
             s.Players.AddRange(t.Players.Where(p => !p.Bot));
             foreach (Joiner j in _joiners.Where(j => !j.Left))
@@ -255,6 +267,11 @@ namespace MphRecomp.Multiplayer.Net
         // asks again with a JOIN and gets its START again
         public void SendStart()
         {
+            if (!IsHost && IsOwner)
+            {
+                OwnerSendStart(); // (a served game: the owner asks the match host, NetMatchOwner.cs)
+                return;
+            }
             lock (_lock)
             {
                 _hostStarted = true;
@@ -356,7 +373,7 @@ namespace MphRecomp.Multiplayer.Net
 
         // buttons whose short press must survive being folded into a later input
         private const CampaignButtons PressButtons = CampaignButtons.Shoot | CampaignButtons.Jump | CampaignButtons.Morph
-            | CampaignButtons.Boost | CampaignButtons.AltAttack | CampaignButtons.Zoom | CampaignButtons.NextWeapon
+            | CampaignButtons.Boost | CampaignButtons.AltAttack | CampaignButtons.Zoom | CampaignButtons.ZoomIn | CampaignButtons.ZoomOut | CampaignButtons.NextWeapon
             | CampaignButtons.PrevWeapon | CampaignButtons.AffinitySlot;
 
         public int InputsFrom(int seat)
@@ -524,6 +541,11 @@ namespace MphRecomp.Multiplayer.Net
         // host: a seat's team in a team mode (0 orange, 1 green; -1 = whichever team is smaller)
         public void SetTeam(int seat, int team)
         {
+            if (!IsHost && IsOwner)
+            {
+                OwnerEdit(s => { if (seat >= 0 && seat < s.Players.Count) s.Players[seat].Team = team; }); // (NetMatchOwner.cs)
+                return;
+            }
             lock (_lock)
             {
                 if (!IsHost || _hostStarted || Settings == null || seat < 0 || seat >= Settings.Players.Count)
@@ -569,6 +591,12 @@ namespace MphRecomp.Multiplayer.Net
         // a new bot (team -1: the smaller team), while a seat is left
         public void AddBot(MatchPlayer bot)
         {
+            if (!IsHost && IsOwner)
+            {
+                bot.Bot = true;
+                OwnerEdit(s => { if (s.Players.Count < MatchSettings.MaxSeats) s.Players.Add(bot); }); // (NetMatchOwner.cs)
+                return;
+            }
             lock (_lock)
             {
                 if (!IsHost || _hostStarted || Settings == null || _template == null || Settings.Players.Count >= MatchSettings.MaxSeats)
@@ -586,6 +614,11 @@ namespace MphRecomp.Multiplayer.Net
 
         private void EditBots(int seat, Action<MatchSettings, MatchPlayer> edit)
         {
+            if (!IsHost && IsOwner)
+            {
+                OwnerEdit(s => { if (seat >= 0 && seat < s.Players.Count && s.Players[seat].Bot) edit(s, s.Players[seat]); }); // (NetMatchOwner.cs)
+                return;
+            }
             lock (_lock)
             {
                 if (!IsHost || _hostStarted || Settings == null || _template == null || seat < 0 || seat >= Settings.Players.Count)
@@ -607,6 +640,10 @@ namespace MphRecomp.Multiplayer.Net
         // host: the joiners not back from the last match's results yet (their names)
         public IReadOnlyList<string> NotBack()
         {
+            if (!IsHost && IsOwner)
+            {
+                return OwnerOthers().Where(o => !o.Seat.Back).Select(o => o.Name).ToList();
+            }
             lock (_lock)
             {
                 return _joiners.Where(j => !j.Left && !j.Back).Select(j => j.Player.Nickname ?? "").ToList();
@@ -625,6 +662,10 @@ namespace MphRecomp.Multiplayer.Net
         // host: the joiners still choosing a hunter (their names)
         public IReadOnlyList<string> StillChoosing()
         {
+            if (!IsHost && IsOwner)
+            {
+                return OwnerOthers().Where(o => o.Seat.Back && o.Seat.Choosing).Select(o => o.Name).ToList();
+            }
             lock (_lock)
             {
                 return _joiners.Where(j => !j.Left && j.Back && j.Choosing).Select(j => j.Player.Nickname ?? "").ToList();
@@ -634,6 +675,11 @@ namespace MphRecomp.Multiplayer.Net
         // host: takes out the joiners not back from the results (KICK, three times: UDP), before starting without them
         public void KickNotBack(string reason)
         {
+            if (!IsHost && IsOwner)
+            {
+                _ownerKickReason = reason; // (the match host takes them out when the owner's START comes: NetMatchOwner.cs)
+                return;
+            }
             bool changed = false;
             lock (_lock)
             {
@@ -1063,6 +1109,10 @@ namespace MphRecomp.Multiplayer.Net
             {
                 OnRehost(r, from);
             }
+            else if (type == MsgOwner)
+            {
+                OnOwner(r, from); // (a served game's lobby owner: NetMatchOwner.cs)
+            }
         }
 
         // a joiner in the lobby: its hunter and look, choosing, ping; it's back (after a match)
@@ -1285,6 +1335,10 @@ namespace MphRecomp.Multiplayer.Net
                 _welcomeSeat = seat;
                 _betweenMatches = false; // (the host is in its lobby: what comes next is the next match's)
                 Interlocked.Exchange(ref _hostHeard, Environment.TickCount64);
+                lock (_lock)
+                {
+                    _hostLobby = host; // (a served game's owner edits from it: NetMatchOwner.cs)
+                }
                 Settings = MatchClient.ForSeat(host, seat);
                 Lobby = seats;
                 PlayersChanged?.Invoke();

@@ -156,6 +156,10 @@ namespace MphRecomp.Online
         // the game's arena is an imported one (Echoes: Multiplayer.ExtraArenas; owner 2026-10-10, N27-N29; server 0.7.0): FIND
         // GAME puts a search into it only when its players all have that arena; the list hides it from a device without it
         public bool ExtraArena { get; set; }
+        // a served game (server 0.8.0, docs/DEDICATED_SERVERS.md): its match runs on the server (relay slot 0, no player)
+        // and Host on its card is the lobby's owner, a joiner like the rest. In HostGameReq: serve it if you can (the server
+        // answers with false when it can't: then this device hosts as before)
+        public bool Served { get; set; }
 
         public const string NoMods = "none";
     }
@@ -473,6 +477,8 @@ namespace MphRecomp.Online
         public string Version { get; set; } = "";
         // must equal the game's GameInfo.Mods
         public string Mods { get; set; } = GameInfo.NoMods;
+        // this app can play in a served game (server 0.8.0): an older one gets "update the game" instead
+        public bool Served { get; set; }
     }
 
     public sealed class LeaveGameReq : OnlineMsg
@@ -501,6 +507,8 @@ namespace MphRecomp.Online
         // host migration (O5b, server 0.5.0): the host of a started match left or its connection dropped and this slot hosts
         // the match now (Slot = the old host's, Joined = false); null = no host change
         public int? HostSlot { get; set; }
+        // a served game (server 0.8.0): the lobby's owner left and this player owns it now; null = no owner change
+        public string? Owner { get; set; }
     }
 
     public sealed class GameClosedEvent : OnlineMsg

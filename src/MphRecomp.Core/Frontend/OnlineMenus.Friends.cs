@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using MphRead;
 using MphRecomp.Online;
 
-// ONLINE PLAY's FRIENDS AND RIVALS and FIND A HUNTER pages (Online play menus thread, owner 2026-10-09; mockups F_A / F_B /
+// ONLINE PLAY's FRIENDS AND RIVALS and FIND A HUNTER pages (owner 2026-10-09; mockups F_A / F_B /
 // F_C and A_A / A_B in extract_out/online_menus/mockups, "OK as shown"). The hub's ALL FRIENDS opens FRIENDS AND RIVALS:
 // four tabs (FRIENDS, RIVALS, REQUESTS with the incoming count, RECENT), five rows a page (L / R or the title's arrows):
 // the person disc, name#tag, where they are, their presence (online green, in lobby cyan, in match orange, offline dimmed),

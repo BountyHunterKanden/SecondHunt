@@ -18,7 +18,10 @@ namespace MphRecomp.Render
         public const int Stride = 13;
         public const float MaterialColor = 2f;
 
-        public static float[] Decode(Model model, Mesh mesh, bool isRoom)
+        // recomp: edges = each polygon's outline as line pairs (GL_LINES) instead of triangles: what the DS draws for a
+        // wireframe polygon (polygon alpha 0, MPH's Material.Wireframe), e.g. First Hunt's Regulator tunnel. Quads keep
+        // their four sides (no diagonal); every polygon of a strip has its own outline, as on the DS.
+        public static float[] Decode(Model model, Mesh mesh, bool isRoom, bool edges = false)
         {
             Material material = model.Materials[mesh.MaterialId];
             int textureWidth = 0, textureHeight = 0;
@@ -59,7 +62,23 @@ namespace MphRecomp.Render
 
             void Tri(int a, int b, int c)
             {
+                if (edges)
+                {
+                    Copy(a); Copy(b); Copy(b); Copy(c); Copy(c); Copy(a);
+                    return;
+                }
                 Copy(a); Copy(b); Copy(c);
+            }
+
+            void Quad(int a, int b, int c, int d)
+            {
+                if (edges)
+                {
+                    Copy(a); Copy(b); Copy(b); Copy(c); Copy(c); Copy(d); Copy(d); Copy(a);
+                    return;
+                }
+                Tri(a, b, c);
+                Tri(a, c, d);
             }
 
             void EndPrimitive()
@@ -76,8 +95,7 @@ namespace MphRecomp.Render
                 case 1: // quads: (0,1,2) (0,2,3)
                     for (int i = 0; i + 3 < n; i += 4)
                     {
-                        Tri(i, i + 1, i + 2);
-                        Tri(i, i + 2, i + 3);
+                        Quad(i, i + 1, i + 2, i + 3);
                     }
                     break;
                 case 2: // triangle strip, alternating winding
@@ -96,8 +114,7 @@ namespace MphRecomp.Render
                 case 3: // quad strip: quad k = v2k, v2k+1, v2k+3, v2k+2
                     for (int i = 0; i + 3 < n; i += 2)
                     {
-                        Tri(i, i + 1, i + 3);
-                        Tri(i, i + 3, i + 2);
+                        Quad(i, i + 1, i + 3, i + 2);
                     }
                     break;
                 }

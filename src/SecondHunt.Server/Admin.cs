@@ -38,6 +38,10 @@ namespace SecondHunt.Server
                 output.WriteLine(Help);
                 return 0;
             }
+            if (rest[0] == "drain")
+            {
+                return Drain(db, rest, output);
+            }
             WordFilter.Load(words ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(db)) ?? ".", "words.txt"));
             using var store = new Store(db);
             try
@@ -64,7 +68,33 @@ namespace SecondHunt.Server
   unmute <who>                chat back on
   words <text>                what the word filter does to this text
   stats                       players, open reports, bans
+  drain [on|off]              before a server update: while on, no new served games (new games are player-hosted, the
+                              running ones play on); restart once the health line says served 0/..
 <who> is a friend code (12 digits) or NAME#0421.";
+
+        // the drain file: next to the database, so the running server sees it (Hub.Draining) without a network command
+        public static string DrainPath(string db) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(db)) ?? ".", "drain");
+
+        private static int Drain(string db, List<string> a, TextWriter o)
+        {
+            string file = DrainPath(db);
+            if (a.Count > 1 && a[1] == "on")
+            {
+                File.WriteAllText(file, DateTime.UtcNow.ToString("u") + "\n");
+            }
+            else if (a.Count > 1 && a[1] == "off")
+            {
+                File.Delete(file);
+            }
+            else if (a.Count > 1)
+            {
+                o.WriteLine("usage: drain [on|off]");
+                return 1;
+            }
+            o.WriteLine(File.Exists(file) ? "drain on: no new served games (the running ones play on; see served N/M on /v1/health)"
+                : "drain off: new games may be served");
+            return 0;
+        }
 
         private static Store.Player Who(Store store, string? who)
         {

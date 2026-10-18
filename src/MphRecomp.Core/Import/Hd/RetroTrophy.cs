@@ -69,6 +69,7 @@ namespace MphRecomp.Import.Hd
         {
             public readonly List<Part> Parts = new();
             public double Scale;
+            public double Feet;   // Prime 4: the kept mesh's lowest point before scaling (source units; BeyondFlourish)
             public int Textures, Materials;
             public Cinf? Skeleton;
             public readonly List<string> Log = new();
@@ -97,6 +98,13 @@ namespace MphRecomp.Import.Hd
             {
                 (uint mid, uint sid, uint kid) = Ancs.FindCharacter(res(h.Ancs), h.Char);
                 m = Cmdl.Load(res, mid, h.Static ? null : sid, h.MatSet);
+                if (h.Model is uint other)
+                {
+                    Cmdl own = m;
+                    m = Cmdl.Load(res, other, null, h.MatSet);
+                    m.Skin = SkinFrom(own, m, out int exact);
+                    Say(0.05f, $"{h.Char}: model {other:x8} on {mid:x8}'s skin, {exact} of {m.PositionCount} positions exactly on it");
+                }
                 skel = h.Static ? null : Cinf.Load(res(kid));
                 if (h.Static) Say(0.05f, $"{h.Char}: model {mid:x8}, material set {h.MatSet} of {m.MaterialSets}");
             }
@@ -207,6 +215,31 @@ namespace MphRecomp.Import.Hd
         }
 
         // the scale: fixed (a ball keeps its suit's size), else the recipe's height over the model's own (Retro's Z)
+        // a recipe's "model": each of its positions takes the skin weights of the nearest skinned position of the character's
+        // own model (same skeleton, same bind space); `exact` = how many sit right on one
+        static List<(uint Bone, float Weight)[]> SkinFrom(Cmdl own, Cmdl other, out int exact)
+        {
+            List<(uint Bone, float Weight)[]> src = own.Skin ?? throw new InvalidDataException("the character's own model has no skin");
+            int n = Math.Min(own.PositionCount, src.Count);
+            var skin = new List<(uint Bone, float Weight)[]>(other.PositionCount);
+            exact = 0;
+            for (int i = 0; i < other.PositionCount; i++)
+            {
+                float x = other.Positions[3 * i], y = other.Positions[3 * i + 1], z = other.Positions[3 * i + 2];
+                float best = Single.MaxValue;
+                int bi = 0;
+                for (int j = 0; j < n; j++)
+                {
+                    float dx = own.Positions[3 * j] - x, dy = own.Positions[3 * j + 1] - y, dz = own.Positions[3 * j + 2] - z;
+                    float d = dx * dx + dy * dy + dz * dz;
+                    if (d < best) { best = d; bi = j; }
+                }
+                if (best < 1e-6f) exact++;
+                skin.Add(src[bi]);
+            }
+            return skin;
+        }
+
         static double Scale(Cmdl m, HdRecipe h)
         {
             if (h.Scale is double fixedScale && fixedScale != 0) return fixedScale;
@@ -239,6 +272,7 @@ namespace MphRecomp.Import.Hd
                     Say(0.3f, $"texture {t:x8}: {(fmt < Txtr.FormatNames.Length ? Txtr.FormatNames[fmt] : fmt.ToString(CultureInfo.InvariantCulture))} not decoded");
                     continue;
                 }
+                h.Recolor?.Apply(t, rgba);
                 PngOut.Write(Path.Combine(outDir, $"{t:x8}.png"), Txtr.FlipRows(rgba, tw, th), tw, th);
                 result.Textures++;
             }
@@ -771,6 +805,22 @@ namespace MphRecomp.Import.Hd
                     .Append(v[0].ToString("F4", CultureInfo.InvariantCulture).PadLeft(10)).Append(' ')
                     .Append(v[1].ToString("F4", CultureInfo.InvariantCulture).PadLeft(10)).Append(' ')
                     .Append(v[2].ToString("F4", CultureInfo.InvariantCulture).PadLeft(10)).Append('\n');
+            }
+            // a part of the MPH hunter's own model held in the hand (HdRecipe "hold"): seated at the middle of its anchor bones
+            foreach (HdRecipe.Hold hd in h.Holds)
+            {
+                double ax = 0, ay = 0, az = 0;
+                foreach (string an in hd.Anchor)
+                {
+                    if (!bpos.TryGetValue(an, out double[]? v)) throw new InvalidDataException($"{h.Char}: no bone '{an}' to hold {hd.Bone}'s part at");
+                    ax += -v[0] * s; ay += v[2] * s; az += v[1] * s;
+                }
+                int k = hd.Anchor.Length;
+                sb.Append("attach ").Append(hd.Bone).Append(' ').Append(hd.Cut.ToString("F4", CultureInfo.InvariantCulture))
+                    .Append(' ').Append((ax / k).ToString("F4", CultureInfo.InvariantCulture))
+                    .Append(' ').Append((ay / k).ToString("F4", CultureInfo.InvariantCulture))
+                    .Append(' ').Append((az / k).ToString("F4", CultureInfo.InvariantCulture))
+                    .Append(' ').Append(hd.Scale.ToString("F4", CultureInfo.InvariantCulture)).Append('\n');
             }
             count = J.Count;
             return sb.ToString();

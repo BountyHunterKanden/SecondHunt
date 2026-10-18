@@ -12,7 +12,8 @@ namespace MphRecomp.App;
 // E toggles the scan visor, the wheel steps weapons, the middle
 // button holds the weapon menu (the mouse picks), 1-9 pick weapons. The host keeps the keys and buttons current
 // (KeyDown / MouseDown, AddScroll; mouse movement goes through PadState.AddAim) and BuildInput adds this to the pad's
-// input once per sim step. The host itself handles Tab (MphRead's pause: the pause menu), Esc and the map key.
+// input once per sim step. The host itself handles Esc (the pause menu) and the map key; Tab is the scoreboard (owner
+// 2026-10-11: no longer MphRead's pause key here).
 // The control customizer moves these (OPTIONS > CONTROLS > KEYBOARD & MOUSE; Config/ControlBinds.cs, LoadBinds); the
 // 1-9 weapon keys and the dialog keys stay MphRead's.
 public sealed class KeyboardMouseInput
@@ -20,13 +21,19 @@ public sealed class KeyboardMouseInput
     readonly PlayerControls _binds = PlayerControls.GetDefault();
     static readonly ControlBinds.Function[] Functions = ControlBinds.KeyFunctions;
     static readonly Dictionary<string, int> FunctionIndex = Functions.Select((f, i) => (f.Id, i)).ToDictionary(p => p.Id, p => p.i);
-    Keybind[][] _functions = Build(null);
+    Keybind[][][] _functions = Build(null);
     public Func<Keys, bool> KeyDown { get; set; } = _ => false;
     public Func<MouseButton, bool> MouseDown { get; set; } = _ => false;
     int _scrollUp, _scrollDown;
     bool _prevConfirm, _prevBack, _prevLeft, _prevRight;
     System.Numerics.Vector2 _wheel;
     readonly object _gate = new();
+    static readonly int[] ZoomIndexes = { FunctionIndex[ControlBinds.ZoomIn], FunctionIndex[ControlBinds.ZoomOut] };
+    readonly List<Keybind> _zoomTook = new(); // keys pressed as zoom in / out while ZoomStepping, until let go
+
+    // set before AddTo: zoomed with ZOOM STEP on (owner 2026-10-17; CampaignRenderer.BuildInput). Then the zoom in / out
+    // keys do only that until they're let go, as PadBindings does with the controller's
+    public bool ZoomStepping { get; set; }
 
     // mouse wheel steps since the last sim step (+ up, - down)
     public void AddScroll(float steps)
@@ -39,15 +46,21 @@ public sealed class KeyboardMouseInput
     }
 
     // the customizer's keys and buttons for each function (the host reloads them when the settings may have changed)
-    public void LoadBinds(RecompSettings settings) => _functions = Build(settings);
-
-    static Keybind[][] Build(RecompSettings? settings)
+    public void LoadBinds(RecompSettings settings)
     {
-        var all = new Keybind[Functions.Length][];
+        ControlBinds.Tidy(settings); // (older saved lists in today's layout)
+        _functions = Build(settings);
+    }
+
+    // each function's bindings: one key or button, or a combo's (owner 2026-10-11)
+    static Keybind[][][] Build(RecompSettings? settings)
+    {
+        var all = new Keybind[Functions.Length][][];
         for (int i = 0; i < Functions.Length; i++)
         {
             string[] names = settings == null ? Functions[i].Defaults : ControlBinds.Get(settings, true, Functions[i].Id);
-            all[i] = names.Select(Parse).OfType<Keybind>().ToArray();
+            all[i] = names.Select(n => ControlBinds.Parts(n).Select(Parse).ToArray())
+                .Where(parts => parts.Length > 0 && parts.All(p => p is not null)).Select(parts => parts.Select(p => p!).ToArray()).ToArray();
         }
         return all;
     }
@@ -67,14 +80,90 @@ public sealed class KeyboardMouseInput
     // online voice chat's push to talk (V by default; CampaignRenderer.BuildInput passes it on with the pad's R3)
     public bool TalkHeld => Held(ControlBinds.Talk, false, false);
 
+    // a match's live scoreboard, held (Tab by default; MatchChat.MatchScoreboardHeld, with the pad's)
+    public bool ScoreboardHeld => Held(ControlBinds.Scoreboard, false, false);
+
+    // a combo is held while all its keys are; while it is, its keys don't do their own single-key functions
     bool Held(string function, bool scrollUp, bool scrollDown)
     {
-        foreach (Keybind bind in _functions[FunctionIndex[function]])
+        foreach (Keybind[] combo in _functions[FunctionIndex[function]])
         {
-            if (Down(bind, scrollUp, scrollDown)) return true;
+            if (ComboHeld(function, combo, scrollUp, scrollDown)) return true;
         }
         return false;
     }
+
+    bool ComboHeld(string function, Keybind[] combo, bool scrollUp, bool scrollDown)
+        => combo.Length > 1 ? AllDown(combo) : Down(combo[0], scrollUp, scrollDown) && !InHeldCombo(combo[0])
+            && (function is ControlBinds.ZoomIn or ControlBinds.ZoomOut || !ZoomTook(combo[0]));
+
+    // held through a key (or combo) that isn't also one of `other`'s (zoom on a scan key, with the scan visor on: the scan)
+    bool HeldUnless(string function, string? other, bool scrollUp, bool scrollDown)
+    {
+        foreach (Keybind[] combo in _functions[FunctionIndex[function]])
+        {
+            if (ComboHeld(function, combo, scrollUp, scrollDown) && (other == null || !Bound(other, combo))) return true;
+        }
+        return false;
+    }
+
+    bool Bound(string function, Keybind[] combo)
+    {
+        foreach (Keybind[] x in _functions[FunctionIndex[function]])
+        {
+            if (x.Length == combo.Length && x.All(k => Array.Exists(combo, c => Same(c, k)))) return true;
+        }
+        return false;
+    }
+
+    bool AllDown(Keybind[] combo)
+    {
+        foreach (Keybind k in combo)
+        {
+            if (!Down(k, false, false)) return false;
+        }
+        return true;
+    }
+
+    bool InHeldCombo(Keybind key)
+    {
+        foreach (Keybind[][] binds in _functions)
+        {
+            foreach (Keybind[] combo in binds)
+            {
+                if (combo.Length > 1 && Array.Exists(combo, k => Same(k, key)) && AllDown(combo)) return true;
+            }
+        }
+        return false;
+    }
+
+    bool ZoomTook(Keybind key)
+    {
+        foreach (Keybind k in _zoomTook)
+        {
+            if (Same(k, key)) return true;
+        }
+        return false;
+    }
+
+    // AddTo, first: zoom in / out's keys pressed while zoom stepping are taken until let go
+    void UpdateZoomTook(bool scrollUp, bool scrollDown)
+    {
+        for (int i = _zoomTook.Count - 1; i >= 0; i--)
+        {
+            if (!Down(_zoomTook[i], scrollUp, scrollDown)) _zoomTook.RemoveAt(i);
+        }
+        if (!ZoomStepping) return;
+        foreach (int z in ZoomIndexes)
+        {
+            foreach (Keybind[] combo in _functions[z])
+            {
+                if (combo.Length == 1 && Down(combo[0], scrollUp, scrollDown) && !ZoomTook(combo[0])) _zoomTook.Add(combo[0]);
+            }
+        }
+    }
+
+    static bool Same(Keybind a, Keybind b) => a.Type == b.Type && a.Key == b.Key && a.MouseButton == b.MouseButton;
 
     bool Down(Keybind bind, bool scrollUp, bool scrollDown) => bind.Type switch
     {
@@ -117,6 +206,7 @@ public sealed class KeyboardMouseInput
             if (up) _scrollUp--;
             if (down) _scrollDown--;
         }
+        UpdateZoomTook(up, down);
         PlayerControls c = _binds;
         bool alt = player.IsAltForm;
         float x = 0, y = 0;
@@ -130,13 +220,30 @@ public sealed class KeyboardMouseInput
             input.Move = new System.Numerics.Vector2(Math.Clamp(input.Move.X + x, -1, 1), Math.Clamp(input.Move.Y + y, -1, 1));
         }
         var b = CampaignButtons.None;
+        // the Trooper's Scout Drone out: its own keys instead of the hunter's (owner 2026-10-11); the mouse aims it
+        if (player.HostScoutDrone && alt)
+        {
+            if (Held(ControlBinds.DroneFire, up, down)) b |= CampaignButtons.Shoot | CampaignButtons.AltAttack;
+            if (Held(ControlBinds.DroneLaser, up, down)) b |= CampaignButtons.Zoom;
+            if (Held(ControlBinds.DroneRise, up, down)) b |= CampaignButtons.Jump | CampaignButtons.Boost;
+            if (Held(ControlBinds.DroneDeploy, up, down)) b |= CampaignButtons.Morph;
+            _wheel = System.Numerics.Vector2.Zero;
+            aim += pointer;
+            input.Buttons |= b;
+            return;
+        }
         if (Held(ControlBinds.Fire, up, down)) b |= CampaignButtons.Shoot;
-        // right click scans with the scan visor on, like the pad's L2 (owner, 2026-10-05); MphRead's Q still scans too
-        if (Held(ControlBinds.ZoomScan, up, down)) b |= player.ScanVisor ? CampaignButtons.Scan : CampaignButtons.Zoom;
+        // right click zooms, and scans with the scan visor on, like the pad's L2 (owner, 2026-10-05); MphRead's Q scans too
+        // (one function a row since owner 2026-10-17, C10: zoom, scan and bombs)
+        if (Held(ControlBinds.Scan, up, down)) b |= CampaignButtons.Scan;
+        if (HeldUnless(ControlBinds.Zoom, player.ScanVisor ? ControlBinds.Scan : null, up, down)) b |= CampaignButtons.Zoom;
         if (Held(ControlBinds.Jump, up, down)) b |= CampaignButtons.Jump | CampaignButtons.Boost; // MphRead: both Space
-        if (Held(ControlBinds.Morph, up, down)) b |= CampaignButtons.Morph;
-        if (Held(ControlBinds.BombScan, up, down)) b |= CampaignButtons.AltAttack | CampaignButtons.Scan; // MphRead: both Q
+        // (the Trooper's morph is his drone: its deploy key)
+        if (Held(player.HostScoutDrone ? ControlBinds.DroneDeploy : ControlBinds.Morph, up, down)) b |= CampaignButtons.Morph;
+        if (Held(ControlBinds.Bombs, up, down)) b |= CampaignButtons.AltAttack; // (MphRead: Q, which scans too)
         if (Held(ControlBinds.ScanVisor, up, down)) b |= CampaignButtons.ScanVisor;
+        if (Held(ControlBinds.ZoomIn, up, down)) b |= CampaignButtons.ZoomIn; // ZOOM STEP (the game reads them only zoomed)
+        if (Held(ControlBinds.ZoomOut, up, down)) b |= CampaignButtons.ZoomOut;
         if (Down(c.AffinitySlot, up, down)) b |= CampaignButtons.AffinitySlot;
         // in the morph ball left click lays bombs too, like the pad's fire button (owner, 2026-10-05)
         if (alt && (b & CampaignButtons.Shoot) != 0) b |= CampaignButtons.AltAttack;
@@ -155,19 +262,14 @@ public sealed class KeyboardMouseInput
             aim += pointer;
         }
         input.Buttons |= b;
+        // the weapons' keys (the customizer's WEAPONS list; 1-9 and 0 by default, owner 2026-10-15)
         if (input.SelectWeapon == BeamType.None)
         {
-            (Keybind Bind, BeamType Beam)[] weapons =
+            foreach ((string id, int beam) in ControlBinds.WeaponPicks)
             {
-                (c.PowerBeam, BeamType.PowerBeam), (c.Missile, BeamType.Missile), (c.VoltDriver, BeamType.VoltDriver),
-                (c.Battlehammer, BeamType.Battlehammer), (c.Imperialist, BeamType.Imperialist), (c.Judicator, BeamType.Judicator),
-                (c.Magmaul, BeamType.Magmaul), (c.ShockCoil, BeamType.ShockCoil), (c.OmegaCannon, BeamType.OmegaCannon),
-            };
-            foreach ((Keybind bind, BeamType beam) in weapons)
-            {
-                if (Down(bind, up, down))
+                if (Held(id, up, down))
                 {
-                    input.SelectWeapon = beam;
+                    input.SelectWeapon = (BeamType)beam;
                     break;
                 }
             }

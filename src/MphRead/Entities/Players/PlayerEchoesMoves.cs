@@ -31,6 +31,8 @@ namespace MphRead.Entities
     {
         // the room being loaded is an Echoes arena in a match with Echoes movement on (set on every room load)
         public static bool HostEchoesMoves { get; set; }
+        // the room being loaded is a First Hunt room: its ball rules (PlayerCollision; set on every room load)
+        public static bool HostFhBallRules { get; set; }
         // a jump while still Grounded keeps the double jump (set with HostEchoesMoves; off = replays recorded before it)
         public static bool HostEchoesLedgeJump { get; set; }
         // no fall damage while still on a jump pad's flight (set with HostEchoesMoves; off = replays recorded before it).

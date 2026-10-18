@@ -344,7 +344,7 @@ namespace MphRecomp.Import.Retro
 
         static void ReadLayer(byte[] s, List<ScriptObject> res)
         {
-            bool gen = s[0] == 'S' && s[1] == 'G';           // "SGEN" vs "SCLY"
+            bool gen = s[0] == 'S' && s[2] == 'G';           // "SCGN" vs "SCLY"
             int layer = gen ? -1 : (int)Be.U32(s, 5);
             int count = (int)Be.U32(s, gen ? 6 : 10);
             int o = gen ? 10 : 14;

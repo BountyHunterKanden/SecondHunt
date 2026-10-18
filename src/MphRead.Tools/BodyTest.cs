@@ -206,6 +206,9 @@ namespace MphRead
         // --bones <clip,...>: an imported body's bone positions in model space (+Z = facing, Y up, feet at body.cfg feet)
         // at the start, middle and end of each clip, plus the posed mesh's extent along Z (where a wall would touch it)
         // --render <png>: each spec at t = 0 / mid / end, front + side, flat-shaded (a look at the layered poses, no GL)
+        // -zsbrawl pose: the map's AfterPose too (no player: Brawl Zero Suit's gun arm on a straight-ahead aim)
+        internal static bool RunAfterPose;
+
         static void Bones(string dir, string clipsArg, string render = "")
         {
             NativeBody b = NativeBody.Load(dir);
@@ -241,6 +244,7 @@ namespace MphRead
                         var d = new Vector3(MathF.Sin(h) * MathF.Cos(pt), MathF.Sin(pt), MathF.Cos(h) * MathF.Cos(pt));
                         NativeBodyAnimator.AimAndPin(b, map, d, wall, 1, b.Bone(map.AimBone), NativeBodyAnimator.PinBones(b, map));
                     }
+                    if (RunAfterPose) map?.AfterPose?.Invoke(b, null);
                     if (render.Length > 0)
                     {
                         tiles.Add(($"{spec} {f:F1}", Splat(b, front: true)));
@@ -260,7 +264,7 @@ namespace MphRead
 
         const int Tile = 280;
 
-        static void SaveSheet(List<(string Label, Rgba32[] Px)> tiles, string path)
+        internal static void SaveSheet(List<(string Label, Rgba32[] Px)> tiles, string path)
         {
             int cols = 6, rows = (tiles.Count + cols - 1) / cols;
             using var img = new Image<Rgba32>(cols * Tile, rows * Tile, new Rgba32(40, 44, 52, 255));
@@ -279,14 +283,14 @@ namespace MphRead
 
         // the posed mesh, orthographic, z-buffered, flat-shaded by face normal: front = looking at his face (his +Z toward
         // the viewer, his left on the right), side = his +Z to the right. Feet at the bottom, 4.4 model units tall
-        static Rgba32[] Splat(NativeBody b, bool front)
+        internal static Rgba32[] Splat(NativeBody b, bool front)
         {
             HdGun g = b.Data;
             var px = new Rgba32[Tile * Tile];
             var depth = new float[Tile * Tile];
             Array.Fill(px, new Rgba32(40, 44, 52, 255));
             Array.Fill(depth, Single.MaxValue);
-            float scale = Tile / 4.4f;
+            float scale = Tile / Math.Max(4.4f, b.Height * 1.15f); // a taller body (a Brawl fighter, ~19 units) fits too
             var pal = new float[32 * 16];
             var light = new Vector3(0.4f, 0.6f, 0.7f).Normalized();
             for (int m = 0; m < g.Materials.Length; m++)

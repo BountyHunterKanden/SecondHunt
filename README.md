@@ -12,8 +12,8 @@ Second Hunt aims to modernize and add new features and content to the original H
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data from any Metroid game and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 2.2 (0.2.2-beta, Android and Windows).** Online play with crossplay between Android and Windows, up to 8
-> players, and new characters, suits and arenas imported from your own Metroid Prime discs. Playable start to finish,
+> **Beta 3 (0.3.0-beta, Android and Windows).** Sylux from _Metroid Prime 4: Beyond_, a heavy turret in Shooting
+> Gallery, online games hosted on our server, rebuilt controls and settings, and a lot of fixes. Playable start to finish,
 > with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
 ## What Second Hunt is
@@ -40,7 +40,7 @@ Android. On Windows the keyboard and mouse use MphRead's own PC controls.
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
 sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
-## What's in Beta 2
+## What's in Beta 3
 
 **Campaign**
 - The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
@@ -62,6 +62,8 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   or all at once with SECOND HUNT SETTINGS > UNLOCKS.
 - SELECT HUNTER has two new characters next to the seven hunters, TROOPER and DARK SAMUS (see Imports below)
 - A weapon ring: hold L2 and point with the right stick. It works while you move.
+- Hold Select for the live scoreboard, like the original
+- The radar shows the other hunters (SHOW HUNTERS ON RADAR), with anyone out of range sitting on its edge
 - REPLAYS: your last ten matches are saved (favorites are kept). Watch them at any speed, skip back and forward,
   follow any player, or fly a free camera.
 - EXTRA rules under ADVANCED: EXTRA PICKUPS (the Pirate Blaster), EXTRA CHARACTERS and EXTRA ARENAS, each of which
@@ -79,8 +81,11 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - Text chat in the lobby and in a match: hold Select and point with the right stick for quick messages, or tap Select
   to type
 - Tap any player's name for their license, your record against them, and MUTE, BLOCK or REPORT
-- If the host leaves, another player takes over the match. If your connection drops, you rejoin where you were.
-- Matches in LAN and online play are always in first person
+- Games you create run on the Second Hunt server, so nobody's device is the host. FIND GAME, _Echoes_ arenas and games
+  made while the server is full are hosted by a player as before, and if that host leaves, another player takes over.
+  If your connection drops, you rejoin where you were.
+- The host can change the mode and rules after creating a game (EDIT RULES in the lobby)
+- Online matches are always in first person (LAN matches can use third person)
 - Online play is for ages 13 and up. The rules and what the server keeps are in
   [docs/PRIVACY_NOTICE.md](docs/PRIVACY_NOTICE.md) and [docs/CODE_OF_CONDUCT.md](docs/CODE_OF_CONDUCT.md), and in the
   game (the line at the bottom of OPTIONS). ONLINE SETTINGS can delete your online profile.
@@ -91,17 +96,27 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   nothing from it is ever uploaded. Each import can be deleted again.
 - HD Samus suits and morph balls from each game you import, picked under SECOND HUNT SETTINGS > SAMUS SUIT (third
   person and morph ball), plus an HD Samus behind the menus
-- TROOPER (from _Metroid Prime_): a Space Pirate trooper with four skins, a wall cling and a Scout Drone alt form
+- TROOPER (from _Metroid Prime_): a Space Pirate trooper with four skins, a wall cling and a Scout Drone alt form.
+  A full Pirate Blaster burst marks a target for 4 seconds (Squad Mark), showing them through walls and on the radar
+  to him, or to his whole team in team games.
 - DARK SAMUS (from _Echoes_, or from _Corruption_ on either its own disc or the _Metroid Prime Trilogy_ disc)
 - Six _Echoes_ multiplayer arenas with their music: Sidehopper Station, Spires, Crossfire Chaos, Pipeline, Spider
-  Complex and Shooting Gallery, with _Echoes_ movement (double jump, Gravity Boost)
+  Complex and Shooting Gallery, with _Echoes_ movement (double jump, Gravity Boost). Shooting Gallery has its heavy
+  turret.
+- A Beyond suit for Sylux, his arm cannon and Lockjaw, from your own _Metroid Prime 4: Beyond_ (Switch). Point IMPORT
+  GAMES at your .xci or .nsp along with your Switch's prod.keys, or at an extracted RomFS folder.
+- The beta Phazon Suit from the _Metroid Prime_ disc, as a Samus skin
+- When an import is out of date after an update, its card shows a red mark, and UPDATE ALL redoes them in one go
 - Playing with someone who hasn't imported a character? They still see you, drawn as the closest hunter in matching
   colors.
 
 **Controls** (OPTIONS > CONTROLS, also SECOND HUNT SETTINGS > CONTROLS and the gunship's OPTIONS)
-- Change which button does what: pick a function, then press its new button (X on a function adds a second button).
-  For a controller on Android and Windows, and for the keyboard and mouse on Windows.
+- One page with every function in sections, each with a PRIMARY and SECONDARY button (CLEAR removes one). For a
+  controller on Android and Windows, and for the keyboard and mouse on Windows, where 1 to 0 can pick weapons.
 - Sensitivity and look invert for the controller, and on Windows a separate sensitivity for the mouse
+- Imperialist zoom: the original zoom, or zoom in steps (ZOOM STEP), with its own sensitivity and a RETICLE INDICATOR
+- TRY CONTROLS: a practice room to test your setup
+- Stylus aim (TOUCH AIM: STYLUS) like the DS
 
 **Audio** (OPTIONS > AUDIO, wired up like the original)
 - Sound effect and music volume
@@ -112,9 +127,9 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   - HQ+FIX: smoother
   - HQ+TONE: HQ+FIX with the DS's treble added back
 
-**Options** (Options > SECOND HUNT SETTINGS, L / R to change pages)
+**Options** (Options > SECOND HUNT SETTINGS, tabs with L1 / R1 or a tap)
 - IMPORT GAMES (see Imports above) and the Samus suit
-- First- or third-person camera (matches in LAN and online play are always first person)
+- First- or third-person camera (online matches are always first person)
 - Music quality, the same setting as QUALITY on OPTIONS > AUDIO. In the pause menu the paused music plays while MUSIC
   is selected, so a change can be heard.
 - Controls: the same page as OPTIONS > CONTROLS
@@ -243,15 +258,13 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
   and the artifact flags.
 - The speaker setting on OPTIONS > AUDIO is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
 - ERASE ALL DATA on OPTIONS isn't in yet.
-- Arm cannons from the Prime games aren't imported yet, and _Metroid Prime 4: Beyond_ shows WORK IN PROGRESS on
-  IMPORT GAMES.
+- Samus's arm cannons from the Prime games aren't imported yet.
 
 **Multiplayer**
 - After you quit a LAN match from the pause menu you can't rejoin it. Closing and reopening the app does rejoin.
 - If a match ends early because players quit, only some devices may keep its replay.
-- Once a game is created, its rules can't be changed. Back out and create a new one.
 - The original's typed rules intro, with its sweeping camera, doesn't play at the start of a match yet.
-- Bots sometimes catch on grates for a moment, and can get stuck in a few spots (Pipeline, Shooting Gallery).
+- Bots still get stuck for a moment on some _Echoes_ arenas.
 - The Trooper's wall cling doesn't hold on curved walls.
 - The Pirate Blaster doesn't leave a mark on walls yet.
 
@@ -291,9 +304,10 @@ doing.
 ## What's planned
 
 **Next**
-- The multiplayer known issues above: rejoining after quitting, changing rules in a created game, the rules intro,
-  bot pathing, wall cling and the blaster's wall mark
+- The multiplayer known issues above: rejoining after quitting, the rules intro, bot pathing, wall cling and the
+  blaster's wall mark
 - Step-through weapon buttons for touch
+- A proper outline on hunters marked by Squad Mark
 - Sound timing like the original: what plays while paused and during escapes, and how music and sounds stop or fade
   when you die, go back to the ship or finish a match
 - The rest of the save data: boss records, the rest of the game timer, stats and artifact flags
@@ -309,8 +323,7 @@ doing.
 - An optional Prime-style HUD with a mini map and weapon indicators and a radar
 - European, Japanese and Korean ROMs
 - Dual-screen devices, with the DS's second screen on a handheld's second display
-- More HD content from games you own: each Prime game's arm cannon, _Metroid Prime 4: Beyond_, and the other
-  hunters
+- More HD content from games you own: each Prime game's arm cannon and the other hunters
 - The rest of MphRead's to-do list (below)
 
 ## MphRead's to-do list

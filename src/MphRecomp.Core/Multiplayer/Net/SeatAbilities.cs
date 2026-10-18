@@ -11,10 +11,22 @@ namespace MphRecomp.Multiplayer.Net
     // has an ability, so matches without a Trooper send one byte more than before.
     public sealed class SeatAbilities
     {
-        public const int SeatSize = 13; // cling 5 + drone 8
+        public const int SeatSize = 17; // cling 5 + drone 8 + Dark Samus's Hyper Ball 2 (LAN 18 / online 16)
+                                        // + Zero Suit's Paralyzer stun on this seat 1 (LAN 19 / online 17)
+                                        // + the Squad Mark on this seat 1 (LAN 20 / online 18)
 
         public PlayerNetCling[] Cling = Array.Empty<PlayerNetCling>();
         public PlayerNetDrone[] Drone = Array.Empty<PlayerNetDrone>();
+        // Dark Samus's Hyper Ball: on, and its two targets' seats (PlayerEntity.NetHyperBall / NetHyperTargets)
+        public byte[] Hyper = Array.Empty<byte>();
+        public byte[] HyperTargets = Array.Empty<byte>();
+        // the Paralyzer stun frames left on each seat (PlayerEntity.HostParalyzedTimer; any seat can be stunned by Zero Suit)
+        public byte[] Paralyzed = Array.Empty<byte>();
+        // the seats whose Squad Mark is on each seat (PlayerEntity.NetSquadMark, a bit a seat; the Trooper's blaster)
+        public byte[] SquadMark = Array.Empty<byte>();
+
+        // (a block made without them, as a test's: none)
+        private static byte HyperAt(byte[] a, int i) => i < a.Length ? a[i] : (byte)0;
 
         public int Size => 1 + Cling.Length * SeatSize;
 
@@ -25,18 +37,24 @@ namespace MphRecomp.Multiplayer.Net
             for (int i = 0; i < seats; i++)
             {
                 PlayerEntity p = PlayerEntity.Players[i];
-                any |= p.HostWallCling || p.HostScoutDrone;
+                any |= p.HostWallCling || p.HostScoutDrone || p.HostHyperBall || p.HostAffinityBeam == MphRead.BeamType.Paralyzer
+                    || p.HostAffinityBeam == MphRead.BeamType.PirateBlaster;
             }
             if (!any)
             {
                 return null;
             }
-            var a = new SeatAbilities { Cling = new PlayerNetCling[seats], Drone = new PlayerNetDrone[seats] };
+            var a = new SeatAbilities { Cling = new PlayerNetCling[seats], Drone = new PlayerNetDrone[seats], Hyper = new byte[seats],
+                HyperTargets = new byte[seats], Paralyzed = new byte[seats], SquadMark = new byte[seats] };
             for (int i = 0; i < seats; i++)
             {
                 PlayerEntity p = PlayerEntity.Players[i];
+                a.Paralyzed[i] = (byte)Math.Min(p.HostParalyzedTimer, 255);
+                a.SquadMark[i] = p.NetSquadMark;
                 a.Cling[i] = p.NetCling;
                 a.Drone[i] = p.NetDrone;
+                a.Hyper[i] = p.NetHyperBall;
+                a.HyperTargets[i] = p.NetHyperTargets;
             }
             return a;
         }
@@ -51,6 +69,9 @@ namespace MphRecomp.Multiplayer.Net
                 bool pose = i != local;
                 p.NetApplyCling(Cling[i], pose);
                 p.NetApplyDrone(Drone[i], pose);
+                p.NetApplyHyperBall(HyperAt(Hyper, i), HyperAt(HyperTargets, i), pose);
+                p.NetApplyParalyzed(HyperAt(Paralyzed, i), pose);
+                p.NetApplySquadMark(HyperAt(SquadMark, i));
             }
         }
 
@@ -74,6 +95,10 @@ namespace MphRecomp.Multiplayer.Net
                 d[o + 9] = r.LaserPattern;
                 BinaryPrimitives.WriteUInt16LittleEndian(d[(o + 10)..], r.LaserWait);
                 d[o + 12] = r.LaserDist;
+                d[o + 13] = HyperAt(Hyper, i);
+                d[o + 14] = HyperAt(HyperTargets, i);
+                d[o + 15] = HyperAt(Paralyzed, i);
+                d[o + 16] = HyperAt(SquadMark, i);
                 o += SeatSize;
             }
             return o;
@@ -82,7 +107,8 @@ namespace MphRecomp.Multiplayer.Net
         public static SeatAbilities Read(ReadOnlySpan<byte> d, out int size)
         {
             int seats = d[0];
-            var a = new SeatAbilities { Cling = new PlayerNetCling[seats], Drone = new PlayerNetDrone[seats] };
+            var a = new SeatAbilities { Cling = new PlayerNetCling[seats], Drone = new PlayerNetDrone[seats], Hyper = new byte[seats],
+                HyperTargets = new byte[seats], Paralyzed = new byte[seats], SquadMark = new byte[seats] };
             int o = 1;
             for (int i = 0; i < seats; i++)
             {
@@ -95,6 +121,10 @@ namespace MphRecomp.Multiplayer.Net
                     FireState = d[o + 5], FireFrame = d[o + 6], Cooldown = d[o + 7], LaserFrame = d[o + 8], LaserPattern = d[o + 9],
                     LaserWait = BinaryPrimitives.ReadUInt16LittleEndian(d[(o + 10)..]), LaserDist = d[o + 12]
                 };
+                a.Hyper[i] = d[o + 13];
+                a.HyperTargets[i] = d[o + 14];
+                a.Paralyzed[i] = d[o + 15];
+                a.SquadMark[i] = d[o + 16];
                 o += SeatSize;
             }
             size = o;

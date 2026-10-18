@@ -15,9 +15,10 @@ internal static class DesktopImport
 
     static ImportPicked? Pick(ImportPickRequest request)
     {
+        if (request.Kind == ImportPickKind.Folder) return PickFolder(request);
         string patterns = String.Join(";", request.Extensions.Select(e => "*" + e));
-        string what = request.Kind == ImportPickKind.WiiKey
-            ? "Wii key file"
+        string what = request.Kind == ImportPickKind.WiiKey ? "Wii key file"
+            : request.Kind == ImportPickKind.SwitchKeys ? "Switch prod.keys file"
             : System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(request.Title.ToLowerInvariant()) + " disc image";
         using var dialog = new System.Windows.Forms.OpenFileDialog
         {
@@ -29,5 +30,21 @@ internal static class DesktopImport
         if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return null;
         Log.Info("MPHFrontend", "import: picked " + Path.GetFileName(dialog.FileName));
         return new ImportPicked(dialog.FileName, Path.GetFileName(dialog.FileName));
+    }
+
+    // a game imported from its files (Prime 4: the RomFS folder of the player's own dump), read where it is
+    static ImportPicked? PickFolder(ImportPickRequest request)
+    {
+        string title = System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(request.Title.ToLowerInvariant());
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = $"Select your {title} RomFS folder (the folder holding Preload, or the one above it)",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+        };
+        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return null;
+        string path = dialog.SelectedPath.TrimEnd(Path.DirectorySeparatorChar);
+        Log.Info("MPHFrontend", "import: picked folder " + Path.GetFileName(path));
+        return new ImportPicked(path, Path.GetFileName(path));
     }
 }

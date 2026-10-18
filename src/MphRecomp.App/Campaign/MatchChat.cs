@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using MphRead;
 using MphRead.Entities;
 using MphRead.Hud;
+using MphRecomp.Config;
 using MphRecomp.Multiplayer.Net;
 using MphRecomp.Online;
 
@@ -12,8 +13,9 @@ namespace MphRecomp.App;
 
 // Chat in an online match (docs/ONLINE_PLAY.md section 8, Social O7). The game's chat (the server's ChatEvents, the same log
 // the lobby's CHAT page shows: OnlineClient.Chat) appears as MphRead's own HUD messages, bottom left, newest at the bottom,
-// a few seconds each; muted players' lines stay hidden (PlayerMutes). The quick-message wheel: hold Select ("View"; the
-// touch controls' CHAT button), point the right stick at one of the eight (ChatPresets.Wheel, clockwise from the top), let
+// a few seconds each; muted players' lines stay hidden (PlayerMutes). The quick-message wheel: hold the CHAT button (the
+// touch controls' CHAT, or a controller button bound to CHAT: none by default; owner 2026-10-11: Select is the live
+// scoreboard, and the pause menu has CHAT: the lobby's CHAT page, RecompMenus.PauseChat), point the right stick at one of the eight (ChatPresets.Wheel, clockwise from the top), let
 // go to send it; the pick stays when the stick goes back to rest, as the weapon ring's. Typed chat (owner 2026-10-09: "build
 // the chat in match"): a short TAP of Select (or of the touch CHAT button) with no wheel pick opens a text box: the host's own
 // (ChatBoxRequested: Android's dialog with the soft keyboard, CampaignActivity) or, with none, a line typed on the HUD (the
@@ -39,6 +41,8 @@ internal sealed partial class CampaignRenderer
     volatile bool _matchChatSending;
     volatile string? _matchChatNote;        // a send's trouble, from the network thread, shown at the next step
     long _chatWheelSince;
+    bool _chatToggle;                       // RECOMP SETTINGS > CONTROLS "chat mode" TOGGLE (ReloadAimFromSettings)
+    bool _chatToggleOpen, _chatKeyPrev;     // TOGGLE: the wheel is open; the bound button at the last step
     volatile bool _chatBoxWanted;           // a tap asked for the text box (opened at the step, on the renderer's thread)
     string? _chatLine;                      // the HUD line being typed (no host box), null = closed
     bool _chatLineSelect;                   // Select held at the last step while the line was open
@@ -112,16 +116,24 @@ internal sealed partial class CampaignRenderer
                 }
             }
         }
+        bool chatHeld = ChatHeld(pad);
+        // TOGGLE (RECOMP SETTINGS > CONTROLS "chat mode", owner 2026-10-11): the bound button's press opens the wheel and the
+        // next press closes it (sending the pick, or the text box with none); the touch CHAT button is held either way
+        bool keyHeld = _padBinds.Held(ControlBinds.Chat), keyPress = keyHeld && !_chatKeyPrev;
+        _chatKeyPrev = keyHeld;
+        if (!_chatToggle || MatchOver || ChatBoxOpen || _chatLine != null) _chatToggleOpen = false;
+        else if (keyPress) _chatToggleOpen = !_chatToggleOpen;
+        bool wheelHeld = _chatToggle ? pad.Touch(PadButton.Select) || _chatToggleOpen : chatHeld;
         if (_chatLine != null)
         {
-            // (a controller alone can't type: Select again closes it)
-            if (pad[PadButton.Select] && !_chatLineSelect) _chatLine = null;
-            _chatLineSelect = pad[PadButton.Select];
+            // (a controller alone can't type: CHAT again closes it)
+            if (chatHeld && !_chatLineSelect) _chatLine = null;
+            _chatLineSelect = chatHeld;
             TypeChatLine(m, p);
             _chatWheelOpen = false;
             return false;
         }
-        if (pad[PadButton.Select] && !MatchOver && !ChatBoxOpen)
+        if (wheelHeld && !MatchOver && !ChatBoxOpen)
         {
             if (!_chatWheelOpen)
             {
@@ -146,13 +158,25 @@ internal sealed partial class CampaignRenderer
             {
                 SendMatchChat(m, ChatPresets.Wheel[_chatWheelPick]);
             }
-            else if (Environment.TickCount64 - _chatWheelSince < ChatTapMs && !MatchOver)
+            else if ((_chatToggle && keyPress || Environment.TickCount64 - _chatWheelSince < ChatTapMs) && !MatchOver)
             {
-                _chatBoxWanted = true; // a tap: type a line (opened at the next step)
+                _chatBoxWanted = true; // a tap (TOGGLE: the closing press with no pick): type a line (opened at the next step)
             }
         }
         return false;
     }
+
+    // the chat wheel's button: the touch controls' CHAT (it presses Select on the touch layer) or a controller button bound
+    // to CHAT (RECOMP SETTINGS > CONTROLS; PadBindings updates at the top of BuildInput: this step's)
+    bool ChatHeld(PadState pad) => pad.Touch(PadButton.Select) || _padBinds.Held(ControlBinds.Chat);
+
+    // BuildInput, each step: the scoreboard button held in a match (the controller's Select, a PC's left Alt, unless moved in
+    // RECOMP SETTINGS > CONTROLS; never the touch controls' CHAT) = vanilla's live scoreboard (the game's own: START held in
+    // multiplayer, PlayerHud.HostScoreboardHeld), not while a chat line is typed. A dev solo run's pickup editor keeps
+    // Select (PickupPlacer.cs)
+    bool MatchScoreboardHeld(PadState pad)
+        => _host?.Match != null && !MatchOver && (_padBinds.Held(ControlBinds.Scoreboard) || KeyboardMouse?.ScoreboardHeld == true)
+            && !(_placing && _solo) && _chatLine == null && !ChatBoxOpen;
 
     void ShowMatchChat(OnlineMatch m, PlayerEntity p)
     {

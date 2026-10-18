@@ -26,7 +26,7 @@ namespace MphRead.Entities
 
     public class AvailableArray
     {
-        private readonly bool[] _array = new bool[12]; // recomp: 12 for BeamType.PirateBlaster (11); 9 and 10 stay unused
+        private readonly bool[] _array = new bool[14]; // recomp: 14 for BeamType.PirateBlaster (11) + Paralyzer (13); 9, 10 (+ 12 for now) stay unused
 
         public void ClearAll()
         {
@@ -220,7 +220,7 @@ namespace MphRead.Entities
         public static readonly PlayerEntity[] _players = new PlayerEntity[SlotCapacity];
         private static IReadOnlyList<PlayerEntity> _playersView = new ArraySegment<PlayerEntity>(_players, 0, VanillaMaxPlayers);
         public static IReadOnlyList<PlayerEntity> Players => _playersView;
-        public bool IsMainPlayer => this == Main && _scene.CameraMode == CameraMode.Player;
+        public bool IsMainPlayer => this == Main && !HostNoLocalSeat && _scene.CameraMode == CameraMode.Player; // (recomp: PlayerServedHost.cs)
         // host hooks (Second Hunt's Hunter License, at the game's "update license info" spots): the main player killed an
         // opponent (the damage's flags and beam); the main player's kill streak ended (it died, or it killed a teammate)
         public static Action<DamageFlags, BeamType>? HostLicenseKill { get; set; }
@@ -408,6 +408,7 @@ namespace MphRead.Entities
         private ushort _jumpPadControlLock = 0;
         private ushort _jumpPadControlLockMin = 0;
         private bool _jumpPadSameArc = false; // host hook: this flight's pad is JumpPadEntity.SameArc
+        private bool _jumpPadKeepPush = false; // host hook: this flight's pad is JumpPadEntity.KeepPush
         private ushort _timeSinceJumpPad = 0;
         private Vector3 _jumpPadAccel;
 
@@ -548,12 +549,12 @@ namespace MphRead.Entities
             NodeRef prevNodeRef = NodeRef;
             int prevHealth = _health;
             _models.Clear();
-            _bipedModelLods[0] = Read.GetModelInstance(Metadata.HunterModels[Hunter][0]);
-            _bipedModelLods[1] = Read.GetModelInstance(Metadata.HunterModels[Hunter][1]);
-            _bipedModel1 = Read.GetModelInstance(Metadata.HunterModels[Hunter][0]);
-            _bipedModel2 = Read.GetModelInstance(Metadata.HunterModels[Hunter][0]);
-            _altModel = Read.GetModelInstance(Metadata.HunterModels[Hunter][2]);
-            _gunModel = Read.GetModelInstance(Metadata.HunterModels[Hunter][3]);
+            _bipedModelLods[0] = HostFirstHunt ? FirstHuntBodyModel(0) : Read.GetModelInstance(Metadata.HunterModels[Hunter][0]); // recomp: the cart's body
+            _bipedModelLods[1] = HostFirstHunt ? FirstHuntBodyModel(1) : Read.GetModelInstance(Metadata.HunterModels[Hunter][1]);
+            _bipedModel1 = HostFirstHunt ? FirstHuntBodyModel(0) : Read.GetModelInstance(Metadata.HunterModels[Hunter][0]);
+            _bipedModel2 = HostFirstHunt ? FirstHuntBodyModel(0) : Read.GetModelInstance(Metadata.HunterModels[Hunter][0]);
+            _altModel = HostFirstHunt ? FirstHuntBallModel() : Read.GetModelInstance(Metadata.HunterModels[Hunter][2]); // recomp: the cart's
+            _gunModel = HostFirstHunt ? FirstHuntGunModel() : Read.GetModelInstance(Metadata.HunterModels[Hunter][3]); // recomp: the cart's own gun
             _gunSmokeModel = Read.GetModelInstance("gunSmoke");
             _bipedIceModel = Read.GetModelInstance(Hunter == Hunter.Noxus || Hunter == Hunter.Trace ? "nox_ice" : "samus_ice");
             _altIceModel = Read.GetModelInstance("alt_ice");
@@ -579,7 +580,8 @@ namespace MphRead.Entities
             _doubleDmgBindingId = _scene.BindGetTexture(_doubleDmgModel.Model, 0, 0, 0);
             base.Initialize();
             EquipInfo.Beams = _beams;
-            Values = Metadata.PlayerValues[(int)Hunter];
+            // recomp: First Hunt's values in a First Hunt level (FirstHunt/FirstHuntRules.cs)
+            Values = HostFirstHunt && FirstHuntRules.Values is PlayerValues fhValues ? fhValues : Metadata.PlayerValues[(int)Hunter];
             _hudObjects = HudElements.HunterObjects[(int)Hunter];
             if (IsMainPlayer)
             {
@@ -587,7 +589,7 @@ namespace MphRead.Entities
             }
             if (GameState.Multiplayer)
             {
-                _healthMax = 2 * Values.EnergyTank - 1;
+                _healthMax = 2 * MpEnergyTank - 1; // recomp: MpEnergyTank = Values.EnergyTank unless the seat's health differs (PlayerParalyzer.cs)
                 _ammoMax[UA] = _ammoMax[Missiles] = Values.MpAmmoCap;
             }
             else
@@ -660,7 +662,7 @@ namespace MphRead.Entities
             string shootNodeName = Hunter == Hunter.Guardian ? "Head_1" : "R_elbow";
             for (int i = 0; i < 2; i++)
             {
-                _spineNodes[i] = _bipedModelLods[i].Model.GetNodeByName("Spine_1");
+                _spineNodes[i] = _bipedModelLods[i].Model.GetNodeByName(HostFirstHunt ? "Spine_2" : "Spine_1"); // recomp: First Hunt's (0x200b2ac)
                 _shootNodes[i] = _bipedModelLods[i].Model.GetNodeByName(shootNodeName);
             }
             if (Hunter == Hunter.Spire)
@@ -766,7 +768,7 @@ namespace MphRead.Entities
             EchoesMovesSpawn(); // recomp: the double jump in Echoes arenas (PlayerEchoesMoves.cs)
             if (GameState.Multiplayer)
             {
-                _health = Values.EnergyTank - 1;
+                _health = MpEnergyTank - 1; // recomp: Values.EnergyTank unless the seat's health differs (PlayerParalyzer.cs)
             }
             else if (IsMainPlayer) // todo: MP1P
             {
@@ -794,6 +796,8 @@ namespace MphRead.Entities
             _frozenTimer = 0;
             _timeSinceFrozen = 255;
             WallClingInit(); // recomp: off the wall on every spawn (PlayerWallCling.cs)
+            HyperBallReset(); // recomp: no Hyper Ball on a spawn (PlayerHyperBall.cs)
+            ResetParalyzerStun(); // recomp: no Paralyzer stun on a spawn (PlayerParalyzer.cs)
             _frozenGfxTimer = 0;
             _drawIceLayer = false;
             _hidingTimer = 0;
@@ -930,6 +934,7 @@ namespace MphRead.Entities
             _jumpPadControlLock = 0;
             _jumpPadControlLockMin = 0;
             _jumpPadSameArc = false;
+            _jumpPadKeepPush = false;
             _timeSinceJumpPad = UInt16.MaxValue; // the game doesn't do this
             if (IsMainPlayer)
             {
@@ -964,7 +969,8 @@ namespace MphRead.Entities
             // the player clears the enemy spawner reference here, using a global array to track them
             _lastTarget = null;
             UpdateScanIds();
-            if (respawn && (IsMainPlayer || GameState.Multiplayer))
+            FirstHuntSpawn(); // recomp: First Hunt's spawn state in a First Hunt level (FirstHunt/PlayerFirstHunt.cs)
+            if (respawn && (IsMainPlayer || GameState.Multiplayer) && !HostFirstHunt) // recomp: First Hunt's own (FirstHuntSpawn)
             {
                 // spawnEffectMP or spawnEffect
                 int effectId = GameState.Multiplayer && PlayerCount > 2 && !Features.MaxPlayerDetail ? 33 : 31;
@@ -1511,11 +1517,16 @@ namespace MphRead.Entities
 
         private void SetGunAnimation(GunAnimation anim, AnimFlags animFlags = AnimFlags.None)
         {
+            if (HostFirstHunt && anim == GunAnimation.Switch && GunAnimation == GunAnimation.Idle)
+            {
+                return; // recomp: First Hunt's gun has no switch clip (PlayerFirstHunt.cs)
+            }
             GunAnimation = anim;
-            int animId = Metadata.GunAnimationIds[(int)Hunter, (int)anim, 0];
+            int animId = HostFirstHunt ? FirstHuntGunAnimId(anim) : Metadata.GunAnimationIds[(int)Hunter, (int)anim, 0]; // recomp
             SetFlags setFlags = SetFlags.Texture | SetFlags.Texcoord | SetFlags.Material | SetFlags.Unused | SetFlags.Node;
             _gunModel.SetAnimation(animId, slot: 0, setFlags, animFlags);
-            animId = Metadata.GunAnimationIds[(int)Hunter, (int)anim, PirateBlaster.BaseIndex(CurrentWeapon) + 1]; // recomp: blaster = PB
+            animId = HostFirstHunt ? -1 // recomp: no per-beam clips on First Hunt's gun
+                : Metadata.GunAnimationIds[(int)Hunter, (int)anim, PirateBlaster.BaseIndex(CurrentWeapon) + 1]; // recomp: blaster = PB
             if (animId >= 0)
             {
                 setFlags &= ~SetFlags.Node;
@@ -1682,6 +1693,21 @@ namespace MphRead.Entities
             TakeDamage((uint)damage, flags, direction, source);
         }
 
+        // recomp (owner 2026-10-11): with friendly fire off, a teammate's hit is no hit at all: the beam's impact still
+        // shows, but no hurt sound, red flash, knockback, invulnerability or bot reaction (vanilla does all of those
+        // with 0 damage: rev 1 arm9 0x02017480 / 0x02017B9C / 0x02019120). Default off (vanilla); MphRecomp
+        // MatchSettings.TeamHitsIgnored turns it on (replays recorded before it read it as off)
+        public bool HostTeamHitsIgnored { get; set; }
+
+        // recomp (2026-10-16): this player's continuous shots (Shock Coil) scale their headshot damage by 1/32 per tick like
+        // their damage, as the game does (BeamProjectileEntity.Spawn); off = MphRead's whole headshot damage, for replays
+        // recorded before it (MphRecomp MatchSettings.ContinuousHeadshots)
+        public bool HostContinuousHeadshots { get; set; } = true;
+
+        // recomp (2026-10-16): the Shock Coil's ramp is dropped after 2 ticks without a hit, as the game does (PlayerProcess.cs);
+        // off = MphRead's half of that, for replays recorded before it (MphRecomp MatchSettings.ShockCoilGrace)
+        public bool HostShockCoilGrace { get; set; } = true;
+
         public void TakeDamage(uint damage, DamageFlags flags, Vector3? direction, EntityBase? source)
         {
             if (_health == 0 || !NetDamageAllowed) // a match client takes damage only from the host (PlayerNet.cs)
@@ -1773,6 +1799,11 @@ namespace MphRead.Entities
             {
                 ignoreDamage = true;
                 damage = 0;
+                if (HostTeamHitsIgnored && attacker != this)
+                {
+                    _damageInvulnTimer = hostInvulnBefore; // (HostTeamHitsIgnored)
+                    return;
+                }
             }
             if (!ignoreDamage && flags.TestFlag(DamageFlags.Headshot) && attacker == Main) // todo: and not on wifi
             {
@@ -1864,6 +1895,10 @@ namespace MphRead.Entities
             }
             // todo?: something for wifi
             NetRecordHit(attacker, beam, flags); // network play: the last hit goes out in the snapshot (PlayerNet.cs)
+            if (beam != null && attacker != null && attacker != this && !ignoreDamage)
+            {
+                attacker.OnSquadMarkHit(this, beam); // recomp: the Trooper's Squad Mark (PlayerSquadMark.cs)
+            }
             if (attacker != null)
             {
                 if (attacker == Main)
@@ -1887,6 +1922,8 @@ namespace MphRead.Entities
                 {
                     beamType = beam.Beam;
                 }
+                bool droneKill = _netApplyingDamage ? _netDamageDrone : DroneHit(attacker, beam); // recomp: (PlayerScoutDrone.cs)
+                bool turretKill = _netApplyingDamage ? _netDamageTurret : TurretHit(beam); // recomp: (PlayerEchoesSeat.cs)
                 if (source == attacker || fromHalfturret || bomb != null)
                 {
                     // halfturret, bomb, or direct hit by player (not beam)
@@ -1930,6 +1967,7 @@ namespace MphRead.Entities
                 _frozenGfxTimer = 0;
                 _disruptedTimer = 0;
                 _burnTimer = 0;
+                ResetParalyzerStun(); // recomp (PlayerParalyzer.cs)
                 if (_furlEffect != null)
                 {
                     _scene.UnlinkEffectEntry(_furlEffect);
@@ -2177,6 +2215,7 @@ namespace MphRead.Entities
                 {
                     if (attacker != null)
                     {
+                        if (HostFirstHunt) FirstHuntMission.PlayerKilled(attacker.SlotIndex, SlotIndex); // recomp: the results' table
                         if (IsMainPlayer)
                         {
                             CloseDialogs();
@@ -2201,11 +2240,19 @@ namespace MphRead.Entities
                             {
                                 killedBy = Strings.GetHudMessage(251); // MAGMAUL BURN
                             }
+                            else if (droneKill) // recomp: the Scout Drone's shots and laser
+                            {
+                                killedBy = DroneKillName; // SENTRY DRONE
+                            }
+                            else if (turretKill) // recomp: Shooting Gallery's turret, its shots and entry kill
+                            {
+                                killedBy = TurretKillName; // HEAVY TURRET
+                            }
                             else if (fromHalfturret)
                             {
                                 killedBy = _altAttackNames[(int)attacker.Hunter];
                             }
-                            else if (beamType <= BeamType.OmegaCannon || beamType == BeamType.PirateBlaster) // recomp
+                            else if (beamType <= BeamType.OmegaCannon || beamType == BeamType.PirateBlaster || beamType == BeamType.Paralyzer) // recomp
                             {
                                 killedBy = _weaponNames[(int)beamType];
                             }
@@ -2243,7 +2290,8 @@ namespace MphRead.Entities
                         if (attacker == this)
                         {
                             GameState.Suicides[SlotIndex]++;
-                            if (GameState.Mode == GameMode.Battle || GameState.Mode == GameMode.BattleTeams)
+                            // recomp: First Hunt has no suicide penalty (cart 0x200ba24; FirstHunt/PlayerFirstHunt.cs)
+                            if ((GameState.Mode == GameMode.Battle || GameState.Mode == GameMode.BattleTeams) && !HostFirstHunt)
                             {
                                 GameState.Points[SlotIndex]--;
                             }
@@ -2350,7 +2398,7 @@ namespace MphRead.Entities
                     else // no attacker
                     {
                         GameState.Suicides[SlotIndex]++;
-                        if (GameState.Mode == GameMode.Battle || GameState.Mode == GameMode.BattleTeams)
+                        if ((GameState.Mode == GameMode.Battle || GameState.Mode == GameMode.BattleTeams) && !HostFirstHunt) // recomp
                         {
                             GameState.Points[SlotIndex]--;
                         }
@@ -2374,7 +2422,8 @@ namespace MphRead.Entities
                         QueueHudMessage(128, 70, 140, 90 / 30f, 2, 242); // the prime hunter is dead!
                     }
                 }
-                if (GameState.Multiplayer && attacker != null && attacker != this && !NetClient) // (host drops it)
+                // (recomp: First Hunt drops nothing on a kill: the cart's death handler 0x200ba24 spawns no item)
+                if (GameState.Multiplayer && attacker != null && attacker != this && !NetClient && !HostFirstHunt) // (host drops it)
                 {
                     ItemType itemType = ItemType.UASmall;
                     if (attacker.EquipInfo.Weapon.AmmoType == 1)
@@ -2434,6 +2483,7 @@ namespace MphRead.Entities
                             _soundSource.PlaySfx(SfxId.LOB_DISRUPT);
                         }
                     }
+                    OnParalyzerHit(beam); // recomp: Zero Suit's charged Paralyzer stuns (PlayerParalyzer.cs)
                     if (beam.Afflictions.TestFlag(Affliction.Burn))
                     {
                         if (flags.TestFlag(DamageFlags.Halfturret))
@@ -2598,7 +2648,7 @@ namespace MphRead.Entities
 
         private static readonly string[] _altAttackNames = new string[8];
         private static readonly string[] _hunterNames = new string[8];
-        private static readonly string[] _weaponNames = new string[12]; // recomp: 9 -> 12 (11 = the Pirate Blaster)
+        private static readonly string[] _weaponNames = new string[14]; // recomp: 9 -> 14 (11 = the Pirate Blaster, 13 = the Paralyzer)
 
         public static void LoadWeaponNames()
         {
@@ -2609,6 +2659,7 @@ namespace MphRead.Entities
             // recomp: no ROM string for the Pirate Blaster (its kills don't count in the per-beam stats yet: BeamKills is
             // the vanilla 9 beams)
             _weaponNames[(int)BeamType.PirateBlaster] = Metadata.WeaponNamesUpper[(int)BeamType.PirateBlaster];
+            _weaponNames[(int)BeamType.Paralyzer] = Metadata.WeaponNamesUpper[(int)BeamType.Paralyzer];
             for (int i = 0; i < 8; ++i)
             {
                 _hunterNames[i] = Strings.GetMessage('H', i + 1, StringTables.WeaponNames);

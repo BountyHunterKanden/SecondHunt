@@ -41,8 +41,16 @@ namespace MphRecomp.Frontend
             {
                 args[ArgName] = setup;
             }
+            foreach (string part in setup.Split(';'))
+            {
+                if (part == TryPart || part == TryActivePart) args["try"] = part[4..]; // TRY CONTROLS (App SoloArena.cs)
+            }
             return args;
         }
+
+        // OPTIONS > CONTROLS' TRY CONTROLS (RecompMenus.ZoomAim.cs): the line's extra part (Read skips it) that launches the
+        // match as a practice run (App SoloArena.cs, --es try 1: idle bots as targets; try 2: bots that fight back)
+        public const string TryPart = "try=1", TryActivePart = "try=2";
 
         // "host" / "client" for a LAN match's line, else null
         public static string? NetRole(string setup)
@@ -56,7 +64,9 @@ namespace MphRecomp.Frontend
 
         public static string Write(MatchSettings s, string? net = null)
         {
-            var parts = new List<string> { "mode=" + s.Mode, "arena=" + Uri.EscapeDataString(s.Arena), "local=" + s.LocalSeat };
+            // numbers always invariant: Read parses them invariant, and e.g. Finnish writes -1 with U+2212 (10-16 crash)
+            CultureInfo ci = CultureInfo.InvariantCulture;
+            var parts = new List<string> { "mode=" + s.Mode, "arena=" + Uri.EscapeDataString(s.Arena), "local=" + s.LocalSeat.ToString(ci) };
             if (net != null) parts.Add("net=" + net);
             void Add(string key, object? value)
             {
@@ -80,7 +90,7 @@ namespace MphRecomp.Frontend
             Add("xc", s.ExtraCharacters);
             foreach (MatchPlayer p in s.Players)
             {
-                parts.Add($"p={p.Hunter},{p.Recolor},{p.Team},{(p.Bot ? 1 : 0)},{(p.Remote ? 1 : 0)},{p.BotLevel},"
+                parts.Add(string.Create(ci, $"p={p.Hunter},{p.Recolor},{p.Team},{(p.Bot ? 1 : 0)},{(p.Remote ? 1 : 0)},{p.BotLevel},")
                     + Uri.EscapeDataString(p.Nickname ?? "")
                     + (string.IsNullOrEmpty(p.Skin) && string.IsNullOrEmpty(p.Character) ? "" : "," + Uri.EscapeDataString(p.Skin ?? ""))
                     + (string.IsNullOrEmpty(p.Character) ? "" : "," + Uri.EscapeDataString(p.Character)));

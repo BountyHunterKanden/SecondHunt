@@ -375,7 +375,7 @@ namespace MphRead.Entities.Enemies
             _grappleInt += _field28 / 2; // todo: FPS stuff
             if ((int)Math.Round(_grappleInt) > _grappleVecs.Length)
             {
-                _grappleInt -= _grappleInt % 1;
+                _grappleInt %= 1; // recomp: vanilla (rev 1 0x213C7E8, and 0xFFF) keeps the fraction
             }
         }
 
@@ -495,7 +495,8 @@ namespace MphRead.Entities.Enemies
             if (dist > 1 / 128f)
             {
                 // sktodo: variable names
-                float v6 = (10 - (PlayerEntity.Main.Position.Y - Position.Y)) * 30;
+                // recomp: vanilla (rev 1 0x213B640, / 0x88) is ticks to reel in at 30 Hz; x2 for 60 Hz frames (reeled 2x fast)
+                float v6 = (10 - (PlayerEntity.Main.Position.Y - Position.Y)) * 30 * 2;
                 // todo?: consider fx32 math in some places? discrepancies accumulate over time,
                 // but this particular line is a single place with a pretty big difference from the game
                 //float v6 = FxDiv(Fixed.ToInt(10 - (PlayerEntity.Main.Position.Y - Position.Y)), 136) / 4096f;
@@ -619,7 +620,8 @@ namespace MphRead.Entities.Enemies
             {
                 between = _grappleVecs[1] - _grappleVecs[0];
             }
-            between = between.WithY(0).WithZ(-between.Z);
+            // recomp: vanilla (rev 1 0x2139BD0) turns the grapple vector sideways, (-z, 0, x), not (x, 0, -z)
+            between = new Vector3(-between.Z, 0, between.X);
             if (between.LengthSquared > 1 / 128f)
             {
                 _field10 = between.Normalized();
@@ -627,7 +629,8 @@ namespace MphRead.Entities.Enemies
             // sktodo: I'm not changing the multiplication by 0.04 since I think the above will usually cause _field10 to get a fresh value every frame?
             // need to double check how/when field10 is actually used, might have to change this and the speed part too idk yet
             _field10 *= 0.04f; // 163
-            _field10 += _speed; // sktodo: FPS stuff
+            // recomp: vanilla (rev 1 0x2139AEC) adds the per-tick speed; _speed is per 60 Hz frame and Func213C4DC halves _field10 again
+            _field10 += _speed * 2;
             Func213B7E0();
             TickGrappleDamage();
             if (_holdTimer > 0)
@@ -856,11 +859,19 @@ namespace MphRead.Entities.Enemies
                         if (trocra.Field184 > 0)
                         {
                             trocra.Field184--;
-                            trocra.Position = new Vector3(
-                                trocra.Field174.X + Fixed.ToFloat(Rng.GetRandomInt2(4096) - 2048),
-                                trocra.Field174.Y + Fixed.ToFloat(Rng.GetRandomInt2(4096) - 2048),
-                                trocra.Field174.Z + Fixed.ToFloat(Rng.GetRandomInt2(4096) - 2048)
-                            );
+                            // recomp: vanilla (rev 1 0x213AF64) rolls the jitter once per 30 Hz tick; hold it on odd frames
+                            if (_scene.FrameCount % 2 == 0)
+                            {
+                                trocra.Position = new Vector3(
+                                    trocra.Field174.X + Fixed.ToFloat(Rng.GetRandomInt2(4096) - 2048),
+                                    trocra.Field174.Y + Fixed.ToFloat(Rng.GetRandomInt2(4096) - 2048),
+                                    trocra.Field174.Z + Fixed.ToFloat(Rng.GetRandomInt2(4096) - 2048)
+                                );
+                            }
+                            else
+                            {
+                                trocra.Position += _speed;
+                            }
                         }
                         // sktodo (document): throwing after timer
                         if (trocra.Field184 == 0)

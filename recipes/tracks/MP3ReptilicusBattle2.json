@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Reptilicus Battle",
+  "group": "SkyTown Elysia",
+  "role": "battle",
+  "files": [
+    { "name": "MP3/Audio/Skytown/reptilian2-japan.fsb", "sha1": "677c3736d5bab6ff37112114d0b4556a80d60925" }
+  ],
+  "gain": 0.509
+}

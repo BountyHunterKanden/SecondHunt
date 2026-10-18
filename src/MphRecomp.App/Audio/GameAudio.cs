@@ -903,6 +903,45 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         StartStreamLoad();
     }
 
+    // First Hunt (docs/FIRST_HUNT_PORT.md P4): the cart's sample banks from the imported game (Paths.FhFileSystem must
+    // point at it, FirstHuntGame.Register), appended after MPH's samples, so its ids play like any sample; their bases
+    // go to MphRead's FirstHuntSounds. Each sample keeps its own header volume. Once per player; a bank that is
+    // missing leaves its base at -1 (the MPH stand-ins play).
+    public void LoadFirstHunt()
+    {
+        if (_samples == null || FirstHuntSounds.SfxBase >= 0 && _samples.Count > FirstHuntSounds.SfxBase)
+        {
+            return;
+        }
+        var all = new List<SoundSample>(_samples);
+        int Append(string file)
+        {
+            try
+            {
+                IReadOnlyList<SoundSample> bank = SoundRead.ReadFhSoundFile(file);
+                if (all.Count + bank.Count >= 0x4000) return -1; // (0x4000 and up are scripts)
+                int start = all.Count;
+                all.AddRange(bank);
+                return start;
+            }
+            catch (System.Exception ex) when (ex is System.IO.IOException or System.UnauthorizedAccessException)
+            {
+                Log.Info("MPHAudio", $"First Hunt {file}: {ex.Message}");
+                return -1;
+            }
+        }
+        int sfx = Append("SFXDATA.BIN");
+        int menu = Append("MENUSFXDATA.BIN");
+        int global = Append("GLOBALSFXDATA.BIN");
+        int bgm = Append("BGMDATA.BIN");
+        _samples = all;
+        FirstHuntSounds.SfxBase = sfx;
+        FirstHuntSounds.MenuBase = menu;
+        FirstHuntSounds.GlobalBase = global;
+        FirstHuntSounds.BgmBase = bgm;
+        Log.Info("MPHAudio", $"First Hunt banks loaded: sfx {sfx}, menu {menu}, global {global}, bgm {bgm} ({all.Count} samples)");
+    }
+
     public void SetPaused(bool paused)
     {
         if (paused)
@@ -1110,6 +1149,61 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
                 _voices.RemoveAt(oldest);
             }
         }
+    }
+
+    // ... and one that loops until StopPcm (Dark Samus's Hyper Ball hum, CampaignRenderer.HyperFx.cs): placed where it
+    // starts, Volume() moves its gains as its source moves; returns the voice (null: nothing played)
+    public object? PlayPcmLoop(short[] pcm, int rate, float volume, SoundSource? source)
+    {
+        if (pcm.Length == 0 || rate <= 0)
+        {
+            return null;
+        }
+        lock (_lock)
+        {
+            var v = new Voice { Pcm = pcm, Step = rate / (double)_mixRate, Loop = true };
+            PcmGains(v, volume, source);
+            _voices.Add(v);
+            return v;
+        }
+    }
+
+    public void MovePcm(object? voice, float volume, SoundSource? source)
+    {
+        if (voice is not Voice v) return;
+        lock (_lock) PcmGains(v, volume, source);
+    }
+
+    // recomp: a playing loop's pitch (its step: its rate times mul), for Shooting Gallery turret's rotation loop, which
+    // Echoes pitch-bends by the barrel's turn (CampaignRenderer.TurretSfx.cs, 2026-10-16)
+    public void PitchPcm(object? voice, int rate, float mul)
+    {
+        if (voice is Voice v) lock (_lock) v.Step = rate * mul / (double)_mixRate;
+    }
+
+    public void StopPcm(object? voice)
+    {
+        if (voice is Voice v) v.Releasing = true; // faded out by the mixer, as a stopped sample
+    }
+
+    void PcmGains(Voice v, float volume, SoundSource? source)
+    {
+        float vol = SfxDsGain * volume * (Sfx.SfxMute && source != null ? 0 : 1) * (source?.Volume ?? 1);
+        float pan = 0;
+        if (source != null && !source.Self)
+        {
+            Vector3 toSource = source.Position - GetListenerPosition();
+            float dist = toSource.Length;
+            vol *= Falloff(dist, source.ReferenceDistance, source.MaxDistance);
+            if (dist > 0.001f)
+            {
+                Vector3 right3 = Vector3.Cross(GetListenerFacing(), GetListenerUp()).Normalized();
+                pan = System.Math.Clamp(Vector3.Dot(right3, toSource.Normalized()), -1f, 1f);
+            }
+        }
+        vol = System.Math.Clamp(vol, 0f, 1f);
+        v.VolL = vol * (1 - pan) * 0.5f;
+        v.VolR = vol * (1 + pan) * 0.5f;
     }
 
     public override void PlayDgn(int id, SoundSource? source, bool loop, bool noUpdate,

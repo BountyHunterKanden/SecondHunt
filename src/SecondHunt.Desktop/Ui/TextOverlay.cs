@@ -65,6 +65,23 @@ internal sealed class TextOverlay
         float w = _image.Width, h = _image.Height;
         float px = center ? x + (width - x - w) / 2 : x, py = center ? (height - h) / 2 : y;
         drawer.Draw(up.Texture, px, py, w, h, width, height);
+        _drawn = (px, py, w, h, s);
+    }
+
+    (float X, float Y, float W, float H, float S) _drawn; // where the last Draw put the picture (window pixels)
+
+    // the panel's line under window pixel (x, y) where it was last drawn, with the text it shows; null off its text
+    public (string Text, int Line)? LineAt(float x, float y)
+    {
+        string text;
+        lock (_gate) text = _text;
+        var (px, py, w, h, s) = _drawn;
+        float padY = _kind == Kind.Panel ? (int)(27 * s) : (int)(12 * s);
+        int lines = text.Split('\n').Length;
+        float lineHeight = (h - padY * 2 - 4) / Math.Max(1, lines);
+        if (text.Length == 0 || x < px || x >= px + w || y < py + padY || lineHeight <= 0) return null;
+        int line = (int)((y - py - padY) / lineHeight);
+        return line < lines ? (text, line) : null;
     }
 
     TextImage Render(string text, float s)

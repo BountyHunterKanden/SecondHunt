@@ -62,7 +62,7 @@ namespace MphRecomp.Arenas
             PlayerEntity.HostEchoesMoves = on;
             PlayerEntity.HostEchoesLedgeJump = on && LedgeJump;
             PlayerEntity.HostEchoesPadNoFall = on && PadNoFall;
-            PlayerEntity.HostBotUnstick = GameState.Multiplayer && ArenaNav.Unstick(roomId);   // Echoes bot jitter [b71a8a]
+            PlayerEntity.HostBotUnstick = GameState.Multiplayer && ArenaNav.Unstick(roomId);   // Echoes bots: get unstuck
             // T7: Echoes' moves on the graph's links + items they can't get (BotMoves: old replays off)
             PlayerEntity.HostBotMoves = PlayerEntity.HostBotUnstick && BotMoves;
             PlayerEntity.HostNavLinks = PlayerEntity.HostBotMoves ? ArenaNav.Links(roomId) : null;

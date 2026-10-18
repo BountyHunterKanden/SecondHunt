@@ -86,6 +86,9 @@ namespace MphRead.Hud
         public readonly ColorRgba[] Texture;
         public float Alpha = 1;
         public float Scale = 1; // recomp: drawn size multiplier (PlayerIntroBanner); 1 = MphRead's own
+        // recomp: the texture is its own HostTextures entry, repainted in place (the Prime HUD's map pictures): a headless
+        // host draws that entry instead of interning the pixels by content each frame (a new sprite per repaint)
+        public bool Live;
         public int BindingId = -1;
         public int CurrentFrame;
         public int StartFrame;

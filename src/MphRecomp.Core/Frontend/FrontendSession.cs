@@ -18,7 +18,8 @@ namespace MphRecomp.Frontend
     // MphRecomp.Replay.ReplayLibrary.List; docs/REPLAY_MODE.md R3); the shell plays it the same way, then the menus open
     // at ReturnPage() (the REPLAYS list)
     public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, Credits, ShareCrashLog, Multiplayer, ControlsDone,
-        CheckUpdates, StartMatch, PlayReplay, OnlineRules /* Options' privacy / code of conduct / 13+ line (RecompMenus.OnlineRules.cs) */ }
+        CheckUpdates, StartMatch, PlayReplay, OnlineRules /* Options' privacy / code of conduct / 13+ line (RecompMenus.OnlineRules.cs) */,
+        FirstHunt /* RECOMP SETTINGS' extras row: the imported First Hunt cart's own game (docs/FIRST_HUNT_PORT.md) */ }
 
     public readonly record struct FrontendRequest(FrontendRequestKind Kind, int Slot = -1, string? Arg = null);
 
@@ -95,6 +96,10 @@ namespace MphRecomp.Frontend
             // ONLINE PLAY (Online play menus, OnlineMenus.cs): who this player is, and the joined match played as START GAME's
             multiplayer.OpenOnline = recomp.OpenOnline;
             recomp.Multiplayer = multiplayer; // (CREATE's setup pages, the lobby's "change hunter")
+            // RECOMP SETTINGS "menu art": its chooser over the settings page, and a new pick drawn behind the menus
+            // (and TRY CONTROLS' pop-up over CONTROLS): over every section page
+            foreach (int page in recomp.SectionMenuPages) multiplayer.AddArtLayer(menu.File.Pages[page]);
+            recomp.MenuArtChanged = () => MenuArtVersion++;
             multiplayer.OnlineResultsDone = recomp.OnlineAfterResults; // (RESULTS after an online match: PLAY AGAIN = its lobby)
             recomp.OnlineMe = () => new RecompMenus.OnlinePlayer(multiplayer.License.Name, multiplayer.License.RankLevel,
                 MultiplayerMenu.MyLook.Hunter, MultiplayerMenu.MyLook.Skin, MultiplayerMenu.MyLook.Character);
@@ -122,7 +127,8 @@ namespace MphRecomp.Frontend
                 if (kind == FrontendRequestKind.CheckUpdates) CheckForUpdates(); // answered here, in the game's box
                 else Request?.Invoke(new FrontendRequest(kind));
             };
-            menu.Redirect = page => Paused && (page == 21 || page == Recomp.ModsPage) ? Recomp.PausePage : page;
+            // (OPTIONS > CONTROLS and its RECOMP SETTINGS copy: CONTROLS in sections, RecompMenus.Controls.cs)
+            menu.Redirect = page => Paused && (page == 21 || page == Recomp.ModsPage) ? Recomp.PausePage : Recomp.Redirect(page);
             files.Popup = popup;
             files.Log = message => Log?.Invoke(message);
             recomp.Import.Popup = popup; // IMPORT GAMES answers in the game's box too
@@ -202,6 +208,8 @@ namespace MphRecomp.Frontend
             if (settingsPath != null) multiplayer.ProfileDir = Path.GetDirectoryName(settingsPath); // the Hunter License (hunter_license.json) beside recomp_settings.json
             multiplayer.SavesDir = savesDir; // vanilla's unlocks from the campaign's files (defeated hunters, gateways)
             multiplayer.UnlockEverything = () => recomp.Settings.UnlockEverything; // RECOMP SETTINGS > UNLOCKS
+            multiplayer.MusicSettings = () => recomp.Settings; // the rules pages' MUSIC row (RECOMP SETTINGS' match music)
+            multiplayer.SaveMusicSettings = recomp.SaveSettings;
             var ending = new GameEnding();
             multiplayer.EndingPercent = () => ending.Current?.CompletePercent; // the license card's octolith (100%)
             if (!ending.Bind(file)) Console.Error.WriteLine("ending: this ROM's results page (49) isn't the expected layout");
@@ -319,7 +327,9 @@ namespace MphRecomp.Frontend
             TickUpdateCheck();
             TickLaunchCheck();
             TickStaleImports();
+            TickImportUpdates();
             Recomp.Tick();
+            TickScrollStick();
             Multiplayer.Tick(Menu);
             TickGrooves();
             if (_hostGoTo != -1 && --_hostDelay <= 0)
@@ -367,6 +377,20 @@ namespace MphRecomp.Frontend
             // rev 1 2026-10-07: A held on page 49 for 100 frames, no call 206; a tap on OK makes it)
             if (Multiplayer.CapturePress(Menu, keys)) return; // (the skin chooser, D9)
             Menu.Press(keys);
+        }
+
+        // a PC keyboard on the name keyboard / address keypad (MultiplayerMenu.TypeChar): true while one is up and no popup
+        // or customizer wait is over it -- the host then sends characters here, and Backspace / Enter to TypeKey
+        public bool Typing => Recomp.CaptureDevice == null && !PopupOpen && Menu.Page != null && Multiplayer.TypingPage(Menu.Page.Index);
+
+        public void TypeChar(char c)
+        {
+            if (Typing) Multiplayer.TypeChar(Menu, c);
+        }
+
+        public void TypeKey(bool backspace)
+        {
+            if (Typing) Multiplayer.TypeKey(Menu, backspace);
         }
 
         public void Navigate(int dx, int dy)
@@ -440,6 +464,97 @@ namespace MphRecomp.Frontend
                 if (TouchMenu(mx, my + 192, i, pageActions: false)) return;
             }
             if (first >= 0) TouchMenu(fx, fy + 192, first, pageActions: true);
+        }
+
+        // ---- drags, the mouse wheel and the right stick: a section page's list (CONTROLS, SECOND HUNT SETTINGS' tabs;
+        // RecompMenus.SectionScroll.cs, owner 2026-10-17: "scrolls with scroll wheel, right stick, and with finger scrolling
+        // on touch screen and by grabbing the scroll bar with finger or mouse") ----
+
+        private bool _pressHeld, _pressDragging;
+        private float _pressX, _pressY, _pressMenuY, _pressSlop;
+        private int _pressRegion = -1;
+        private float _wheelRows, _stickY, _stickRows;
+        private const float DragSlop = 4, BarSlop = 1; // menu units a held touch moves before it's a drag, not a tap
+        private const float WheelRows = 2; // rows per wheel notch
+        private const float StickDead = 0.3f, StickSlowRows = 4, StickFastRows = 18; // the right stick's rows a second, past its dead zone
+
+        // A touch's down (kind 0), move (1), up (2) and cancel (3: no tap) at canvas pixel (x, y). Down on a section page's rows or scroll bar
+        // waits: moving drags the list (or the bar's thumb), lifting without a drag is the tap it would have been. Anywhere
+        // else the down is the tap at once, as TouchCanvas(x, y)
+        public void TouchCanvas(float x, float y, int kind)
+        {
+            if (kind == 0)
+            {
+                _pressHeld = _pressDragging = false;
+                if (!SectionPress(x, y)) TouchCanvas(x, y);
+                return;
+            }
+            if (!_pressHeld || _placements == null || _pressRegion >= _placements.Length) return;
+            (_, float my) = _placements[_pressRegion].ToMenu(x, y);
+            if (kind == 1)
+            {
+                if (!_pressDragging && MathF.Abs(my - _pressMenuY) >= _pressSlop) _pressDragging = true;
+                if (_pressDragging)
+                {
+                    _showFocus = false;
+                    Recomp.SectionDrag(Menu, my);
+                }
+                return;
+            }
+            _pressHeld = false;
+            if (!_pressDragging && kind == 2) TouchCanvas(_pressX, _pressY);
+        }
+
+        // a down that lands on a section page's rows or bar (RecompMenus.SectionGrab): held for TouchCanvas(x, y, 1 / 2)
+        private bool SectionPress(float x, float y)
+        {
+            if (_placements == null || Recomp.CaptureDevice != null || PopupOpen || Menu.Page == null
+                || !RecompMenus.IsSectionMenuPage(Menu.Page)) return false;
+            for (int i = 0; i < _placements.Length; i++)
+            {
+                (float mx, float my) = _placements[i].ToMenu(x, y);
+                if (!_layout.Regions[i].Contains(mx, my)) continue;
+                int grab = Recomp.SectionGrab(Menu, mx, my);
+                if (grab == 0) return false;
+                (_pressHeld, _pressX, _pressY, _pressMenuY, _pressRegion) = (true, x, y, my, i);
+                _pressSlop = grab == 2 ? BarSlop : DragSlop;
+                return true;
+            }
+            return false;
+        }
+
+        private bool SectionScrolls => Menu.Page != null && RecompMenus.IsSectionMenuPage(Menu.Page) && !PopupOpen && Recomp.CaptureDevice == null;
+
+        // the mouse wheel: notches up (+) scroll the list up, a couple of rows a notch (a touchpad's fractions add up)
+        public void ScrollWheel(float notches)
+        {
+            if (!SectionScrolls) return;
+            _wheelRows -= notches * WheelRows;
+            int rows = (int)_wheelRows;
+            _wheelRows -= rows;
+            Recomp.SectionScrollBy(Menu, rows);
+        }
+
+        // the right stick's up / down (+ down, -1..1; the shells send it as it changes): scrolls while held (Tick)
+        public void ScrollStick(float y)
+        {
+            float was = _stickY;
+            _stickY = MathF.Abs(y) < StickDead ? 0 : Math.Clamp(y, -1, 1);
+            if (was == 0 && _stickY != 0) _stickRows = MathF.Sign(_stickY) * 0.99f; // (a push moves a row at once)
+        }
+
+        private void TickScrollStick()
+        {
+            if (_stickY == 0 || !SectionScrolls)
+            {
+                _stickRows = 0;
+                return;
+            }
+            float push = (MathF.Abs(_stickY) - StickDead) / (1 - StickDead);
+            _stickRows += MathF.Sign(_stickY) * (StickSlowRows + (StickFastRows - StickSlowRows) * push * push) * (float)TickSeconds;
+            int rows = (int)_stickRows;
+            _stickRows -= rows;
+            Recomp.SectionScrollBy(Menu, rows);
         }
 
         // A tap through region `region` doesn't take a button whose touch rectangle (text coordinates) sits wholly in
@@ -521,11 +636,11 @@ namespace MphRecomp.Frontend
         }
 
         // ---- MR1 V1 (docs/MULTIPLAYER_RELIABILITY.md section 2): once per run, the first time the main menu is up, the
-        //      game's box says when an update changed how some imported items are made (IMPORT GAMES marks them UPDATE;
-        //      they aren't used until imported again: Import/ImportedContent.cs) ----
+        //      game's box says when an update changed how some imported items are made (IMPORT GAMES marks them UPDATE and a
+        //      red badge on their cards and tiles; they aren't used until imported again: Import/ImportedContent.cs) ----
 
         private const int MainMenuPage = 18;
-        public const string StaleImportsText = "an update changed some imported items. import them again on import games (marked update).";
+        public const string StaleImportsText = "an update changed some imported items. update them on import games: a red badge marks them.";
         private bool _staleImportsChecked;
 
         private void TickStaleImports()
@@ -548,6 +663,23 @@ namespace MphRecomp.Frontend
             if (stale == 0) return;
             Log?.Invoke($"imports: {stale} stale item(s) -- asked to import again");
             Popup.Inform(StaleImportsText);
+        }
+
+        // IMPORT GAMES, come to from another page: the check or the X for updating what an update made stale (ImportGames.
+        // UpdateAll; nothing to update = no box)
+        private void TickImportUpdates()
+        {
+            if (!Recomp.UpdateNoticeDue || Popup == null || PopupOpen || Paused || Menu.PendingPage >= 0) return;
+            Recomp.UpdateNoticeDue = false;
+            if (Menu.Page == null || !RecompMenus.IsImportCardsPage(Menu.Page)) return;
+            try
+            {
+                Recomp.Import.UpdateAll(null, notice: true);
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                Log?.Invoke("imports: update notice skipped (" + ex.Message + ")");
+            }
         }
 
         // ---- RECOMP SETTINGS > UPDATES: a check per press (never on its own); YES downloads, verifies and installs the
@@ -972,7 +1104,9 @@ namespace MphRecomp.Frontend
             string layoutSetting = Settings.MenuLayout;
             if (_layoutPage != page.Index || _layoutSetting != layoutSetting || _layoutPaused != Paused)
             {
-                _layout = Paused ? MenuLayout.MainFamily() : MenuLayout.For(Menu.File, page, dual: layoutSetting == "sidebyside");
+                // (CONTROLS: its own frame in the pause menu too)
+                _layout = Paused ? RecompMenus.IsSectionMenuPage(page) ? MenuLayout.Replays() : MenuLayout.MainFamily()
+                    : MenuLayout.For(Menu.File, page, dual: layoutSetting == "sidebyside");
                 _layoutPage = page.Index;
                 _layoutSetting = layoutSetting;
                 _layoutPaused = Paused;
@@ -990,6 +1124,9 @@ namespace MphRecomp.Frontend
             Recomp.DrawOnline(Menu, _tris); // ONLINE PLAY's pages (OnlineMenus.cs)
             Recomp.DrawOptions(Menu, _tris); // Options' IMPORT GAMES pill (RecompMenus.cs)
             Recomp.DrawImportCards(Menu, _tris); // IMPORT GAMES' cards (RecompMenus.ImportCards.cs)
+            Recomp.DrawControls(Menu, _tris); // CONTROLS' sections (RecompMenus.Controls.cs)
+            Multiplayer.DrawTryPicker(Menu, _tris); // over them, TRY CONTROLS' pop-up or the menu art's (MultiplayerMenu.TryPicker.cs)
+            Recomp.DrawModeDescription(Menu, _tris, wide: _layout.Kind == LayoutKind.Setup); // (MultiplayerMenu.ModeDescription.cs)
             AddFocusFrame();
             // Each item goes wholly to the region holding the centre of its bounds, so no widget or label is cut in two
             // -- except a model drawn across BOTH screens (the boot logos' oval-on-top + swirl-below), whose triangles
@@ -1289,6 +1426,9 @@ namespace MphRecomp.Frontend
         private int _hdVersion;
 
         public bool HasHdBackdrop => _hdBackground[0] != -1;
+
+        // bumped by a "menu art" pick: FrontendRenderer renders the backdrop again (the old one stays until the new is ready)
+        public int MenuArtVersion { get; private set; }
 
         // rgba: the picture (two DS screens tall, top row first); the top half is the top screen
         public void SetHdBackdrop(int width, int height, byte[] rgba)

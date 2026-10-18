@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Multiplayer Music A",
+  "group": "Shared",
+  "role": "area",
+  "files": [
+    { "name": "Audio/multi-defbgm32.dsp", "sha1": "d8c920f0cf7a229ec3dc00655d85fc0eac7529aa" }
+  ],
+  "gain": 0.565
+}

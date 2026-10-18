@@ -11,20 +11,22 @@ using OpenTK.Mathematics;
 namespace MphRead
 {
     // The Trooper's standing body (his Scout Drone out) is hit as a whole biped, not Weavel's 0.45 turret sphere, and
-    // takes no headshots (owner 2026-10-09; MphRead HalfturretEntity.HostBodyHit), headless:
-    //   -standinghittest [arena=Combat Hall]
+    // takes headshots in the same top-0.3 zone as any hunter (owner 2026-10-09 / 2026-10-15; MphRead
+    // HalfturretEntity.HostBodyHit / HostBodyHeadshot), headless:
+    //   -standinghittest [arena=Combat Hall] [bodyheads=0]   (0: HostDroneBodyHeadshots off, replays before format 35)
     // seat 0 is a local Trooper driven by a script; seat 1 a Samus seat no input reaches (never moves) and only
     // owns the test's Power Beam shots (6 damage, 8 to the head: a head hit is flagged), each spawned 2.5 to the side
     // of the target and fired straight across it at a set height over the floor.
     //   - control, on his biped before the split: 1.0 hits without a headshot, 1.5 hits as a headshot
     //   - on the standing body after the split (the drone flown away first): 0.3, 0.8, 1.2, 1.45 and 1.55 hit (the old
-    //     sphere: only up to ~0.9), never a headshot and always a Halfturret hit; 1.75 (over the 1.6 top) and 1.2 at 0.75
-    //     to the side of its middle miss
+    //     sphere: only up to ~0.9), always a Halfturret hit, 1.45 and 1.55 as headshots (none with bodyheads=0); 1.75
+    //     (over the 1.6 top) and 1.2 at 0.75 to the side of its middle miss
     internal static class StandingBodyHitTest
     {
         public static void Run(string[] args)
         {
             string arenaName = "Combat Hall";
+            bool bodyHeads = true;
             foreach (string arg in args.Skip(1))
             {
                 int eq = arg.IndexOf('=');
@@ -33,6 +35,7 @@ namespace MphRead
                 switch (key.ToLowerInvariant())
                 {
                 case "arena": arenaName = value; break;
+                case "bodyheads": bodyHeads = value != "0"; break;
                 default: throw new ArgumentException($"unknown option {arg}");
                 }
             }
@@ -62,6 +65,7 @@ namespace MphRead
 
             PlayerEntity me = PlayerEntity.Players[0];
             PlayerEntity shooter = PlayerEntity.Players[1];
+            me.HostDroneBodyHeadshots = bodyHeads;
             var equip = new EquipInfo
             {
                 Weapon = Weapons.Current[0], // Power Beam
@@ -170,9 +174,10 @@ namespace MphRead
                     {
                         Fail($"body at {h:0.00} off {off:0.00}: hit {r.Hit}, expected {expect}");
                     }
-                    if (r.Hit && (isHead || !isHalf))
+                    bool head = bodyHeads && h >= 1.3f;
+                    if (r.Hit && (isHead != head || !isHalf))
                     {
-                        Fail($"body at {h:0.00}: headshot {isHead}, Halfturret {isHalf} (expected no headshot, a Halfturret hit)");
+                        Fail($"body at {h:0.00}: headshot {isHead}, Halfturret {isHalf} (expected headshot {head}, a Halfturret hit)");
                     }
                 }
             }

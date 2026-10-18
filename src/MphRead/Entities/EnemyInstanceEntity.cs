@@ -369,6 +369,10 @@ namespace MphRead.Entities
 
         public void TakeDamage(uint damage, EntityBase? source)
         {
+            if (FirstHuntTakeDamage(damage, source)) // recomp: First Hunt's enemies take damage their own way (FirstHunt/Enemies)
+            {
+                return;
+            }
             ushort prevHealth = _health;
             Effectiveness effectiveness = Effectiveness.Normal;
             BeamProjectileEntity? beamSource = null;
@@ -525,6 +529,12 @@ namespace MphRead.Entities
             int index = PirateBlaster.BaseIndex(beam); // recomp: the Pirate Blaster takes the Power Beam's row
             Debug.Assert(index < BeamEffectiveness.Length);
             return BeamEffectiveness[index];
+        }
+
+        // recomp: true when a First Hunt enemy took the damage itself
+        protected virtual bool FirstHuntTakeDamage(uint damage, EntityBase? source)
+        {
+            return false;
         }
 
         /// <summary>

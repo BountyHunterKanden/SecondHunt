@@ -43,6 +43,10 @@ Format references (no code shipped from them unless the entry says so):
 | Dolphin's `docs/WiaAndRvz.md` | GPL-2.0-or-later (the Dolphin repository's default) | the RVZ/WIA format's facts; no Dolphin code or text was taken (`Import/Disc/WiaReader.cs`) |
 | Retro Modding Wiki (wiki.axiodl.com), WiiBrew | CC BY 4.0 / wiki | file-layout facts (`Import/Retro/Ancs.cs`, `Mrea.cs`, `Retro3/Anim3.cs`; `Import/Disc/WiiDisc.cs`); no text taken |
 | RFC 8878 (Zstandard), the LZMA and bzip2 format descriptions | (specifications) | this project's own decoders in `Import/Disc/` |
+| Switchbrew wiki (switchbrew.org: XCI, NCA, PartitionFS/HFS0, RomFS, IVFC, BKTR patch RomFS, Ticket pages) | wiki | file-layout facts for this project's own Switch game-file reader (`Import/Switch/`: .xci / .nsp, NCA decryption, RomFS, update patches); no code from any other implementation used, no text taken |
+| Prime 4 Model Dumper (LogicFox15's fork of KillzXGaming's MPR-Model-Dumper) | none stated | Prime 4's pak, model, material and texture layouts, read by the clean-room spec author only to write the code-free spec `docs/cleanroom/G_beyond_spec.md` (CR6, owner 2026-10-17 option 1). Its readers in `Import/Beyond/` (`BeyondArchive`, `BeyondUnpack`, `BeyondForm`, `BeyondModelFile`, `BeyondMaterialInstance`, `BeyondTexture`, `TegraBlockLinear` and the texture decoders; the `Chpr*` skeleton readers are older, worked out from the dump's own bytes) were written from that spec by an implementer who never saw the tool's code or output; no code, text or names were taken, and the tool is not in the repository |
+| Khronos Data Format Specification (ASTC), Microsoft's BC7 format documentation | (specifications) | this project's own ASTC and BC7 decoders (`Import/Beyond/AstcBlockDecoder.cs`, `Bc7BlockDecoder.cs`); the 8-bit rounding of an ASTC result matches what common ASTC decoders give (found by comparing results, no code read) |
+| NumPy, OpenBLAS | BSD 3-clause | behaviour only: `Import/Hd/BeyondTrophy.cs` reproduces the results of this project's own Python converter, so it sorts as `numpy.argsort`'s default introsort does and solves 3x3 systems in OpenBLAS's order of operations (worked out by testing their results; no code taken) |
 
 ---
 
@@ -788,6 +792,36 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+## Sun Microsystems CCITT G.721 reference code (`MphRecomp.Core` `Music/RsfMusic.cs`, the G721 decoder)
+
+A C# port of the decoder in Sun's `g72x.c` / `g721.c` (Prime 1's `.rsf` music files are G.721), under its notice:
+
+```text
+This source code is a product of Sun Microsystems, Inc. and is provided
+for unrestricted use.  Users may copy or modify this source code without
+charge.
+
+SUN SOURCE CODE IS PROVIDED AS IS WITH NO WARRANTIES OF ANY KIND INCLUDING
+THE WARRANTIES OF DESIGN, MERCHANTIBILITY AND FITNESS FOR A PARTICULAR
+PURPOSE, OR ARISING FROM A COURSE OF DEALING, USAGE OR TRADE PRACTICE.
+
+Sun source code is provided with no support and without any obligation on
+the part of Sun Microsystems, Inc. to assist in its use, correction,
+modification or enhancement.
+
+SUN MICROSYSTEMS, INC. SHALL HAVE NO LIABILITY WITH RESPECT TO THE
+INFRINGEMENT OF COPYRIGHTS, TRADE SECRETS OR ANY PATENTS BY THIS SOFTWARE
+OR ANY PART THEREOF.
+
+In no event will Sun Microsystems, Inc. be liable for any lost revenue
+or profits or other special, indirect and consequential damages, even if
+Sun has been advised of the possibility of such damages.
+
+Sun Microsystems, Inc.
+2550 Garcia Avenue
+Mountain View, California  94043
 ```
 
 ## LDNOOBW English word list (server only: `src/SecondHunt.Server/wordlists/ldnoobw_en.txt`)

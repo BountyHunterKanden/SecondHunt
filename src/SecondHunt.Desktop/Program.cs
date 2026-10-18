@@ -9,6 +9,9 @@ internal static class Program
     [STAThread] // the ROM file picker
     static int Main(string[] args)
     {
+        // every text format is invariant, like the PC tools and the Android app (10-16: Finnish -1 = "−1" crash)
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
         // after an in-game update: wait for the old process, clear its *.old files (DesktopUpdater)
         args = DesktopUpdater.AfterUpdate(args);
         AppOptions options = AppOptions.Parse(args);
@@ -20,6 +23,7 @@ internal static class Program
         DesktopCrashLog.Install();
         RecompSettings.PublicBuild = BuildFlags.Public;
         RecompSettings.DesktopHost = true;
+        MphRecomp.Frontend.RecompMenus.PadConnected = () => DesktopInput.PadSeen;
         RecompSettings.AppId = BuildFlags.AppName;
         // RECOMP SETTINGS > UPDATES (Core Update/): this build's version and its installer; a dev build reads a test
         // server's base URL from update_feed.txt in its data folder

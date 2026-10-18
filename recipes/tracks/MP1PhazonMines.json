@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Phazon Mines",
+  "group": "Phazon Mines",
+  "role": "area",
+  "files": [
+    { "name": "Audio/min_mainL.dsp", "sha1": "d3391bb3ef8a7aa320751ea967d0463b1972e8af" },
+    { "name": "Audio/min_mainR.dsp", "sha1": "796c071812a416b7a2b2611059affeb0fc8df829" }
+  ],
+  "gain": 0.698
+}

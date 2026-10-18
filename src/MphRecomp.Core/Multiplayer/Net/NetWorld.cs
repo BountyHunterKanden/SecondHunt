@@ -12,12 +12,15 @@ namespace MphRecomp.Multiplayer.Net
     // break). Clients run them as mirrors (EchoesBreakables.Mirror): no hits, breaks, timers or drops of their own; the
     // weapon a crate leaves is an ordinary item the item sync already brings. LAN protocol 16 / online 15. The last
     // block of Snapshot.Write's bytes (online's SnapshotDelta carries it inside the mode block, which runs to the end).
+    // Then Shooting Gallery's turret (a presence byte + Arenas/EchoesTurret.cs NetTurret; LAN protocol 21 / online 19):
+    // clients mirror it (EchoesTurret.Mirror).
     public sealed class NetWorld
     {
         public const byte Up = 1, Hit = 2;
         public byte[] States = Array.Empty<byte>();
+        public NetTurret? Turret;
 
-        public int Size => 1 + States.Length;
+        public int Size => 1 + States.Length + 1 + (Turret != null ? NetTurret.Size : 0);
 
         // the scene's crates + breakables in id order (the same ids on every device: SceneSetup.HostExtraEntities)
         public static List<EnemyInstanceEntity> Elements(Scene scene)
@@ -31,12 +34,23 @@ namespace MphRecomp.Multiplayer.Net
             return list;
         }
 
+        // the scene's turret (null: none)
+        public static EchoesTurretEntity? TurretOf(Scene scene)
+        {
+            foreach (EntityBase e in scene.Entities)
+            {
+                if (e is EchoesTurretEntity t) return t;
+            }
+            return null;
+        }
+
         // host: null when the arena has none
         public static NetWorld? Capture(Scene scene)
         {
             List<EnemyInstanceEntity> list = Elements(scene);
-            if (list.Count == 0) return null;
-            var w = new NetWorld { States = new byte[Math.Min(list.Count, 255)] };
+            EchoesTurretEntity? turret = TurretOf(scene);
+            if (list.Count == 0 && turret == null) return null;
+            var w = new NetWorld { States = new byte[Math.Min(list.Count, 255)], Turret = turret?.NetCapture() };
             for (int i = 0; i < w.States.Length; i++)
             {
                 (bool up, bool hit, int breaks) = list[i] switch
@@ -62,12 +76,16 @@ namespace MphRecomp.Multiplayer.Net
                 if (list[i] is EchoesCrateEntity c) c.NetApply(up, hit, breaks);
                 else if (list[i] is EchoesBreakableEntity b) b.NetApply(up, hit, breaks);
             }
+            if (Turret != null) TurretOf(scene)?.NetApply(Turret);
         }
 
         public int Write(Span<byte> dest)
         {
             dest[0] = (byte)States.Length;
             States.CopyTo(dest[1..]);
+            int o = 1 + States.Length;
+            dest[o++] = (byte)(Turret != null ? 1 : 0);
+            Turret?.Write(dest[o..]);
             return Size;
         }
 
@@ -76,7 +94,13 @@ namespace MphRecomp.Multiplayer.Net
             size = 0;
             if (src.Length < 1 || src.Length < 1 + src[0]) return null;
             size = 1 + src[0];
-            return new NetWorld { States = src.Slice(1, src[0]).ToArray() };
+            var w = new NetWorld { States = src.Slice(1, src[0]).ToArray() };
+            if (src.Length > size && src[size++] == 1 && src.Length >= size + NetTurret.Size)
+            {
+                w.Turret = NetTurret.Read(src[size..]);
+                size += NetTurret.Size;
+            }
+            return w;
         }
     }
 }

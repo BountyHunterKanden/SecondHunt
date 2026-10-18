@@ -904,7 +904,10 @@ namespace MphRead
             // unused
             /* 22 */ "pick_wpn_missile",
             // recomp: the Pirate Blaster pickup (placeholder model until the Pickups track's art)
-            /* 23 */ "pick_wpn_blaster" // recomp: built by the host (Read.HostBuildModel), else pick_wpn_all
+            /* 23 */ "pick_wpn_blaster", // recomp: built by the host (Read.HostBuildModel), else pick_wpn_all
+            // recomp: 24 = the Hyper Beam's (reserved, docs/DARK_SAMUS_HYPER.md); 25 = the Paralyzer's (placeholder model)
+            /* 24 */ "pick_wpn_all",
+            /* 25 */ "pick_wpn_all"
         };
 
         public static readonly IReadOnlyList<string> FhItems
@@ -1126,13 +1129,16 @@ namespace MphRead
         {
             "POWER BEAM", "VOLT DRIVER", "MISSILES", "BATTLEHAMMER", "IMPERIALIST",
             "JUDICATOR", "MAGMAUL", "SHOCK COIL", "OMEGA CANNON", "PLATFORM", "ENEMY",
-            "PIRATE BLASTER" // recomp
+            "PIRATE BLASTER", // recomp
+            "HYPER BEAM", // recomp: 12, reserved (docs/DARK_SAMUS_HYPER.md)
+            "PARALYZER" // recomp: 13, Zero Suit's (Metadata/Paralyzer.cs)
         };
 
         public static readonly IReadOnlyList<int> WeaponMessageIds = new List<int>()
         {
             0, 109, 0, 110, 111, 112, 113, 114, 115, 0, 0,
-            0 // recomp: the Pirate Blaster (no ROM message)
+            0, // recomp: the Pirate Blaster (no ROM message)
+            0, 0 // recomp: the Hyper Beam (reserved), the Paralyzer
         };
 
         public static Vector3 GetEventColor(Message eventId)

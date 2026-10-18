@@ -1,6 +1,6 @@
 # Vanilla accuracy: MphRead TODOs and unintended differences
 
-**Owner GO 2026-09-30.** Thread owner: session "Vanilla accuracy" (see `COORDINATION.md`).
+**Owner GO 2026-09-30.**
 
 ## Scope (owner's rule)
 
@@ -57,6 +57,21 @@ Known or likely slips (fix list A1-A5; each checked against the oracle before an
   trailed the rolling ball closer (3.3-3.6 vs 3.8-4.3 u). Now `1 - sqrt(1 - Field84)` per frame: 0.80-0.82, 3.8-4.3 u.
 - **A4. Per-frame random chances** in bot AI (`PlayerAi.cs` 3437, 3486, "FPS stuff if this is called repeatedly"):
   if these run every frame (the author wasn't sure), a 1-in-N roll per 60 Hz frame happens twice as often as vanilla.
+  **FIXED 2026-10-11, with the bot aim turn rate:** the rolls sit in per-frame
+  `Func2_*` behaviours (dodge jumps x2, Sylux bombs) and `UpdateAggro` (spotting a cloaked player); they now roll on tick
+  frames only. Same cause, bigger effect: the aim step `_aimValues` (5/15/20 deg per tick by level, ROM dword_214C750)
+  was applied every 60 Hz frame, so bots turned 10/30/40 deg per tick; now half per frame (snap capped too). And levels
+  2-3 led moving targets 2x (`vec /= finalSpeed` divided a per-tick lead by a per-frame beam speed). All behind
+  `PlayerEntity.HostBotTickPace` (replay format 30, Settings.BotTickPace; older replays play with it off). PC check
+  `-botpacetest`: turn per tick exactly 5/15/20; 1-star bot damage on a strafing player 145 -> 59 /min (8 arenas, 240 s).
+  **Second pass (same day, same flag):** random state gates (func3 210 in Data4) roll once per tick; the hits a tick's
+  state checks read (`_slotHits`/`_slotDamage`) are kept until a tick frame; the visibility pair / node-queue checks run
+  per tick; the wall-stuck detector's `Speed.Y` threshold is vanilla's 0.0625 (Speed is per tick); two sites added
+  `AltColYPos` (fx32) raw. And **Spire's Dialanche rocks** (`PlayerCollision.CheckAltAttackHit1`, any Spire) ignore damage
+  invulnerability, so MphRead's every-frame check did 8 per 60 Hz frame = 2x vanilla; now once per tick. BizHawk A/B
+  (Battle, Combat Hall, human Samus strafing, 1-star SpiBot, 4 min, `tools: handoffs/bot-difficulty-vs-vanilla_2026-10-11_2009-files`):
+  vanilla 418 dmg/min (201 rock hits of 8, ~10 beam shots/min); ours before 764 (pace on) / 534 (off), after ~340.
+  (`-botpacetest` needs `Scene.HostDrawFreeSim` on, as real matches have, or Spire's rocks are never placed.)
 - **A7. Walking top speed -- FIXED 2026-10-01 (top speed exact; acceleration/stopping slightly off).** Vanilla per 30
   Hz tick: `speed *= factor; position += speed; (collision); speed += traction`, capped (Samus: traction 450, walk factor
   3604, air 3481, stand 2785, cap 983, all /4096). MphRead added the full per-tick traction every 60 Hz frame and used
@@ -168,12 +183,12 @@ oracle observation.
 6. **Bucket B** only where step 1 shows a visible divergence.
 7. Our rebuilt parts (ship, star map, saves, menus, HUD, audio): differences found go to the owning session.
 
-Every MphRead edit: quiet-file check, one change at a time, logged in `COORDINATION.md` "Cross-session edits".
+Every MphRead edit: one change at a time, each checked against the original.
 
 ## Dispatch: MphRead TODOs handed to the owning threads (owner's plan, 2026-10-03)
 
 The owner's plan: this thread doesn't fix every MphRead TODO itself. It hands them to the thread that owns the area, a
-handful at a time, through `COORDINATION.md` section "MphRead TODO queue". Those threads pick them up when they're active
+handful at a time. Those threads pick them up when they're active
 or after they migrate. When a thread's T items are all DONE or dropped, this thread sends that thread its next batch from
 the backlog below. A thread's owner-reported items (#1-34) come first.
 
@@ -228,12 +243,61 @@ effects" and `PlatformEntity.cs:831` (effects drawn while the entity is hidden /
   First Hunt (`FH`) leftovers, `MP1P` (6), playable Guardian / Guardian HUD (not vanilla), MphRead's input modernization
   (`itodo` sensitivity, stick thresholds), `todo: bugfix` (bucket D: vanilla bugs, kept).
 
+## Gorea (2026-10-11, checked against the rev 1 code)
+
+Gorea's code is overlay 12 (base 0x2133B80). MphRead's `Func21xxxxx` names in the Gorea files are not rev 1
+addresses (around 1B, rev 1 = MphRead name - 0xA0). Scratch disassembly: `%TEMP%\gorea_re\ov12.s` (PC only, not kept).
+
+**Rotating beam weakness: matches vanilla.** The six-phase table (`Metadata.GoreaEffectiveness`, `5, 0x81, 0x401,
+0x2001, 0x4001, 0x301`) is byte-for-byte at 0x2142974. Vanilla's weapon change (0x2137C70 = `Enemy24Entity.ChangeWeapon`)
+steps the weapon 0-5, points at the phase colours (table 0x2142588), changes music, arms both arms, and writes the phase's
+weakness into both arms (their hurt zone sits on the shoulder joint) and Gorea 1B's chest sphere. Decoded (MphRead's own
+list is in `Metadata/Enemies.cs` ~2980):
+
+| Phase | Gorea uses (glow) | Hurts the arms / chest sphere |
+|---|---|---|
+| 0 | Battlehammer (green) | Volt Driver half |
+| 1 | Volt Driver (yellow) | Battlehammer normal |
+| 2 | Magmaul (orange) | Judicator half |
+| 3 | Judicator (purple) | Magmaul normal |
+| 4 | Imperialist (red) | Shock Coil half |
+| 5 | Shock Coil (blue) | Imperialist double; one Imperialist hit finishes the arm (`26_GoreaArm.cs:141`) |
+
+Power Beam does half in every phase; Missile and Omega Cannon nothing. Gorea 2's seal sphere: Omega Cannon only (`0x20000`).
+**Phase colours** go on the 3 gun-tip materials per arm, `ChestCore` + `HeadFullLit`, and a darker tint on the body
+(vanilla 0x2135670 = `IncrementAllMaterialColors`), and on 1B's chest sphere. The shoulder pads (`L_/R_ShoulderTarget`)
+are left out in vanilla too (0x2135670, reset 0x21347F0); their own material animation (1A group 26) only pulses
+white-grey, and a hit flashes them orange. Not yet confirmed by eye in BizHawk.
+
+**TODO answers:**
+
+| TODO | Result |
+|---|---|
+| `31_Gorea2.cs` "pretty jerky" (upstream :546) | **FIXED.** Hover angles stepped +4/+2 deg per 60 Hz frame and the jitter re-rolled every frame = 2x vanilla (0x213D58C: +4/+2 deg and two rolls per 30 Hz tick). Now +2/+1 per frame, rolls on even frames (`UpdateHoverPosition`) |
+| `28_Gorea1B.cs` State07 (grapple swing, next to :628) | **FIXED.** Vanilla turns the grapple vector sideways, (-z, 0, x) (helper 0x2139BD0, called from 0x21399F8); MphRead used (x, 0, -z). The x0.04 (163/4096) and the keep-last-value case are vanilla (TODO :628 checked) |
+| `24_Gorea1A.cs:1131`, `:1179`, `:469`, `:1301`, `:1510`; `28_Gorea1B.cs:173`; `33_GoreaMeteor.cs:302` | Checked: vanilla does the same (addresses in docs/MPHREAD_TODO.md) |
+| `28_Gorea1B.cs:401` "add a bugfix" | Vanilla never writes the clamped vector back (0x213B86C-0x213BB84); MphRead does (its fix). No visible difference; left |
+| `24_Gorea1A.cs` CheckTargeting, Shock Coil phase | **FIXED.** Vanilla's phase-5 fire check (0x21377FC) shoots once per 30 Hz anim tick inside [ShotCooldown, AutofireCooldown]; MphRead shot every 60 Hz frame = 2x shots, damage and shot-sound requests. Now `frame % 2 == 1` (phase 0's every-4-ticks was already right) |
+| Frame rate audit, all Gorea files (2026-10-12) | Every Gorea `FPS stuff` line was checked against rev 1. **FIXED:** Gorea 1B's grapple reeled the player in 2x fast (0x213B640: the step is per 30 Hz tick; `28_Gorea1B.cs` `Func213B678` now x2); 1B's grapple swing added Gorea's speed at half rate (0x2139AEC adds the per-tick speed, `_field10` is halved again in `Func213C4DC`; now `_speed * 2`); Gorea 2's State08 timer clamp was `Max(…, 15 ticks)` where vanilla takes `min(…, 15)` (0x213F124); Gorea 2's `Func213D80C` snap distance was halved like a step (vanilla 0x555 = 1/3, 0x213D7C8); the meteor's hit shake re-rolled its jitter every 60 Hz frame (0x21413D8: three rolls per 30 Hz tick; now rolled on even frames and held). Second pass (same day), also **FIXED:** 1A's arm-regen and arm-attack timers ended half a tick early (vanilla counts N down to -1 = N + 1 ticks, 0x2134484; now `* 2 + 1`); Gorea 2's laser closed 1/24 of the gap per frame where vanilla closes 0x155/4096 per tick (0x213F614), now 1 - sqrt(1 - 341/4096) per frame (its second, fixed-length step at 0x213F758 was already right); Gorea 2's contact push (0x2140854) is horizontal in vanilla (Y zeroed) and adds between/4 once per tick, MphRead pushed in 3D and twice per tick on held contact (now `between.WithY(0) / 4 / 4` per frame); 1B's Trocra jitter rolled every frame (0x213AF64: once per tick; now rolled on even frames and held); Gorea 2 Behavior06 now also saves the return state like vanilla (0x2140088; that branch never runs, as MphRead notes) |
+| Decompile slips (found in the audit) | **FIXED.** `31_Gorea2.cs` both teleport behaviours wrote `_field234` (the 22-tick timer) where vanilla writes field 0x243, the state to return to (0x213FCF4, 0x21402D4); `28_Gorea1B.cs` `UpdateGrappleDrawInt` dropped the fraction on wrap where vanilla keeps it (`and 0xFFF`, 0x213C7E8) |
+| `24_Gorea1A.cs:801` Shock Coil sound hack (board T8) | Still open, hack kept. Vanilla's path: shot state 0x21357CC -> ov2 0x2103668 (uncharged shot: flags 0, no recency flag 0x80000) -> arm9 0x2073EC8 -> slot search 0x20741B8 (free slot, else take over the lowest-priority copy no higher than the new one, else the same source's oldest, else drop). A same-source copy has equal priority, so vanilla's code would restart it too, which disagrees with MphRead's author's ear. Settle by listening in BizHawk (phase 5). GameAudio's `TakeSlot` already follows that rule. (The handoff's 0x2073964 is a rev 0 address) |
+
+Check: Tools `-endingtest` 3/3 (bad, chain, good: Gorea 1A/1B x3 and Gorea 2 run through) after both fixes. 2026-10-12: 3/3 again after the audit fixes.
+
+**Recolours (campaign census, 2026-10-11):** every enemy, door, force field and teleporter palette on the disc is used;
+the Gorea effect models (`goreaArmRegen`, `goreaMindTrick`, `goreaGrappleBeam`, `goreaLaser`) have one palette each,
+so `recolor: 0` is right. Gorea's colour changes reach the Android renderer (`u_matDiffuse`/`u_matAmbient`). Fire/Ice Spawn: `39_FireSpawn.cs:87` writes the ice ambient (18, 27, 31) onto the shared model's
+material 0 and never resets it; vanilla does the same (ov10 0x215F7A8-0x215F7EC). The only spawns are Council Chamber
+(fire, Alinos) and Fault Line (ice, Arcterra), and each landing builds a fresh Scene (model cache cleared), so the tint
+can't reach a fire spawn. No fix.
+
 ## Log
 
 | When | What | Result |
 |---|---|---|
+| 2026-10-16 | Shock Coil headshots (user report: head hits killed almost instantly). Vanilla (rev 1 arm9 0x2041388-0x2041404) scales a continuous beam's damage (+0x26) AND headshot damage (+0x28) by 1/32 per tick with the same dither, splash (+0x2A) whole; MphRead (upstream too) scaled only the damage, so a Shock Coil / Platform Arc Welder hit in the head zone did 10-20 every 60 Hz frame and flagged HEADSHOT. Fixed in `BeamProjectileEntity.Spawn` (`PlayerEntity.HostContinuousHeadshots`; replays before format 38 keep the old way) | `-shockcoilheadtest` PASS: head = body (100 health in 166 frames); old: 10 frames |
 | 2026-10-03 | A8 morph ball roll fixed (owner queue #4). New route `probe_roll.lua` (the landing site pops a one-time message box when the ball reaches the flat floor, ~frame 232: OK at (128, 142)), Tools `-accuracy roll`, `-accuracy ramp ball` | acceleration and top speed per tick = vanilla; regressions in board Cross-session edits |
-| 2026-10-03 | Owner's plan: MphRead TODOs go to their owning threads a handful at a time. Inventory re-run (1,451 lines), batch 1 = T1-T15 on the board ("MphRead TODO queue"), backlog in "Dispatch" above. No code changed | board text only |
+| 2026-10-03 | Owner's plan: MphRead TODOs go to their owning threads a handful at a time. Inventory re-run (1,451 lines), batch 1 = T1-T15, backlog in "Dispatch" above. No code changed | docs only |
 | 2026-10-03 21:40 | A9 steep-slope walking fixed (owner queue #23). Routes `probe_slope.lua`, `probe_ramp26.lua`, `probe_ramp45.lua`, driver `pokes`; Tools `-accuracy slope/ramp26/ramp45 <csv>`, `-accuracy steep <ROOM>|all [verts|box x0 x1 z0 z1]` (walkable steep faces) | 26.6 deg 89.7 -> 106.1%, 45 deg 59.5 -> 101.5% of vanilla; regressions in board Cross-session edits |
 | 2026-10-03 21:41 | A9 on the Odin: `PlayerCollision.cs` (21:21:57) rode along in Music 5's 21:34 APK (Release MphRead.dll 21:33:26), installed 21:41 | owner to test |
 | 2026-10-03 20:50 | A8 on the Odin: `PlayerInput.cs` (18:29) rode along in every shared-tree APK since 18:53 (latest 20:32, installed 20:34); no install of this thread's own | owner to test by feel |

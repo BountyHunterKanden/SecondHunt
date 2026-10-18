@@ -4,6 +4,7 @@ using MphRead;
 using MphRead.Formats.Sound;
 using MphRecomp.Frontend;
 using MphRecomp.Media;
+using MphRecomp.PrimeMusic;
 
 namespace MphRecomp.App;
 
@@ -42,6 +43,7 @@ internal sealed class FrontendRenderer : IGlScreen
     public string? HdRoot { get; set; }
     public string? CacheDir { get; set; }
     MenuSamusRender? _menuSamus;
+    int _menuArtVersion;
     // IMPORT GAMES' pictures of imported models (ImportItemRender.cs; Importer menu visual design's, reached in 2026-10-08)
     readonly ImportItemRender _importRender = new();
     // the character + skin picker's pictures (CharacterPictureRender.cs; Character + skin picker (D9)'s, reached in 2026-10-08)
@@ -65,8 +67,15 @@ internal sealed class FrontendRenderer : IGlScreen
     // s.Recomp.CaptureInput(name) instead of Press / Navigate (read off the GL thread: a reference, at worst a frame old)
     public string? CaptureDevice => _session?.Recomp.CaptureDevice;
 
+    // the name keyboard / address keypad is up (FrontendSession.Typing): a PC keyboard's keys go to TypeChar / TypeKey
+    // (read off the GL thread as CaptureDevice: at worst a frame old)
+    public bool Typing => _session?.Typing == true;
+
     public void OnSurfaceCreated()
     {
+        // a new context: the program names a match's context linked are gone (the HD Samus backdrop, the character
+        // pictures and the import renders drew nothing after a match until the app restarted, 2026-10-17)
+        CampaignGlCache.Reset();
         _drawer.Init();
         _presenter?.ResetGl();
         if (_session == null && _error == null)
@@ -134,8 +143,15 @@ internal sealed class FrontendRenderer : IGlScreen
     void StepMenuSamus(FrontendSession session)
     {
         // public builds too since 2026-10-07 (owner: "include that"; the Beta 1 hold kept the DS picture)
-        if (HdRoot == null || CacheDir == null || session.HasHdBackdrop || !session.Settings.MenuArtHd) return;
-        _menuSamus ??= new MenuSamusRender(HdRoot, CacheDir, System.Math.Max(_width, _height));
+        if (HdRoot == null || CacheDir == null || !session.Settings.MenuArtHd) return;
+        // a new "menu art" pick (FrontendSession.MenuArtVersion): drawn again once the one in hand is finished
+        if (_menuSamus is { Done: true } && _menuArtVersion != session.MenuArtVersion) _menuSamus = null;
+        if (_menuSamus == null)
+        {
+            if (session.HasHdBackdrop && _menuArtVersion == session.MenuArtVersion) return;
+            _menuArtVersion = session.MenuArtVersion;
+            _menuSamus = new MenuSamusRender(HdRoot, CacheDir, System.Math.Max(_width, _height), session.Settings.MenuArtSuit);
+        }
         if (_menuSamus.Done) return;
         if (_menuSamus.Step() is { } pic) session.SetHdBackdrop(pic.W, pic.H, pic.Rgba);
     }
@@ -346,9 +362,27 @@ internal sealed class FrontendRenderer : IGlScreen
     // the page's music: changes only with the table's entry (same id + kind = no change), stops for the intro movie
     // (above; null) and pauses while the campaign owns the foreground (PauseAudio, below -- GameActivity.OnPause fires
     // when CampaignActivity starts, same as when the whole app backgrounds)
+    // The menus' theme (SEQ 43 CHUTNEY) gives way to the player's own song (RecompSettings.MenuMusic: a Prime song
+    // imported from their discs, or "shuffle": another each start; docs/PRIME_MUSIC.md) on the music player's stream
+    // player. A choice is resolved once, so a shuffle keeps its song for the run.
+    Track? _menuSong, _menuSongPlaying;
+    string? _menuSongChoice;
+
+    Track? MenuSong(FrontendSession session)
+    {
+        string choice = session.Settings.MenuMusic ?? "";
+        if (choice != _menuSongChoice)
+        {
+            _menuSongChoice = choice;
+            _menuSong = MusicLibrary.Resolve(choice, Path.GetDirectoryName(_settingsPath), session.Settings.HiddenSongs, null, new Random());
+        }
+        return _menuSong;
+    }
+
     void UpdateMenuMusic(PageTune? desired, FrontendSession session)
     {
-        if (desired == _currentTune)
+        Track? song = desired is { Stream: false, Id: (int)SeqId.CHUTNEY } ? MenuSong(session) : null;
+        if (desired == _currentTune && song == _menuSongPlaying)
         {
             return;
         }
@@ -357,6 +391,28 @@ internal sealed class FrontendRenderer : IGlScreen
         if (old is { Stream: true })
         {
             _sfx?.StopStream();
+        }
+        if (_menuSongPlaying != null && song != _menuSongPlaying)
+        {
+            _music?.Stream.Stop(0.5f);
+            _menuSongPlaying = null;
+        }
+        if (song != null && _music != null)
+        {
+            try
+            {
+                _music.Stop();
+                _music.Stream.Start(TrackCatalog.Open(Path.GetDirectoryName(_settingsPath)!, song), song.Gain, fadeIn: 0.01f, delay: 0,
+                    oldFadeOut: 0.5f, repeat: true);
+                _menuSongPlaying = song;
+                Log.Info("MPHAudio", $"menu music: {song.Title} ({song.Id})");
+                return;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("MPHAudio", $"menu music: {song.Id} won't open ({ex.Message}); the menu theme plays");
+                _menuSong = null;
+            }
         }
         if (desired is not PageTune tune)
         {

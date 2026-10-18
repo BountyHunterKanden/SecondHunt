@@ -194,10 +194,9 @@ namespace MphRecomp.Input
         {
             if (!p.EquipInfo.Zoomed) return 1f;
             float normal = MphRead.Fixed.ToFloat(p.Values.NormalFov) * 2;
-            // PlayerInput.UpdateAimX/Y: sensitivity /= -Field70 * (Fov - NormalFov * 2)
-            float fovFactor = p.CameraInfo.Fov - normal;
-            if (fovFactor == 0f) return 1f; // the camera is on its normal FOV (a camera sequence overrode it)
-            float mph = 1f / (-MphRead.Fixed.ToFloat(p.Values.Field70) * fovFactor);
+            // PlayerInput.UpdateAimX/Y scale every aim delta by ZoomAimFactor (the game's own, ~focal-length already)
+            if (p.CameraInfo.Fov >= normal) return 1f; // the camera is on its normal FOV (a camera sequence overrode it)
+            float mph = p.ZoomAimFactor();
             return GyroAim.ZoomScale(p.CameraInfo.Fov, normal, mph);
         }
     }

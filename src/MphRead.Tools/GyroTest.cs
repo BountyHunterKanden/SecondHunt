@@ -239,6 +239,208 @@ namespace MphRead
                 $"yaw {fixedTurn:0.00}");
             for (int i = 0; i < 60; i++) host.Step(new CampaignInput { SelectWeapon = i < 2 ? BeamType.PowerBeam : BeamType.None,
                 Buttons = i < 2 ? CampaignButtons.Zoom : CampaignButtons.None }); // unzoom, back to the Power Beam
+            // ZOOM STEP (owner 2026-10-17, PlayerInput.HostZoomStepPresses): vanilla's two zooms, the second (the target zoom)
+            // only when asked. zoom = first zoom -> target zoom when one is ready (else out) -> out; zoom in takes the target
+            // zoom only when it's ready; zoom out steps back; the target leaving the cone = back to the first zoom, no auto
+            // zoom after
+            Action? pin = null; // holds the target in place before every step (below)
+            // keeps the aim on a moving target (the enemy walks about) while a step has no aim input of its own, as a player
+            // tracks it; the rates per unit of aim input are Face's unzoomed ones, slowed by the zoom's aim factor
+            Func<Vector3>? track = null;
+            float trackRx = 0, trackRy = 0;
+            void Step(CampaignInput input)
+            {
+                pin?.Invoke();
+                if (track != null && input.AimDelta == default && trackRx != 0 && trackRy != 0)
+                {
+                    Vector3 dir = track();
+                    float half = p.CameraInfo.Fov / 2, slow = 1 - 0.7f * Math.Clamp((39 - half) / 27, 0, 1);
+                    input.AimDelta = new NVec2(0.3f * Wrap(Yaw(dir) - Yaw(Aim())) / (trackRx * slow),
+                        0.3f * (Pitch(dir) - Pitch(Aim())) / (trackRy * slow));
+                }
+                host.Step(input);
+                for (int d = 0; d < 600 && host.DialogPaused; d++) // a message box (the room's area messages): closed
+                {
+                    host.Step(new CampaignInput { SelectWeapon = BeamType.None, DialogButton = d % 10 != 0 ? HostDialogButton.None
+                        : host.Dialog == DialogType.YesNo ? HostDialogButton.No : HostDialogButton.Advance });
+                }
+            }
+            float StepFov(CampaignButtons press, BeamType weapon = BeamType.None, bool step = true)
+            {
+                for (int i = 0; i < 60; i++) Step(new CampaignInput { SelectWeapon = weapon,
+                    Buttons = (step ? CampaignButtons.ZoomStep : CampaignButtons.None) | (i < 2 ? press : CampaignButtons.None) });
+                return p.CameraInfo.Fov;
+            }
+            StepFov(CampaignButtons.None, BeamType.Imperialist);
+            float stepNormal = p.CameraInfo.Fov;
+            float tier1 = 2 * Fixed.ToFloat(p.EquipInfo.Weapon.ZoomFov);
+            FieldInfo facingVec = typeof(PlayerEntity).GetField("_facingVector", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            Vector3 Facing() => (Vector3)facingVec.GetValue(p)!; // the facing the game's zoom check uses
+            Vector3 spawnAim = Aim(), spawnPos = p.Position;
+            // turns the aim onto `dir` with aim input, as a player would (a teleport's facing doesn't hold: the game eases the
+            // facing back toward the aim), then lets the facing settle
+            void Face(Vector3 dir, bool step = true)
+            {
+                CampaignButtons hold = step ? CampaignButtons.ZoomStep : CampaignButtons.None;
+                Func<Vector3>? tracking = track;
+                track = null; // (its own aim input only)
+                // degrees of aim per unit of AimDelta (signed): 8 steps of input, then 8 to let it land
+                float Probe(NVec2 delta, bool yaw)
+                {
+                    Vector3 before = Aim();
+                    for (int i = 0; i < 8; i++) Step(new CampaignInput { SelectWeapon = BeamType.None, AimDelta = delta, Buttons = hold });
+                    for (int i = 0; i < 8; i++) Step(new CampaignInput { SelectWeapon = BeamType.None, Buttons = hold });
+                    return (yaw ? Wrap(Yaw(Aim()) - Yaw(before)) : Pitch(Aim()) - Pitch(before)) / (8 * (yaw ? delta.X : delta.Y));
+                }
+                float rx = Probe(new NVec2(1, 0), true), ry = Probe(new NVec2(0, 1), false);
+                for (int round = 0; round < 12; round++)
+                {
+                    float dy = Wrap(Yaw(dir) - Yaw(Aim())), dp = Pitch(dir) - Pitch(Aim());
+                    if (MathF.Abs(dy) < 0.02f && MathF.Abs(dp) < 0.02f) break;
+                    // the error spread over 10 steps, then 10 to land
+                    var delta = new NVec2(rx != 0 ? dy / rx / 10 : 0, ry != 0 ? dp / ry / 10 : 0);
+                    Vector3 before = Aim();
+                    for (int i = 0; i < 10; i++) Step(new CampaignInput { SelectWeapon = BeamType.None, AimDelta = delta, Buttons = hold });
+                    for (int i = 0; i < 10; i++) Step(new CampaignInput { SelectWeapon = BeamType.None, Buttons = hold });
+                    // the rates re-measured from what this round did (the aim isn't linear over big turns)
+                    float my = Wrap(Yaw(Aim()) - Yaw(before)), mp = Pitch(Aim()) - Pitch(before);
+                    if (MathF.Abs(delta.X) > 1e-4f && MathF.Abs(my) > 0.05f) rx = my / (10 * delta.X);
+                    if (MathF.Abs(delta.Y) > 1e-4f && MathF.Abs(mp) > 0.05f) ry = mp / (10 * delta.Y);
+                }
+                for (int i = 0; i < 40; i++) Step(new CampaignInput { SelectWeapon = BeamType.None, Buttons = hold });
+                if (!p.EquipInfo.Zoomed) { trackRx = rx; trackRy = ry; }
+                track = tracking;
+            }
+            // ZOOM STEP's reticle cue (PlayerZoomReady.cs): faint in the first zoom until the target zoom is ready
+            PlayerEntity.HostZoomReadyIcon = true;
+            MethodInfo reticleAlpha = typeof(PlayerEntity).GetMethod("ZoomReadyReticleAlpha", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            float RetAlpha() => (float)reticleAlpha.Invoke(p, null)!;
+            float f = StepFov(CampaignButtons.ZoomIn);
+            Check("zoom step: zoom in while not zoomed does nothing", Near(f, stepNormal, 0.05f) && !p.EquipInfo.Zoomed, $"fov {f:0.00}");
+            f = StepFov(CampaignButtons.Zoom);
+            Check($"zoom step: 1st zoom press -> first zoom ({tier1:0.0})", Near(f, tier1, 0.05f), $"fov {f:0.00}");
+            bool readyHere = p.HostZoomTargetReady;
+            f = StepFov(CampaignButtons.ZoomIn);
+            Check("zoom step: no target in sight -> zoom in refused (first zoom)", !readyHere && Near(f, tier1, 0.05f),
+                $"ready {readyHere}, fov {f:0.00}");
+            Check("zoom step: first zoom, no target -> reticle faint (0.4)", Near(RetAlpha(), 0.4f, 0.001f), $"alpha {RetAlpha():0.00}");
+            f = StepFov(CampaignButtons.Zoom);
+            Check($"zoom step: 2nd press, no target -> normal ({stepNormal:0.0})", Near(f, stepNormal, 0.05f) && !p.EquipInfo.Zoomed,
+                $"fov {f:0.00}");
+            Check("zoom step: unzoomed -> reticle solid", Near(RetAlpha(), 1, 0.001f), $"alpha {RetAlpha():0.00}");
+            // a target: the farthest targetable enemy / player / weapon-zoom object, faced from where Samus stands
+            EntityBase? target = null;
+            float targetDist = 0;
+            foreach (EntityBase e in host.Scene.Entities)
+            {
+                if (e == p || !e.GetTargetable() || e.Type is not (EntityType.EnemyInstance or EntityType.Player or EntityType.Object))
+                {
+                    continue;
+                }
+                if (e is ObjectEntity obj && !obj.Data.EffectFlags.TestFlag(ObjEffFlags.WeaponZoom))
+                {
+                    continue;
+                }
+                e.GetPosition(out Vector3 at);
+                float d = (at - p.Position).Length;
+                if (d > targetDist && d < 200)
+                {
+                    target = e;
+                    targetDist = d;
+                }
+            }
+            // the room's only target (an enemy that stays put) is nearer than a target zoom reaches (vanilla zooms past the
+            // first zoom only beyond 3 / tan 12 = 14.1 units): Samus is backed off from it, on her spawn side, to a spot where
+            // she stands (the room has pits), and kept at full health
+            Vector3 home = p.Position;
+            if (target != null && targetDist < 16)
+            {
+                pin = () => p.Health = p.HealthMax;
+                target.GetPosition(out Vector3 at);
+                Vector3 away = (home - at).WithY(0).Normalized();
+                bool placed = false;
+                foreach (int dist in new[] { 20, 18, 16 })
+                {
+                    foreach (int deg in new[] { 0, 20, -20, 40, -40 })
+                    {
+                        if (placed) break;
+                        float rad = MathHelper.DegreesToRadians(deg);
+                        var dir = new Vector3(away.X * MathF.Cos(rad) - away.Z * MathF.Sin(rad), 0, away.X * MathF.Sin(rad) + away.Z * MathF.Cos(rad));
+                        Vector3 spot = new Vector3(at.X, home.Y + 0.3f, at.Z) + dir * dist;
+                        p.Teleport(spot, -dir, host.Scene.GetNodeRefContaining(spot));
+                        p.PrevPosition = spot;
+                        for (int k = 0; k < 40; k++) Step(new CampaignInput { SelectWeapon = BeamType.None, Buttons = CampaignButtons.ZoomStep });
+                        placed = MathF.Abs(p.Position.Y - home.Y) < 1.5f && (p.Position - spot).WithY(0).Length < 1;
+                    }
+                }
+                target.GetPosition(out at);
+                targetDist = (at - p.Position).Length;
+            }
+            Check("zoom step: a target past the first zoom's reach (> 14.1 units)", target != null && targetDist > 15,
+                target == null ? "none" : $"{target.Type} at {targetDist:0.0}, Samus at {p.Position}");
+            if (target != null && targetDist > 15)
+            {
+                Vector3 TargetDir() { target.GetPosition(out Vector3 at); return at - p.Position; }
+                float Expected() => 2 * MathHelper.RadiansToDegrees(MathF.Atan2(3, Vector3.Dot(TargetDir(), Facing())));
+                Face(TargetDir());
+                track = TargetDir;
+                f = StepFov(CampaignButtons.Zoom);
+                Check("zoom step: facing the target, 1st press -> first zoom, reticle solid", Near(f, tier1, 0.05f) && p.HostZoomTargetReady
+                    && Near(RetAlpha(), 1, 0.001f), $"fov {f:0.00}, ready {p.HostZoomTargetReady}, alpha {RetAlpha():0.00}");
+                Face(TargetDir());
+                f = StepFov(CampaignButtons.Zoom);
+                float want = Expected();
+                Check($"zoom step: 2nd press -> vanilla's target zoom ({want:0.00}), reticle solid", Near(f, want, 0.1f) && f < tier1 - 1
+                    && Near(RetAlpha(), 1, 0.001f), $"fov {f:0.00}, alpha {RetAlpha():0.00}");
+                track = null;
+                Face(new Vector3(-TargetDir().Z, 0, TargetDir().X)); // a quarter turn away: out of the cone
+                f = StepFov(CampaignButtons.None);
+                Check("zoom step: target leaves the cone -> back to the first zoom, reticle faint", Near(f, tier1, 0.05f) && p.EquipInfo.Zoomed
+                    && Near(RetAlpha(), 0.4f, 0.001f), $"fov {f:0.00}, alpha {RetAlpha():0.00}");
+                Face(TargetDir());
+                track = TargetDir;
+                f = StepFov(CampaignButtons.None);
+                Check("zoom step: target back in sight -> no auto zoom (stays first zoom)", Near(f, tier1, 0.05f), $"fov {f:0.00}");
+                Face(TargetDir());
+                f = StepFov(CampaignButtons.ZoomIn);
+                want = Expected();
+                Check($"zoom step: zoom in -> target zoom again ({want:0.00})", Near(f, want, 0.1f), $"fov {f:0.00}");
+                f = StepFov(CampaignButtons.ZoomOut);
+                Check("zoom step: zoom out from the target zoom -> first zoom", Near(f, tier1, 0.05f), $"fov {f:0.00}");
+                f = StepFov(CampaignButtons.ZoomOut);
+                Check("zoom step: zoom out from the first zoom -> normal", Near(f, stepNormal, 0.05f) && !p.EquipInfo.Zoomed, $"fov {f:0.00}");
+                // the same target with ZOOM STEP off: vanilla zooms onto it by itself, to the same depth
+                Face(TargetDir(), step: false);
+                f = StepFov(CampaignButtons.Zoom, step: false);
+                want = Expected();
+                Check($"zoom step off: vanilla auto zoom onto the target, same depth ({want:0.00})", Near(f, want, 0.1f), $"fov {f:0.00}");
+                f = StepFov(CampaignButtons.Zoom, step: false);
+                track = null;
+                pin = null;
+                p.Teleport(home, Facing(), host.Scene.GetNodeRefContaining(home));
+                p.PrevPosition = home;
+                Face(spawnAim, step: false);
+            }
+            // VANILLA zoom look draws this FOV as it is, so it must move at the ROM's speed (rev 1 arm9): in = 2 deg half per
+            // 30 Hz tick = 2 full per 60 Hz frame (78 -> 24 in 27 frames); out = a quarter of the gap per tick, 0.134 per frame
+            var fovs = new System.Collections.Generic.List<float>();
+            for (int i = 0; i < 40; i++)
+            {
+                host.Step(new CampaignInput { SelectWeapon = BeamType.None, Buttons = i < 2 ? CampaignButtons.Zoom : CampaignButtons.None });
+                fovs.Add(p.CameraInfo.Fov);
+            }
+            int inFrames = fovs.FindIndex(v => v <= tier1 + 0.01f) + 1;
+            Check("vanilla zoom in: 2 deg (full) per frame, 78 -> 24 in 27 frames", inFrames >= 27 && inFrames <= 28
+                && Near(fovs[0] - fovs[1], 2f, 0.01f), $"{inFrames} frames, step {fovs[0] - fovs[1]:0.00}");
+            fovs.Clear();
+            for (int i = 0; i < 40; i++)
+            {
+                host.Step(new CampaignInput { SelectWeapon = BeamType.None, Buttons = i < 2 ? CampaignButtons.Zoom : CampaignButtons.None });
+                fovs.Add(p.CameraInfo.Fov);
+            }
+            float outFrac = (fovs[2] - fovs[1]) / (stepNormal - fovs[1]);
+            Check("vanilla zoom out: eases 0.134 of the gap per frame", Near(outFrac, 0.134f, 0.01f), $"x{outFrac:0.000} per frame");
+            StepFov(CampaignButtons.None, BeamType.PowerBeam);
             // a still hand for 2 s
             var still = NewAim(GyroTurnAxis.Player);
             var rng = new Random(2);

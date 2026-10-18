@@ -10,6 +10,8 @@ namespace MphRead.Entities
     public partial class PlayerEntity
     {
         public CameraInfo CameraInfo { get; } = new CameraInfo();
+        // recomp: the view before the main player's first spawn, for rooms with no intro sequence (null: none)
+        public static Func<Scene, (Vector3 Eye, Vector3 Target)?>? HostPreSpawnView;
         public CameraType CameraType { get; private set; } = CameraType.First;
         private Vector3 _field544;
         private float _field554 = 0;
@@ -49,6 +51,7 @@ namespace MphRead.Entities
 
         private void UpdateCamera()
         {
+            SlotHoldBall(); // recomp: the camera follows a ball the turret's bomb slot holds from where it's held (PlayerEchoesSeat.cs)
             CameraInfo.PrevPosition = CameraInfo.Position;
             if (_camSwitchTimer < Values.CamSwitchTime * 2) // todo: FPS stuff
             {
@@ -60,6 +63,17 @@ namespace MphRead.Entities
             }
             if (IsMainPlayer && CameraSequence.Current != null)
             {
+                return;
+            }
+            // recomp: before the main player's first spawn in a room with no intro sequence (the Echoes arenas), a set
+            // view of the arena instead of the unspawned player's spot at the origin, inside the walls (EchoesArena)
+            if (IsMainPlayer && !LoadFlags.TestFlag(LoadFlags.Spawned) && HostPreSpawnView?.Invoke(_scene) is { } view)
+            {
+                CameraInfo.Position = view.Eye;
+                CameraInfo.Target = view.Target;
+                CameraInfo.UpVector = Vector3.UnitY;
+                CameraInfo.NodeRef = _scene.Room?.GetNodeRefContaining(view.Eye) ?? NodeRef.None;
+                CameraInfo.Update();
                 return;
             }
             if (CameraType == CameraType.Third1)
@@ -82,6 +96,8 @@ namespace MphRead.Entities
             {
                 UpdateCameraFirst();
             }
+            SlotCamera(); // recomp: the turret's bomb slot's fixed camera while it holds this ball (PlayerEchoesSeat.cs)
+            SeatCamera(); // recomp: the turret's own camera while seated (PlayerEchoesSeat.cs)
             CameraInfo.Update();
         }
 

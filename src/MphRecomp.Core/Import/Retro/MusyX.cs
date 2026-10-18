@@ -11,6 +11,8 @@ namespace MphRecomp.Import.Retro
     // (DSP-ADPCM in its sample data) at a note, at a volume, and fades / stops it on its own clock. Render plays one sfx's
     // macro offline into mono PCM at its sample's rate, so the app can play it as a plain one-shot.
     //   AGSC (MP1): "Audio/\0", "<group>\0", then pool, proj, samp, sdir, each a BE u32 length + its bytes.
+    //   AGSC (Echoes): u32 version 1, "<group>\0", u16 group id, the four BE u32 lengths (pool, proj, sdir, samp), then
+    //     the four blocks in that order; the blocks are MP1's (Shooting Gallery's turret sounds, Arenas/EchoesTurret.cs).
     //   proj: groups chained by their end offset (0xFFFFFFFF ends): u32 end, u16 id, u16 type; an sfx group (type 1) has its
     //     table's offset at +28: u16 count, u16 pad, then 10-byte entries u16 sfx id, u16 macro id, u8 priority,
     //     u8 max voices, u8 velocity, u8 pan, u8 key, u8 pad.
@@ -103,18 +105,37 @@ namespace MphRecomp.Import.Retro
         public static Agsc Parse(byte[] b)
         {
             var a = new Agsc();
-            Be.CString(b, 0, out int e);
-            a.Group = Be.CString(b, e + 1, out e);
-            int o = e + 1;
             var secs = new byte[4][];
-            for (int i = 0; i < 4; i++)
+            byte[] pool, proj, sdir;
+            if (Be.U32(b, 0) == 1)
             {
-                int len = (int)Be.U32(b, o);
-                secs[i] = Be.Slice(b, o + 4, len);
-                o += 4 + len;
+                // Echoes: the lengths first, sdir before samp
+                a.Group = Be.CString(b, 4, out int e);
+                int o = e + 1 + 2;
+                int at = o + 16;
+                for (int i = 0; i < 4; i++)
+                {
+                    int len = (int)Be.U32(b, o + 4 * i);
+                    secs[i] = Be.Slice(b, at, len);
+                    at += len;
+                }
+                pool = secs[0]; proj = secs[1]; sdir = secs[2];
+                a._samp = secs[3];
             }
-            byte[] pool = secs[0], proj = secs[1], sdir = secs[3];
-            a._samp = secs[2];
+            else
+            {
+                Be.CString(b, 0, out int e);
+                a.Group = Be.CString(b, e + 1, out e);
+                int o = e + 1;
+                for (int i = 0; i < 4; i++)
+                {
+                    int len = (int)Be.U32(b, o);
+                    secs[i] = Be.Slice(b, o + 4, len);
+                    o += 4 + len;
+                }
+                pool = secs[0]; proj = secs[1]; sdir = secs[3];
+                a._samp = secs[2];
+            }
             for (int p = 0; p + 8 <= proj.Length;)
             {
                 uint end = Be.U32(proj, p);
@@ -177,6 +198,9 @@ namespace MphRecomp.Import.Retro
             public int Rate;
             public readonly List<string> Steps = new();
             public readonly List<int> Skipped = new();   // ops played as no-ops
+            // a looping sfx: one turn of the loop its voice is left in when the macro ends, at the voice's pitch and
+            // gains (seamless played over and over; empty for a one-shot)
+            public short[] Loop = Array.Empty<short>();
         }
 
         const float MaxSeconds = 10;
@@ -323,6 +347,38 @@ namespace MphRecomp.Import.Retro
                 }
             }
             done:
+            if (playing && s != null && pcm != null && s.LoopLength > 0 && s.LoopStart < pcm.Length)
+            {
+                int len = Math.Min(s.LoopLength, pcm.Length - s.LoopStart);
+                int n = Math.Max(1, (int)Math.Round(len / step));
+                double st = (double)len / n;
+                float g = vol * envTo;
+                r.Loop = new short[n];
+                for (int i = 0; i < n; i++)
+                {
+                    double q = i * st;
+                    int k = (int)q;
+                    double f = q - k;
+                    int k0 = s.LoopStart + k, k1 = s.LoopStart + (k + 1) % len;
+                    r.Loop[i] = (short)Math.Clamp(MathF.Round((float)(pcm[k0] * (1 - f) + pcm[k1] * f) * g), short.MinValue, short.MaxValue);
+                }
+                // the turn's last samples cross-faded into the ones just before the loop start (which lead into its first
+                // sample): ADPCM decoded once through doesn't always meet itself at the loop end (a click each turn)
+                int fade = Math.Min(256, n / 4);
+                if (fade > 0 && s.LoopStart - (fade + 1) * st >= 0)
+                {
+                    for (int i = 0; i < fade; i++)
+                    {
+                        double q = s.LoopStart - (fade - i) * st;
+                        int k = (int)q;
+                        double f = q - k;
+                        float pre = (float)(pcm[k] * (1 - f) + pcm[k + 1] * f) * g;
+                        float w = (i + 1) / (float)(fade + 1);
+                        int at = n - fade + i;
+                        r.Loop[at] = (short)Math.Clamp(MathF.Round(r.Loop[at] * (1 - w) + pre * w), short.MinValue, short.MaxValue);
+                    }
+                }
+            }
             // the voice ends: past the last command, a playing loop is cut, a one-shot plays out
             var res = new short[outp.Count];
             for (int i = 0; i < res.Length; i++) res[i] = (short)Math.Clamp(MathF.Round(outp[i]), short.MinValue, short.MaxValue);

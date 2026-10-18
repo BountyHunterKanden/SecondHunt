@@ -26,8 +26,10 @@ internal sealed class PauseOverlay
     double _last;
 
     public bool IsOpen { get; private set; }
-    // a LAN / online match: set by the match (MatchSession.ConfigureMatch); first person only there
+    // a LAN / online match: set by the match (MatchSession.ConfigureMatch); online (OnlineChat set) is first person only
     public bool NetMatch { get; set; }
+    // an online match (MatchSession.ConfigureMatch): the pause gets CHAT, the lobby's CHAT page on this match's connection
+    public MphRecomp.Multiplayer.Net.OnlineMatch? OnlineChat { get; set; }
     public event Action? Resumed, QuitToMenu, DevTools;
     // RECOMP SETTINGS > CREDITS / CRASH LOG: the host opens the same screens as the front end does (GameActivity)
     public event Action? Credits, ShareCrashLog;
@@ -43,8 +45,10 @@ internal sealed class PauseOverlay
     // the choices as they are now (the pause menu saves every change to the settings file at once)
     public RecompSettings Settings => _session?.Settings ?? RecompSettings.Load(_settingsPath);
 
-    // the cursor is on RECOMP SETTINGS > MUSIC: the host lets the paused music play to hear a change live
-    public bool MusicRowFocused => IsOpen && _session != null && _session.Recomp.FocusedSetting(_session.Menu) == "music";
+    // the cursor is on SECOND HUNT SETTINGS > SOUND's music quality or volume: the host lets the paused music play to hear a
+    // change live
+    public bool MusicRowFocused => IsOpen && _session != null
+        && _session.Recomp.FocusedSetting(_session.Menu) is "music\nquality" or "music\nvolume";
 
     public void OnSurfaceCreated() => _drawer.Init();
 
@@ -73,7 +77,9 @@ internal sealed class PauseOverlay
                 // the ship's OPTIONS saves the file too: start from it, so a save here doesn't put old values back
                 _session.Settings.ReloadFrom(_settingsPath);
             }
-            _session.Recomp.InNetMatch = NetMatch; // the camera row greys out (RecompMenus)
+            _session.Recomp.InNetMatch = NetMatch;
+            _session.Recomp.InOnlineMatch = NetMatch && OnlineChat != null; // the camera row greys out (RecompMenus); LAN can switch it
+            _session.Recomp.PauseChat = OnlineChat is { Disposed: false } chat ? chat : null; // CHAT (RecompMenus.PausePage)
             open(_session);
             IsOpen = true;
             _clock.Restart();
@@ -129,6 +135,10 @@ internal sealed class PauseOverlay
     public void Press(MenuKeys keys) => HoldSounds(() => _session?.Press(keys));
     public void Navigate(int dx, int dy) => _session?.Navigate(dx, dy);
     public void Touch(float x, float y) => HoldSounds(() => _session?.TouchCanvas(x, y));
+    // a touch's down / move / up / cancel (0-3): settings and CONTROLS scroll by a drag (FrontendSession.TouchCanvas)
+    public void Touch(float x, float y, int kind) => HoldSounds(() => _session?.TouchCanvas(x, y, kind));
+    public void ScrollWheel(float notches) => _session?.ScrollWheel(notches);
+    public void ScrollStick(float y) => _session?.ScrollStick(y);
 
     // The menu's click for a press sounds before the press acts, so it's held until we know what the press did: one that
     // closed the menu (resume, quit) is silent -- no unpause noise (owner 2026-10-04) -- any other plays as before.

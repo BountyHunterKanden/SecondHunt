@@ -5,9 +5,10 @@ using System.Security.Cryptography;
 
 namespace MphRecomp.Online
 {
-    // NIST P-256 point multiplication in plain managed code. Used only to turn a backup seed's private scalar into its
-    // public point, so the platform crypto can import both (importing a private scalar alone isn't supported everywhere).
-    // Not constant-time: it runs once per start, on the player's own device. Checked against the platform's own key
+    // NIST P-256 point multiplication in plain managed code. Turns a backup seed's private scalar into its public point,
+    // so the platform crypto can import both (importing a private scalar alone isn't supported everywhere), and signs
+    // the login when the platform can't import a private key at all (Wine). Not constant-time: it runs once per login,
+    // on the player's own device. Checked against the platform's own key
     // generation by `SecondHunt.Server --selftest`.
     internal static class P256
     {
@@ -72,6 +73,34 @@ namespace MphRecomp.Online
                 k >>= 1;
             }
             return (Bytes(rx), Bytes(ry));
+        }
+
+        // ECDSA P-256 over SHA-256 of data, as r || s (32 bytes each, the IEEE P1363 layout the server verifies). The
+        // fallback for platforms whose crypto can't import a private key: Wine's ncrypt throws NTE_NOT_SUPPORTED
+        // (0x80090029) for ECDsaCng.ImportParameters, so a Windows build under Wine/Proton could never log in.
+        public static byte[] Sign(BigInteger d, ReadOnlySpan<byte> data)
+        {
+            var z = new BigInteger(SHA256.HashData(data), isUnsigned: true, isBigEndian: true);
+            Span<byte> random = stackalloc byte[32];
+            while (true)
+            {
+                RandomNumberGenerator.Fill(random);
+                var k = new BigInteger(random, isUnsigned: true, isBigEndian: true);
+                if (k.Sign == 0 || k >= N)
+                {
+                    continue;
+                }
+                var r = new BigInteger(MultiplyBase(k).X, isUnsigned: true, isBigEndian: true) % N;
+                BigInteger s = BigInteger.ModPow(k, N - 2, N) * (z + r * d) % N;
+                if (r.Sign == 0 || s.Sign == 0)
+                {
+                    continue;
+                }
+                byte[] signature = new byte[64];
+                Bytes(r).CopyTo(signature, 0);
+                Bytes(s).CopyTo(signature, 32);
+                return signature;
+            }
         }
 
         private static (BigInteger, BigInteger, bool) Add(BigInteger x1, BigInteger y1, BigInteger x2, BigInteger y2)

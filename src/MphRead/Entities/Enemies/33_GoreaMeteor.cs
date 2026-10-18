@@ -19,6 +19,7 @@ namespace MphRead.Entities.Enemies
         private float _field1A4 = 0;
         private float _field1AC = 0;
         private Vector3 _basePos;
+        private Vector3 _shakeOffset;
         private float _field1B0 = 0;
         private int _field1B4 = 0;
         private int _field1B6 = 0;
@@ -171,10 +172,15 @@ namespace MphRead.Entities.Enemies
             _basePos += _speed;
             if (_shakeTimer > 0)
             {
-                float x = ((int)Rng.GetRandomInt2(512) - 256) / 4096f;
-                float y = ((int)Rng.GetRandomInt2(512) - 256) / 4096f;
-                float z = ((int)Rng.GetRandomInt2(512) - 256) / 4096f;
-                Position = new Vector3(_basePos.X + x, _basePos.Y + y, _basePos.Z + z);
+                // recomp: vanilla (rev 1 0x21413D8) rolls the shake once per 30 Hz tick, not every 60 Hz frame
+                if (_scene.FrameCount % 2 == 0)
+                {
+                    float x = ((int)Rng.GetRandomInt2(512) - 256) / 4096f;
+                    float y = ((int)Rng.GetRandomInt2(512) - 256) / 4096f;
+                    float z = ((int)Rng.GetRandomInt2(512) - 256) / 4096f;
+                    _shakeOffset = new Vector3(x, y, z);
+                }
+                Position = _basePos + _shakeOffset;
                 _shakeTimer--;
             }
         }

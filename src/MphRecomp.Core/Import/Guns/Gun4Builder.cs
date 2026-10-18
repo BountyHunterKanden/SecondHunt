@@ -73,6 +73,18 @@ namespace MphRecomp.Import.Guns
             int[] sParent = sk.Parent;
             IReadOnlyList<BeyondMesh> meshes = model.Meshes;
             IReadOnlyList<BeyondLookMaterial> mats = look.Materials;
+            // the recipe's own joints (a cannon cut from a body), else Samus's first-person arm
+            int keepRoot = -1;
+            if (recipe.Keep.Length > 0 && !sk.Index.TryGetValue(recipe.Keep, out keepRoot)) throw new InvalidDataException($"no joint '{recipe.Keep}' to keep");
+            bool Kept(int j)
+            {
+                if (keepRoot < 0) return !Dropped.IsMatch(sNames[j]);
+                for (; j >= 0; j = sParent[j]) if (j == keepRoot) return true;
+                return false;
+            }
+            var animated = recipe.Animate.Length > 0 ? new Regex(recipe.Animate, RegexOptions.CultureInvariant) : null;
+            var barrelRx = new Regex(recipe.Barrel, RegexOptions.CultureInvariant);
+            var topRx = new Regex(recipe.Top, RegexOptions.CultureInvariant);
 
             // ---- which meshes are drawn
             var allowed = new HashSet<int>();
@@ -126,7 +138,7 @@ namespace MphRecomp.Import.Guns
                         var skin = new List<(int, double)>[3];
                         for (int c = 0; c < 3; c++) skin[c] = SkinOf(p, p.Indices[3 * t + c], sk.Index);
                         int main = MainJoint(skin);
-                        if (Dropped.IsMatch(sNames[main]))
+                        if (!Kept(main))
                         {
                             dropArm++;
                             continue;
@@ -173,6 +185,12 @@ namespace MphRecomp.Import.Guns
                     }
                 }
             }
+            // a muzzle joint the recipe names is exported too (its idle position places the muzzle)
+            if (recipe.MuzzleJoint.Length > 0)
+            {
+                if (!sk.Index.TryGetValue(recipe.MuzzleJoint, out int mz0)) throw new InvalidDataException($"no muzzle joint '{recipe.MuzzleJoint}'");
+                for (int j = mz0; j >= 0 && need.Add(j); j = sParent[j]) { }
+            }
             var order = new List<int>();
             var placed = new HashSet<int>();
             void Visit(int j)
@@ -202,7 +220,7 @@ namespace MphRecomp.Import.Guns
             }
             ChprAnimation idle = Anim(recipe.IdleAnim);
             Dictionary<string, int> idleAt = JointMap(idle);
-            float[] FramesFor(ChprAnimation an, int n)
+            float[] FramesFor(ChprAnimation an, int n, int f0 = 0, bool restAnimated = false)
             {
                 Dictionary<string, int> at = JointMap(an);
                 int ja = an.Joints.Length, ji = idle.Joints.Length;
@@ -213,11 +231,19 @@ namespace MphRecomp.Import.Guns
                     for (int f = 0; f < n; f++)
                     {
                         int o = (f * nb + bi) * 10;
-                        if (at.TryGetValue(nm, out int i))
+                        bool moves = animated == null || animated.IsMatch(nm);
+                        if (restAnimated && moves)
                         {
-                            Array.Copy(an.RotXyzw, (f * ja + i) * 4, F, o, 4);
-                            Array.Copy(an.Trans, (f * ja + i) * 3, F, o + 4, 3);
-                            Array.Copy(an.Scale, (f * ja + i) * 3, F, o + 7, 3);
+                            (double[] q, double[] tr) = sk.RestLocal(nm);
+                            F[o] = (float)q[1]; F[o + 1] = (float)q[2]; F[o + 2] = (float)q[3]; F[o + 3] = (float)q[0];
+                            F[o + 4] = (float)tr[0]; F[o + 5] = (float)tr[1]; F[o + 6] = (float)tr[2];
+                            F[o + 7] = 1; F[o + 8] = 1; F[o + 9] = 1;
+                        }
+                        else if (moves && at.TryGetValue(nm, out int i))
+                        {
+                            Array.Copy(an.RotXyzw, ((f0 + f) * ja + i) * 4, F, o, 4);
+                            Array.Copy(an.Trans, ((f0 + f) * ja + i) * 3, F, o + 4, 3);
+                            Array.Copy(an.Scale, ((f0 + f) * ja + i) * 3, F, o + 7, 3);
                         }
                         else if (idleAt.TryGetValue(nm, out i))
                         {
@@ -241,11 +267,55 @@ namespace MphRecomp.Import.Guns
             foreach ((string role, string src) in recipe.Roles)
             {
                 ct.ThrowIfCancellationRequested();
-                ChprAnimation an = Anim(src);
-                int n = role == recipe.Idle ? 1 : an.Frames;
-                float[] F = FramesFor(an, n);
+                // "a + b + c": pieces played one after another (each piece's first frame dropped, the last one's end held
+                // there); a trailing " x1.5" plays the whole at that speed
+                string spec = src;
+                double speed = 1;
+                int sx = spec.LastIndexOf(" x", StringComparison.Ordinal);
+                if (sx > 0)
+                {
+                    speed = Double.Parse(spec[(sx + 2)..], CultureInfo.InvariantCulture);
+                    spec = spec[..sx];
+                }
+                var parts = new List<float[]>();
+                double fps = 0;
+                foreach (string piece in spec.Split('+', StringSplitOptions.TrimEntries))
+                {
+                    // "clip@a-b": frames a to b of the clip (a held deploy: the end of an opening clip, looped); b before a
+                    // plays them backwards (an opening made from a closing clip)
+                    string clip = piece;
+                    int f0 = 0, f1 = -1;
+                    int at = piece.LastIndexOf('@');
+                    if (at > 0)
+                    {
+                        clip = piece[..at];
+                        string[] ab = piece[(at + 1)..].Split('-');
+                        f0 = Int32.Parse(ab[0], CultureInfo.InvariantCulture);
+                        f1 = ab.Length > 1 ? Int32.Parse(ab[1], CultureInfo.InvariantCulture) : f0;
+                    }
+                    ChprAnimation an = Anim(clip);
+                    if (f1 < 0) f1 = an.Frames - 1;
+                    bool backwards = f1 < f0;
+                    if (backwards) (f0, f1) = (f1, f0);
+                    if (f0 < 0 || f1 >= an.Frames) throw new InvalidDataException($"{piece}: frames {f0}-{f1} outside 0-{an.Frames - 1}");
+                    int pn = role == recipe.Idle ? 1 : f1 - f0 + 1;
+                    // "idleRest": the idle's moving joints at the rest pose (the cannon as the third-person body wears it)
+                    float[] P = FramesFor(an, pn, f0, role == recipe.Idle && recipe.IdleRest);
+                    if (backwards && role != recipe.Idle)
+                    {
+                        var R = new float[P.Length];
+                        int frame = nb * 10;
+                        for (int k = 0; k < pn; k++) Array.Copy(P, k * frame, R, (pn - 1 - k) * frame, frame);
+                        P = R;
+                    }
+                    if (parts.Count > 0 && an.FpsAssumed != fps) throw new InvalidDataException($"{src}: the pieces' frame rates differ");
+                    fps = an.FpsAssumed;
+                    parts.Add(parts.Count > 0 && P.Length > nb * 10 ? P[(nb * 10)..] : P);
+                }
+                float[] F = parts.Count == 1 ? parts[0] : parts.SelectMany(p => p).ToArray();
+                int n = F.Length / (nb * 10);
                 if (role == recipe.Idle) idleF = F;
-                baked.Add((role, F, n, an.FpsAssumed, src));
+                baked.Add((role, F, n, fps * speed, src));
             }
             if (idleF == null) throw new InvalidDataException($"the idle role '{recipe.Idle}' is not in the recipe's roles");
             Say(0.3f, $"animations: {baked.Count} roles");
@@ -298,16 +368,16 @@ namespace MphRecomp.Import.Guns
             for (int ti = 0; ti < tris.Count; ti++)
             {
                 string mj = sNames[tris[ti].Main];
-                if (mj.StartsWith("fps_gun", StringComparison.Ordinal)) gunPts.AddRange(new[] { 3 * ti, 3 * ti + 1, 3 * ti + 2 });
-                if (mj.Contains("top_rail", StringComparison.Ordinal) || mj.Contains("top_panel", StringComparison.Ordinal)) topPts.AddRange(new[] { 3 * ti, 3 * ti + 1, 3 * ti + 2 });
+                if (barrelRx.IsMatch(mj)) gunPts.AddRange(new[] { 3 * ti, 3 * ti + 1, 3 * ti + 2 });
+                if (topRx.IsMatch(mj)) topPts.AddRange(new[] { 3 * ti, 3 * ti + 1, 3 * ti + 2 });
             }
-            if (gunPts.Count == 0) throw new InvalidDataException("no triangle rides an fps_gun joint: no barrel to place");
-            if (topPts.Count == 0) throw new InvalidDataException("no triangle rides a top_rail / top_panel joint: no up direction");
+            if (gunPts.Count == 0) throw new InvalidDataException($"no triangle rides a barrel joint ({recipe.Barrel}): no barrel to place");
+            if (topPts.Count == 0 && recipe.Up == null) throw new InvalidDataException($"no triangle rides a top joint ({recipe.Top}): no up direction");
             double[] cen = Mean(PP, gunPts);
-            double[] elbow = sk.Index.TryGetValue("fps_gun_bind", out int gb) && bix.TryGetValue(gb, out int gbi) ? Translation(Wb[gbi]) : cen;
+            double[] elbow = sk.Index.TryGetValue(recipe.Elbow, out int gb) && bix.TryGetValue(gb, out int gbi) ? Translation(Wb[gbi]) : cen;
             double[] ax = PrincipalAxis(PP, gunPts, cen);
             // the barrel points away from the shoulder
-            double[] behind = sk.Index.TryGetValue("fps_shoulder_r_bind", out int sh) && bix.TryGetValue(sh, out int shi) ? Translation(Wb[shi]) : elbow;
+            double[] behind = sk.Index.TryGetValue(recipe.Shoulder, out int sh) && bix.TryGetValue(sh, out int shi) ? Translation(Wb[shi]) : elbow;
             if (Dot(Sub(cen, behind), ax) < 0) ax = new[] { -ax[0], -ax[1], -ax[2] };
             int np = tris.Count * 3;
             var proj = new double[np];
@@ -328,7 +398,14 @@ namespace MphRecomp.Import.Guns
             double ta = Dot(tc, ax);
             double[] off = { tc[0] - ta * ax[0], tc[1] - ta * ax[1], tc[2] - ta * ax[2] };
             double[] muzzle = { cen[0] + ax[0] * front + off[0], cen[1] + ax[1] * front + off[1], cen[2] + ax[2] * front + off[2] };
-            double[] up = Sub(Mean(PP, topPts), cen);
+            if (recipe.MuzzleJoint.Length > 0)
+            {
+                // the muzzle at a joint (its idle position): the barrel's front is there, the length measured to it
+                double[] mp = Translation(Wb[bix[sk.Index[recipe.MuzzleJoint]]]);
+                front = Dot(Sub(mp, cen), ax);
+                muzzle = mp;
+            }
+            double[] up = recipe.Up != null ? (double[])recipe.Up.Clone() : Sub(Mean(PP, topPts), cen);
             double ua = Dot(up, ax);
             up = new[] { up[0] - ua * ax[0], up[1] - ua * ax[1], up[2] - ua * ax[2] };
             double un = Math.Sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
@@ -344,7 +421,17 @@ namespace MphRecomp.Import.Guns
                 sroot[5 * i] = scale;
             }
             tout[14] = MuzzleZ;
-            double[] root = ChprMath.MatMul(ChprMath.MatMul(ChprMath.MatMul(troot, rrow), sroot), tout);
+            // recipe "aim": the barrel turned about the muzzle, pitch (x) then yaw (y), as OpenTK's row-vector rotations
+            double[] aim = Identity();
+            if (recipe.Aim != null)
+            {
+                double p = recipe.Aim[1] * Math.PI / 180, yw = recipe.Aim[0] * Math.PI / 180;
+                double[] rx = Identity(), ry = Identity();
+                rx[5] = Math.Cos(p); rx[6] = Math.Sin(p); rx[9] = -Math.Sin(p); rx[10] = Math.Cos(p);
+                ry[0] = Math.Cos(yw); ry[2] = -Math.Sin(yw); ry[8] = Math.Sin(yw); ry[10] = Math.Cos(yw);
+                aim = ChprMath.MatMul(rx, ry);
+            }
+            double[] root = ChprMath.MatMul(ChprMath.MatMul(ChprMath.MatMul(ChprMath.MatMul(troot, rrow), sroot), aim), tout);
             Say(0.4f, String.Format(CultureInfo.InvariantCulture, "idle-pose cannon: length {0:F3} -> x{1:F4}, axis ({2:F3}, {3:F3}, {4:F3}), up ({5:F3}, {6:F3}, {7:F3})",
                 front - back, scale, ax[0], ax[1], ax[2], up[0], up[1], up[2]));
             ct.ThrowIfCancellationRequested();
@@ -416,7 +503,10 @@ namespace MphRecomp.Import.Guns
                         double nn = Math.Sqrt(nx * nx + ny * ny + nz * nz) + 1e-12;
                         rows.Add((float)t.Pos[3 * c]); rows.Add((float)t.Pos[3 * c + 1]); rows.Add((float)t.Pos[3 * c + 2]);
                         rows.Add((float)(nx / nn)); rows.Add((float)(ny / nn)); rows.Add((float)(nz / nn));
-                        rows.Add((float)t.Uv[2 * c]); rows.Add((float)t.Uv[2 * c + 1]);
+                        // V flipped as DaeModel reads the look's .dae (the third-person body's convention): the look's PNGs
+                        // are stored for that, and the raw V read every texture upside down (2026-10-17: Sylux's coil
+                        // glow strips dark, its tip blue; Samus's glove brown)
+                        rows.Add((float)t.Uv[2 * c]); rows.Add((float)(1 - t.Uv[2 * c + 1]));
                         rows.Add(1f); rows.Add(1f); rows.Add(whiteBa);
                         for (int i = 0; i < 4; i++) rows.Add(i < ws.Count ? pal.IndexOf(bix[ws[i].Joint]) : 0f);
                         for (int i = 0; i < 4; i++) rows.Add(i < ws.Count ? (float)(ws[i].Weight / tot) : 0f);
@@ -477,13 +567,17 @@ namespace MphRecomp.Import.Guns
                 else Say(0.9f, $"  missing texture {tn}");
             }
             var cfg = new StringBuilder();
-            cfg.Append("scale ").Append(ScaleText).Append('\n');
+            // a cut cannon's size against the hunter's own MPH gun (recipe "size"), else Prime 1's
+            string scaleText = recipe.Size == 1 ? ScaleText
+                : FormatG(Double.Parse(ScaleText, CultureInfo.InvariantCulture) * recipe.Size, 7);
+            cfg.Append("scale ").Append(scaleText).Append('\n');
             // (the Python takes set.pop() of the units: the lowest, for GX's 0-7)
-            if (glow.Count > 0) cfg.Append("glow ").Append(glow.Min.ToString(CultureInfo.InvariantCulture)).Append('\n');
+            if (glow.Count > 0 && recipe.GlowTint) cfg.Append("glow ").Append(glow.Min.ToString(CultureInfo.InvariantCulture)).Append('\n');
+            if (recipe.UpDownHold) cfg.Append("updown hold\n");
             cfg.Append("root ").Append(String.Join(" ", root.Select(v => FormatG(v, 7)))).Append('\n');
             cfg.Append("muzzle 0 0 ").Append(FormatG(MuzzleZ, 7)).Append('\n');
             File.WriteAllText(Path.Combine(outDir, "gun.cfg"), cfg.ToString());
-            result.Scale = Double.Parse(ScaleText, CultureInfo.InvariantCulture);
+            result.Scale = Double.Parse(scaleText, CultureInfo.InvariantCulture);
             Say(1f, $"gun.gx.json: {gx.Count} draws, {result.Textures} textures");
             return result;
         }

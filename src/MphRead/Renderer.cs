@@ -198,6 +198,26 @@ namespace MphRead
             return _hudSprites.Count - 1;
         }
 
+        // recomp: a HUD quad with its own pixels (First Hunt's HUD, FirstHuntHud), interned by reference
+        private readonly Dictionary<HostHudSprite, int> _hudSpriteRefs = new();
+
+        public void HostHudQuad(HostHudSprite sprite, float left, float right, float top, float bottom, float alpha = 1)
+        {
+            if (!_hudSpriteRefs.TryGetValue(sprite, out int index))
+            {
+                _hudSprites.Add(sprite);
+                index = _hudSprites.Count - 1;
+                _hudSpriteRefs[sprite] = index;
+            }
+            HostHudItem item = NextHudItem();
+            item.Left = left;
+            item.Right = right;
+            item.Top = top;
+            item.Bottom = bottom;
+            item.Alpha = alpha;
+            item.SpriteIndex = index;
+        }
+
         // the HUD part of OnRenderFrame, recorded instead of drawn (once per simulation step)
         private void RecordHud()
         {
@@ -205,6 +225,12 @@ namespace MphRead
             HudMaskBindingId = -1;
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
+                if (PlayerEntity.HostFirstHunt && FirstHuntHud.Loaded) // recomp: First Hunt's own HUD
+                {
+                    FirstHuntHud.Record(this, PlayerEntity.Main);
+                    PlayerEntity.Main.DrawFirstHuntHudObjects();
+                    return;
+                }
                 PlayerEntity.HudOwner.DrawHudModels(); // recomp: HudOwner (PlayerHud.cs)
                 DrawHudLayer(Layer4Info); // ice layer
                 DrawHudLayer(Layer3Info); // helmet back
@@ -496,7 +522,7 @@ namespace MphRead
             );
             _fogOffset = meta.FogOffset;
             _fogSlope = meta.FogSlope;
-            if (meta.ClearFog && meta.FirstHunt)
+            if (meta.ClearFog && (meta.FirstHunt || HostClearFogRoom?.Invoke(meta) == true))
             {
                 _clearColor = new Color4(_fogColor.X, _fogColor.Y, _fogColor.Z, _fogColor.W);
             }
@@ -578,6 +604,12 @@ namespace MphRead
         public NodeRef GetNodeRefContaining(Vector3 position)
         {
             return Room?.GetNodeRefContaining(position) ?? NodeRef.None;
+        }
+
+        // recomp: see RoomEntity.PartHasGeometryAt
+        public bool PartHasGeometryAt(int partIndex, Vector3 position)
+        {
+            return Room?.PartHasGeometryAt(partIndex, position) ?? false;
         }
 
         public bool IsNodeRefVisible(NodeRef nodeRef)
@@ -1190,6 +1222,9 @@ namespace MphRead
         // the room model in EndTransition) only file them (Android, 2026-10-03: decoding was 15-23 ms of the swap-in frame
         // on a desktop CPU, several times that on the Odin, plus 5-10 ms per entity while crossing). Off = MphRead's own.
         public static bool HostPredecodeTextures { get; set; }
+        // recomp: rooms besides First Hunt's own that clear the screen to their fog colour as First Hunt does (the imported
+        // First Hunt arenas, which load as MPH rooms); null = MphRead's own (First Hunt rooms only)
+        public static Func<RoomMetadata, bool>? HostClearFogRoom { get; set; }
         private readonly ConcurrentDictionary<(int, int, int, int), (IReadOnlyList<ColorRgba> Pixels, bool Opaque)> _predecoded = new();
 
         // any thread: GetPixels only reads the model (InitTextures' RenderMode fix-up stays on the GL thread)
@@ -1473,7 +1508,8 @@ namespace MphRead
                 UpdateCameraPosition();
             }
             UpdateProjection();
-            if (ProcessFrame && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && !GameState.DialogPause)
+            // (recomp: a served match host has no player and no HUD: PlayerServedHost.cs)
+            if (ProcessFrame && !PlayerEntity.HostNoLocalSeat && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && !GameState.DialogPause)
             {
                 PlayerEntity.Main.UpdateHud();
                 if (PlayerEntity.HostHudSeat is PlayerEntity hudSeat && hudSeat != PlayerEntity.Main
@@ -2151,6 +2187,7 @@ namespace MphRead
             EffectEntry entry = _inactiveEffects.Dequeue();
             entry.EffectId = 0;
             entry.HostColor = null;
+            entry.HostColorElement = null;
             Debug.Assert(entry.Elements.Count == 0);
             return entry;
         }
@@ -3115,7 +3152,7 @@ namespace MphRead
                         player.AiData.Process();
                     }
                 }
-                if (playerActive)
+                if (playerActive && !PlayerEntity.HostNoLocalSeat) // (recomp: a served host has no HUD, PlayerServedHost.cs)
                 {
                     PlayerEntity.Main.ProcessModeHud();
                 }
@@ -3984,7 +4021,8 @@ namespace MphRead
         {
             if (Headless)
             {
-                return; // multiplayer locator icons; not recorded
+                RecordIconModel(position, angle, inst, color, alpha); // recomp: was not recorded (no locators in the app)
+                return;
             }
             float scale = Size.Y / 192f;
             var position3d = new Vector3(position.X * Size.X - Size.X / 2, (1 - position.Y) * Size.Y - (Size.Y / 2), -1f);
@@ -4008,6 +4046,87 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
             Matrix4 identity = Matrix4.Identity;
             GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref identity);
+        }
+
+        // recomp (2026-10-16): Headless hosts record the multiplayer locator icons (PlayerHud.DrawLocatorIcon: the Prime
+        // Hunter, the Octolith and its carrier, Survival's campers, nodes, the Trooper's Squad Mark) as HUD quads; until then
+        // the app drew none. DrawIconModel draws the icon's quad at DS-pixel size (Size.Y / 192 a unit) centred on the
+        // position, its texture modulated by the colour and turned by the angle (the edge arrow). The quads are axis-aligned,
+        // so the tint and the turn are baked into a sprite (cached by texture, colour and the angle in 5 degree steps).
+        private readonly Dictionary<(int, ushort, int), HostHudSprite> _iconSprites = new();
+
+        private void RecordIconModel(Vector2 position, float angle, ModelInstance inst, ColorRgb color, float alpha)
+        {
+            Model model = inst.Model;
+            UpdateMaterials(model, 0);
+            Material material = model.Materials[0];
+            if (!_hostTextures.TryGetValue(material.TextureBindingId, out HostTexture? tex) || tex.Width == 0)
+            {
+                return;
+            }
+            // the quad, in model units (= DS pixels): the meshes' nodes' bounds, else the texture's size
+            float minX = Single.MaxValue, minY = Single.MaxValue, maxX = Single.MinValue, maxY = Single.MinValue;
+            foreach (Node node in model.Nodes)
+            {
+                if (node.MeshCount > 0 && node.MaxBounds.X > node.MinBounds.X && node.MaxBounds.Y > node.MinBounds.Y)
+                {
+                    minX = MathF.Min(minX, node.MinBounds.X);
+                    minY = MathF.Min(minY, node.MinBounds.Y);
+                    maxX = MathF.Max(maxX, node.MaxBounds.X);
+                    maxY = MathF.Max(maxY, node.MaxBounds.Y);
+                }
+            }
+            if (minX >= maxX)
+            {
+                (minX, maxX, minY, maxY) = (-tex.Width / 2f, tex.Width / 2f, -tex.Height / 2f, tex.Height / 2f);
+            }
+            int step = (int)MathF.Round(angle / 5) % 72;
+            if (step < 0)
+            {
+                step += 72;
+            }
+            var key = (material.TextureBindingId, (ushort)(color.Red | color.Green << 5 | color.Blue << 10), step);
+            float rad = MathHelper.DegreesToRadians(step * 5);
+            float cos = MathF.Cos(rad), sin = MathF.Sin(rad);
+            // the turned quad's box (model units, y up)
+            float boxX = 0, boxY = 0;
+            foreach ((float x, float y) in new[] { (minX, minY), (maxX, minY), (minX, maxY), (maxX, maxY) })
+            {
+                boxX = MathF.Max(boxX, MathF.Abs(x * cos - y * sin));
+                boxY = MathF.Max(boxY, MathF.Abs(x * sin + y * cos));
+            }
+            if (!_iconSprites.TryGetValue(key, out HostHudSprite? sprite))
+            {
+                // 4 sprite pixels a unit: the turned edges stay smooth at any HUD scale
+                const int Sub = 4;
+                int w = Math.Max(1, (int)MathF.Ceiling(boxX * 2 * Sub)), h = Math.Max(1, (int)MathF.Ceiling(boxY * 2 * Sub));
+                var pixels = new ColorRgba[w * h];
+                float r = color.Red / 31f, g = color.Green / 31f, b = color.Blue / 31f;
+                for (int py = 0; py < h; py++)
+                {
+                    for (int px = 0; px < w; px++)
+                    {
+                        // the sprite pixel's centre (y up) turned back into the quad
+                        float sx = (px + 0.5f) / Sub - boxX, sy = boxY - (py + 0.5f) / Sub;
+                        float qx = sx * cos + sy * sin, qy = -sx * sin + sy * cos;
+                        if (qx < minX || qx >= maxX || qy < minY || qy >= maxY)
+                        {
+                            continue;
+                        }
+                        // texcoord (0,0) = the quad's top-left
+                        int tx = Math.Clamp((int)((qx - minX) / (maxX - minX) * tex.Width), 0, tex.Width - 1);
+                        int ty = Math.Clamp((int)((maxY - qy) / (maxY - minY) * tex.Height), 0, tex.Height - 1);
+                        ColorRgba c = tex.Pixels[ty * tex.Width + tx];
+                        pixels[py * w + px] = new ColorRgba((byte)(c.Red * r), (byte)(c.Green * g), (byte)(c.Blue * b), c.Alpha);
+                    }
+                }
+                sprite = new HostHudSprite { Width = w, Height = h, Pixels = pixels };
+                _iconSprites[key] = sprite;
+            }
+            float scale = Size.Y / 192f;
+            float cx = position.X * 2 - 1, cy = 1 - position.Y * 2; // NDC
+            float hw = boxX * scale / (Size.X / 2), hh = boxY * scale / (Size.Y / 2);
+            HostHudQuad(sprite, cx - hw, cx + hw, cy + hh, cy - hh, alpha); // (DrawIconModel: the alpha alone)
         }
 
         // Headless hosts: the dialogs (PlayerDialog.DrawDialogs: message boxes, pickups, questions, scan results, and their
@@ -4062,6 +4181,22 @@ namespace MphRead
             if (inst.FlipVertical)
             {
                 (bottomPos, topPos) = (topPos, bottomPos);
+            }
+            if (inst.Live) // recomp: drawn from its HostTextures entry (re-uploaded when its Version changes)
+            {
+                if (!_hostTextures.ContainsKey(inst.BindingId))
+                {
+                    return;
+                }
+                HostHudItem live = NextHudItem();
+                live.Left = leftPos;
+                live.Right = rightPos;
+                live.Top = topPos;
+                live.Bottom = bottomPos;
+                live.Alpha = inst.Alpha;
+                live.UseMask = inst.UseMask;
+                live.BindingId = inst.BindingId;
+                return;
             }
             int sprite = InternHudSprite(inst.BindingId);
             if (sprite < 0)

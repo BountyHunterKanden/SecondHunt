@@ -90,10 +90,10 @@ namespace MphRead
         // Load a model + animation file straight from paths relative to the file system root, bypassing the metadata
         // tables. The recomp's front end uses it for the menu widgets the menu file names by path (e.g.
         // @"main menu\options_Model.bin" + @"main menu\options_Selected_Anim.bin"). Not cached.
-        public static Model ReadModelFile(string name, string modelPath, string? animationPath)
+        public static Model ReadModelFile(string name, string modelPath, string? animationPath, bool firstHunt = false)
         {
             var recolors = new List<RecolorMetadata>() { new RecolorMetadata("default", modelPath) };
-            return ReadModel(name, modelPath, animationPath, animationShare: null, recolors, firstHunt: false);
+            return ReadModel(name, modelPath, animationPath, animationShare: null, recolors, firstHunt);
         }
 
         public static ModelInstance GetRoomModelInstance(string name)
@@ -433,6 +433,11 @@ namespace MphRead
                 animations.MaterialGroupOffsets.AddRange(shared.MaterialGroupOffsets);
                 animations.TexcoordGroupOffsets.AddRange(shared.TexcoordGroupOffsets);
                 animations.TextureGroupOffsets.AddRange(shared.TextureGroupOffsets);
+            }
+            if (firstHunt)
+            {
+                // recomp: First Hunt's texture animation keys are relative to each material (FirstHunt/FirstHuntModels.cs)
+                FirstHuntModels.RemapTextureAnimations(animations.TextureAnimationGroups, materials, header.TextureCount, header.PaletteCount);
             }
             // NodePosition and NodeInitialPosition are always 0
             IReadOnlyList<Vector3Fx> nodePos = DoOffsets<Vector3Fx>(initialBytes, header.NodePosition, header.NodeCount);

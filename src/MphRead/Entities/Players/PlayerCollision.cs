@@ -138,7 +138,9 @@ namespace MphRead.Entities
                     hit = CollisionDetection.CheckSphereOverlapVolume(target.Volume, attacker._spireRockPosL, 0.5f, ref unused)
                         || CollisionDetection.CheckSphereOverlapVolume(target.Volume, attacker._spireRockPosR, 0.5f, ref unused);
                 }
-                if (hit)
+                // recomp (HostBotTickPace): the rocks ignore damage invulnerability, so vanilla's once-per-tick check hurts once
+                // per tick; MphRead checks every 60 Hz frame (twice the damage)
+                if (hit && (!HostBotTickPace || attacker._scene.FrameCount % 2 == 0))
                 {
                     Vector3 dir = Vector3.Zero;
                     if (!halfturret)
@@ -310,8 +312,8 @@ namespace MphRead.Entities
             }
             else if (Hunter == Hunter.Noxus && _altAttackTime >= Values.AltAttackStartup * 2) // todo: FPS stuff
             {
-                Vector3 between = target.HurtVolume.SpherePosition - Volume.SpherePosition;
-                float radius = target.HurtVolume.SphereRadius;
+                (Vector3 hurtPos, float radius) = HurtSphere(target.HurtVolume);
+                Vector3 between = hurtPos - Volume.SpherePosition;
                 if (between.Y > -radius && between.Y < radius)
                 {
                     float hMagSqr = between.X * between.X + between.Z * between.Z;
@@ -330,6 +332,20 @@ namespace MphRead.Entities
             return false;
         }
 
+        // recomp: the enemy alt attacks read the target's hurt volume as a sphere (MPH's enemies' all are); a host's
+        // cylinder or box (Echoes' crates) shares those fields with other values (a cylinder's "sphere" is its axis at
+        // (0, 1, 0) with its x position as the radius: every crate in reach from anywhere), so it's its centre and the
+        // radius that holds it
+        private static (Vector3 Position, float Radius) HurtSphere(CollisionVolume v)
+        {
+            return v.Type switch
+            {
+                VolumeType.Cylinder => (v.GetCenter(), MathF.Max(v.CylinderRadius, v.CylinderDot / 2)),
+                VolumeType.Box => (v.GetCenter(), new Vector3(v.BoxDot1, v.BoxDot2, v.BoxDot3).Length / 2),
+                _ => (v.SpherePosition, v.SphereRadius),
+            };
+        }
+
         public bool CheckAltAttackHitEnemy2(EnemyInstanceEntity target)
         {
             if (target.Flags.TestAny(EnemyFlags.Invincible | EnemyFlags.NoBombDamage))
@@ -338,14 +354,15 @@ namespace MphRead.Entities
             }
             if ((Hunter == Hunter.Trace || Hunter == Hunter.Weavel) && Flags2.TestFlag(PlayerFlags2.AltAttack))
             {
-                Vector3 between = _volume.SpherePosition - target.HurtVolume.SpherePosition;
+                (Vector3 hurtPos, float hurtRadius) = HurtSphere(target.HurtVolume);
+                Vector3 between = _volume.SpherePosition - hurtPos;
                 float distSqr = between.LengthFast;
                 if (distSqr == 0)
                 {
                     between = Vector3.UnitX;
                     distSqr = 1;
                 }
-                float radii = _volume.SphereRadius + target.HurtVolume.SphereRadius;
+                float radii = _volume.SphereRadius + hurtRadius;
                 if (distSqr < radii * radii)
                 {
                     target.TakeDamage(Values.AltAttackDamage, this);
@@ -610,6 +627,14 @@ namespace MphRead.Entities
             float v2;
             if (IsAltForm)
             {
+                // host hook (First Hunt rooms): FH's ball on the floor isn't pushed by ceilings (faces or their edges), only
+                // while airborne, so it rolls under the low lids (Regulator's maze: under the lid at y 12.38 with its centre at
+                // 12.18; measured in BizHawk on the cart)
+                if (HostFhBallRules && result.EntityCollision == null && result.Plane.Y < -0.5f
+                    && (Flags1.TestFlag(PlayerFlags1.Standing) || Flags1.TestFlag(PlayerFlags1.StandingPrevious)))
+                {
+                    return;
+                }
                 float altRad = Fixed.ToFloat(Values.AltColRadius);
                 Vector3 altPos = Position.AddY(Fixed.ToFloat(Values.AltColYPos));
                 if (result.Field0 == 0)
@@ -628,6 +653,12 @@ namespace MphRead.Entities
                     float dot = Vector3.Dot(between, edge);
                     float div = Math.Clamp(dot / edge.LengthSquared, 0, 1);
                     between = altPos - (result.EdgePoint1 + edge * div);
+                    if (HostFhBallRules && between.Y < 0 && result.EntityCollision == null
+                        && (Flags1.TestFlag(PlayerFlags1.Standing) || Flags1.TestFlag(PlayerFlags1.StandingPrevious)))
+                    {
+                        // (First Hunt: nor any edge above its centre, e.g. a low lid's front)
+                        return;
+                    }
                     float magSqr = between.LengthSquared;
                     if (magSqr >= altRad * altRad || magSqr <= 0)
                     {

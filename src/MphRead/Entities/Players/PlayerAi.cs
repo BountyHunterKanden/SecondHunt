@@ -10,9 +10,19 @@ namespace MphRead.Entities
 {
     public partial class PlayerEntity
     {
+        // recomp, dev only (App SoloArena.cs --es targets 1): bots think but press nothing, standing where they spawned
+        public static bool HostIdleBots { get; set; }
+
         public PlayerAiData AiData { get; init; }
         public NodeData3? ClosestNode { get; set; } = null;
         public int BotLevel { get; set; } = 0;
+        // recomp: vanilla's bot brain runs once per 30 Hz tick; MphRead runs it every 60 Hz frame. On: the aim turn step
+        // (5/15/20 deg per tick by level) is halved per frame, per-tick random rolls (dodge jumps, Sylux bombs, spotting a
+        // cloaked player; docs/ACCURACY.md A4) roll on tick frames only, and shot leading uses the beam's per-tick speed,
+        // so bots turn, dodge and lead like vanilla. Also per tick when on: random state gates, the hits a tick's state checks
+        // see, the visibility/node-queue updates; and Spire's rocks hurt once per tick (PlayerCollision CheckAltAttackHit1,
+        // any Spire, bot or not: vanilla's 8 per tick, MphRead's 8 per frame). Off = MphRead's (replays before format 30).
+        public static bool HostBotTickPace { get; set; } = true;
 
         public partial class PlayerAiData
         {
@@ -221,6 +231,10 @@ namespace MphRead.Entities
 
             public static void UpdateVisibilityAndGlobals(Scene scene)
             {
+                if (HostBotTickPace && scene.FrameCount % 2 != 0)
+                {
+                    return; // recomp: vanilla checks one player pair (and one queued node) per tick, not per frame
+                }
                 UpdateVisibility(scene);
                 UpdateGlobals(scene);
             }
@@ -253,7 +267,9 @@ namespace MphRead.Entities
                         pos2 = player2.Position;
                     }
                     CollisionResult discard = default;
-                    if (!CollisionDetection.CheckBetweenPoints(pos1, pos2, TestFlags.None, scene, ref discard))
+                    if (!CollisionDetection.CheckBetweenPoints(pos1, pos2, TestFlags.None, scene, ref discard)
+                        || discard.EntityCollision?.Entity is EntityBase shell // recomp: a turret occupant's own shell (PlayerEchoesSeat.cs)
+                        && (shell == player1.HostSeatShell || shell == player2.HostSeatShell))
                     {
                         _playerVisibility[_visIndex1, _visIndex2] = true;
                         _playerVisibility[_visIndex2, _visIndex1] = true;
@@ -591,7 +607,7 @@ namespace MphRead.Entities
                         throw new ProgramException("Unreachable AI button.");
                     }
                     bool prevDown = control.IsDown;
-                    if (button.IsDown)
+                    if (button.IsDown && !HostIdleBots) // recomp: HostIdleBots
                     {
                         Flags3 &= ~AiFlags3.NoInput;
                         button.FramesUp = 0;
@@ -642,8 +658,13 @@ namespace MphRead.Entities
                     AiButton button = _touchButtons.AllButtons[i];
                     if (button.IsDown)
                     {
-                        Flags3 &= ~AiFlags3.NoInput;
-                        if (button == _touchButtons.Morph || button == _touchButtons.Unmorph)
+                        if (!HostIdleBots) Flags3 &= ~AiFlags3.NoInput; // recomp: see below
+                        if (HostIdleBots)
+                        {
+                            // recomp: HostIdleBots also holds the touch screen's buttons (no morphing, no weapon switches),
+                            // and a held press isn't input (MPH's idle count runs, so its 10 s flourish plays)
+                        }
+                        else if (button == _touchButtons.Morph || button == _touchButtons.Unmorph)
                         {
                             _player.TrySwitchForms();
                         }
@@ -708,6 +729,12 @@ namespace MphRead.Entities
                 }
                 _player._buttonAimX = 0;
                 _player._buttonAimY = 0;
+                if (HostIdleBots)
+                {
+                    // recomp: HostIdleBots bots don't turn to aim either (they stand as placed, and stay idle)
+                    _buttonAimX = 0;
+                    _buttonAimY = 0;
+                }
                 if (_buttonAimX != 0)
                 {
                     Flags3 &= ~AiFlags3.NoInput;
@@ -742,13 +769,19 @@ namespace MphRead.Entities
                 Func2134594();
                 Func2148ABC();
                 Execute(_executionTree[0]);
+                ParalyzerCloseIn(); // recomp (before the unstick, which can still take over)
+                TurretErrand(); // recomp: Shooting Gallery's turret (PlayerEchoesSeat.cs; likewise)
+                DroneTestStep(); // recomp, dev: the launcher's Drone kill test (PlayerScoutDrone.cs)
                 if (HostBotUnstick) // recomp: Echoes arenas' generated graphs (PlayerAiUnstick.cs)
                 {
                     BotUnstickTick();
                 }
-                Array.Fill(_slotHits, 0);
-                Array.Fill(_slotDamage, 0);
-                DamageFromHalfturret = 0;
+                if (TickFrame) // recomp (HostBotTickPace): the tick's hits stay until the state checks (tick frames) saw them
+                {
+                    Array.Fill(_slotHits, 0);
+                    Array.Fill(_slotDamage, 0);
+                    DamageFromHalfturret = 0;
+                }
                 Flags2 &= ~AiFlags2.AiStart;
                 Flags2 &= ~AiFlags2.Bit16;
                 Flags2 &= ~AiFlags2.Bit17;
@@ -818,7 +851,7 @@ namespace MphRead.Entities
                         {
                             div = 4;
                         }
-                        if (Rng.GetRandomInt2((31 - alpha + rand) / div) != 0)
+                        if (!TickFrame || Rng.GetRandomInt2((31 - alpha + rand) / div) != 0)
                         {
                             // sktodo-ai: same as above
                             return;
@@ -1259,7 +1292,8 @@ namespace MphRead.Entities
                     for (int j = 0; j < data2.Data4.Count; j++)
                     {
                         AiPersonalityData4 data4 = data2.Data4[j];
-                        if (ExecuteFuncs3(context, data4.Func3Id, data4.Parameters) == 0)
+                        // recomp (HostBotTickPace): a random gate (210) rolls once per tick, as vanilla's, not every frame
+                        if (data4.Func3Id == 210 && !TickFrame || ExecuteFuncs3(context, data4.Func3Id, data4.Parameters) == 0)
                         {
                             noUpdate = true;
                             break;
@@ -2060,7 +2094,11 @@ namespace MphRead.Entities
             {
                 _weapon1 = 0;
                 Flags4 &= ~AiFlags4.Bit1;
-                if (CheckBeam(BeamType.Magmaul))
+                if (_player.AffinityBeam == BeamType.Paralyzer && CheckBeam(BeamType.Paralyzer))
+                {
+                    _weapon1 = 13; // recomp: Zero Suit's own stun beam comes first (index 13 = its BeamType)
+                }
+                else if (CheckBeam(BeamType.Magmaul))
                 {
                     _weapon1 = 6;
                 }
@@ -2079,6 +2117,10 @@ namespace MphRead.Entities
                 else if (CheckBeam(BeamType.PirateBlaster)) // recomp: the Pirate Blaster (index 11 = its BeamType)
                 {
                     _weapon1 = 11;
+                }
+                else if (CheckBeam(BeamType.Paralyzer)) // recomp: the Paralyzer (index 13 = its BeamType)
+                {
+                    _weapon1 = 13;
                 }
                 else if (CheckBeam(BeamType.VoltDriver))
                 {
@@ -2106,7 +2148,7 @@ namespace MphRead.Entities
                 int seenBits = 1 | 2;
                 bool sawAffinity = false;
                 int seenCount = 0;
-                Span<int> seenItems = stackalloc int[8]; // recomp: 7 -> 8 (+ the Pirate Blaster)
+                Span<int> seenItems = stackalloc int[9]; // recomp: 7 -> 9 (+ the Pirate Blaster, the Paralyzer)
                 foreach (ItemSpawnEntity itemSpawn in _scene.GetItemSpawnEntities())
                 {
                     // todo?: this condition is just for efficiency, but it's probably the wrong value since OC is also checked
@@ -2134,6 +2176,10 @@ namespace MphRead.Entities
                         {
                             type = ItemType.PirateBlaster; // recomp: the Trooper's affinity pickup is the blaster
                         }
+                        else if (affinityWeapon == BeamType.Paralyzer)
+                        {
+                            type = ItemType.Paralyzer; // recomp: Zero Suit's affinity pickup is the Paralyzer
+                        }
                     }
                     int index = type switch
                     {
@@ -2145,6 +2191,7 @@ namespace MphRead.Entities
                         ItemType.ShockCoil => 7,
                         ItemType.OmegaCannon => 8,
                         ItemType.PirateBlaster => 11, // recomp: index 11 = its BeamType
+                        ItemType.Paralyzer => 13, // recomp: index 13 = its BeamType
                         _ => 0
                     };
                     if ((seenBits & (1 << index)) == 0)
@@ -2181,7 +2228,7 @@ namespace MphRead.Entities
                 }
                 int affinityIndex = 0;
                 int candidateCount = 0;
-                Span<int> candidates = stackalloc int[9]; // recomp: 8 -> 9 (+ the Pirate Blaster)
+                Span<int> candidates = stackalloc int[10]; // recomp: 8 -> 10 (+ the Pirate Blaster, the Paralyzer)
                 bool includeMissile = _player.AffinityBeam == BeamType.Missile; // recomp: the seat's affinity beam
                 for (int i = includeMissile ? 1 : 2; i < 9; i++)
                 {
@@ -2202,6 +2249,15 @@ namespace MphRead.Entities
                     if (_player.AffinityBeam == BeamType.PirateBlaster)
                     {
                         affinityIndex = 11;
+                    }
+                }
+                // recomp: the same for the Paralyzer (index 13 = its BeamType); Zero Suit's affinity
+                if (CheckBeam(BeamType.Paralyzer))
+                {
+                    candidates[candidateCount++] = 13;
+                    if (_player.AffinityBeam == BeamType.Paralyzer)
+                    {
+                        affinityIndex = 13;
                     }
                 }
                 if (candidateCount == 1)
@@ -2505,6 +2561,12 @@ namespace MphRead.Entities
                     UpdateTargetItem(_player._availableWeapons[BeamType.PirateBlaster] ? FindItemForUa()
                         : FindItemForWeapon(ItemType.PirateBlaster, BeamType.PirateBlaster));
                 }
+                else if (_findWeaponIndex == 13)
+                {
+                    // recomp: the Paralyzer (UA when held, else its pickup)
+                    UpdateTargetItem(_player._availableWeapons[BeamType.Paralyzer] ? FindItemForUa()
+                        : FindItemForWeapon(ItemType.Paralyzer, BeamType.Paralyzer));
+                }
                 else
                 {
                     UpdateTargetItem(null);
@@ -2672,6 +2734,12 @@ namespace MphRead.Entities
                     // recomp: the Pirate Blaster (UA when held, else its pickup)
                     SetEntity(_player._availableWeapons[BeamType.PirateBlaster] ? FindItemSpawnForUa()
                         : FindItemSpawnForWeapon(ItemType.PirateBlaster, BeamType.PirateBlaster));
+                }
+                else if (_findWeaponIndex == 13)
+                {
+                    // recomp: the Paralyzer (UA when held, else its pickup)
+                    SetEntity(_player._availableWeapons[BeamType.Paralyzer] ? FindItemSpawnForUa()
+                        : FindItemSpawnForWeapon(ItemType.Paralyzer, BeamType.Paralyzer));
                 }
                 else
                 {
@@ -3475,7 +3543,7 @@ namespace MphRead.Entities
                     }
                     else if (context.FieldF == 69)
                     {
-                        if (Rng.GetRandomInt2(15 * _player.SyluxBombCount + 10) == 0 // sktodo-ai: FPS stuff if this is called repeatedly
+                        if (TickFrame && Rng.GetRandomInt2(15 * _player.SyluxBombCount + 10) == 0 // recomp: per tick (HostBotTickPace)
                             && _player._abilities.TestFlag(AbilityFlags.Bombs)
                             && _player._bombAmmo > 0 && _player._bombCooldown == 0)
                         {
@@ -3524,7 +3592,7 @@ namespace MphRead.Entities
                 {
                     PressButton(_buttons.L, 5);
                 }
-                if (Flags2.TestFlag(AiFlags2.Bit21) && Rng.GetRandomInt2(10) == 0 // sktodo-ai: FPS stuff if this is called repeatedly
+                if (Flags2.TestFlag(AiFlags2.Bit21) && TickFrame && Rng.GetRandomInt2(10) == 0 // recomp: per tick (HostBotTickPace)
                     && !_player.IsAltForm && !_player.IsMorphing && !_player.Flags1.TestFlag(PlayerFlags1.UsedJump))
                 {
                     PressButton(_buttons.L, 5);
@@ -3864,7 +3932,7 @@ namespace MphRead.Entities
                 _targetPlayer.GetPosition(out _field1048);
                 _field1048 = new Vector3(
                     _field1048.X + (Rng.GetRandomInt2(8192) / 4096f - 1), // -1.0f to 1.0f // todo: accuracy?
-                    _field1048.Y + (_targetPlayer.IsAltForm ? _targetPlayer.Values.AltColYPos : 0.5f),
+                    _field1048.Y + (_targetPlayer.IsAltForm ? AltColY(_targetPlayer) : 0.5f),
                     _field1048.Z + (Rng.GetRandomInt2(8192) / 4096f - 1)
                 );
                 if (!Func213842C())
@@ -3996,7 +4064,7 @@ namespace MphRead.Entities
                     }
                     Func21436D8();
                 }
-                if (Flags2.TestFlag(AiFlags2.Bit10) && Rng.GetRandomInt2(10) == 0 && !_player.IsAltForm && !_player.IsMorphing
+                if (Flags2.TestFlag(AiFlags2.Bit10) && TickFrame && Rng.GetRandomInt2(10) == 0 && !_player.IsAltForm && !_player.IsMorphing
                     && !_player.Flags1.TestFlag(PlayerFlags1.UsedJump) && _buttons.L.FramesUp > 5 * 2) // todo: FPS stuff
                 {
                     _buttons.L.IsDown = true;
@@ -4825,7 +4893,7 @@ namespace MphRead.Entities
                 {
                     Debug.Assert(_targetPlayer != null);
                     _targetPlayer.GetPosition(out Vector3 targetPos);
-                    targetPos = targetPos.AddY(_targetPlayer.IsAltForm ? _targetPlayer.Values.AltColYPos : 0.5f);
+                    targetPos = targetPos.AddY(_targetPlayer.IsAltForm ? AltColY(_targetPlayer) : 0.5f);
                     if (Func3_2139A1C(context, targetPos, angleCos: 0.5f, maxDistSqr: 15 * 15))
                     {
                         return 1;
@@ -4941,6 +5009,12 @@ namespace MphRead.Entities
                     // recomp: the Pirate Blaster (UA when held, else its pickup)
                     return (_player._availableWeapons[BeamType.PirateBlaster] ? FindItemForUa()
                         : FindItemForWeapon(ItemType.PirateBlaster, BeamType.PirateBlaster)) != null ? 1 : 0;
+                }
+                if (_findWeaponIndex == 13)
+                {
+                    // recomp: the Paralyzer (UA when held, else its pickup)
+                    return (_player._availableWeapons[BeamType.Paralyzer] ? FindItemForUa()
+                        : FindItemForWeapon(ItemType.Paralyzer, BeamType.Paralyzer)) != null ? 1 : 0;
                 }
                 return 0;
             }
@@ -6522,6 +6596,22 @@ namespace MphRead.Entities
             private static readonly IReadOnlyList<float> _dotValues = [255 / 256f, 3956 / 4096f, 3849 / 4096f];
             private static readonly IReadOnlyList<float> _aimValues = [5, 15, 20];
 
+            // recomp: the largest aim turn per call (HostBotTickPace: vanilla's per-tick step spread over its two frames)
+            private float AimStep => HostBotTickPace ? _aimValues[_player.BotLevel] / 2 : _aimValues[_player.BotLevel];
+
+            // recomp: the snap to an angle under the step's dot threshold (HostBotTickPace: never past the per-frame step)
+            private float AimSnap(float dot)
+            {
+                float angle = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                return HostBotTickPace ? MathF.Min(angle, AimStep) : angle;
+            }
+
+            // recomp: a per-tick random roll made by a per-frame function rolls on tick frames only (HostBotTickPace)
+            private bool TickFrame => !HostBotTickPace || _scene.FrameCount % 2 == 0;
+            // AltColYPos is fx32: two MphRead sites added it raw (a morph ball target aimed thousands of units up); fixed with the pace
+            private static float AltColY(PlayerEntity target) => HostBotTickPace
+                ? Fixed.ToFloat(target.Values.AltColYPos) : target.Values.AltColYPos;
+
             // todo: member name -- Func2145C14() updates X, Func21447E8() updates X and Y
             private void Func2145C14(Vector3 position)
             {
@@ -6550,11 +6640,11 @@ namespace MphRead.Entities
                 {
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = AimSnap(dot);
                     }
                     else
                     {
-                        _buttonAimX = _aimValues[_player.BotLevel];
+                        _buttonAimX = AimStep;
                     }
                     if (Vector3.Cross(vec1, vec2).Y < 0)
                     {
@@ -6569,12 +6659,12 @@ namespace MphRead.Entities
                 var vec1 = new Vector3(_player.CameraInfo.Field48, 0, _player.CameraInfo.Field4C);
                 Vector3 vec2 = _field1038.X != 0 || _field1038.Z != 0 ? _field1038.WithY(0).Normalized() : vec1;
                 float dot = Vector3.Dot(vec1, vec2);
-                float value = _aimValues[_player.BotLevel];
+                float value = AimStep;
                 if (dot < 1)
                 {
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = AimSnap(dot);
                     }
                     else
                     {
@@ -6717,7 +6807,8 @@ namespace MphRead.Entities
                             {
                                 finalSpeed = weapon.UnchargedFinalSpeed / 4096f / 2; // todo: FPS stuff
                             }
-                            vec /= finalSpeed; // sktodo-ai: FPS stuff, by usage --> leading shots
+                            // recomp: vec is per tick, finalSpeed per 60 Hz frame (HostBotTickPace: the per-tick speed, else 2x the lead)
+                            vec /= HostBotTickPace ? finalSpeed * 2 : finalSpeed; // sktodo-ai: FPS stuff, by usage --> leading shots
                         }
                         _field1048 = targetPos + vec;
                     }
@@ -6808,7 +6899,7 @@ namespace MphRead.Entities
                 Func2145738(_field1048);
                 if (Flags4.TestFlag(AiFlags4.Bit2))
                 {
-                    float aimValue = _aimValues[_player.BotLevel] / 2;
+                    float aimValue = AimStep / 2;
                     _buttonAimX = Math.Clamp(_buttonAimX, -aimValue, aimValue);
                     _buttonAimY = Math.Clamp(_buttonAimY, -aimValue, aimValue);
                 }
@@ -6834,13 +6925,13 @@ namespace MphRead.Entities
                 toPos = toPos.WithY(0);
                 toPos = toPos != Vector3.Zero ? toPos.Normalized() : toTarget;
                 float dot = Vector3.Dot(toTarget, toPos);
-                float value = _aimValues[_player.BotLevel];
+                float value = AimStep;
                 if (dot < 1)
                 {
                     // sktodo-ai: add a common function for this
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = AimSnap(dot);
                     }
                     else
                     {
@@ -6918,6 +7009,38 @@ namespace MphRead.Entities
                     }
                 }
                 return Flags2.TestFlag(AiFlags2.Bit17);
+            }
+
+            // recomp: Zero Suit bots and the Paralyzer's charged stun (reach ~2 units from the muzzle: Paralyzer.ChargedSpeed/ChargedLifespan).
+            // Start charging inside the first range (a started charge is kept out to twice it), fire inside the second, and
+            // let a full charge go after holding it this many frames past full without a close target
+            private const float ParalyzerChargeRange = 8; // (16 and 5.5 for the 6-unit reach before 10-15)
+            private const float ParalyzerFireRange = 2.5f; // (centre to centre: the reach is from her muzzle)
+            private const int ParalyzerHoldFrames = 150 * 2;
+
+            // recomp: a Zero Suit bot with a target she can stun walks straight at it while she charges the Paralyzer (and
+            // once it's in range to start), so the ~2-unit charged blast can land (owner 10-15: "make the bots close in
+            // before charging"). Not in alt form, nor at a target well above or below her (the unstick still takes over).
+            private void ParalyzerCloseIn()
+            {
+                if (_player.IsAltForm || _player.CurrentWeapon != BeamType.Paralyzer || _targetPlayer == null
+                    || !Flags2.TestFlag(AiFlags2.TargetPlayer) || !_targetPlayer.ParalyzerStunnable
+                    || !Paralyzer.Stuns(_player.EquipWeapon, charged: true) || !CanChargeWeapon())
+                {
+                    return;
+                }
+                Vector3 toTarget = _targetPlayer.Position - _player.Position;
+                float range = _player.EquipInfo.ChargeLevel > 0 ? ParalyzerChargeRange * 2 : ParalyzerChargeRange;
+                if (toTarget.LengthSquared >= range * range || MathF.Abs(toTarget.Y) > 3
+                    || toTarget.WithY(0).LengthSquared < ParalyzerFireRange * ParalyzerFireRange * 0.25f)
+                {
+                    return;
+                }
+                _buttons.X.IsDown = false;
+                _buttons.B.IsDown = false;
+                _buttons.Y.IsDown = false;
+                _buttons.A.IsDown = false;
+                Func2142AE8(_targetPlayer.Position); // forward / strafe toward it (the aim is already on it)
             }
 
             // todo: member name
@@ -7045,6 +7168,46 @@ namespace MphRead.Entities
                     {
                         _buttons.R.IsDown = true;
                         SetRandomDelay();
+                    }
+                }
+                else if (beam == BeamType.Paralyzer)
+                {
+                    // recomp: the Paralyzer has no touch button: equip it directly. Its charged shot only reaches ~2 units and
+                    // only Zero Suit's stuns, so she charges once a target that can be stunned comes within ParalyzerChargeRange
+                    // and lets go at full charge inside ParalyzerFireRange (holding a full charge up to ParalyzerHoldFrames);
+                    // otherwise short presses that end before the charge starts (one bolt a press since 10-15)
+                    if (_player.CurrentWeapon != beam)
+                    {
+                        _player.TryEquipWeapon(beam);
+                    }
+                    else if (Paralyzer.Stuns(weapon, charged: true) && CanChargeWeapon() && _targetPlayer != null
+                        && Flags2.TestFlag(AiFlags2.TargetPlayer) && _targetPlayer.ParalyzerStunnable
+                        && (_targetPlayer.Position - _player.Position).LengthSquared
+                            < (equip.ChargeLevel > 0 ? ParalyzerChargeRange * ParalyzerChargeRange * 4 : ParalyzerChargeRange * ParalyzerChargeRange))
+                    {
+                        bool full = equip.ChargeLevel >= weapon.FullCharge * 2; // todo: FPS stuff
+                        bool close = (_targetPlayer.Position - _player.Position).LengthSquared < ParalyzerFireRange * ParalyzerFireRange;
+                        if (full && (close || _buttons.R.FramesDown > weapon.FullCharge * 2 + ParalyzerHoldFrames))
+                        {
+                            SetRandomDelay(); // release: the charged shot
+                        }
+                        else if (_buttons.R.FramesDown > 0 || _buttons.R.FramesUp > _shotDelay || equip.ChargeLevel > 0)
+                        {
+                            _buttons.R.IsDown = true;
+                        }
+                    }
+                    else if (_buttons.R.FramesDown > 0 && _buttons.R.FramesDown < _shotDelay)
+                    {
+                        _buttons.R.IsDown = true;
+                    }
+                    else if (_buttons.R.FramesUp <= _shotDelay)
+                    {
+                        SetRandomDelay();
+                    }
+                    else
+                    {
+                        _buttons.R.IsDown = true;
+                        _shotDelay = (int)Rng.GetRandomInt2(weapon.MinCharge * 2); // todo: FPS stuff
                     }
                 }
                 else if (beam == BeamType.Battlehammer)
@@ -7227,6 +7390,10 @@ namespace MphRead.Entities
                     {
                         _touchButtons.Magmaul.IsDown = true;
                     }
+                    else if (beam == BeamType.Paralyzer)
+                    {
+                        _player.TryEquipWeapon(beam); // recomp: no touch button
+                    }
                     return;
                 }
                 // note: the game checks the potentially overriden bot weapon's charge cost (0 for 1P) here, but it normally
@@ -7334,7 +7501,7 @@ namespace MphRead.Entities
                 if (facingY != 0)
                 {
                     float aimY = MathHelper.RadiansToDegrees(MathF.Acos(facingY)) - 90;
-                    float value = _aimValues[_player.BotLevel];
+                    float value = AimStep;
                     _buttonAimY = Math.Clamp(aimY, -value, value);
                 }
             }
@@ -7762,11 +7929,11 @@ namespace MphRead.Entities
                 {
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = AimSnap(dot);
                     }
                     else
                     {
-                        _buttonAimX = _aimValues[_player.BotLevel];
+                        _buttonAimX = AimStep;
                     }
                     if (Vector3.Cross(altVec, toNode).Y < 0)
                     {
@@ -8134,7 +8301,8 @@ namespace MphRead.Entities
                 }
                 else
                 {
-                    if (_player.Speed.Y >= 0.0625f / 2 || _player.Speed.Y < -0.0625f / 2 // todo: FPS stuff
+                    float stillY = HostBotTickPace ? 0.0625f : 0.0625f / 2; // recomp: Speed is per tick, so vanilla's 0.0625 as is
+                    if (_player.Speed.Y >= stillY || _player.Speed.Y < -stillY // todo: FPS stuff
                         || _player.IsMorphing || _player.IsUnmorphing)
                     {
                         context.Field40 = 0;
@@ -10621,7 +10789,7 @@ namespace MphRead.Entities
                 if (itemType == ItemType.VoltDriver || itemType == ItemType.Battlehammer || itemType == ItemType.Imperialist
                     || itemType == ItemType.Judicator || itemType == ItemType.Magmaul || itemType == ItemType.ShockCoil
                     || itemType == ItemType.OmegaCannon || itemType == ItemType.AffinityWeapon
-                    || itemType == ItemType.PirateBlaster) // recomp
+                    || itemType == ItemType.PirateBlaster || itemType == ItemType.Paralyzer) // recomp
                 {
                     int weapon = (int)itemType - 4;
                     if (itemType == ItemType.AffinityWeapon)
@@ -10631,6 +10799,10 @@ namespace MphRead.Entities
                     else if (itemType == ItemType.PirateBlaster)
                     {
                         weapon = (int)BeamType.PirateBlaster; // recomp
+                    }
+                    else if (itemType == ItemType.Paralyzer)
+                    {
+                        weapon = (int)BeamType.Paralyzer; // recomp
                     }
                     return _player.AvailableWeapons[weapon];
                 }

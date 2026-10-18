@@ -45,9 +45,10 @@ namespace MphRecomp.Frontend
         private MenuSounds? _cardSounds;
         private CardInfo[]? _cardInfos;
 
-        // what a card shows, read as the page comes in and after every import (not each frame: ImportGames.Game sorts)
+        // what a card shows, read as the page comes in and after every import (not each frame: ImportGames.Game sorts);
+        // Stale: an update changed how some of its items are made (UPDATE on its page) -> the red badge in its corner
         private sealed record CardInfo(ImportGames.GameRow Row, bool Known, int Done, int Total, List<(string Kind, int Count)> Kinds,
-            ImportPicked? Source = null, List<ImportItemInfo>? Shown = null);
+            ImportPicked? Source = null, List<ImportItemInfo>? Shown = null, bool Stale = false);
 
         // IMPORT GAMES' folder (the settings file's): the picked discs' banners and the imports' renders are cached there
         private string? ImportRoot => _settingsPath == null ? null : Path.GetDirectoryName(_settingsPath);
@@ -140,7 +141,8 @@ namespace MphRecomp.Frontend
                 if (row.Id == ImportGames.TrilogyId)
                 {
                     (int tDone, int tTotal) = Import.TrilogyCount();
-                    cards[k] = new CardInfo(row, tTotal > 0, tDone, tTotal, new(), Import.Source(row.Id));
+                    bool tStale = ImportGames.TrilogyGames.Any(id => Import.Game(id)?.Items.Any(i => i.Status == ItemImportStatus.Stale) == true);
+                    cards[k] = new CardInfo(row, tTotal > 0, tDone, tTotal, new(), Import.Source(row.Id), Stale: tStale);
                     continue;
                 }
                 ImportGameInfo? g = row.Available ? Import.Game(row.Id) : null;
@@ -163,7 +165,7 @@ namespace MphRecomp.Frontend
                 var shown = g.Items.Where(ImportGames.Imported).OrderBy(i => ImportGames.IsSuit(i) ? 0 : i.Kind == "hd" && !ImportGames.IsBall(i) ? 1
                     : ImportGames.IsBall(i) ? 2 : 3).ToList();
                 cards[k] = new CardInfo(row, true, g.Items.Count(i => i.Status == ItemImportStatus.Complete), g.Items.Count, kinds,
-                    Import.Source(row.Id), shown);
+                    Import.Source(row.Id), shown, g.Items.Any(i => i.Status == ItemImportStatus.Stale));
             }
             _cardInfos = cards;
         }
@@ -181,7 +183,13 @@ namespace MphRecomp.Frontend
                 if (k >= 0 && k < Cards) _cardFocus = k;
             }
             FocusCard(menu, _cardFocus);
+            // come from outside IMPORT GAMES (not back from a game's page): the box asks about updates (FrontendSession)
+            if (_lastPage != _importGameRows?.Page && _lastPage != _songRows?.Page && _lastPage != _songFilterRows?.Page) UpdateNoticeDue = true;
         }
+
+        // IMPORT GAMES was just come to: FrontendSession asks "n items need updates. update them all now?" once the page is
+        // settled (owner 2026-10-17: "a notice when you go to the screen if you need updates ... with a check or x")
+        public bool UpdateNoticeDue { get; set; }
 
         private void FocusCard(MenuEngine menu, int focus)
         {
@@ -354,6 +362,9 @@ namespace MphRecomp.Frontend
                 y -= KindPitch;
             }
 
+            // import again: the red badge over the card's upper left corner (owner 2026-10-16), on top of the plate
+            if (info.Stale) Picture(ImportCardPictures.Alert, x0 - AlertBadge / 2 + AlertIn, top + AlertBadge / 2 - AlertIn, AlertBadge, off: false, tag);
+
             // how many are imported and the bar; "not yet" on Prime 4
             float countTop = bottom + CountFromBottom;
             if (soon || !info.Known)
@@ -367,6 +378,9 @@ namespace MphRecomp.Frontend
 
         // the banner on a card: 2.9 times its 96 x 32 (the mockup's 278 x 93 px), its top 6 px above the title's
         private const float BannerCardW = 56.24f, BannerCardH = 18.75f, BannerCardLift = 1.21f, BannerCardBlock = 19.56f;
+
+        // the import-again badge: its centre this far inside the card's corner
+        private const float AlertBadge = 11.31f, AlertIn = 1.21f;
 
         // the card's render, the mockup's emblem in its corner (74 px, 8 in)
         private const float CornerEmblem = 14.95f, CornerInset = 1.62f;

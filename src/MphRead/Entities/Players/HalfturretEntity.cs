@@ -49,13 +49,21 @@ namespace MphRead.Entities
         // recomp: hits on the standing body (owner 2026-10-09): a segment `radius` wide (a beam's, the drone laser's) hits
         // the whole biped standing there -- a player's own standing cylinder (BeamProjectileEntity), MinPickupHeight to
         // MaxPickupHeight around HostBodyPosition, BipedColRadius wide -- not the turret's 0.45 sphere. Still a Halfturret
-        // hit, so no headshots (the owner is the drone, in alt form).
+        // hit; its headshots: HostBodyHeadshot.
         public bool HostBodyHit(Vector3 from, Vector3 to, float radius, ref CollisionResult result)
         {
             float minY = Fixed.ToFloat(Owner.Values.MinPickupHeight);
             float height = Fixed.ToFloat(Owner.Values.MaxPickupHeight) - minY;
             return CollisionDetection.CheckCylindersOverlap(from, to, HostBodyPosition.AddY(minY), Vector3.UnitY, height,
                 Fixed.ToFloat(Owner.Values.BipedColRadius) + radius, ref result);
+        }
+
+        // recomp: a hit at `at` on the standing body is in its head zone (owner 2026-10-15): the top 0.3 of that cylinder,
+        // measured from HostBodyPosition as a standing hunter's is from his Position (BeamProjectileEntity's own test)
+        public bool HostBodyHeadshot(Vector3 at)
+        {
+            return Owner.HostScoutDrone && Owner.HostDroneBodyHeadshots
+                && at.Y - HostBodyPosition.Y >= Fixed.ToFloat(Owner.Values.MaxPickupHeight) - 0.3f;
         }
 
         public HalfturretEntity(PlayerEntity owner, Scene scene) : base(EntityType.Halfturret, scene)

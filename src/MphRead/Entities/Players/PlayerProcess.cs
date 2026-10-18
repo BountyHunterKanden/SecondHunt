@@ -20,6 +20,10 @@ namespace MphRead.Entities
         // The HUD only: the match plays the same. Default off.
         public static bool HostNoRespawnPrompt { get; set; }
 
+        // host hook: the main player spawns at once, the first time and after each death, with no "press FIRE" (and so no
+        // intro's rules screen: a spawn ends the intro). TRY CONTROLS (App SoloArena.cs). Default off.
+        public static bool HostSpawnAtOnce { get; set; }
+
         // host hook: the main player's sounds come from where they are, like anyone else's, instead of "your own" (a
         // replay listening from another player or a free cam). Sound only. Default off.
         public static bool HostMainSoundsPlaced { get; set; }
@@ -47,6 +51,9 @@ namespace MphRead.Entities
                 return LoadFlags.TestFlag(LoadFlags.SlotActive);
             }
             // todo?: something with wifi lockjaw bomb
+            HyperBallProcess(); // recomp: Dark Samus's Hyper Ball (PlayerHyperBall.cs)
+            FirstHuntFrame(); // recomp: a First Hunt level's match rules (FirstHunt/PlayerFirstHunt.cs)
+            PrimeMapPieceFrame(); // recomp: the map's corridors/chambers she enters (PlayerPrimeHud.cs)
             if (Flags2.TestFlag(PlayerFlags2.UnequipOmegaCannon))
             {
                 UnequipOmegaCannon();
@@ -202,11 +209,13 @@ namespace MphRead.Entities
                         if (IsMainPlayer && GameState.Multiplayer) // todo: and some global is not set
                         {
                             // press FIRE to begin / press FIRE to respawn
-                            int messageId = CameraSequence.Current?.IsIntro == true ? 245 : 244;
+                            // (recomp: begin too before the first spawn in a room with a set view instead of an intro: HostPreSpawnView)
+                            int messageId = CameraSequence.Current?.IsIntro == true
+                                || !LoadFlags.TestFlag(LoadFlags.Spawned) && HostPreSpawnView?.Invoke(_scene) != null ? 245 : 244;
                             if (!Bugfixes.NoStrayRespawnText || time > 0
                                 || GameState.Mode != GameMode.Survival && GameState.Mode != GameMode.SurvivalTeams)
                             {
-                                if (!HostNoRespawnPrompt) QueueHudMessage(128, 162, 1 / 1000f, 0, messageId);
+                                if (!HostNoRespawnPrompt && !HostSpawnAtOnce) QueueHudMessage(128, 162, 1 / 1000f, 0, messageId);
                                 if (time < 150 * 2) // todo: FPS stuff
                                 {
                                     string message = Text.Strings.GetHudMessage(246); // SPAWNING IN %d...
@@ -216,11 +225,12 @@ namespace MphRead.Entities
                             }
                         }
                         // network play: a match client never spawns anyone itself; the host's spawn arrives (PlayerNet.cs)
-                        if (!NetClient && (GameState.SinglePlayer || Controls.Shoot.IsDown || time <= 0 || IsBot)) // todo: or forced
+                        if (!NetClient && (GameState.SinglePlayer || Controls.Shoot.IsDown || time <= 0 || IsBot || FirstHuntSpawnNow
+                            || HostSpawnAtOnce && IsMainPlayer)) // todo: or forced
                         {
                             // todo?: something with wi-fi
                             // else...
-                            PlayerSpawnEntity? respawn = GetRespawnPoint();
+                            PlayerSpawnEntity? respawn = HostFirstHunt ? FirstHuntRespawnPoint() : GetRespawnPoint();
                             if (respawn != null)
                             {
                                 Vector3 position = ForcedSpawnPos ?? respawn.Position;
@@ -264,6 +274,7 @@ namespace MphRead.Entities
             {
                 _disruptedTimer--;
             }
+            UpdateSquadMark(); // recomp: the Trooper's Squad Mark wears off (PlayerSquadMark.cs)
             if (GameState.Mode == GameMode.Survival || GameState.Mode == GameMode.SurvivalTeams)
             {
                 if (Flags2.TestFlag(PlayerFlags2.RadarReveal))
@@ -315,7 +326,9 @@ namespace MphRead.Entities
                     }
                 }
             }
-            if (_timeSinceHitTarget != UInt16.MaxValue && ++_timeSinceHitTarget > 1)
+            // recomp: the game drops the Shock Coil's ramp after 2 ticks without a hit (rev 1 arm9 0x200FE04: > 1 tick), 4 frames
+            // here; MphRead's > 1 frame dropped it after one missed tick. Off (> 1): replays before format 40
+            if (_timeSinceHitTarget != UInt16.MaxValue && ++_timeSinceHitTarget > (HostShockCoilGrace ? 1 * 2 + 1 : 1)) // todo: FPS stuff
             {
                 _shockCoilTimer = 0;
                 _shockCoilTarget = null;
@@ -383,6 +396,7 @@ namespace MphRead.Entities
                 }
             }
             // todo?: FH leftover ammo recharge stuff
+            FirstHuntAmmo(); // recomp: that, in a First Hunt level (FirstHunt/PlayerFirstHunt.cs)
             if (_timeSinceMorphCamera != UInt16.MaxValue)
             {
                 _timeSinceMorphCamera++;
@@ -713,7 +727,7 @@ namespace MphRead.Entities
                     }
                     int effectId = Metadata.ChargeEffectIds[PirateBlaster.BaseIndex(CurrentWeapon)];
                     _chargeEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, FxMuzzlePos); // recomp: HostFxMuzzle
-                    if (!IsMainPlayer && _chargeEffect != null)
+                    if ((!IsMainPlayer || CurrentWeapon == BeamType.Paralyzer && HostOwnParalyzerLook) && _chargeEffect != null) // recomp
                     {
                         _chargeEffect.SetDrawEnabled(false);
                     }
@@ -734,7 +748,7 @@ namespace MphRead.Entities
                         {
                             _chargeEffect.SetElementExtension(true);
                             Flags2 |= PlayerFlags2.ChargeEffect;
-                            if (!IsMainPlayer)
+                            if (!IsMainPlayer || CurrentWeapon == BeamType.Paralyzer && HostOwnParalyzerLook) // recomp: Brawl look
                             {
                                 _chargeEffect.SetDrawEnabled(false);
                             }
@@ -860,9 +874,13 @@ namespace MphRead.Entities
             if (AttachedEnemy != null && !IsAltForm && (_bipedModel2.AnimInfo.Index[0] != (int)PlayerAnimation.Unmorph
                 || _bipedModel2.AnimInfo.Flags[0].TestFlag(AnimFlags.Ended)))
             {
-                if (AttachedEnemy.EnemyType == EnemyType.Temroid)
+                if (AttachedEnemy is Enemy02Entity temroid)
                 {
-                    ((Enemy02Entity)AttachedEnemy).UpdateAttached(this);
+                    temroid.UpdateAttached(this);
+                }
+                else if (AttachedEnemy is FirstHunt.FhMetroidEntity fhMetroid) // recomp: First Hunt's Metroid (FirstHunt/Enemies)
+                {
+                    fhMetroid.UpdateAttached(this);
                 }
                 else if (AttachedEnemy.EnemyType == EnemyType.Quadtroid)
                 {
@@ -1002,7 +1020,9 @@ namespace MphRead.Entities
                 float diff = normalFov - currentFov;
                 if (MathF.Abs(diff) >= 0.1f * 2)
                 {
-                    currentFov += diff / 4; // todo: FPS stuff (balances out here)
+                    // recomp: the game eases a quarter of the way a 30 Hz tick (0x020118D8): 1 - sqrt(0.75) = 0.134 a 60 Hz
+                    // frame (MphRead took a quarter a frame, twice as fast; HostVanillaZoom off keeps that for old replays)
+                    currentFov += diff * (HostVanillaZoom ? 0.1340f : 1 / 4f); // todo: FPS stuff (balances out here)
                     CameraInfo.Fov = currentFov;
                 }
                 else
@@ -1182,13 +1202,15 @@ namespace MphRead.Entities
             // host hook (Echoes arenas): a same-arc pad flies the alt forms on the biped's arc (biped gravity in
             // PlayerInput, so no lock extension); false for every MPH pad
             _jumpPadSameArc = jumpPad.SameArc;
+            _jumpPadKeepPush = jumpPad.KeepPush;
             if (_jumpPadSameArc && JumpPadEntity.HostSameArcSteer)
             {
                 // the stick back after MPH's minimum like a lock-0 pad (owner: the pair's 1.5 s felt long next to the
                 // single pad); the pad's lock keeps only its gravity hold, so the arc is the same
                 _jumpPadControlLockMin = 5 * 2; // todo: FPS stuff
             }
-            if (IsAltForm && !_jumpPadSameArc)
+            // (a First Hunt pad, KeepPush: FH adds no lock for the alt form)
+            if (IsAltForm && !_jumpPadSameArc && !_jumpPadKeepPush)
             {
                 float accelY = _jumpPadAccel.Y;
                 float altGrav = Fixed.ToFloat(Values.AltAirGravity);
@@ -1210,6 +1232,7 @@ namespace MphRead.Entities
             {
                 return;
             }
+            FirstHuntPickUps(); // recomp: a First Hunt level's items (FirstHunt/PlayerFirstHunt.cs)
             // todo: visualize
             float distSqr = _volume.SphereRadius + 0.45f;
             distSqr *= distSqr;
@@ -1304,6 +1327,7 @@ namespace MphRead.Entities
                 case ItemType.OmegaCannon:
                 case ItemType.AffinityWeapon:
                 case ItemType.PirateBlaster: // recomp
+                case ItemType.Paralyzer: // recomp
                     pickedUp = true;
                     PickUpWeapon(item.ItemType);
                     break;
@@ -1434,6 +1458,7 @@ namespace MphRead.Entities
                     ItemType.ShockCoil => BeamType.ShockCoil,
                     ItemType.OmegaCannon => BeamType.OmegaCannon,
                     ItemType.PirateBlaster => BeamType.PirateBlaster, // recomp
+                    ItemType.Paralyzer => BeamType.Paralyzer, // recomp
                     _ => BeamType.None
                 };
             }
@@ -1539,7 +1564,8 @@ namespace MphRead.Entities
             if (!force && (IsMorphing || IsUnmorphing || _frozenTimer > 0 || _field6D0 || _deathaltTimer > 0
                     || Flags2.TestFlag(PlayerFlags2.NoFormSwitch)
                     || !IsAltForm && Flags2.TestFlag(PlayerFlags2.BipedStuck)
-                    || IsAltForm && MorphCamera != null))
+                    || IsAltForm && MorphCamera != null
+                    || HostSeated || HostSlotHeld)) // recomp: no switching in the turret or its bomb slot (a bot's touch buttons come here; PlayerEchoesSeat.cs)
             {
                 if (IsMainPlayer && (CameraSequence.Current == null || !CameraSequence.Current.BlockInput))
                 {

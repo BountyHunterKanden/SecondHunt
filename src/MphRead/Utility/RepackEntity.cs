@@ -28,6 +28,12 @@ namespace MphRead.Utility
             return RepackEntities(entities);
         }
 
+        // Host (recomp): a First Hunt entity file anywhere (imported First Hunt arenas), as MPH entity editors
+        public static List<EntityEditorBase> FhEntitiesAsMph(string fullPath)
+        {
+            return ConvertFhToMph(GetFhEntities(fullPath, fullPath: true));
+        }
+
         public static byte[] RepackFhEntities(string room, RepackFilter filter = RepackFilter.All)
         {
             RoomMetadata meta = Metadata.RoomMetadata[room];

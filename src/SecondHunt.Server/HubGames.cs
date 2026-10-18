@@ -34,6 +34,9 @@ namespace SecondHunt.Server
             // relay slot -> player code of a seat dropped for its silence (DropQuietSeats) while the match runs: it gets the
             // seat back if its device sends again (SeatReturned)
             public Dictionary<int, string> Dropped { get; } = new();
+            // a served game's match host on relay slot 0 (HubServed.cs; Host is then the lobby's owner, a joiner); null = the
+            // host is a player
+            public MatchHostProcess? MatchHost { get; set; }
 
             public Game(string id, string host, GameInfo info, Relay.Room room)
             {
@@ -62,6 +65,7 @@ namespace SecondHunt.Server
             ExtraPickups = info.ExtraPickups,
             ExtraCharacters = info.ExtraPickups && info.ExtraCharacters, // (characters need the pickups)
             ExtraArena = info.ExtraArena, // (0.7.0, T2: Find Game's backfill checks the searchers have it)
+            Served = info.Served, // (0.8.0: asked for; HostGame decides)
         };
 
         // decision 10 (doc section 8b): a game strangers can find runs without mods
@@ -192,12 +196,24 @@ namespace SecondHunt.Server
                     FindCancel(me, "hosting"); // (hosting another game ends a search)
                 }
                 LeaveGame(me);
+                // served (0.8.0, HubServed.cs): the match host on slot 0, this player the lobby's owner on slot 1
+                info.Served = info.Served && found == null && CanServe(info);
+                if (info.Served)
+                {
+                    info.MaxPlayers = Math.Min(info.MaxPlayers, RelayWire.MaxSlots - 1);
+                }
                 string id = NewId(_games.ContainsKey);
                 Relay.Room room = _relay.OpenRoom(id);
                 _relay.Keep(room, true);
                 var g = new Game(id, me, info, room);
-                Relay.Member member = _relay.AddMember(room, 0);
-                g.Slots[0] = me;
+                if (info.Served && (g.MatchHost = StartMatchHost(g, _relay.AddMember(room, 0), 1)) == null)
+                {
+                    _relay.RemoveMember(room, 0);
+                    info.Served = false;
+                }
+                int mySlot = info.Served ? 1 : 0;
+                Relay.Member member = _relay.AddMember(room, mySlot);
+                g.Slots[mySlot] = me;
                 _games[id] = g;
                 _gameOf[me] = g;
                 BroadcastPresence(me);
@@ -219,6 +235,11 @@ namespace SecondHunt.Server
             {
                 Game g = HostedBy(me);
                 info = Clean(info, g.Slots.Count);
+                info.Served = g.Info.Served; // (decided when it opened)
+                if (info.Served)
+                {
+                    info.MaxPlayers = Math.Min(info.MaxPlayers, RelayWire.MaxSlots - 1);
+                }
                 CheckMods(info);
                 if (info.Mods != g.Info.Mods && g.Slots.Count > 1)
                 {
@@ -244,7 +265,7 @@ namespace SecondHunt.Server
             }
         }
 
-        private GameMsg JoinGame(string me, string id, string version, string mods)
+        private GameMsg JoinGame(string me, string id, string version, string mods, bool served = false)
         {
             lock (_gamesLock)
             {
@@ -284,6 +305,10 @@ namespace SecondHunt.Server
                 {
                     throw new OnlineException("version", "that game runs a different version: both players need the same game "
                         + "update and ROM");
+                }
+                if (g.Info.Served && !served)
+                {
+                    throw new OnlineException("version", "that game runs on the server: update the game to join it");
                 }
                 if (string.IsNullOrEmpty(mods))
                 {
@@ -330,7 +355,7 @@ namespace SecondHunt.Server
                 {
                     return false;
                 }
-                if (g.Host == me)
+                if (g.Host == me && g.MatchHost == null)
                 {
                     // O5b: a started match goes on with a new host (the others are mid-match); a lobby closes
                     if (!g.Started || !MigrateHost(g))
@@ -343,10 +368,27 @@ namespace SecondHunt.Server
                 g.Slots.Remove(slot);
                 _gameOf.Remove(me);
                 _relay.RemoveMember(g.Room, slot);
+                string? owner = null;
+                if (g.MatchHost != null)
+                {
+                    // a served game (HubServed.cs) closes when nobody is left; its owner leaving passes the lobby on
+                    if (g.Slots.Count == 0)
+                    {
+                        CloseGame(g, "everyone left");
+                        BroadcastPresence(me);
+                        return true;
+                    }
+                    if (g.Host == me)
+                    {
+                        (int ownerSlot, owner) = g.Slots.First();
+                        g.Host = owner;
+                        TellOwner(g.MatchHost, ownerSlot);
+                    }
+                }
                 Store.Player leaver = _store.Get(me)!;
                 foreach (string m in g.Slots.Values)
                 {
-                    Push(m, new MemberEvent { GameId = g.Id, Player = Card(leaver, m), Slot = slot, Joined = false });
+                    Push(m, new MemberEvent { GameId = g.Id, Player = Card(leaver, m), Slot = slot, Joined = false, Owner = owner });
                 }
                 BroadcastPresence(me);
                 foreach (string m in g.Slots.Values)
@@ -359,6 +401,10 @@ namespace SecondHunt.Server
 
         private void CloseGame(Game g, string reason)
         {
+            if (g.MatchHost != null)
+            {
+                StopMatchHost(g.MatchHost);
+            }
             _games.Remove(g.Id);
             foreach (string m in g.Slots.Values)
             {
@@ -380,32 +426,42 @@ namespace SecondHunt.Server
             lock (_gamesLock)
             {
                 Game g = HostedBy(me);
-                if (started && !g.Started)
+                if (g.MatchHost != null)
                 {
-                    _store.AddRecent(g.Slots.Values.ToList());
-                    RoundStarted(g); // (who's in this match: the host's head-to-head report is checked against it, HubRecords.cs)
-                    if (g.Slots.Count >= 2)
-                    {
-                        _store.AddMatches(g.Slots.Values.ToList()); // (a match with people counts toward the typed-chat unlock)
-                    }
+                    return new OkMsg { Done = false }; // (a served game: its match host says when it starts, HubServed.cs)
                 }
-                g.Started = started;
-                // a lobby is kept while its host is online; a match lives on its traffic
-                _relay.Keep(g.Room, !started);
-                if (!started)
-                {
-                    // back in the lobby: players who dropped during the match are gone now
-                    foreach (string m in g.Slots.Values.Where(m => !_online.ContainsKey(m)).ToList())
-                    {
-                        LeaveGame(m);
-                    }
-                }
-                foreach (string m in g.Slots.Values)
-                {
-                    BroadcastPresence(m);
-                }
-                return new OkMsg { Done = true };
+                return SetStarted(g, started);
             }
+        }
+
+        // (under _gamesLock) the game's match started, or its lobby is back (from its host: a player, or the match host)
+        private OkMsg SetStarted(Game g, bool started)
+        {
+            if (started && !g.Started)
+            {
+                _store.AddRecent(g.Slots.Values.ToList());
+                RoundStarted(g); // (who's in this match: the host's head-to-head report is checked against it, HubRecords.cs)
+                if (g.Slots.Count >= 2)
+                {
+                    _store.AddMatches(g.Slots.Values.ToList()); // (a match with people counts toward the typed-chat unlock)
+                }
+            }
+            g.Started = started;
+            // a lobby is kept while its host is online; a match lives on its traffic
+            _relay.Keep(g.Room, !started);
+            if (!started)
+            {
+                // back in the lobby: players who dropped during the match are gone now
+                foreach (string m in g.Slots.Values.Where(m => !_online.ContainsKey(m)).ToList())
+                {
+                    LeaveGame(m);
+                }
+            }
+            foreach (string m in g.Slots.Values)
+            {
+                BroadcastPresence(m);
+            }
+            return new OkMsg { Done = true };
         }
 
         private OkMsg Invite(string me, string code)
@@ -439,7 +495,7 @@ namespace SecondHunt.Server
                 {
                     LeaveGame(me);
                 }
-                else if (g != null && g.Host == me)
+                else if (g != null && g.Host == me && g.MatchHost == null)
                 {
                     // O5b: the host of a started match dropped: a player still online takes over (none: as before, the
                     // game ends when its relay room goes quiet)
@@ -504,7 +560,7 @@ namespace SecondHunt.Server
         private void StartSeatTimer() => _seatTimer = new Timer(_ => DropQuietSeats(), null, 1_000, 1_000);
 
         // (under _gamesLock) a started match's non-host seat whose device has been silent on the relay for a while
-        private bool IsHeld(Game g, string code) => g.Started && g.Host != code && g.Has(code)
+        private bool IsHeld(Game g, string code) => g.Started && (g.Host != code || g.MatchHost != null) && g.Has(code)
             && _relay.QuietMs(g.Room, g.SlotOf(code)) > HeldQuietMs;
 
         private Game? HeldGame(string me)
@@ -541,7 +597,7 @@ namespace SecondHunt.Server
                 {
                     foreach ((int slot, string m) in g.Slots)
                     {
-                        if (m != g.Host && _relay.QuietMs(g.Room, slot) > SeatHoldMs)
+                        if ((m != g.Host || g.MatchHost != null) && _relay.QuietMs(g.Room, slot) > SeatHoldMs)
                         {
                             quiet.Add((g, slot, m));
                         }

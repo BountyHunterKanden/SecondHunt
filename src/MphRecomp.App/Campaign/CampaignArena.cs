@@ -27,6 +27,8 @@ internal sealed partial class CampaignRenderer
 {
     ArenaHdDraw? _arenaHd;
     Task<ArenaHdDraw?>? _arenaHdLoad;
+    // Shooting Gallery's turret, its hologram and the slot's ring (EchoesTurret.ImportLook), with their lights
+    (TurretLook Look, CrateLight? Light, CrateLight? Holo, CrateLight? Ring)? _turretLook;
     int _arenaHdRoom = -1;
     // the arena's CPU time on the GL thread, its share of MPHPerf's "draw": one MPHArena line every 2 s
     readonly double[] _arenaMs = new double[3];
@@ -43,11 +45,17 @@ internal sealed partial class CampaignRenderer
             _arenaHdRoom = _host.RoomId;
             _arenaHd = null;
             _arenaHdLoad = null;
+            _turretLook = null;
             RoomMetadata? meta = Metadata.GetRoomById(_host.RoomId, noThrow: true);
             if (meta != null && EchoesArena.IsEchoesRoom(meta.Name) && meta.Archive is string archive)
             {
                 string dir = EchoesArena.HdDir(meta.Name) ?? Path.Combine(Paths.FileSystem, "_archives", archive, ArenaHdWriter.Dir);
                 _arenaHdLoad = Task.Run(() => ArenaHdDraw.TryLoad(dir));
+                if (EchoesTurret.LoadLook(dir) is { } look)
+                {
+                    _turretLook = (look, EchoesTurret.Light(look.Ambient, look.Lights), EchoesTurret.Light(look.HoloAmbient, look.HoloLights),
+                        EchoesTurret.Light(look.RingAmbient, look.RingLights));
+                }
             }
         }
         if (_arenaHd == null)
@@ -68,6 +76,13 @@ internal sealed partial class CampaignRenderer
         if (first) ArenaPerfFrame();
         hd.Draw(scene.ViewMatrix, scene.PerspectiveMatrix, pass, _clock.Elapsed.TotalSeconds, sky: first);
         if (pass == 0) DrawCrates(scene, hd);
+        // the occupant's see-through turret after the arena's blended surfaces (water, glass) and the crates: drawn with
+        // the opaque pass and writing no depth, the water and the crates painted over it (owner 10-16)
+        if (pass == 1 && _seatShell.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _seatShell);
+        // the turret effects' model particles (all additive) last of all: drawn with the opaque pass the water and glass
+        // blended over them (the firing rods washed out, the grates showing through: owner 10-16), and the shell's quarter
+        // alpha would dim them
+        if (pass == 1 && _turretFxProps.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _turretFxProps);
         ArenaGl.UseProgram(_program);
         ArenaGl.BindVertexArray(0);
         ArenaGl.ActiveTexture(GLES30.GlTexture0);
@@ -76,7 +91,6 @@ internal sealed partial class CampaignRenderer
         ArenaGl.Disable(CullFaceCap);
         ArenaGl.DepthMask(pass == 0);
         ArenaGl.DepthFunc(restoreDepthFunc);
-        if (pass == 1) DrawUnderwater(scene);
         double ms = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
         _arenaMs[first ? 0 : pass == 0 ? 1 : 2] += ms;
         _arenaFrameMs += ms;
@@ -86,9 +100,10 @@ internal sealed partial class CampaignRenderer
     const float UnderwaterTint = 0.35f;
 
     // with the camera inside Pipeline's water (Echoes movement's boxes, PlayerEntity.HostWater) the view takes Echoes'
-    // underwater fog colour (WATR UnderwaterFogColor): after the arena's blended surfaces, under the HUD
-    void DrawUnderwater(Scene scene)
+    // underwater fog colour (WATR UnderwaterFogColor): after everything in the room, under the HUD
+    void DrawArenaUnderwater(Scene scene)
     {
+        if (_host == null || scene != _host.Scene || _arenaHd == null || _arenaHd.Failed) return;
         if (!PlayerEntity.HostEchoesMoves || PlayerEntity.HostWater is not { } water) return;
         Vector3 c = scene.CameraPosition;
         bool inside = false;
@@ -111,7 +126,12 @@ internal sealed partial class CampaignRenderer
         GLES30.GlEnable(GLES30.GlDepthTest);
     }
 
-    readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass)> _crates = new();
+    readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _crates = new();
+    // the turret as its occupant sees it (see-through, no depth write): drawn last, with the blended pass (DrawArena)
+    readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _seatShell = new();
+    // the turret effects' model particles: drawn after the blended pass too (DrawArena)
+    readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _turretFxProps = new();
+    float _holoFade = -1, _ringFade = -1, _fadeAt;   // the turret's hologram/glow and slot ring, faded in and out (AddTurret)
 
     // Echoes' weapon crates that are up, spinning about the vertical (EchoesCrateEntity.Spin), and the breakables that
     // are up (their models placed already), red while just hit, lit as Echoes lights them there; with both opaque
@@ -120,23 +140,77 @@ internal sealed partial class CampaignRenderer
     {
         if (!hd.HasProps && !hd.HasPlaced) return;
         _crates.Clear();
+        _seatShell.Clear();
+        _turretFxProps.Clear();
+        bool turret = false;
         foreach (EnemyInstanceEntity e in scene.GetEnemyInstanceEntities())
         {
+            if (e is EchoesTurretEntity t)
+            {
+                if (hd.HasPlaced && _turretLook is { } look) AddTurret(look, t);
+                turret = true;
+                continue;
+            }
             if (e is EchoesCrateEntity { Up: true } c && hd.HasProps)
             {
-                _crates.Add((Matrix4.CreateRotationY(c.Spin) * Matrix4.CreateTranslation(c.Position), c.Flash, c.Light, ArenaHdWriter.PropPass));
+                _crates.Add((Matrix4.CreateRotationY(c.Spin) * Matrix4.CreateTranslation(c.Position), c.Flash, c.Light, ArenaHdWriter.PropPass, 1, null));
             }
             else if (e is EchoesBreakableEntity { Up: true } br && hd.HasPlaced)
             {
-                _crates.Add((Matrix4.Identity, br.Flash, br.Light, br.Pass));
+                _crates.Add((Matrix4.Identity, br.Flash, br.Light, br.Pass, 1, null));
             }
         }
         // the arena's static actor models (Spires' pillars: solid in the collision, not in the render mesh; T6 N3)
         if (hd.HasPlaced && _host != null)
         {
-            foreach ((int pass, CrateLight? light) in EchoesStatics.For(_host.RoomId)) _crates.Add((Matrix4.Identity, false, light, pass));
+            foreach ((int pass, CrateLight? light) in EchoesStatics.For(_host.RoomId)) _crates.Add((Matrix4.Identity, false, light, pass, 1, null));
         }
+        // the turret off (LAN and online until it syncs): drawn lowered, as it waits
+        if (!turret && hd.HasPlaced && _turretLook is { } idle) AddTurret(idle, null);
+        // the turret effects' model particles (CampaignRenderer.TurretFx.cs)
+        if (hd.HasPlaced) AddTurretModels(_crates, _turretFxProps);
         if (_crates.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _crates);
+    }
+
+    // the turret's parts in its state's clip: lowered while free (the hologram spinning over it), rising as a player gets
+    // in, raised (recoiling after a shot) and its barrel turned with the aim, lowering as they leave or it's destroyed; red
+    // while just hit; the slot's ring while the slot is armed. The hologram and its glow fade in over 1 s when the turret
+    // comes free and out over 0.2 s when it's taken, the ring in and out over 1 s (Echoes' fades on them: the actors'
+    // alpha, drawn additive, so here their colour scaled). Its occupant sees the whole model at a quarter alpha, depth
+    // written off: the turret RSO's PreRender (0x7a8) gives the actor CModelFlags(5, 0, 1, (1, 1, 1, 0.25)) in the
+    // occupant's own viewport only (a negative Fade to DrawProps: see-through at that alpha)
+    const float SeatAlpha = 0.25f;
+
+    void AddTurret((TurretLook Look, CrateLight? Light, CrateLight? Holo, CrateLight? Ring) l, EchoesTurretEntity? t)
+    {
+        TurretLook look = l.Look;
+        EchoesTurretEntity.TurretState state = t?.State ?? EchoesTurretEntity.TurretState.Free;
+        float seconds = (float)_clock.Elapsed.TotalSeconds;
+        float dt = Math.Clamp(seconds - _fadeAt, 0, 0.1f);
+        _fadeAt = seconds;
+        bool holoOn = state == EchoesTurretEntity.TurretState.Free, ringOn = t is { Armed: true };
+        bool seat = t != null && PlayerEntity.Main is { } main && t.Occupant == main;
+        _holoFade = _holoFade < 0 ? (holoOn ? 1 : 0) : Math.Clamp(_holoFade + (holoOn ? dt / 1.0f : -dt / 0.2f), 0, 1);
+        _ringFade = _ringFade < 0 ? (ringOn ? 1 : 0) : Math.Clamp(_ringFade + (ringOn ? dt : -dt) / 1.0f, 0, 1);
+        foreach (TurretPiece p in look.Pieces)
+        {
+            if (p.Holo)
+            {
+                if (_holoFade > 0 && p.Spin != null && look.HoloTime > 0)
+                {
+                    _crates.Add((EchoesTurret.PieceMatrix(p.Spin, seconds % look.HoloTime / look.HoloTime), false, l.Holo, p.Pass, _holoFade, null));
+                }
+                continue;
+            }
+            // its clip by the turret's state, the whole head turned and pitched with the aim (EchoesTurret.PieceNow)
+            Matrix4 m = EchoesTurret.PieceNow(look, p, t);
+            // (no hit flash in the occupant's view: PreRender's flags replace the actor's, damage colour included; the
+            // shell round their camera tinted the whole screen)
+            if (seat) _seatShell.Add((m, false, l.Light, p.Pass, -SeatAlpha, null));
+            else _crates.Add((m, t?.Flash ?? false, l.Light, p.Pass, 1, null));
+        }
+        if (_ringFade > 0 && look.RingPass >= 0) _crates.Add((Matrix4.Identity, false, l.Ring, look.RingPass, _ringFade, null));
+        if (_holoFade > 0 && look.GlowPass >= 0) _crates.Add((Matrix4.Identity, false, l.Holo, look.GlowPass, _holoFade, null));
     }
 
     // the frame's first arena call: closes the last frame, logs every 2 s
@@ -236,6 +310,10 @@ internal sealed class ArenaHdDraw
         // every other material: its own TEV program (ArenaGxSpec) once linked; null = the GX interpreter
         public string? SpecSrc;
         public Spec? Spec;
+        // a prop's (DrawProps: crates, the turret, the effects' model particles): its own TEV programs too, plain and with
+        // the brightness recolour (uTint: a model particle's colour, the red hit flash), never shared with the world's
+        public string? PropSrc, PropTintSrc;
+        public Spec? PropSpec, PropTintSpec;
     }
 
     // a linked ArenaGxSpec program and its uniforms; per-frame ones re-sent when the frame or the sky/world MVP changes,
@@ -243,6 +321,7 @@ internal sealed class ArenaHdDraw
     sealed class Spec
     {
         public int Prog, Mvp, ViewRot, SceneAmb, ColCtrl, AlpCtrl, Attn, ChanMat, ChanAmb, TgMode, TexMtx, Reg, Konst;
+        public int Tint = -1, Exposure = -1, NumLights = -1, LightDir = -1, LightCol = -1; // (a prop's)
         public int[] Units = Array.Empty<int>();
         public long Stamp = -1;
         public bool Sky;
@@ -289,6 +368,12 @@ internal sealed class ArenaHdDraw
 
     static readonly string[] TexUniform = { "uTex0", "uTex1", "uTex2", "uTex3", "uTex4", "uTex5", "uTex6", "uTex7" };
     static readonly float[] NoLights = new float[12];
+    // a prop's own program: its source marked after #version, so the cache never hands it a world program to share
+    static string PropProgram(string frag)
+    {
+        int nl = frag.IndexOf('\n') + 1;
+        return frag[..nl] + "// prop\n" + frag[nl..];
+    }
 
     // GxShader's vertex program + a second UV set (texgen mode 2 = aUv1), made here so GxShader.cs stays as it is
     static readonly string Vert = PatchVert(GxShader.Vert);
@@ -342,7 +427,8 @@ internal sealed class ArenaHdDraw
             int t = s.GetProperty("texmap").GetInt32();
             if (t < 0 || t >= layers.Length) return null;
             JsonElement l = layers[t];
-            bool still = !l.GetProperty("env").GetBoolean() && l.GetProperty("scroll").EnumerateArray().All(e => e.GetDouble() == 0);
+            bool still = !l.GetProperty("env").GetBoolean() && l.GetProperty("scroll").EnumerateArray().All(e => e.GetDouble() == 0)
+                && !l.TryGetProperty("strip", out _);
             return still && l.GetProperty("uv").GetInt32() == uv ? l.GetProperty("name").GetString() : null;
         }
         string? lm = Layer(st[0], 0), tex = Layer(st[1], 1), glow = st.Length == 3 ? Layer(st[2], 1) : null;
@@ -430,6 +516,17 @@ internal sealed class ArenaHdDraw
             {
                 b.SpecSrc = spec;
                 if (!_specOrder.Contains(spec)) _specOrder.Add(spec);
+            }
+            // props: on the interpreter, the turret seat's shell and the lift rings around the camera took the Odin's GPU
+            // from 4 to 10 ms a frame, and 45-55 ms as the lower rings rose through the camera (owner 10-16: "awful frame
+            // dips" getting in, sitting in and getting out). The marker line keeps them apart from the world's programs.
+            if (pass >= ArenaHdWriter.PropPass && pass != ArenaHdWriter.FluidPass && ArenaGxSpec.Frag(p) is string plain
+                && ArenaGxSpec.Frag(p, tintMode: 1) is string tinted)
+            {
+                b.PropSrc = PropProgram(plain);
+                b.PropTintSrc = PropProgram(tinted);
+                if (!_specOrder.Contains(b.PropSrc)) _specOrder.Add(b.PropSrc);
+                if (!_specOrder.Contains(b.PropTintSrc)) _specOrder.Add(b.PropTintSrc);
             }
             for (int u = 0; u < 8; u++)
             {
@@ -569,6 +666,8 @@ internal sealed class ArenaHdDraw
                 int Id(string? png) => png != null && _texIds.TryGetValue(png, out int t) ? t : White();
                 if (b.Fast) { b.TexLm = Id(b.FastLm); b.TexD = Id(b.FastTex); b.TexG = b.FastGlow != null ? Id(b.FastGlow) : White(); }
                 b.Spec = b.SpecSrc != null && _specs.TryGetValue(b.SpecSrc, out Spec? s) ? s : null;
+                b.PropSpec = b.PropSrc != null && _specs.TryGetValue(b.PropSrc, out Spec? ps) ? ps : null;
+                b.PropTintSpec = b.PropTintSrc != null && _specs.TryGetValue(b.PropTintSrc, out Spec? pt) ? pt : null;
             }
             _pixels.Clear();
             _vertBuf = null;
@@ -577,7 +676,8 @@ internal sealed class ArenaHdDraw
                 + $"{(_texNames.Count > 0 ? _texNames.Keys.Max() : 0)}, {_warmMs:0} ms of GL work; "
                 + $"fast path {(_fastOk ? _batches.Count(b => b.Fast) : 0)} of {_batches.Count(b => b.Pass == 0)} opaque batches; "
                 + $"own TEV programs {_specs.Values.Count(s => s != null)} of {_specOrder.Count} for {_batches.Count(b => b.Spec != null)} of "
-                + $"{_batches.Count(b => !(b.Fast && _fastOk))} other batches)");
+                + $"{_batches.Count(b => !(b.Fast && _fastOk))} other batches; props on their own {_batches.Count(b => b.PropSpec != null && b.PropTintSpec != null)} "
+                + $"of {_batches.Count(b => b.Pass >= ArenaHdWriter.PropPass && b.Pass != ArenaHdWriter.FluidPass)})");
         }
         _step++;
     }
@@ -658,9 +758,11 @@ internal sealed class ArenaHdDraw
     // MphRead's enemies flash when hit; light:
     // Echoes' lighting there (EchoesCrates.Lighting): its ambient + up to 4 directional lights, the normals turned with
     // the model; none (an import before it) = lit like the sky: lights off, ambient white), after the opaque world:
-    // depth tested and written, back faces culled. Through the GX interpreter (uTint); call right after Draw with the
+    // depth tested and written, back faces culled. On its own TEV programs (else the GX interpreter); call right after Draw with the
     // same view
-    public void DrawProps(Matrix4 view, Matrix4 proj, double seconds, List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass)> props)
+    readonly HashSet<int> _fadeLogged = new();
+
+    public void DrawProps(Matrix4 view, Matrix4 proj, double seconds, List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> props)
     {
         if (!_glReady || Failed) return;
         _curProg = _active = _blend = _blendSrc = _blendDst = _depthMask = _depthFunc = -1;
@@ -669,18 +771,18 @@ internal sealed class ArenaHdDraw
         ArenaGl.CullFace(0x0405); // GL_BACK
         ArenaGl.FrontFace(0x0901); // GL_CCW
         ArenaGl.BindVertexArray(_vao);
-        Use(_prog);
-        bool tinted = false;
-        foreach ((Matrix4 model, bool flash, CrateLight? light, int pass) in props)
+        // the tint now set on the interpreter (w 0: none): a model particle's colour and the red hit flash both set it, so
+        // it's compared whole
+        Vector4 tintNow = new(-1);
+        bool exposed = false; // the interpreter's uExposure left below 1 (a fading prop)
+        foreach ((Matrix4 model, bool flash, CrateLight? light, int pass, float fade, Vector3? tint) in props)
         {
             Matrix4 mv = model * view;
             HunterRig.ToArray(mv * proj, _propMvp);
-            ArenaGl.UniformMatrix4(U("uMvp"), 1, _propMvp);
             // the normal's way to the camera through the model's turn (as _viewRot holds the view's)
             _propRot[0] = mv.M11; _propRot[1] = mv.M12; _propRot[2] = mv.M13;
             _propRot[3] = mv.M21; _propRot[4] = mv.M22; _propRot[5] = mv.M23;
             _propRot[6] = mv.M31; _propRot[7] = mv.M32; _propRot[8] = mv.M33;
-            ArenaGl.UniformMatrix3(U("uViewRot"), 1, _propRot);
             Vector3 amb = light?.Ambient ?? Vector3.One;
             int n = light == null ? 0 : Math.Min(4, light.Dirs.Length);
             for (int i = 0; i < n; i++)
@@ -689,29 +791,83 @@ internal sealed class ArenaHdDraw
                 _propDir[3 * i] = d.X; _propDir[3 * i + 1] = d.Y; _propDir[3 * i + 2] = d.Z;
                 _propCol[3 * i] = c.X; _propCol[3 * i + 1] = c.Y; _propCol[3 * i + 2] = c.Z;
             }
-            ArenaGl.Uniform3f(U("uSceneAmb"), amb.X, amb.Y, amb.Z);
-            ArenaGl.Uniform1i(U("uNumLights"), n);
-            if (n > 0)
-            {
-                ArenaGl.Uniform3fv(U("uLightDir"), 4, _propDir);
-                ArenaGl.Uniform3fv(U("uLightCol"), 4, _propCol);
-            }
-            if (flash != tinted)
-            {
-                GLES30.GlUniform4f(U("uTint"), 1, 0.25f, 0.2f, flash ? 1 : 0);
-                tinted = flash;
-            }
+            // (a model particle: the material times its colour, w -1, as Retro's Additive(col) adds a KONST x CPREV stage;
+            // the brightness recolour turned the firing rods teal where Echoes' are pure green: owner 10-16)
+            Vector4 want = tint is Vector3 tc ? new Vector4(tc, -1) : new Vector4(1, 0.25f, 0.2f, flash ? 1 : 0);
+            bool see = fade < 0;   // (the turret's occupant: the whole model blended at -fade, AddTurret)
+            if (see) GLES30.GlBlendColor(0, 0, 0, -fade);
+            float exposure = fade < 1 && !see ? fade : 1; // (a fading additive prop: its colour scaled)
+            bool progSet = false; // this prop's uniforms on the interpreter
             foreach (Batch b in _batches)
             {
                 if (b.Pass != pass) continue;
-                Material(b, seconds);
-                Blend(b.P);
-                DepthMask(!b.P.Blend);
+                if (fade < 1 && !see && tint == null && _fadeLogged.Add(pass))
+                    Log.Info("MPHArena", $"faded prop pass {pass}: blend {b.P.Blend} {b.P.BlendSrc}/{b.P.BlendDst} (additive fades by colour)");
+                if ((want.W != 0 ? b.PropTintSpec : b.PropSpec) is Spec s)
+                {
+                    // its own TEV program: this prop's uniforms on every draw (a program can serve several props a frame)
+                    Use(s.Prog);
+                    ArenaGl.UniformMatrix4(s.Mvp, 1, _propMvp);
+                    ArenaGl.UniformMatrix3(s.ViewRot, 1, _propRot);
+                    ArenaGl.Uniform3f(s.SceneAmb, amb.X, amb.Y, amb.Z);
+                    ArenaGl.Uniform1i(s.NumLights, n);
+                    if (n > 0)
+                    {
+                        ArenaGl.Uniform3fv(s.LightDir, 4, _propDir);
+                        ArenaGl.Uniform3fv(s.LightCol, 4, _propCol);
+                    }
+                    if (s.Tint >= 0) GLES30.GlUniform4f(s.Tint, want.X, want.Y, want.Z, want.W);
+                    GLES30.GlUniform1f(s.Exposure, exposure);
+                    SpecMaterial(b, s, seconds);
+                }
+                else
+                {
+                    Use(_prog);
+                    if (!progSet)
+                    {
+                        ArenaGl.UniformMatrix4(U("uMvp"), 1, _propMvp);
+                        ArenaGl.UniformMatrix3(U("uViewRot"), 1, _propRot);
+                        ArenaGl.Uniform3f(U("uSceneAmb"), amb.X, amb.Y, amb.Z);
+                        ArenaGl.Uniform1i(U("uNumLights"), n);
+                        if (n > 0)
+                        {
+                            ArenaGl.Uniform3fv(U("uLightDir"), 4, _propDir);
+                            ArenaGl.Uniform3fv(U("uLightCol"), 4, _propCol);
+                        }
+                        if (want != tintNow)
+                        {
+                            GLES30.GlUniform4f(U("uTint"), want.X, want.Y, want.Z, want.W);
+                            tintNow = want;
+                        }
+                        if (exposure < 1 || exposed) GLES30.GlUniform1f(U("uExposure"), exposure);
+                        exposed = exposure < 1;
+                        progSet = true;
+                    }
+                    Material(b, seconds);
+                }
+                if (tint != null)
+                {
+                    // an additive model particle (Retro's PMAB: added, depth-tested, no depth write, whatever its material)
+                    BlendAdditive();
+                    DepthMask(false);
+                }
+                else if (see)
+                {
+                    BlendSeeThrough(b.P);
+                    DepthMask(false);
+                }
+                else
+                {
+                    Blend(b.P);
+                    DepthMask(!b.P.Blend);
+                }
                 DepthFunc(GLES30.GlLequal);
                 ArenaGl.DrawArrays(GLES30.GlTriangles, b.Start, b.Count);
             }
         }
-        if (tinted) GLES30.GlUniform4f(U("uTint"), 0, 0, 0, 0);
+        Use(_prog);
+        if (exposed) GLES30.GlUniform1f(U("uExposure"), 1);
+        if (tintNow.W != 0) GLES30.GlUniform4f(U("uTint"), 0, 0, 0, 0);
         ArenaGl.Uniform1i(U("uNumLights"), 0); // the world draws with no lights (its lightmaps)
         _progStamp = -1; // the world's MVP, view turn and ambient go back on with its next draw
         ArenaGl.Disable(0x0B44);
@@ -775,6 +931,28 @@ internal sealed class ArenaHdDraw
         _wrap[tex] = w;
     }
 
+    void BlendAdditive()
+    {
+        if (_blend != 1)
+        {
+            ArenaGl.Enable(GLES30.GlBlend);
+            _blend = 1;
+        }
+        if (_blendSrc != GLES30.GlSrcAlpha || _blendDst != GLES30.GlOne) ArenaGl.BlendFunc(_blendSrc = GLES30.GlSrcAlpha, _blendDst = GLES30.GlOne);
+    }
+
+    // a see-through prop's blend: over the frame at the blend colour's alpha (an additive material stays added, scaled)
+    void BlendSeeThrough(GxShader.Params P)
+    {
+        if (_blend != 1)
+        {
+            ArenaGl.Enable(GLES30.GlBlend);
+            _blend = 1;
+        }
+        int dst = P.Blend && DstFactor(P.BlendDst) == GLES30.GlOne ? GLES30.GlOne : GLES30.GlOneMinusConstantAlpha;
+        if (_blendSrc != GLES30.GlConstantAlpha || _blendDst != dst) ArenaGl.BlendFunc(_blendSrc = GLES30.GlConstantAlpha, _blendDst = dst);
+    }
+
     // the material's blend (null: blending off)
     void Blend(GxShader.Params? P)
     {
@@ -832,6 +1010,14 @@ internal sealed class ArenaHdDraw
             s.Stamp = _stamp;
             s.Sky = sky;
         }
+        SpecMaterial(b, s, seconds);
+    }
+
+    // a batch's material on its own TEV program (the program in use): its uniforms when the program last drew another
+    // batch (or it scrolls), its textures
+    void SpecMaterial(Batch b, Spec s, double seconds)
+    {
+        GxShader.Params P = b.P;
         if (s.Last != b || P.Scrolls)
         {
             ArenaGl.Uniform4iv(s.ColCtrl, 2, P.ColCtrl); ArenaGl.Uniform4iv(s.AlpCtrl, 2, P.AlpCtrl);
@@ -858,9 +1044,10 @@ internal sealed class ArenaHdDraw
         for (int i = 0; i < 8; i++)
         {
             var L = b.Gx.Layers[i];
-            if (L == null || L.ScrollPerSec == System.Numerics.Vector2.Zero) continue;
-            _scroll[i * 9 + 6] += (float)(L.ScrollPerSec.X * seconds % 1.0);
-            _scroll[i * 9 + 7] += (float)(L.ScrollPerSec.Y * seconds % 1.0);
+            if (L == null || !L.Moves) continue;
+            System.Numerics.Vector2 d = L.UvShift(seconds); // (scroll + filmstrip)
+            _scroll[i * 9 + 6] += d.X;
+            _scroll[i * 9 + 7] += d.Y;
         }
         return _scroll;
     }
@@ -881,6 +1068,7 @@ internal sealed class ArenaHdDraw
             Prog = prog, Mvp = L("uMvp"), ViewRot = L("uViewRot"), SceneAmb = L("uSceneAmb"), ColCtrl = L("uColCtrl"), AlpCtrl = L("uAlpCtrl"),
             Attn = L("uAttn"), ChanMat = L("uChanMat"), ChanAmb = L("uChanAmb"), TgMode = L("uTgMode"), TexMtx = L("uTexMtx"),
             Reg = L("uReg"), Konst = L("uKonst"),
+            Tint = L("uTint"), Exposure = L("uExposure"), NumLights = L("uNumLights"), LightDir = L("uLightDir"), LightCol = L("uLightCol"),
         };
         GLES30.GlUseProgram(_curProg = prog);
         var units = new List<int>();
@@ -1021,7 +1209,7 @@ internal sealed class ArenaHdDraw
         _fastProg = _depthProg = _curProg = 0;
         _fastOk = false;
         _specs.Clear();
-        foreach (Batch b in _batches) b.Spec = null;
+        foreach (Batch b in _batches) b.Spec = b.PropSpec = b.PropTintSpec = null;
         _step = 0;
         _glReady = false;
         Failed = false;

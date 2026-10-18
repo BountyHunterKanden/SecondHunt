@@ -21,7 +21,12 @@ namespace MphRecomp.Campaign
         NextWeapon = 1 << 8,
         PrevWeapon = 1 << 9,
         WeaponMenu = 1 << 10,
-        AffinitySlot = 1 << 11 // the last special (non-Power/Missile) weapon
+        AffinitySlot = 1 << 11, // the last special (non-Power/Missile) weapon
+        // ZOOM STEP (owner 2026-10-17, MphRead PlayerEntity.HostZoomButtons): the option on (every step it is), and its zoom
+        // in / zoom out buttons (fit the online input's 16 bits)
+        ZoomIn = 1 << 12,
+        ZoomOut = 1 << 13,
+        ZoomStep = 1 << 14,
     }
 
     // One frame of player intent for the campaign sim. Movement is digital like the DS d-pad the game was built
@@ -87,7 +92,9 @@ namespace MphRecomp.Campaign
             bool arriving = true, bool holdSpawn = false)
         {
             Scene.Headless = true;
+            PlayerEntity.HostNoLocalSeat = false; // (only a served match host has none: MatchStart)
             PlayerEntity.HostHoldMainSpawn = holdSpawn;
+            PlayerEntity.HostBotTickPace = true; // hunter encounters' bots at vanilla's tick pace (a replay may have turned it off)
             Scene.CollectDrawItems = collectDrawItems;
             // populates Music's internal seq/room tables; without it, the first room's Music.TryPlayRoomMusic (called
             // during scene setup below) throws on the still-null tables -- desktop callers get this from Renderer.cs,
@@ -132,6 +139,30 @@ namespace MphRecomp.Campaign
             {
                 return;
             }
+            // a served match host (docs/DEDICATED_SERVERS.md) has no player of its own: seat 0 is a remote player whose
+            // relayed input SetRemoteInput already set, so this device's (empty) input mustn't overwrite it
+            if (!PlayerEntity.HostNoLocalSeat)
+            {
+                ApplyLocalInput(input);
+            }
+            // the desktop window applies pending dialog/menu pauses right before each update frame
+            GameState.ApplyPause();
+            LagFrame(); // a match host's N4 lag compensation (Multiplayer/MatchRemote.cs)
+            Scene.OnUpdateFrame();
+            CarryWeapon();
+            // Renderer.OnUpdateFrame only calls these `if (!Headless)` (they drive the desktop OpenAL/SoundFlow
+            // pump, which doesn't exist here) -- but Music.UpdateMusic is also where a *queued* PlaySeq (PlayMusic,
+            // TryPlayRoomMusic, PlayPausedMusic -- anything that fades the old track out first) actually loads the
+            // next one; skipping it left every queued room-music change stuck forever after its own Stop(). Sfx.Update
+            // drives GameSfxPlayer's free-sfx-script delays the same way. Both are no-ops with no host registered.
+            MphRead.Sound.Sfx.Update(1 / 60f);
+            MphRead.Music.UpdateMusic();
+            Frame++;
+        }
+
+        // this device's own player: its buttons, aim, touch and dialog presses for the next frame
+        private void ApplyLocalInput(in CampaignInput input)
+        {
             PlayerControls c = Player.Controls;
             c.MoveUp.HostDown = input.Move.Y > CampaignInput.MoveDeadZone;
             c.MoveDown.HostDown = input.Move.Y < -CampaignInput.MoveDeadZone;
@@ -155,6 +186,7 @@ namespace MphRecomp.Campaign
             c.PrevWeapon.HostDown = (b & CampaignButtons.PrevWeapon) != 0;
             c.WeaponMenu.HostDown = (b & CampaignButtons.WeaponMenu) != 0;
             c.AffinitySlot.HostDown = (b & CampaignButtons.AffinitySlot) != 0;
+            Player.HostZoomButtons((b & CampaignButtons.ZoomStep) != 0, (b & CampaignButtons.ZoomIn) != 0, (b & CampaignButtons.ZoomOut) != 0);
             c.PowerBeam.HostDown = input.SelectWeapon == BeamType.PowerBeam;
             c.VoltDriver.HostDown = input.SelectWeapon == BeamType.VoltDriver;
             c.Missile.HostDown = input.SelectWeapon == BeamType.Missile;
@@ -172,19 +204,6 @@ namespace MphRecomp.Campaign
             Player.HostTouchDy = input.TouchDy;
             PlayerEntity.HostDialogPress = input.DialogButton ?? HostDialogButton.None;
             SetWheelPointer(input.WeaponWheel);
-            // the desktop window applies pending dialog/menu pauses right before each update frame
-            GameState.ApplyPause();
-            LagFrame(); // a match host's N4 lag compensation (Multiplayer/MatchRemote.cs)
-            Scene.OnUpdateFrame();
-            CarryWeapon();
-            // Renderer.OnUpdateFrame only calls these `if (!Headless)` (they drive the desktop OpenAL/SoundFlow
-            // pump, which doesn't exist here) -- but Music.UpdateMusic is also where a *queued* PlaySeq (PlayMusic,
-            // TryPlayRoomMusic, PlayPausedMusic -- anything that fades the old track out first) actually loads the
-            // next one; skipping it left every queued room-music change stuck forever after its own Stop(). Sfx.Update
-            // drives GameSfxPlayer's free-sfx-script delays the same way. Both are no-ops with no host registered.
-            MphRead.Sound.Sfx.Update(1 / 60f);
-            MphRead.Music.UpdateMusic();
-            Frame++;
         }
 
         // Owner queue #8b (2026-10-03): the beam wasn't kept through a full room load -- a portal, a boss door whose

@@ -218,7 +218,7 @@ namespace MphRead.Entities
             if (entCol != null)
             {
                 entCol.Transform = transform;
-                entCol.Inverse1 = transform.Inverted();
+                entCol.Inverse1 = DetMatrix.Inverted(transform);
                 entCol.CurrentCenter = Matrix.Vec3MultMtx4(entCol.InitialCenter, transform);
             }
         }
@@ -228,7 +228,7 @@ namespace MphRead.Entities
             EntityCollision? entCol = EntityCollision[slot];
             if (entCol != null)
             {
-                entCol.Inverse2 = entCol.Transform.Inverted();
+                entCol.Inverse2 = DetMatrix.Inverted(entCol.Transform);
             }
         }
 

@@ -181,8 +181,9 @@ namespace MphRead
             return pass;
         }
 
-        // a game's import groups: its arm cannons, its HD models, its multiplayer data (Echoes' arenas + their music)
-        static string Group(ImportRecipe r) => r.Kind is "arenas" or "music" ? "multiplayer" : r.Kind;
+        // a game's import groups: its arm cannons, its HD models, its multiplayer data (Echoes' arenas + their music);
+        // each Prime song is its own (owner 2026-10-14: songs import and delete one at a time, docs/PRIME_MUSIC.md)
+        static string Group(ImportRecipe r) => r.Kind is "arenas" or "music" ? "multiplayer" : r.Kind == "tracks" ? r.Id : r.Kind;
 
         static string Build(Spec spec, IEnumerable<(string Name, string Sha1, string EditionSha1)> files, IEnumerable<string> items)
         {

@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Hall of the Elders",
+  "group": "Chozo Ruins",
+  "role": "area",
+  "files": [
+    { "name": "Audio/rui_chozobowlingL.dsp", "sha1": "a5ee17e5d1748c961c6ac9bee843c2d9d37e0ba1" },
+    { "name": "Audio/rui_chozobowlingR.dsp", "sha1": "f272fa14257b11f325d1716882cf06fc80813524" }
+  ],
+  "gain": 0.774
+}

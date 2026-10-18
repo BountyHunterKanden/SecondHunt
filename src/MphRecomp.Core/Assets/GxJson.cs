@@ -66,6 +66,7 @@ namespace MphRecomp.Assets
                         Name = jl.GetProperty("name").GetString(), TexMapId = tm, MapMode = env ? 1 : 0,
                         UvMtx = new[] { mtx[0], mtx[3], 0, mtx[1], mtx[4], 0, mtx[2], mtx[5], 1 },   // column-major mat3
                         ScrollPerSec = new Vector2(sc[0], sc[1]),
+                        Strip = jl.TryGetProperty("strip", out var jst) && jst.ValueKind == JsonValueKind.Array ? Floats(jst) : null,
                     };
                     m.TexNames[tm] = jl.GetProperty("name").GetString();
                     m.TexGenSrc[tc] = env ? 1 : 5; m.TexCoordSrc[tc] = env ? 1 : 0;

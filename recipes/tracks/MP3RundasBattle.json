@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Rundas Battle",
+  "group": "Bryyo",
+  "role": "boss",
+  "files": [
+    { "name": "MP3/Audio/Bryyo/rundas_fight.fsb", "sha1": "b7569d029a33389a1137788c566d55a158200bac" }
+  ],
+  "gain": 0.586
+}

@@ -71,3 +71,19 @@ phone through ntfy (chat / voice / other at high priority). Set by `REPORT_ALERT
 on". The phone: the free ntfy app, subscribe to the same topic name. Only the kind leaves the server (no names, codes or
 chat). The topic is in the owner's notes, not the repo: anyone who knows it could read or post to it, so pick a new one
 (edit the line, restart, resubscribe) if it leaks.
+
+## 6. Served games: the match host and its game files (server 0.8.0+, docs/DEDICATED_SERVERS.md)
+Every deploy also puts up `SecondHuntMatchHost` (one process per served match) and the unit that passes
+`--matchhost /opt/secondhunt/SecondHuntMatchHost --matchhost-data /var/lib/secondhunt/gamedata --max-matches 3`.
+Served matches need the owner's own extracted game files on the server, picked by name (`gamedata.txt`, names only):
+```
+.\gamedata.ps1 -Extract <...\files\AMHE1> -Out <scratch folder>
+.\deploy.ps1 -Server root@<server ip> -GameData <scratch folder>          (-GameKey AMHE1 by default)
+```
+They land in `/var/lib/secondhunt/gamedata/` (service user, 0700, never served, never in the repo); a later deploy
+without `-GameData` keeps them. 652 files, 16 MB: room models/collision/entities/nodes, the hunter, weapon, pickup and
+effect models, particle files, intro cameras, the bot personality table, HUD string tables and 2 music tables (MphRead's
+room load reads them). No cart code (`_bin`: the match host runs with `Extract.NoCodeFiles`), sound, movies or menus.
+Health then ends `served N/M` and the log says `served games: on, game version MPH USA/3`. Without the files (or the
+match host) served games stay off and every game is player-hosted as before. Before a deploy with people in served
+games: `secondhunt-admin drain on` (new games go player-hosted, running matches finish), then `drain off` after.

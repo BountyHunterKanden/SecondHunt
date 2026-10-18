@@ -16,16 +16,20 @@ namespace MphRecomp.Import.Echoes
 {
     // recipes/arenas/<Key>.json (Key = EchoesArena.Def.Key):
     //   { "game": "mp2", "discId": "G2ME01", "pak": "Metroid6.pak", "pakSha1": "...", "scale": 0.5925926,
+    //     "audioPak": "AudioGrp.pak", "audioPakSha1": "...",
     //     "crates": [ "Imperialist", ... ],
     //     "pads": [ { "slot": [x,y,z], "pad": [..], "launch": [..], "lockFrames": 0, "altOk": true, "dropped": false,
     //                 "plan": "...", "landed": [..], "miss": 0.01, "altMiss": 2.8, "altLanded": [..] }, ... ] }
     // crates: the weapon crates' weapons (MPH ItemType names, equal chance; absent: EchoesArena.CratePools', empty: no
-    // crates). pads: one per cannon in ArenaCannons.Find's order; slot is the check that it's the same cannon, the rest is
+    // crates). audioPak: the sound lookup + audio groups for Shooting Gallery's turret sounds (EchoesTurret.ImportSounds;
+    // absent: no turret sounds). hudPak: the turret HUD's textures (NoARAM.pak; EchoesTurret.ImportHud; absent: none). pads: one per cannon in ArenaCannons.Find's order; slot is the check that it's the same cannon, the rest is
     // what the tuning run left in arena.json (so the import writes the same arena.json)
     public sealed class ArenaRecipe
     {
         public EchoesArena.Def Def = null!;
         public string Pak = "", PakSha1 = "";
+        public string AudioPak = "", AudioPakSha1 = "";
+        public string HudPak = "", HudPakSha1 = "";
         public float Scale = EchoesArena.DefaultScale;
         public readonly List<ArenaCannons.Cannon> Pads = new();
         public List<ItemType>? Crates;
@@ -39,6 +43,16 @@ namespace MphRecomp.Import.Echoes
                 PakSha1 = r.Str("pakSha1"),
             };
             if (r.Root.TryGetProperty("scale", out JsonElement s)) a.Scale = s.GetSingle();
+            if (r.Root.TryGetProperty("audioPak", out JsonElement ap))
+            {
+                a.AudioPak = ap.GetString() ?? "";
+                a.AudioPakSha1 = r.Str("audioPakSha1");
+            }
+            if (r.Root.TryGetProperty("hudPak", out JsonElement hp))
+            {
+                a.HudPak = hp.GetString() ?? "";
+                a.HudPakSha1 = r.Str("hudPakSha1");
+            }
             if (r.Root.TryGetProperty("crates", out JsonElement crates))
             {
                 a.Crates = new List<ItemType>();
@@ -88,13 +102,16 @@ namespace MphRecomp.Import.Echoes
         {
             ArenaRecipe a = ArenaRecipe.From(recipe);
             yield return (a.Pak, a.PakSha1);
+            if (a.AudioPak != "") yield return (a.AudioPak, a.AudioPakSha1);
+            if (a.HudPak != "") yield return (a.HudPak, a.HudPakSha1);
         }
 
         public void Run(ImportContext ctx, ImportRecipe recipe, string outDir, Action<float, string> progress, CancellationToken ct)
         {
             ArenaRecipe a = ArenaRecipe.From(recipe);
             if (recipe.Game != "mp2") throw new NotSupportedException($"{recipe.Id}: arenas from game '{recipe.Game}' are not importable");
-            EchoesArena.Import(ctx.Pak(a.Pak), a.Def, EchoesArena.Layout.Folder(outDir), a.Scale, a.Pads, progress: progress, ct: ct, crates: a.Crates);
+            EchoesArena.Import(ctx.Pak(a.Pak), a.Def, EchoesArena.Layout.Folder(outDir), a.Scale, a.Pads, progress: progress, ct: ct, crates: a.Crates,
+                audio: a.AudioPak != "" ? ctx.Pak(a.AudioPak) : null, hud: a.HudPak != "" ? ctx.Pak(a.HudPak) : null);
         }
     }
 

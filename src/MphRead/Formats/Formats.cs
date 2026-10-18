@@ -1610,8 +1610,25 @@ namespace MphRead
         private static readonly bool _caseSensitiveFs = !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS();
         private static readonly ConcurrentDictionary<string, string> _caseResolved = new ConcurrentDictionary<string, string>();
 
+        // recomp (docs/DEDICATED_SERVERS.md D6): SECONDHUNT_FILE_TRACE=<file>: every game path built here, written at exit as
+        // <file>.<pid> (which files a server's headless match reads, so only those go on the server); off = nothing done
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte>? _fileTrace = StartFileTrace();
+
+        private static System.Collections.Concurrent.ConcurrentDictionary<string, byte>? StartFileTrace()
+        {
+            string? file = Environment.GetEnvironmentVariable("SECONDHUNT_FILE_TRACE");
+            if (String.IsNullOrEmpty(file))
+            {
+                return null;
+            }
+            var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => File.WriteAllLines($"{file}.{Environment.ProcessId}", seen.Keys.Order());
+            return seen;
+        }
+
         private static string ResolveCase(string path)
         {
+            _fileTrace?.TryAdd(path, 0);
             if (!_caseSensitiveFs || path.Length == 0)
             {
                 return path;

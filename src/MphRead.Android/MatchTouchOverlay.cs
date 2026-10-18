@@ -16,8 +16,9 @@ namespace MphRecomp.App;
 //     MORPH (= X), MISSILE (= R1: missiles <-> power beam; reads POWER BEAM while missiles are selected, owner
 //     2026-10-04), WEAPON (= L2 held, Y until 2026-10-09: the weapon ring -- drag from the button towards a weapon and let go, like the DS
 //     stylus; owner 2026-10-04: "the touch overlay needs a weapon switcher"), PAUSE (Start); after the match a tap
-//     anywhere continues. While the player flies the Trooper's Scout Drone (owner 2026-10-08): FIRE reads BURST and
-//     LASER (= L2, the weapon ring's button, which is the laser in drone form) shows
+//     anywhere continues. While the player flies the Trooper's Scout Drone (owner 2026-10-08 / 2026-10-11) the buttons turn
+//     into the drone's (the drone functions' default buttons): FIRE reads BURST, JUMP RISE, MORPH RECALL, LASER (= L2)
+//     shows, and the hunter-only ones (MISSILE, WEAPON, OMEGA, VISOR, SCAN) hide until it comes back
 //   campaign (owner 2026-10-04: "touch overlay should be available for campaign"): the match's six plus
 //     VISOR (= D-pad right: scan visor on/off), SCAN (= Y, L2 until 2026-10-09: hold to scan in the scan visor, zoom outside it),
 //     MAP (Select: the pause map). In a dialog JUMP reads OK / YES and FIRE reads NO. FIRE / JUMP also skip movies and
@@ -27,6 +28,9 @@ namespace MphRecomp.App;
 // (PadState.StylusDown/Move/Up, in DS pixels by physical size), and MphRead plays vanilla's stylus rules on it
 // (PlayerTouch.cs): a double tap jumps (JUMP stays), and in Samus's / Kanden's / Spire's / Noxus's morph ball a drag rolls
 // the ball and a fast flick boosts, so there the finger is the stylus only (no aim stick; drawn as a dot).
+// RECOMP SETTINGS "touch aim" (owner 2026-10-16: "the original vanilla stylus aiming as an option ... to replace virtual
+// right stick"): STYLUS makes that finger the stylus everywhere: its drag turns the view by the game's own stylus rule
+// (PadState.StylusAim -> CampaignRenderer.StylusAimDelta), with no stick; STICK (default) keeps the floating stick.
 // It stands aside (draws nothing, passes taps on) while the pause menu, the pause map or an in-ship menu is open: those
 // take their own taps in CampaignActivity.OnTouchEvent.
 // Shown per RECOMP SETTINGS "touch controls" (RecompSettings.TouchControls): auto = only while no game controller is
@@ -39,6 +43,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     readonly string _settingsPath;
     readonly string? _explicitMode;
     string _mode = "auto";
+    bool _stylusAimSetting; // RECOMP SETTINGS "touch aim": stylus
     readonly Paint _fill = new() { AntiAlias = true };
     readonly Paint _ring = new() { AntiAlias = true, StrokeWidth = 4 };
     readonly Paint _text = new() { AntiAlias = true, TextAlign = Paint.Align.Center, Color = Color.White };
@@ -57,6 +62,8 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         public float X, Y, R; // fractions of the view: centre and radius (of the height)
         public int Pointer = -1;
         public bool DroneOnly; // shown (and pressable) only while the player flies the Trooper's Scout Drone
+        public bool HunterOnly; // hidden while the drone flies (owner 2026-10-11: the buttons turn into the drone's)
+        public string? DroneLabel; // the label while the drone flies (its button is the drone function's default)
         public bool VoiceOnly; // shown only in an online game with voice chat in push-to-talk mode (O8)
         public bool ChatOnly; // shown only in an online game (O7: the quick-message wheel)
         public bool OmegaOnly; // shown only while the Omega Cannon waits in the third slot (T4 N15: vanilla's touch icon)
@@ -65,12 +72,12 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
 
     static TouchButton[] MatchLayout() => new TouchButton[]
     {
-        new() { Label = "FIRE", Key = PadButton.B, X = 0.90f, Y = 0.72f, R = 0.10f },
-        new() { Label = "JUMP", Key = PadButton.A, X = 0.78f, Y = 0.86f, R = 0.08f },
-        new() { Label = "MORPH", Key = PadButton.X, X = 0.78f, Y = 0.60f, R = 0.065f },
-        new() { Label = "MISSILE", Key = PadButton.R1, X = 0.91f, Y = 0.45f, R = 0.06f },
-        new() { Label = "WEAPON", Kind = Press.Wheel, Key = PadButton.L2, X = 0.80f, Y = 0.43f, R = 0.055f },
-        new() { Label = "OMEGA", Kind = Press.Omega, OmegaOnly = true, X = 0.855f, Y = 0.29f, R = 0.05f },
+        new() { Label = "FIRE", DroneLabel = "BURST", Key = PadButton.B, X = 0.90f, Y = 0.72f, R = 0.10f },
+        new() { Label = "JUMP", DroneLabel = "RISE", Key = PadButton.A, X = 0.78f, Y = 0.86f, R = 0.08f },
+        new() { Label = "MORPH", DroneLabel = "RECALL", Key = PadButton.X, X = 0.78f, Y = 0.60f, R = 0.065f },
+        new() { Label = "MISSILE", HunterOnly = true, Key = PadButton.R1, X = 0.91f, Y = 0.45f, R = 0.06f },
+        new() { Label = "WEAPON", HunterOnly = true, Kind = Press.Wheel, Key = PadButton.L2, X = 0.80f, Y = 0.43f, R = 0.055f },
+        new() { Label = "OMEGA", HunterOnly = true, Kind = Press.Omega, OmegaOnly = true, X = 0.855f, Y = 0.29f, R = 0.05f },
         new() { Label = "PAUSE", Kind = Press.Start, X = 0.50f, Y = 0.07f, R = 0.045f },
         // the Trooper's Scout Drone (owner 2026-10-08): its cutting laser, the pad's L2 (zoom, which the drone has no use
         // for); left of JUMP / MORPH, clear of FIRE (which reads BURST meanwhile)
@@ -89,13 +96,13 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     // middle. The reticle and the HUD's middle stay clear.
     static TouchButton[] CampaignLayout() => new TouchButton[]
     {
-        new() { Label = "FIRE", YesNoLabel = "NO", Key = PadButton.B, X = 0.90f, Y = 0.74f, R = 0.095f },
-        new() { Label = "JUMP", OkLabel = "OK", YesNoLabel = "YES", Key = PadButton.A, X = 0.775f, Y = 0.87f, R = 0.075f },
-        new() { Label = "MORPH", Key = PadButton.X, X = 0.775f, Y = 0.625f, R = 0.06f },
-        new() { Label = "MISSILE", Key = PadButton.R1, X = 0.925f, Y = 0.50f, R = 0.055f },
-        new() { Label = "WEAPON", Kind = Press.Wheel, Key = PadButton.L2, X = 0.82f, Y = 0.41f, R = 0.05f },
-        new() { Label = "VISOR", Key = PadButton.DpadUp, X = 0.055f, Y = 0.42f, R = 0.05f }, // the pad's visor key
-        new() { Label = "SCAN", Key = PadButton.Y, X = 0.065f, Y = 0.58f, R = 0.06f },
+        new() { Label = "FIRE", DroneLabel = "BURST", YesNoLabel = "NO", Key = PadButton.B, X = 0.90f, Y = 0.74f, R = 0.095f },
+        new() { Label = "JUMP", DroneLabel = "RISE", OkLabel = "OK", YesNoLabel = "YES", Key = PadButton.A, X = 0.775f, Y = 0.87f, R = 0.075f },
+        new() { Label = "MORPH", DroneLabel = "RECALL", Key = PadButton.X, X = 0.775f, Y = 0.625f, R = 0.06f },
+        new() { Label = "MISSILE", HunterOnly = true, Key = PadButton.R1, X = 0.925f, Y = 0.50f, R = 0.055f },
+        new() { Label = "WEAPON", HunterOnly = true, Kind = Press.Wheel, Key = PadButton.L2, X = 0.82f, Y = 0.41f, R = 0.05f },
+        new() { Label = "VISOR", HunterOnly = true, Key = PadButton.DpadUp, X = 0.055f, Y = 0.42f, R = 0.05f }, // the pad's visor key
+        new() { Label = "SCAN", HunterOnly = true, Key = PadButton.Y, X = 0.065f, Y = 0.58f, R = 0.06f },
         new() { Label = "MAP", Kind = Press.Select, X = 0.43f, Y = 0.065f, R = 0.042f },
         new() { Label = "PAUSE", Kind = Press.Start, X = 0.57f, Y = 0.065f, R = 0.042f },
     };
@@ -129,20 +136,23 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     // UI thread: (re)read the mode -- at start and whenever the pause menu resumes (RECOMP SETTINGS may have changed it)
     public void ReloadSettings()
     {
-        string mode = (_explicitMode ?? LoadSetting()).ToLowerInvariant();
+        MphRecomp.Config.RecompSettings? settings = LoadSettings();
+        string mode = (_explicitMode ?? settings?.TouchControls ?? "auto").ToLowerInvariant();
         _mode = mode is "on" or "off" ? mode : "auto";
+        _stylusAimSetting = string.Equals(settings?.TouchAim, "stylus", StringComparison.OrdinalIgnoreCase);
+        StylusOnly(); // (a change re-centres the aim stick under a finger that is down)
         ApplyMode();
     }
 
-    string LoadSetting()
+    MphRecomp.Config.RecompSettings? LoadSettings()
     {
         try
         {
-            return MphRecomp.Config.RecompSettings.Load(_settingsPath).TouchControls ?? "auto";
+            return MphRecomp.Config.RecompSettings.Load(_settingsPath);
         }
         catch (Exception)
         {
-            return "auto";
+            return null;
         }
     }
 
@@ -220,19 +230,23 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         }
     }
 
-    // the aim finger is the stylus only (the morph ball's touch roll); a change re-centres the aim stick under the finger
-    bool _stylusRolls;
-    bool StylusRolls()
+    // the aim finger is the stylus only (the morph ball's touch roll, or TOUCH AIM: STYLUS); a change re-centres the aim
+    // stick under the finger
+    bool _stylusOnly;
+    bool StylusOnly()
     {
-        bool rolls = _renderer.TouchStylusRolls;
-        if (rolls != _stylusRolls)
+        bool only = _stylusAimSetting || _renderer.TouchStylusRolls;
+        if (only != _stylusOnly)
         {
-            _stylusRolls = rolls;
+            _stylusOnly = only;
             _aim.OX = _aim.X;
             _aim.OY = _aim.Y;
         }
-        return rolls;
+        return only;
     }
+
+    // the aim finger's drag turns the view (TOUCH AIM: STYLUS): not while it rolls the morph ball (that drag rolls instead)
+    bool StylusAims => _stylusAimSetting && !_renderer.TouchStylusRolls;
 
     // the pause menu, the pause map and the in-ship menus (menu, briefing, planet select) take their own taps
     bool MenuUp => _renderer.PauseMenuOpen || _renderer.ShipMenuOpen || _renderer.MapOpen;
@@ -258,6 +272,20 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
                 _renderer.RequestMatchContinue();
             }
             return true;
+        }
+        // the text panel's rows (the ship's save prompt, game over) take a first finger that misses the buttons: it goes on
+        // to CampaignActivity.OnTouchEvent (ShipPanelTap)
+        if (e.ActionMasked == MotionEventActions.Down && _campaign && _renderer.ShipPanelUp)
+        {
+            bool drone = _renderer.TouchDrone, onButton = false;
+            foreach (TouchButton b in _buttons)
+            {
+                onButton |= Hits(b, e.GetX(), e.GetY(), drone);
+            }
+            if (!onButton)
+            {
+                return false;
+            }
         }
         int index = e.ActionIndex;
         int pointer = e.GetPointerId(index);
@@ -287,16 +315,16 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
 
     void Down(int pointer, float x, float y)
     {
+        // a dialog's own OK / YES / NO / page arrows take the tap first (CampaignRenderer.DialogTouch.cs); the finger then
+        // holds nothing, so its moves and lift do nothing
+        if (_campaign && _renderer.TouchDialog != 0 && _renderer.DialogTouch(x, y))
+        {
+            return;
+        }
         bool drone = _renderer.TouchDrone;
         foreach (TouchButton b in _buttons)
         {
-            float r = b.R * Height * 1.15f; // a little slack around the drawn circle
-            if (b.DroneOnly && !drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
-                || b.OmegaOnly && !_renderer.TouchOmega)
-            {
-                continue;
-            }
-            if (b.Pointer == -1 && Sq(x - b.X * Width) + Sq(y - b.Y * Height) <= r * r)
+            if (b.Pointer == -1 && Hits(b, x, y, drone))
             {
                 b.Pointer = pointer;
                 switch (b.Kind)
@@ -339,6 +367,18 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         }
     }
 
+    // a shown button under (x, y), with a little slack around the drawn circle
+    bool Hits(TouchButton b, float x, float y, bool drone)
+    {
+        if (b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
+            || b.OmegaOnly && !_renderer.TouchOmega)
+        {
+            return false;
+        }
+        float r = b.R * Height * 1.15f;
+        return Sq(x - b.X * Width) + Sq(y - b.Y * Height) <= r * r;
+    }
+
     void Moved(int pointer, float x, float y)
     {
         foreach (Stick s in new[] { _move, _aim, _wheel })
@@ -347,7 +387,12 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
             {
                 if (s == _aim)
                 {
-                    _renderer.Pad.StylusMove((x - s.X) * DsPerPixel, (y - s.Y) * DsPerPixel);
+                    float dsX = (x - s.X) * DsPerPixel, dsY = (y - s.Y) * DsPerPixel;
+                    _renderer.Pad.StylusMove(dsX, dsY);
+                    if (StylusAims && _wheel.Pointer == -1)
+                    {
+                        _renderer.Pad.StylusAim(dsX, dsY); // (while the weapon ring is up the view holds, as with the stick)
+                    }
                 }
                 s.X = x;
                 s.Y = y;
@@ -421,15 +466,15 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     {
         PadState pad = _renderer.Pad;
         (pad.Lx, pad.Ly) = Deflection(_move);
-        // (in the rolling morph ball the aim finger is the stylus: no right stick from it)
-        (pad.Rx, pad.Ry) = _wheel.Pointer != -1 ? Deflection(_wheel) : StylusRolls() ? (0, 0) : Deflection(_aim);
+        // (in the rolling morph ball, or with TOUCH AIM: STYLUS, the aim finger is the stylus: no right stick from it)
+        (pad.Rx, pad.Ry) = _wheel.Pointer != -1 ? Deflection(_wheel) : StylusOnly() ? (0, 0) : Deflection(_aim);
     }
 
     protected override void OnDraw(Canvas canvas)
     {
         base.OnDraw(canvas);
         PostInvalidateDelayed(250); // menus / dialogs / the results screen come and go without a touch here
-        if (_stylusRolls != _renderer.TouchStylusRolls)
+        if (_stylusOnly != (_stylusAimSetting || _renderer.TouchStylusRolls))
         {
             UpdateSticks(); // morphed / unmorphed with the finger still: the aim stick goes or comes back now
         }
@@ -443,7 +488,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         float textSize = Height * 0.03f;
         foreach (TouchButton b in _buttons)
         {
-            if ((b.DroneOnly && !drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
+            if ((b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
                 || b.OmegaOnly && !_renderer.TouchOmega) && b.Pointer == -1)
             {
                 continue;
@@ -456,7 +501,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
             canvas.DrawCircle(cx, cy, r, _ring);
             string label = (dialog == 2 ? b.YesNoLabel : dialog == 1 ? b.OkLabel : null)
                 ?? (b.Key == PadButton.R1 && missile ? "POWER\nBEAM" // what R1 switches to
-                    : b.Key == PadButton.B && drone ? "BURST" : b.Label); // the drone's blasters
+                    : drone && b.DroneLabel != null ? b.DroneLabel : b.Label); // the drone's: BURST, RISE, RECALL
             string[] lines = label.Split('\n');
             _text.TextSize = textSize;
             float w = 0;
@@ -478,7 +523,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
             {
                 continue;
             }
-            if (s == _aim && _wheel.Pointer == -1 && StylusRolls())
+            if (s == _aim && _wheel.Pointer == -1 && StylusOnly())
             {
                 // the stylus: a dot under the finger, no stick
                 _fill.Color = Color.Argb(110, 255, 255, 255);

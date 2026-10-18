@@ -52,6 +52,8 @@ internal sealed partial class CampaignRenderer
     Matrix4 _cannonFrame = Matrix4.Identity; // dev framing about the muzzle (BodyArmCannon.GunSpace)
     CampaignRetroBody? _cannonBody;
     Matrix4 _cannonModel;
+    Vector4 _cannonTint2;
+    Vector4 _cannonTint; // the seat's team / duplicate colour on its real body (MatchSkins.SeatTint), on the cannon too
     float _cannonAlpha;
     string _cannonGun = "", _cannonLogged = "";
     readonly Dictionary<Hunter, MphGunMotion?> _cannonMotion = new();
@@ -133,6 +135,8 @@ internal sealed partial class CampaignRenderer
             p.HostFxMuzzle = Vector3.TransformPosition(blast * _cannonSize, _cannonFrame) + new Vector3(0, 0, muzzle);
         }
         _cannonBody = body;
+        _cannonTint = SeatTint(p);
+        _cannonTint2 = SeatTint2(p); // (a two-tone copy's lights)
         _cannonAlpha = alpha;
         _cannonGun = gun;
         _cannonActive = true;
@@ -154,6 +158,7 @@ internal sealed partial class CampaignRenderer
         {
             if (p == null) continue;
             p.HostFxShootOffset = null;
+            if (HeldGunFx3P(p)) continue; // ZeroSuitGunTip.cs: Brawl Zero Suit flash on her held gun's muzzle
             if (!_cannon3p || !_cannonOn || BodyOf(p) is not CampaignRetroBody body || !body.CannonInWorld(p, out Vector3 tip, out _)) continue;
             var ahead = new Vector3(p.Field70, 0, p.Field74);
             if (ahead.LengthSquared < 1e-12f) continue;
@@ -255,7 +260,9 @@ internal sealed partial class CampaignRenderer
     void DrawArmCannon(Scene scene, SuitPass pass)
     {
         if (!_cannonActive || _cannonBody == null || _host == null || scene != _host.Scene) return;
-        _cannonBody.DrawCannon(_cannonModel, scene.ViewMatrix, GunProjection(scene), pass, _cannonAlpha, _cannonLightDev);
+        _cannonBody.SeatTint2 = _cannonTint2;
+        _cannonBody.DrawCannon(_cannonModel, scene.ViewMatrix, GunProjection(scene), pass, _cannonAlpha, _cannonLightDev, _cannonTint);
+        _cannonBody.SeatTint2 = Vector4.Zero;
         if (pass == SuitPass.Additive && _cannonViewsDir != null && --_cannonViewsWait <= 0)
         {
             ShootCannonViews(_cannonBody, _cannonViewsDir);
@@ -367,6 +374,6 @@ internal sealed partial class CampaignRenderer
     }
 
     string ArmCannonPauseText() => _host != null && BodyOf(_host.Player)?.Cannon != null
-        ? $"\nFirst-person gun: {(_cannonOn ? $"the body's own cannon, size {_cannonSize:0.00}; third person: flash on its tip, {(_armShots ? "shots drawn from the arm" : "vanilla shots")}" : "MPH (flash and shots too)")}  -- D-pad left/right: arm shots / vanilla shots / MPH, up/down: size"
+        ? $"\nFirst-person gun: {(_cannonOn ? $"the body's own cannon, size {_cannonSize:0.00}; third person: flash on its tip, {(_armShots ? "shots drawn from the arm" : "vanilla shots")}" : "MPH (flash and shots too)")}  -- D-pad left: arm shots / vanilla shots / MPH, up/down: size"
         : "";
 }

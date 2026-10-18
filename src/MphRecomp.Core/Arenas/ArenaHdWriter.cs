@@ -44,7 +44,26 @@ namespace MphRecomp.Arenas
 
         // a model placed in the area (an actor's or platform's): its CMDL, the script object's transform (position,
         // rotation in degrees, scale: Echoes area space) and the pass it draws in
-        public sealed record Placed(uint Model, float[] Transform, int Pass);
+        public sealed record Placed(uint Model, float[] Transform, int Pass)
+        {
+            // a skinned model's rigid part (Shooting Gallery's turret, EchoesTurret.ImportLook): Skin is its CSKR, and only
+            // the triangles that follow Bone (TriangleBone) are written, about Origin (the bone's bind position, model
+            // space) and not placed by Transform; the device places them each frame
+            public uint Skin { get; init; } = uint.MaxValue;
+            public uint? Bone { get; init; }
+            public Vector3 Origin { get; init; }
+        }
+
+        // the bone a skinned model's triangle follows: its first corner's heaviest (uint.MaxValue: not skinned)
+        public static uint TriangleBone(Cmdl g, int t)
+        {
+            if (g.Skin == null) return uint.MaxValue;
+            int p = g.Triangles[3 * t].P;
+            if (p >= g.Skin.Count || g.Skin[p].Length == 0) return uint.MaxValue;
+            (uint bone, float w) = g.Skin[p][0];
+            foreach ((uint b, float x) in g.Skin[p]) if (x > w) (bone, w) = (b, x);
+            return bone;
+        }
 
         // a fluid's surface: the rectangle min..max (Echoes area space, metres, Z up) at height z, and its look
         public sealed record Fluid(float[] Min, float[] Max, float Z, FluidLook Look);
@@ -89,9 +108,9 @@ namespace MphRecomp.Arenas
             Vector2 Uv(float[]? a, int i) => a != null && i >= 0 && 2 * i + 1 < a.Length ? new Vector2(a[2 * i], a[2 * i + 1]) : Vector2.Zero;
             // triangles grouped by (pass, material); a sky's (a prop's) triangles all go to the sky (prop) pass, opaque
             // materials first
-            void Emit(Cmdl g, int matBase, int? onePass, float posScale = 1, float[]? place = null)
+            int Emit(Cmdl g, int matBase, int? onePass, float posScale = 1, float[]? place = null, uint? bone = null, Vector3 origin = default)
             {
-                var order = Enumerable.Range(0, g.TriangleCount)
+                var order = Enumerable.Range(0, g.TriangleCount).Where(t => bone == null || TriangleBone(g, t) == bone)
                     .OrderBy(t => Pass(g.Materials[g.TriangleMaterial[t]])).ThenBy(t => g.TriangleMaterial[t]).ToList();
                 foreach (int t in order)
                 {
@@ -106,7 +125,8 @@ namespace MphRecomp.Arenas
                         Cmdl.Corner c = g.Triangles[3 * t + k];
                         var mp = new Vector3(g.Positions[3 * c.P], g.Positions[3 * c.P + 1], g.Positions[3 * c.P + 2]);
                         var mn = 3 * c.N + 2 < g.Normals.Length ? new Vector3(g.Normals[3 * c.N], g.Normals[3 * c.N + 1], g.Normals[3 * c.N + 2]) : Vector3.UnitZ;
-                        if (place != null) { mp = Place(place, mp); mn = PlaceNormal(place, mn); }
+                        if (bone != null) mp -= origin;
+                        else if (place != null) { mp = Place(place, mp); mn = PlaceNormal(place, mn); }
                         Vector3 p = map(mp.X, mp.Y, mp.Z) * posScale;
                         Vector3 n = map(mn.X, mn.Y, mn.Z);
                         if (n.LengthSquared > 1e-12f) n.Normalize();
@@ -117,6 +137,7 @@ namespace MphRecomp.Arenas
                     var b = batches[^1];
                     batches[^1] = (b.Mat, b.Start, b.Count + 3, b.Pass);
                 }
+                return order.Count;
             }
             Emit(geo, 0, null);
             res.Triangles = verts.Count / FloatsPerVertex / 3;
@@ -163,18 +184,18 @@ namespace MphRecomp.Arenas
             }
             // the placed models: each model's materials once, its triangles in its own pass per placement
             int placedBase = fluidBase + fluidList.Count;
-            var placedModels = new List<(uint Id, Cmdl Model, int MatBase)>();
+            var placedModels = new List<(uint Id, uint Skin, Cmdl Model, int MatBase)>();
             foreach (Placed pl in placed ?? Array.Empty<Placed>())
             {
-                int k = placedModels.FindIndex(m => m.Id == pl.Model);
+                int k = placedModels.FindIndex(m => m.Id == pl.Model && m.Skin == pl.Skin);
                 if (k < 0)
                 {
-                    if (!pak.Contains(pl.Model)) continue;
-                    placedModels.Add((pl.Model, Cmdl.Load(pak.Get, pl.Model), placedBase + placedModels.Sum(m => m.Model.Materials.Length)));
+                    if (!pak.Contains(pl.Model) || pl.Skin != uint.MaxValue && !pak.Contains(pl.Skin)) continue;
+                    placedModels.Add((pl.Model, pl.Skin, Cmdl.Load(pak.Get, pl.Model, pl.Skin == uint.MaxValue ? null : pl.Skin),
+                        placedBase + placedModels.Sum(m => m.Model.Materials.Length)));
                     k = placedModels.Count - 1;
                 }
-                Emit(placedModels[k].Model, placedModels[k].MatBase, pl.Pass, place: pl.Transform);
-                res.PlacedTriangles += placedModels[k].Model.TriangleCount;
+                res.PlacedTriangles += Emit(placedModels[k].Model, placedModels[k].MatBase, pl.Pass, place: pl.Transform, bone: pl.Bone, origin: pl.Origin);
             }
             res.Batches = batches.Count;
 
@@ -217,11 +238,17 @@ namespace MphRecomp.Arenas
                     if (anim != null && anim.Mode == 2 && anim.Params.Length >= 4) scroll = new[] { anim.Params[2], -anim.Params[3] };
                     if (anim != null && anim.Mode is 0 or 1) env = true;
                     if (src == 4 && (m.Flags & 0x800) != 0) lightmaps.Add(m.TexIds[ti]);
-                    layers.Add(new Dictionary<string, object>
+                    var layer = new Dictionary<string, object>
                     {
                         ["name"] = $"{m.TexIds[ti]:x8}", ["texmap"] = ti, ["texcoord"] = tcs.Count > 0 ? tcs[0] : ti, ["env"] = env,
                         ["scroll"] = scroll, ["mtx"] = new[] { 1, 0, 0, 0, 1, 0 }, ["uv"] = src >= 5 ? 1 : 0,
-                    });
+                    };
+                    // a filmstrip (modes 4/5: the turret's four bars pulsing, Shooting Gallery): GxLayer.UvShift steps it
+                    if (anim != null && anim.Mode is 4 or 5 && anim.Params.Length >= 4)
+                    {
+                        layer["strip"] = new double[] { anim.Mode, anim.Params[0], anim.Params[1], anim.Params[2], anim.Params[3] };
+                    }
+                    layers.Add(layer);
                 }
                 int pass = isPlaced ? FirstPlacedPass : isProp ? PropPass : isSky ? SkyPass : Pass(m);
                 mats.Add(new Dictionary<string, object>

@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Sky Temple Escape",
+  "group": "Shared",
+  "role": "area",
+  "files": [
+    { "name": "Audio/escape3-1a-32.dsp", "sha1": "c4e16db5039ef0a9b5e4b453fc03702afcab80ed" }
+  ],
+  "gain": 0.603
+}

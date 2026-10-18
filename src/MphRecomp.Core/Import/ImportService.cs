@@ -10,6 +10,7 @@ using System.Threading;
 using MphRecomp.Import.Disc;
 using MphRecomp.Import.Guns;
 using MphRecomp.Import.Retro;
+using MphRecomp.Import.Switch;
 
 namespace MphRecomp.Import
 {
@@ -47,6 +48,7 @@ namespace MphRecomp.Import
     {
         public string[] Extensions = Array.Empty<string>();   // ".iso", ".gcm"
         public bool Folder;                                     // a folder instead (Switch RomFS)
+        public string Marker = "";                              // a path every such folder holds ("Preload")
     }
 
     public sealed class ImportReport
@@ -116,7 +118,14 @@ namespace MphRecomp.Import
         {
             if (!_sha1.TryGetValue(path, out string? h))
             {
-                h = Convert.ToHexString(SHA1.HashData(File(path))).ToLowerInvariant();
+                // read through, not held: a file not already loaded may be far bigger than a phone can hold (the standalone
+                // Corruption disc's InGameAudio.pak is ~740 MB; Dark Samus Hyper Mode, 2026-10-12)
+                if (_files.TryGetValue(path, out byte[]? loaded)) h = Convert.ToHexString(SHA1.HashData(loaded)).ToLowerInvariant();
+                else
+                {
+                    using Stream s = Source.OpenRead(path);
+                    h = Convert.ToHexString(SHA1.HashData(s)).ToLowerInvariant();
+                }
                 _sha1[path] = h;
             }
             return h;
@@ -145,10 +154,16 @@ namespace MphRecomp.Import
             // disc's extracted file tree (Dolphin: Extract Entire Disc -> DATA/files, holding MP3/*.pak)
             new() { Id = "mp3", Title = "Metroid Prime 3: Corruption (Metroid Prime Trilogy)", Platform = "Wii", DiscPrefixes = new[] { "R3M" },
                 Extensions = new[] { ".rvz", ".wia", ".iso", ".wbfs" }, Folder = true, FolderMarker = "MP3" },
-            // TODO "mp4" (Metroid Prime 4: Beyond: the user's extracted RomFS folder, Folder = true, no Extensions): its
-            // recipes (recipes/guns/MP4*.json, Gun4Recipe) and Guns/Gun4Builder are ready (-importcheck guns4), but the
-            // source side is not: the Beyond RomFS pak + SMDL/CMDL + MATI/TXTR readers and the material conversion
-            // (implementing Beyond/BeyondSources.cs), and a hash check for resources inside a pak (GunImportKind.Sources)
+            // Super Smash Bros. Brawl (Wii): Zero Suit's Paralyzer effects (docs/BRAWL_PARALYZER.md); RVZ/WIA need no key, a
+            // plain .iso/.wbfs needs the user's key file; or the extracted tree (DATA/files, holding effect/)
+            new() { Id = "ssbb", Title = "Super Smash Bros. Brawl", Platform = "Wii", DiscPrefixes = new[] { "RSB" },
+                Extensions = new[] { ".rvz", ".wia", ".iso", ".wbfs" }, Folder = true, FolderMarker = "effect" },
+            // Metroid Prime 4: Beyond (Switch): the user's own game file (.xci / .nsp, read with their own prod.keys: SwitchKeys)
+            // or extracted RomFS folder; its root holds Preload/.
+            // Sylux (recipes/hd/MP4Sylux.json) imports through the clean-room Beyond readers (Import/Beyond, CR6). TODO: its
+            // arm cannons (recipes/guns/MP4*.json, Gun4Builder, -importcheck guns4) still need IBeyondModelSource /
+            // IBeyondLookSource on those readers (GunImportKind refuses them for now)
+            new() { Id = "mp4", Title = "Metroid Prime 4: Beyond", Platform = "Switch", Extensions = SwitchGame.Extensions, Folder = true, FolderMarker = "Preload" },
         };
 
         readonly Dictionary<string, IImportKind> _kinds = new(StringComparer.Ordinal);
@@ -160,6 +175,8 @@ namespace MphRecomp.Import
         // the user's own Wii common key file, loaded by the app (WiiCommonKeys.FromFile) -- only plain Wii .iso/.wbfs
         // images need it; the app never contains a key (docs/IMPORT_PIPELINE.md section 6)
         public WiiCommonKeys? WiiKeys { get; set; }
+        // the user's own Switch prod.keys (+ title.keys), loaded by the app (SwitchKeys.FromFile): .xci / .nsp files need them
+        public SwitchKeys? SwitchKeys { get; set; }
 
         public ImportService(string outputRoot, RecipeStore? recipes = null)
         {
@@ -171,6 +188,8 @@ namespace MphRecomp.Import
             Register(new Bodies.BodyImportKind());   // native Retro bodies for multiplayer characters (docs/CHARACTERS_AND_SKINS.md)
             Register(new Echoes.EchoesArenaImportKind());   // Echoes arenas + their music (CR2)
             Register(new Echoes.MusicImportKind());
+            Register(new BrawlFx.BrawlFxImportKind());   // Brawl's Paralyzer effects (docs/BRAWL_PARALYZER.md)
+            Register(new PrimeMusic.TrackImportKind());   // the Prime games' songs, one a recipe (docs/PRIME_MUSIC.md)
         }
 
         public void Register(IImportKind kind) => _kinds[kind.Kind] = kind;
@@ -186,7 +205,7 @@ namespace MphRecomp.Import
         {
             Extensions = Def(gameId).Extensions.Concat(Editions.Where(e => e.Game == gameId).SelectMany(e => e.Extensions))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-            Folder = Def(gameId).Folder,
+            Folder = Def(gameId).Folder, Marker = Def(gameId).FolderMarker,
         };
 
         // the files a recipe reads from the source, with the SHA-1 it was authored against (its kind's Sources)
@@ -259,6 +278,18 @@ namespace MphRecomp.Import
         {
             GameDef def = Def(gameId);
             var clock = Stopwatch.StartNew();
+            // a Switch game file (.xci / .nsp): its RomFS, decrypted in place with the user's own keys (Import/Switch)
+            if (SwitchGame.Detect(source) != SwitchFileFormat.Unknown)
+            {
+                if (def.Platform != "Switch") throw new InvalidDataException($"this is a Switch game file; {def.Title} is a {def.Platform} game");
+                using SwitchRomFs romfs = SwitchGame.Open(source, SwitchKeys
+                    ?? throw new SwitchKeyRequiredException("Switch game files are encrypted: give your own prod.keys, dumped from your own Switch"));
+                if (def.FolderMarker.Length > 0 && !romfs.Paths.Any(p => p.StartsWith(def.FolderMarker + "/", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new InvalidDataException($"this Switch game ({romfs.Title}) is not {def.Title} (no {def.FolderMarker} in it)");
+                }
+                return Import(gameId, romfs, progress, ct, only);
+            }
             if (def.Extensions.Length == 0)
             {
                 throw new InvalidDataException($"{def.Title}: disc images are not supported yet; give the folder holding its extracted files");

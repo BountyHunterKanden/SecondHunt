@@ -62,7 +62,7 @@ namespace MphRecomp.Campaign
         static BodyClips Echoes(NativeBody body)
         {
             const string ready = "B_ready_dark_samus";
-            var m = new BodyClips { Idle = ready, Lift = EchoesLift };
+            var m = new BodyClips { Idle = ready, Lift = EchoesLift, FlourishSet = BodyFlourish.Prepare(body, BodyFlourish.Echoes, ready) };
             foreach (PlayerAnimation a in new[] { PlayerAnimation.Idle, PlayerAnimation.Spawn, PlayerAnimation.Flourish, PlayerAnimation.Turn,
                 PlayerAnimation.Morph, PlayerAnimation.Unmorph, PlayerAnimation.JumpNeutral, PlayerAnimation.LandNeutral,
                 PlayerAnimation.LandLeft, PlayerAnimation.LandRight })
@@ -95,7 +95,7 @@ namespace MphRecomp.Campaign
             m.SetTorso(PlayerAnimation.DamageBack, "R_heavyHitB_dark_samus", false);
             m.SetTorso(PlayerAnimation.DamageLeft, "R_heavytHitR_dark_samus", false);
             m.SetTorso(PlayerAnimation.DamageRight, "R_heavyHitL_dark_samus", false);
-            if (HoldOf(body) is Hold h) m.AfterPose = h.Apply;
+            if (HoldOf(body) is Hold h) m.AfterPose = (b, who) => h.Apply(b, who, 1 - m.FlourishWeight);
             Vanilla(m, ownUnmorph: uncurl);
             return m;
         }
@@ -106,7 +106,7 @@ namespace MphRecomp.Campaign
         {
             string ready = DarkSamusFloat.Make(body, "b_ready_dark_samus", "b_float_right_c_dark_samus", "b_float_right_c_dark_samus",
                 "b_float_forward_c_dark_samus", "b_float_forward_c_dark_samus") ?? "b_ready_dark_samus";
-            var m = new BodyClips { Idle = ready, Lift = CorruptionLift };
+            var m = new BodyClips { Idle = ready, Lift = CorruptionLift, FlourishSet = BodyFlourish.Prepare(body, BodyFlourish.Corruption, ready) };
             foreach (PlayerAnimation a in new[] { PlayerAnimation.Idle, PlayerAnimation.Spawn, PlayerAnimation.Flourish, PlayerAnimation.Turn,
                 PlayerAnimation.Morph, PlayerAnimation.Unmorph, PlayerAnimation.LandNeutral, PlayerAnimation.LandLeft, PlayerAnimation.LandRight })
             {
@@ -127,7 +127,7 @@ namespace MphRecomp.Campaign
             m.SetTorso(PlayerAnimation.DamageBack, "r_heavy_hit_dark_samus", false);
             m.SetTorso(PlayerAnimation.DamageLeft, "r_hit_right_dark_samus", false);
             m.SetTorso(PlayerAnimation.DamageRight, "r_hit_left_dark_samus", false);
-            if (HoldOf(body) is Hold h) m.AfterPose = h.Apply;
+            if (HoldOf(body) is Hold h) m.AfterPose = (b, who) => h.Apply(b, who, 1 - m.FlourishWeight);
             Vanilla(m, ownUnmorph: false); // her own ball clips (b_morphball_2_hover) are multi-part: not imported yet
             return m;
         }
@@ -180,14 +180,17 @@ namespace MphRecomp.Campaign
 
             // after each pose: the arm on the aim (who null: a standing body, aimed level); while she uncurls from the ball
             // (her own unmorph) the hold eases in over the clip's second half, so the cannon isn't stuck out of the ball
-            public void Apply(NativeBody body, PlayerEntity? who)
+            public void Apply(NativeBody body, PlayerEntity? who) => Apply(body, who, 1);
+
+            // ... by how much (1 = held, 0 = her own arm: let go while her flourish plays, BodyClips.FlourishWeight)
+            public void Apply(NativeBody body, PlayerEntity? who, float release)
             {
-                float weight = 1;
+                float weight = release;
                 if (who != null && (PlayerAnimation)who.HostBipedModel1.AnimInfo.Index[0] == PlayerAnimation.Unmorph)
                 {
                     AnimationInfo a = who.HostBipedModel1.AnimInfo;
                     float t = a.FrameCount[0] > 0 ? (float)a.Frame[0] / a.FrameCount[0] : 1;
-                    weight = Math.Clamp(2 * t - 1, 0, 1);
+                    weight *= Math.Clamp(2 * t - 1, 0, 1);
                 }
                 Apply(body, who?.FacingVector.Y ?? 0, weight);
             }

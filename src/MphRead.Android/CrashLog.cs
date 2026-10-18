@@ -13,12 +13,17 @@ public class MphApp : Application
     public override void OnCreate()
     {
         base.OnCreate();
+        // every text format (setup lines, settings, saves, net messages) is invariant, like the PC tools: a Finnish
+        // phone wrote -1 as "−1" (U+2212) and crashed match start (10-16); the UI is English, so nothing visible changes
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
         CrashLog.Install(this);
         AndroidPlatform.Install(this); // the shared app layer's logging, audio output, images and caches
         VoiceAndroid.Install(this); // online voice chat (O8): follows online games, idle otherwise
         // device bans (10-09): ANDROID_ID, scrambled before it's sent; a ban then survives clearing data / reinstalling
         MphRecomp.Online.DeviceTag.SetRawId(Android.Provider.Settings.Secure.GetString(ContentResolver, Android.Provider.Settings.Secure.AndroidId));
         MphRecomp.Config.RecompSettings.PublicBuild = BuildFlags.Public;
+        MphRecomp.Frontend.RecompMenus.PadConnected = MatchTouchOverlay.HasGameController; // (the settings tabs' L1 / R1)
         MphRecomp.Config.RecompSettings.AppId = PackageName ?? MphRecomp.Config.RecompSettings.AppId;
         InstallUpdateHost();
     }

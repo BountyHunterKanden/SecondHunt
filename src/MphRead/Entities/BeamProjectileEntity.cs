@@ -42,6 +42,8 @@ namespace MphRead.Entities
         public float SplashRadius { get; set; }
         public float MaxDistance { get; set; }
         public Affliction Afflictions { get; set; }
+        // recomp: a Paralyzer shot that stuns what it hits (Zero Suit's charged shot: Metadata/Paralyzer.cs, PlayerParalyzer.cs)
+        public bool HostParalyzerStun { get; set; }
 
         public EntityBase? Owner { get; set; }
         public WeaponInfo? RicochetWeapon { get; set; }
@@ -387,7 +389,9 @@ namespace MphRead.Entities
             // todo: visualize player collision (and rename some "pickup" fields)
             foreach (PlayerEntity player in _scene.GetPlayerEntities())
             {
-                if (player.Health == 0)
+                // recomp: the Echoes turret's occupant sits inside its shell, which takes the shots (EchoesTurret.cs; MPH's
+                // body volume poked out of its front at our scale)
+                if (player.Health == 0 || player.HostSeated)
                 {
                     continue;
                 }
@@ -551,7 +555,9 @@ namespace MphRead.Entities
                             float damage = 0;
                             uint wholeDamage = 0;
                             bool isHeadshot = false;
-                            if (!player.IsAltForm
+                            if (hitHalfturret
+                                ? player.Halfturret.HostBodyHeadshot(anyRes.Position) // recomp: the Trooper's standing body (drone out)
+                                : !player.IsAltForm
                                 && anyRes.Position.Y - player.Position.Y >= Fixed.ToFloat(player.Values.MaxPickupHeight) - 0.3f)
                             {
                                 if (Beam == BeamType.Imperialist)
@@ -597,6 +603,7 @@ namespace MphRead.Entities
                             if (wholeDamage != 0)
                             {
                                 player.TakeDamage(wholeDamage, damageFlags, damageDir, this);
+                                HostHitPush?.Invoke(this, player, -1);
                             }
                             if (Flags.TestFlag(BeamFlags.LifeDrain) && Owner.Type == EntityType.Player)
                             {
@@ -877,6 +884,10 @@ namespace MphRead.Entities
         private void PlayBeamHitSfx()
         {
             StopHomingSfx();
+            if (HostOwnHitSound?.Invoke(this) == true)
+            {
+                return;
+            }
             if (HostOwnSfx)
             {
                 HostHitSfx?.Invoke(this);
@@ -984,8 +995,10 @@ namespace MphRead.Entities
                         // recomp: where a remote shooter saw this player (online host lag compensation; else where it is)
                         Vector3 playerPos = player.Position + PlayerEntity.NetLagShift(Owner, player);
                         float dist = Vector3.Distance(playerPos, Position);
+                        // recomp: a host rule's reach to the player's bounds (Echoes' turret shot), else the centre's
+                        float reach = HostSplashDistance?.Invoke(this, player, playerPos) ?? dist;
                         // todo?: wifi conditions
-                        if (dist >= SplashRadius
+                        if (reach >= SplashRadius
                             || CollisionDetection.CheckBetweenPoints(Position, playerPos, TestFlags.Beams, _scene, ref discard))
                         {
                             OmegaCannonFlash();
@@ -993,9 +1006,10 @@ namespace MphRead.Entities
                         else
                         {
                             Vector3 damageDir = GetDamageDirection(Position, playerPos);
-                            float ratio = dist / SplashRadius;
+                            float ratio = MathF.Min(dist / SplashRadius, 1); // recomp: (bounds reached past the centre's radius)
                             int damage = (int)GetInterpolatedValue(SplashDamageType, SplashDamage, 0, ratio);
                             player.TakeDamage(damage, DamageFlags.NoDmgInvuln, damageDir, this);
+                            HostHitPush?.Invoke(this, player, ratio);
                             if (Owner != null)
                             {
                                 _scene.SendMessage(Message.Impact, this, Owner, player, 0);
@@ -1011,17 +1025,23 @@ namespace MphRead.Entities
             }
             foreach (EnemyInstanceEntity enemy in _scene.GetEnemyInstanceEntities())
             {
-                if (enemy == colWith || !enemy.Flags.TestFlag(EnemyFlags.CollideBeam))
+                // recomp: a host rule's reach to the enemy's bounds, and targets it adds (Echoes' turret shot: crates, grates)
+                float? reach = HostSplashDistance?.Invoke(this, enemy, enemy.Position);
+                if (enemy == colWith || !enemy.Flags.TestFlag(EnemyFlags.CollideBeam) && reach == null)
                 {
                     continue;
                 }
                 CollisionResult res = default;
                 float dist = Vector3.Distance(enemy.Position, Position);
-                if (dist < SplashRadius
-                    && !CollisionDetection.CheckBetweenPoints(Position, enemy.Position, TestFlags.Beams, _scene, ref res))
+                // recomp: a host rule's sight line ignores the target's own collision (it ends at its centre, inside it)
+                CollisionDetection.HostRayExclude = reach != null ? enemy : null;
+                bool blocked = (reach ?? dist) < SplashRadius
+                    && CollisionDetection.CheckBetweenPoints(Position, enemy.Position, TestFlags.Beams, _scene, ref res);
+                CollisionDetection.HostRayExclude = null;
+                if ((reach ?? dist) < SplashRadius && !blocked)
                 {
-                    float damage = GetInterpolatedValue(SplashDamageType, SplashDamage, 0, dist / SplashRadius);
-                    enemy.TakeDamage((uint)damage, this);
+                    float damage = GetInterpolatedValue(SplashDamageType, SplashDamage, 0, MathF.Min(dist / SplashRadius, 1));
+                    if (HostSplashHit?.Invoke(this, enemy, (int)damage) != true) enemy.TakeDamage((uint)damage, this);
                     if (Owner != null)
                     {
                         _scene.SendMessage(Message.Impact, this, Owner, enemy, 0);
@@ -1065,10 +1085,38 @@ namespace MphRead.Entities
         // wherever MphRead would play it (PlayBeamHitSfx: walls, players, doors, ...), the shot at its hit position
         public bool HostOwnSfx { get; set; }
         public static Action<BeamProjectileEntity>? HostHitSfx { get; set; }
+        // recomp: asked first wherever MphRead would play a shot's hit sound; true = the host played its own and MphRead's
+        // isn't (Shooting Gallery's turret shots in Echoes' sound, CampaignRenderer.TurretSfx.cs)
+        public static Func<BeamProjectileEntity, bool>? HostOwnHitSound { get; set; }
+        // recomp: after a shot damages a player: the ratio is -1 for a direct hit, else the splash's distance / radius (the
+        // Echoes turret's knockback, PlayerEchoesSeat.cs)
+        public static Action<BeamProjectileEntity, PlayerEntity, float>? HostHitPush { get; set; }
+
+        // recomp: a host rule for a shot's splash (CheckSplashDamage): the distance from the blast to a target's bounds
+        // (a player or an enemy at the position given; null = MphRead's centre distance, and an enemy without
+        // CollideBeam left out), and the hit on an enemy taken by the rule (true: no TakeDamage)
+        public static Func<BeamProjectileEntity, EntityBase, Vector3, float?>? HostSplashDistance { get; set; }
+        public static Func<BeamProjectileEntity, EntityBase, int, bool>? HostSplashHit { get; set; }
         public static Action<BeamProjectileEntity, CollisionResult, bool>? HostImpact { get; set; }
         // recomp: this shot is a Pirate Blaster bolt in the app's own look (PlayerEntity.HostOwnPirateBlasterLook, set per
         // shot in Spawn: a pool slot it had goes back to MphRead's look for the next weapon's shot)
         public bool HostBlasterLook { get; private set; }
+        // recomp: a Paralyzer shot in the app's own look (PlayerEntity.HostOwnParalyzerLook, set per shot in Spawn)
+        public bool HostParalyzerLook { get; private set; }
+        // recomp: a shot of a weapon the app draws itself (HostOwnLookWeapon says which: the app's Echoes turret look,
+        // CampaignRenderer.TurretFx.cs), set per shot in Spawn like the two above; draw only
+        public bool HostWeaponLook { get; private set; }
+        public static Func<WeaponInfo, bool>? HostOwnLookWeapon { get; set; }
+        // recomp: a shot of Shooting Gallery's turret (its weapon's Description, Core EchoesTurret.ShotName): its kill message
+        // says (HEAVY TURRET) (PlayerEchoesSeat.cs; set per shot in Spawn)
+        public const string TurretWeaponName = "Echoes turret";
+        public bool HostTurretShot { get; private set; }
+        // recomp: HostWeaponLook's hits, counted (each SpawnCollisionEffect: where, the surface's normal, whether its life ran
+        // out in the air) for the app to draw its own hit effect without HostImpact
+        public int HostHits { get; private set; }
+        public Vector3 HostHitAt { get; private set; }
+        public Vector3 HostHitNormal { get; private set; }
+        public bool HostHitExpired { get; private set; }
         // recomp: a host draws this shot moved by HostDrawShift at its spawn point (a body holding its cannon away from
         // the sim's muzzle), easing to nothing HostDrawFade units along its path: trail, model and in-flight effect.
         // Draw only: Position, every hit and the hit effects are the sim's. Set per shot from HostSpawned (end of Spawn).
@@ -1529,7 +1577,9 @@ namespace MphRead.Entities
                     Matrix4 transform = GetTransformMatrix(effFacing, effUp);
                     transform.Row3.Xyz = position;
                     // recomp: HostOwnLook's pool: its muzzle flash runs but isn't drawn
-                    scene.HostSpawnHidden = equip.Beams.Length > 0 && equip.Beams[0].HostOwnLook && !equip.Beams[0].HostBlasterLook;
+                    scene.HostSpawnHidden = equip.Beams.Length > 0 && equip.Beams[0].HostOwnLook && !equip.Beams[0].HostBlasterLook
+                        || weapon.Beam == BeamType.Paralyzer && PlayerEntity.HostOwnParalyzerLook // recomp: the app's Brawl look
+                        || HostOwnLookWeapon?.Invoke(weapon) == true; // recomp: a weapon the app draws (Echoes' turret)
                     // the game does this by spawning a CBeamEffect, but that's unncessary for muzzle effects
                     if (spawnFlags.TestFlag(BeamSpawnFlags.DestroyMuzzle))
                     {
@@ -1640,6 +1690,10 @@ namespace MphRead.Entities
                 // note: previously the frame count partiy check was part of the condition below, but that assumed the base value
                 // was zero after the division by 32, which is true for Shock Coil but not e.g. platform green energy beams,
                 // so we need those to hit every other frame to match the DPS from the game
+                // recomp: the headshot damage too, as the game does (rev 1 arm9 0x2041388-0x2041404: beam +0x26 and +0x28
+                // the same way, +0x2A splash left whole). MphRead left it whole, so a Shock Coil or Arc Welder hit in the
+                // head zone did its full 10-20 every frame and flagged a headshot. Off: replays before format 38
+                bool scaleHeadshot = owner is not PlayerEntity ownerHs || ownerHs.HostContinuousHeadshots;
                 if (scene.FrameCount % 2 == 0)
                 {
                     ulong bits = (ulong)(damage & 31);
@@ -1648,10 +1702,23 @@ namespace MphRead.Entities
                     {
                         damage++;
                     }
+                    if (scaleHeadshot)
+                    {
+                        ulong hsBits = (ulong)(hsDamage & 31);
+                        hsDamage /= 32;
+                        if (hsBits != 0 && ((hsBits * (scene.FrameCount / 2)) & 31) >= 32 - hsBits)
+                        {
+                            hsDamage++;
+                        }
+                    }
                 }
                 else
                 {
                     damage = 0;
+                    if (scaleHeadshot)
+                    {
+                        hsDamage = 0;
+                    }
                 }
             }
             if (Cheats.QuadrupleDamage)
@@ -1726,6 +1793,25 @@ namespace MphRead.Entities
                     beam.HostOwnLook = beam.HostBlasterLook = blasterLook;
                     beam.HostOwnSfx = blasterLook && PlayerEntity.HostOwnPirateBlasterHitSfx;
                 }
+                // recomp: a Paralyzer shot in the app's look, its hit sound the app's too when it has Brawl's
+                bool paralyzerLook = weapon.Beam == BeamType.Paralyzer && PlayerEntity.HostOwnParalyzerLook;
+                if (paralyzerLook || beam.HostParalyzerLook)
+                {
+                    beam.HostParalyzerLook = paralyzerLook;
+                    beam.HostOwnLook = blasterLook || paralyzerLook;
+                    if (!blasterLook)
+                    {
+                        beam.HostOwnSfx = paralyzerLook && PlayerEntity.HostOwnParalyzerHitSfx;
+                    }
+                }
+                beam.HostTurretShot = weapon.Description == TurretWeaponName; // recomp: (HEAVY TURRET)
+                // recomp: a weapon in the app's own look (HostOwnLookWeapon: Shooting Gallery's turret in Echoes')
+                bool weaponLook = HostOwnLookWeapon?.Invoke(weapon) == true;
+                if (weaponLook || beam.HostWeaponLook)
+                {
+                    beam.HostWeaponLook = weaponLook;
+                    beam.HostOwnLook = blasterLook || paralyzerLook || weaponLook;
+                }
                 beam.BeamKind = weapon.BeamKind;
                 beam.Flags = flags;
                 beam.NodeRef = nodeRef;
@@ -1757,6 +1843,7 @@ namespace MphRead.Entities
                 beam.DamageInterpolation = damageInterpolation;
                 beam.MaxDistance = maxDist;
                 beam.Afflictions = afflictions;
+                beam.HostParalyzerStun = Paralyzer.Stuns(weapon, charged); // recomp
                 beam.CylinderRadius = cylinderRadius;
                 beam.Lifespan = lifespan;
                 beam.RicochetLossH = ricochetLossH;
@@ -2141,6 +2228,13 @@ namespace MphRead.Entities
                 return;
             }
             HostImpact?.Invoke(this, colRes, Lifespan <= 0);
+            if (HostWeaponLook)
+            {
+                HostHits++;
+                HostHitAt = colRes.Position;
+                HostHitNormal = colRes.Plane.Xyz;
+                HostHitExpired = Lifespan <= 0;
+            }
             _scene.HostSpawnHidden = true;
             try
             {

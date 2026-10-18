@@ -35,7 +35,14 @@ namespace MphRead.Entities
         // MPH's flight lands, just ~1.8x as slowly; holding Jump on the way down hovers (within its cap). Off: replays from
         // before it (MPH's alt-form flight, no hover till landing).
         public bool HostDronePadArc { get; set; } = true;
+        // dev (--es dronetest 1, MatchSession; the launcher's "Drone kill test"): a bot fires its drone whenever it has a live
+        // target, not only on the AI's rare alt-attack press (owner 2026-10-17: "We also still need to test drone killing me")
+        public static bool HostDroneTest { get; set; }
         private bool DronePadArcOn => HostScoutDrone && HostDronePadArc && IsAltForm;
+        // headshots on his standing body (owner 2026-10-15): a hit in the top 0.3 of its biped cylinder is a headshot by the
+        // same rules as on any standing hunter (HalfturretEntity.HostBodyHeadshot, BeamProjectileEntity). Off: replays from
+        // before it (format < 35: the turret's no headshots).
+        public bool HostDroneBodyHeadshots { get; set; } = true;
         private bool _dronePadFall = false; // this pad flight's top is past (its sideways speed already cut)
 
         private const float _droneRiseSpeed = 0.1f; // Speed.Y while Jump is held (3 units/s)
@@ -79,6 +86,24 @@ namespace MphRead.Entities
         public int[] DroneShotsBySide { get; } = new int[2];
         // the drone's own shot pool (the app draws Prime's look on these; Scout Drone MP1 beam session)
         public BeamProjectileEntity[]? DroneBeams => _droneBeams;
+
+        // the kill message for the drone's blaster shots and its laser (owner 2026-10-17: "change the killed
+        // by player (power beam) message to say (sentry drone)"). Text only: the shots still count as Power Beam kills in
+        // the stats, as before. A match client gets it from the host's snapshot (PlayerNet NetLastDrone).
+        public const string DroneKillName = "SENTRY DRONE";
+
+        private static bool DroneHit(PlayerEntity? attacker, BeamProjectileEntity? beam)
+        {
+            if (attacker == null)
+            {
+                return false;
+            }
+            if (beam == null)
+            {
+                return _droneLaserApplying;
+            }
+            return attacker._droneBeams != null && Array.IndexOf(attacker._droneBeams, beam) >= 0;
+        }
         public int DroneMuzzleClamps { get; private set; }
         public float DroneFloorGap => _droneFloorGap;
         public float DroneCap => Fixed.ToFloat(Values.MaxPickupHeight) - Fixed.ToFloat(Values.MinPickupHeight);
@@ -284,7 +309,7 @@ namespace MphRead.Entities
             {
                 // a bot's press is one frame: it holds the trigger for the whole burst while its target lives, or
                 // fires the laser (PlayerDroneLaser.cs)
-                if (_droneFireState == 0 && Controls.AltAttack.IsDown)
+                if (_droneFireState == 0 && (Controls.AltAttack.IsDown || HostDroneTest && AiData.HostTargetPlayer is PlayerEntity { Health: > 0 }))
                 {
                     if (ScoutDroneBotWantsLaser())
                     {
@@ -544,6 +569,19 @@ namespace MphRead.Entities
             if ((!IsMainPlayer || !HostOwnMainAlt) && !HostOwnAlt)
             {
                 GetDrawItems(_droneModel, _droneModel.Model.Nodes[0], _curAlpha, recolor);
+            }
+        }
+
+        public partial class PlayerAiData
+        {
+            // dev HostDroneTest, after the AI's own step: a Trooper bot with a live target splits and stays split, so its
+            // drone fires at the target (ScoutDroneFire) as soon as the unfold and waits allow
+            private void DroneTestStep()
+            {
+                if (!HostDroneTest || !_player.HostScoutDrone || _player.IsMorphing) return;
+                if (HostTargetPlayer is not PlayerEntity { Health: > 0 }) return;
+                _touchButtons.Unmorph.IsDown = false;
+                if (!_player.IsAltForm && _touchButtons.Morph.FramesUp > 20) _touchButtons.Morph.IsDown = true;
             }
         }
     }

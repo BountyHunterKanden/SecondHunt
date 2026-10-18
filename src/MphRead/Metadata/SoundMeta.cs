@@ -43,6 +43,31 @@ namespace MphRead
             EnemyDeathSfx = ParseSfxData4(data, count: 52);
         }
 
+        // every table with no sounds (-1): a server's match host has no cart code files (Extract.NoCodeFiles)
+        public static void SetNoSfxData()
+        {
+            static int[,] None2(int rows, int columns)
+            {
+                int[,] dest = new int[rows, columns];
+                for (int r = 0; r < rows; r++)
+                {
+                    for (int c = 0; c < columns; c++)
+                    {
+                        dest[r, c] = -1;
+                    }
+                }
+                return dest;
+            }
+            HunterSfx = None2(8, 17);
+            BeamSfx = None2(9, 10);
+            TerrainSfx = None2(12, 6);
+            PlatformSfx = None2(45, 4);
+            EnemyDamageSfx = new int[52];
+            EnemyDeathSfx = new int[52];
+            Array.Fill(EnemyDamageSfx, -1);
+            Array.Fill(EnemyDeathSfx, -1);
+        }
+
         private static int[,] ParseSfxData2(byte[] data, int rows, int columns)
         {
             Debug.Assert(data.Length > 0 && data.Length % 2 == 0);

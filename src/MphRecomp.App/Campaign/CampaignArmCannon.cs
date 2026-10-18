@@ -25,7 +25,7 @@ internal sealed partial class CampaignRetroBody
         if (_verts == null) return;
         try
         {
-            Cannon ??= BodyArmCannon.For(Body);
+            Cannon ??= BodyArmCannon.For(Body) ?? HeldGunCannon(); // (+ Brawl Zero Suit's gun arm: ZeroSuitGunTip.cs)
         }
         catch (Exception ex)
         {
@@ -55,15 +55,16 @@ internal sealed partial class CampaignRetroBody
 
     // the cannon at `model` (body model space in the cannon's pose -> world: BodyArmCannon.GunSpace * the gun matrix):
     // passes as DrawBody (opaque 0 / blended 1 / additive 2, the depth rebuild), faded by alpha (MPH's gun alpha: the
-    // cloak); no damage flash (MPH's first-person gun has none)
-    public void DrawCannon(Matrix4 model, Matrix4 view, Matrix4 proj, SuitPass pass, float alpha, float light = 0)
+    // cloak); no damage flash (MPH's first-person gun has none). tint: the seat's team / duplicate colour (MatchSkins'
+    // SeatTint, as its body wears it; zero = as imported)
+    public void DrawCannon(Matrix4 model, Matrix4 view, Matrix4 proj, SuitPass pass, float alpha, float light = 0, Vector4 tint = default)
     {
         if (Cannon == null || _cannon.Count == 0 || alpha <= 0f || Failed || !Warm(1000)) return;
         _cannonLight = light > 0 ? light : Cannon.Light;
         try
         {
-            _interpOnly = false;
-            _tint = Vector4.Zero;
+            _interpOnly = tint.W > 0;
+            _tint = tint;
             foreach (Batch c in _cannon)
             {
                 // the body's batch of the same material made the program and textures (again after a GL reset)
@@ -107,19 +108,23 @@ internal sealed partial class CampaignRetroBody
         }
         finally
         {
+            _interpOnly = false;
+            _tint = Vector4.Zero;
             GLES30.GlActiveTexture(GLES30.GlTexture0);
             GLES30.GlBindVertexArray(0);
         }
     }
 
     // Emit at the cannon's own light (BodyArmCannon.Light, or DrawCannon's dev override): the program's exposure, set
-    // after Use loads the body's (1) -- Material's Use then keeps it (same program); the body's next Begin loads 1 again
+    // after Use loads the body's (1) -- Material's Use then keeps it (same program); the body's next Begin loads 1 again.
+    // A tinted seat draws through the interpreter (Material: _interpOnly), so that's the program lit
     void EmitCannon(Batch c, float fade, double seconds, bool lequal = false)
     {
-        if (_cannonLight != 1f && !_interpOnly && c.Prog != 0)
+        if (_cannonLight != 1f && c.Prog != 0)
         {
-            Use(c.Prog);
-            GLES30.GlUniform1f(U(c.Prog, "uExposure"), _cannonLight);
+            int prog = _interpOnly ? _prog : c.Prog;
+            Use(prog);
+            GLES30.GlUniform1f(U(prog, "uExposure"), _cannonLight);
         }
         Emit(c, fade, seconds, lequal);
     }
@@ -170,7 +175,7 @@ internal sealed partial class CampaignRetroBody
         {
             if (c.Pass != 0) continue;
             Material(c, alpha, seconds);
-            if (_cannonLight != 1f) GLES30.GlUniform1f(U(c.Prog, "uExposure"), _cannonLight);
+            if (_cannonLight != 1f) GLES30.GlUniform1f(U(_cur, "uExposure"), _cannonLight);
             GLES30.GlDrawArrays(GLES30.GlTriangles, c.Start, c.Count);
         }
     }

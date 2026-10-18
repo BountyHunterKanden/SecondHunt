@@ -779,6 +779,34 @@ namespace MphRead.Entities
             return false;
         }
 
+        // host: the touch-screen button under a tap at DS pixel (x, y) of the dialog's 256x192 layout (OK, or YES / NO in a
+        // YES-NO dialog, then the page arrows), with a little slack for a finger; None if it misses. A press of it goes
+        // through HostDialogPress, so vanilla still decides whether that button is live yet.
+        public static HostDialogButton HostDialogButtonAt(float x, float y, bool yesNo, float slack = 3)
+        {
+            ReadOnlySpan<DialogButton> order = yesNo
+                ? stackalloc DialogButton[] { DialogButton.Yes, DialogButton.No, DialogButton.Left, DialogButton.Right }
+                : stackalloc DialogButton[] { DialogButton.Okay, DialogButton.Left, DialogButton.Right };
+            foreach (DialogButton button in order)
+            {
+                ButtonInfo info = _buttonInfo[(int)button];
+                if (x >= info.Left * 256 - slack && x < info.Right * 256 + slack
+                    && y >= info.Top * 192 - slack && y < info.Bottom * 192 + slack)
+                {
+                    return (HostDialogButton)(int)button;
+                }
+            }
+            return HostDialogButton.None;
+        }
+
+        // host: the same for a tap at (x, y) in pixels of a viewWidth x viewHeight view, where the dialogs sit in a centred
+        // 4:3 box across the view's height (Scene.HostHudDialogBox) or across the whole view
+        public static HostDialogButton HostDialogButtonAtView(float x, float y, float viewWidth, float viewHeight, bool yesNo)
+        {
+            float box = Scene.HostHudDialogBox ? MathF.Min(viewWidth, viewHeight * 4 / 3f) : viewWidth;
+            return HostDialogButtonAt((x - (viewWidth - box) / 2) / box * 256, y / viewHeight * 192, yesNo);
+        }
+
         private readonly struct ButtonInfo
         {
             public readonly float Left;

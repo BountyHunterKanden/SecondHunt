@@ -15,7 +15,7 @@ namespace MphRecomp.Multiplayer
     {
         // an arena only some devices have (by room name; an Echoes room counts even where it isn't imported)
         public static bool IsExtra(string? arena)
-            => arena != null && (EchoesArena.IsEchoesRoom(arena) || MatchArenas.Find(arena) is { Id: > MatchArenas.LastId });
+            => arena != null && (EchoesArena.IsEchoesRoom(arena) || FirstHuntArena.IsFirstHuntRoom(arena) || MatchArenas.Find(arena) is { Id: > MatchArenas.LastId });
 
         private static HashSet<string>? s_owned;
         private static long s_ownedAt;
@@ -28,7 +28,7 @@ namespace MphRecomp.Multiplayer
             HashSet<string> owned;
             try
             {
-                owned = MatchArenas.All.Where(r => r.Id > MatchArenas.LastId).Select(r => r.Name).ToHashSet();
+                owned = MatchArenas.All.Where(r => r.Id > MatchArenas.LastId && !FirstHuntArena.IsDevRoom(r.Name)).Select(r => r.Name).ToHashSet();
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
             {
@@ -48,7 +48,7 @@ namespace MphRecomp.Multiplayer
 
         // the arena's name for messages ("spires")
         public static string Label(string arena)
-            => (MatchArenas.Find(arena)?.InGameName ?? EchoesArena.Find(arena)?.InGameName ?? arena).ToLowerInvariant();
+            => (MatchArenas.Find(arena)?.InGameName ?? EchoesArena.Find(arena)?.InGameName ?? FirstHuntArena.Find(arena)?.InGameName ?? arena).ToLowerInvariant();
 
         // the JOIN message's last field: this device's extra arenas. Optional, so it needs no protocol bump: an older host
         // ignores it, and a JOIN without it (an older joiner) reads as null = no extra arenas
@@ -71,6 +71,6 @@ namespace MphRecomp.Multiplayer
         // why a joiner with these arenas can't have this arena, or null
         public static string? Refusal(IReadOnlyCollection<string>? owned, string arena)
             => Has(owned, arena) ? null
-            : $"this game is in {Label(arena)}, an arena you don't have. import metroid prime 2: echoes on import games to play it";
+            : $"this game is in {Label(arena)}, an arena you don't have. import {(FirstHuntArena.IsFirstHuntRoom(arena) ? "metroid prime hunters: first hunt" : "metroid prime 2: echoes")} on import games to play it";
     }
 }

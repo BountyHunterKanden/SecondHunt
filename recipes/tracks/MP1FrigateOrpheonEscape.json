@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Frigate Orpheon Escape",
+  "group": "Space Pirate Frigate",
+  "role": "area",
+  "files": [
+    { "name": "Audio/int_escapel.dsp", "sha1": "bfac8f3be4f5604246d510f6d4fd9c5079aeb5f8" },
+    { "name": "Audio/int_escaper.dsp", "sha1": "bc7c017d8ec8673afd313466d650af820bbbd25c" }
+  ],
+  "gain": 0.735
+}

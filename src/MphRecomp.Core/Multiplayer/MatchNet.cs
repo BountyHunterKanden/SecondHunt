@@ -178,6 +178,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.NetClient = false;
             PlayerEntity.NetWeaponPending = false;
             MphRecomp.Arenas.EchoesBreakables.Mirror = false; // crates + breakables run here now (a broken one back soon)
+            MphRecomp.Arenas.EchoesTurret.Mirror = false; // and Shooting Gallery's turret, from the state it mirrored
             _itemSync ??= new ItemSync();
             _handoff?.Apply(Scene, _itemSync);
             _itemSync.TakeOver();

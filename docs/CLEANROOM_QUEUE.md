@@ -1,8 +1,7 @@
 # Clean-room queue (2026-10-07)
 
 Owner, 2026-10-07: document every piece of the dev app that still needs work to be clean, make a queue of them, and
-work through it. This file is that queue. The live status of each item is in the board (`COORDINATION.md`, section
-"Clean-room queue (2026-10-07)"); this file says what each item is and what "done" means.
+work through it. This file is that queue: what each item is and what "done" means.
 
 Kept out of `docs/cleanroom/` on purpose: that folder is published with the release, and this one names internal
 tools, fan rigs and the owner's devices. When an item that used the spec/implementer process is done, its record goes
@@ -58,7 +57,7 @@ items that retire third-party tools, then the rest.
 | **CR3** | **Rest of Prime 1 / Echoes / Corruption characters**: MP1 troopers + pirate, MP2 suits / Dark Samus / commandos / troopers, MP3 suits / Dark Samus + their balls | as CR1, plus `prime3_char.py` / `prime3_model.py` for Corruption materials | PC Python + push | CR1's converter plus the Corruption material path (`Material3Gx` exists) and Echoes' bone layout | port | S21, S24 |
 | **CR4** | **Brawl trophies**: Kanden, Noxus, Samus, Spire, Sylux, Trace, Weavel (mesh, textures, `.brres` looks) | `wit` extracts the disc, **BrawlCrate** exports `.dae` + textures; `Mdl0Gx` (ours) reads the looks | two third-party tools | Brawl game def on `WiiDisc`; our own reader for the trophy archives, BRRES **MDL0 geometry** and **TEX0**; writer to the layout the app reads | **clean-room** (spec from the files + public format descriptions; implementer never opens BrawlLib/BrawlCrate/wit source; harness vs today's BrawlCrate output) | S22 |
 | **CR5** | **Brawl rig recipes**: joints (MIA-seeded or hand-placed), own-rule numbers (`own/<T>.own.txt`), pieces, `rest_place` facings, Rig Studio chunks, `DolKanden.posed.txt`, Samus `fighter_transfer` (needs the MP1 disc too) | `make_pieces.py`, `own_pieces.py`, `fighter_transfer.py`, `lean_fix` / `foot_fix` / `crotch_fix`, hand files in `brawl_extract/` | PC Python; hand data outside `recipes/` | port the scripts to Core; move the numbers into `recipes/brawl/<T>/` with source sha1 and no per-vertex data (rule 2 + section 6 of IMPORT_PIPELINE) | port | S26, S21 (post-steps) |
-| **CR6** | **Prime 4 (Beyond)**: suits, Sylux, pirates, their balls, and the 6 MP4 guns | **LogicFox15's Prime 4 Model Dumper** DLLs (glTF + textures) + `mp4_to_trophy.py` + `mp4_batch.sh`; guns via test-only adapters over the dumper (`Gun4TestSources.cs`) | third-party tool | our own RomFS pak, SMDL/CMDL model, MATI and TXTR readers (compression, Tegra swizzle, BCn) implementing `Import/Beyond/BeyondSources.cs`; port `mp4_to_trophy`; register game `mp4` (folder source) + `modelSha1` in the MP4 gun recipes | **clean-room** (spec from the owner's own dump; implementer never opens the dumper or any other Switch tool's code; harness vs today's dumper output) | S23, S17 |
+| **CR6** | **Prime 4 (Beyond)**: suits, Sylux, pirates, their balls, and the 6 MP4 guns | **LogicFox15's Prime 4 Model Dumper** DLLs (glTF + textures) + `mp4_to_trophy.py` + `mp4_batch.sh`; guns via test-only adapters over the dumper (`Gun4TestSources.cs`) | third-party tool | our own RomFS pak, SMDL/CMDL model, MATI and TXTR readers (compression, Tegra swizzle, BCn) implementing `Import/Beyond/BeyondSources.cs`; port `mp4_to_trophy`; register game `mp4` (folder source) + `modelSha1` in the MP4 gun recipes | **clean-room** (spec from the owner's own dump; implementer never opens the dumper or any other Switch tool's code; harness vs today's dumper output) | S23, S17  **Sylux DONE 2026-10-17** (owner option 1: spec `docs/cleanroom/G_beyond_spec.md` written from the dumper's source by the spec author; `Import/Beyond/` readers by a separate implementer from the spec alone): `recipes/hd/MP4Sylux.json` (game `mp4`, RomFS folder, `assetsSha1` revision check) imports through `Import/Hd/BeyondTrophy.cs` + `HdRigBuild`; `-importcheck hd MP4Sylux` PASS, every file (both rig caches too) identical to `brawl_extract/Converted/MP4Sylux`. Suits, pirates, balls and the 6 guns still use the dumper (guns need `IBeyondModelSource` / `IBeyondLookSource` over the new readers) |
 | **CR7** | **Rigs at import + guards** for every character | Tools `TrophyRigger` on the PC, `*.mphrig` pushed | PC step + push | run `TrophyRigIO.LoadOrFit` and the variant builds at import (`CampaignSuit` and `MenuSamus` only read caches today); guard: no import produces KandenRest / SyluxRest / MP3ZeroSuit | port | S25, S26 |
 | **CR8** | **IMPORT GAMES page** (the user-facing part of all of the above) | none (API ready) | without it nothing is reachable in the app | the page on `ImportService`: games + status, SAF document/tree pickers, Wii key file, progress + cancel, re-import, hash-mismatch message | UI work (owner GO pending, D8) | S32 |
 | **CR9** | **`Retro/Anim.cs`** (Prime 1/2 animation decode) | C#, translated from PrimeWorldEditor via `prime_anim.py` | licence-adherent (MIT, credited); listed only because it's the one translated reader | optional clean-room rewrite if the owner wants no translated code at all. Also confirm `Mrea.cs`'s research prototypes (`mp2_mrea.py`, `scly.py`) cite only format references (S11 didn't cover them) | owner's call | S11 |
@@ -94,7 +93,7 @@ Acknowledged already: the import is slower on the Odin than on the PC (owner: "t
    **Owner's call made 2026-10-07 ~12:45** (to the Start menu and UI thread, after its clean-room check of everything the
    page makes): public builds show IMPORT GAMES, the samus suit and the hd menu art; the first-person arm cannons stay
    held (not offered for import, never loaded in a public campaign). Takes effect with the next public release.
-3. **Imported on the Odin (2026-10-07 08:29-08:48, by session Start menu UI rebuild [b9a8c1], through the IMPORT GAMES
+3. **Imported on the Odin (2026-10-07 08:29-08:48, through the IMPORT GAMES
    screen and the real file picker):** Prime 1 21/21 from `mp1.rvz` in 46 s (peak ~770 MB), Echoes 22/22 from
    `echoes_widescreen.iso` in 148 s (~1.04 GB), Corruption 8/8 from `trilogy.rvz` in 22 s (~960 MB); no errors. Pulled
    and compared with the PC: guns, balls, music, `.dae` / `.gx.json` / PNGs byte-identical; the retro rigs (what the
@@ -103,7 +102,7 @@ Acknowledged already: the import is slower on the Odin than on the PC (owner: "t
 4. **The Odin still has the PC-staged arenas** in its ROM tree (`InstallStaged`); an import replaces them in the game's
    room table, so a match after importing uses the import. The staging folder `<external files>/arenas` is also where
    the import keeps `arenas/<Key>/`; staging now copies only its `_archives/` and `levels/` folders.
-5. **Other threads' files changed for CR2** (all logged in the board's Cross-session edits, 2026-10-07 07:40-08:00):
+5. **Other files changed for CR2** (2026-10-07):
    MphRead `Metadata/Rooms.cs` (upstream file: an optional `hostFolder` constructor argument), Echoes Arenas'
    `EchoesArena.cs` / `ArenaMusic.cs` / `CampaignArena.cs` / `MainActivity.cs` Arenas(), Campaign's `ImportService.cs` /
    `CampaignLaunch.cs` / Tools `ImportCheck.cs`, the UI thread's `ImportGames.cs` / `RecompMenus.cs`.
@@ -124,8 +123,7 @@ Acknowledged already: the import is slower on the Odin than on the PC (owner: "t
     Odin's ARM chip (bind poses within 5e-7) decide the side. Weights are equal; the retro rigs are identical; one
     centre-line vertex on either side looks the same. Making it identical would mean changing the hunter rigger's tie
     rule, which re-fits every cached rig (Brawl ones included), so it's left as is.
-12. **CR6 (Prime 4) needs your call: an unknown compression.** Surveyed 2026-10-07 on your RomFS dump (session
-    [60fd47], our own scripts reading the files only; the dumper's code not opened). The pak layer is easy: RFRM chunks
+12. **CR6 (Prime 4) needs your call: an unknown compression.** Surveyed 2026-10-07 on your RomFS dump (our own scripts reading the files only; the dumper's code not opened). The pak layer is easy: RFRM chunks
     (24-byte headers), a PACK with a table of 60-byte entries (type, GUID, offset, sizes) and a META table; no
     pak-level compression. But every texture's and model's GPU data starts with a codec code (3 for models, 12 / 13 / 14
     for textures) and is compressed (zlib can't shrink it). It isn't deflate, zlib, gzip, LZMA, XZ, Brotli, zstd or LZ4,
@@ -144,7 +142,7 @@ Acknowledged already: the import is slower on the Odin than on the PC (owner: "t
 
 ## 6. Log
 
-- 2026-10-07: queue written (session "Clean room queue" [051d5e]); CR1 started.
+- 2026-10-07: queue written; CR1 started.
 - 2026-10-07: **CR1 in-app converter + rigs done on the PC.** Core `Import/Hd/`: `HdRecipe`, `RetroTrophy` (port of
   `prime_to_trophy.py`'s first pass), `RetroLayout` (port of its `--layout`, incl. `--rigid-head-band`), `HdRigBuild`
   (the rigid + retro rig variants at import, on MPH's own Samus model), `HdImportKind` ("hd"); 11 recipes in
@@ -198,10 +196,10 @@ Acknowledged already: the import is slower on the Odin than on the PC (owner: "t
   each from the import folder; the IMPORT GAMES screen on the PC imports Echoes' 22 items in 72 s with the same output;
   `-recipecheck` 58/58. Recipes are rewritten from a new tuning run by `-importcheck arenas --write-recipes`.
   Left: the owner's import on the Odin (Echoes page, 6 arenas + "arena music"), then a match in an imported arena.
-- 2026-10-07: **CR1, CR2, CR3 imported on the Odin** (08:29-08:48, session Start menu UI rebuild [b9a8c1], through the
+- 2026-10-07: **CR1, CR2, CR3 imported on the Odin** (08:29-08:48, through the
   IMPORT GAMES screen; numbers in section 4b item 3). Same output as the PC except 3 centre-line vertices of the MP2
-  Dark / Light suits' rigid rigs (section 4b item 11). Re-run on the PC afterwards (session [60fd47], same tree):
+  Dark / Light suits' rigid rigs (section 4b item 11). Re-run on the PC afterwards (same tree):
   `-importcheck arenas all` 7/7, `-importcheck hd all` 34/34. Left: the owner's look on the Odin.
-- 2026-10-07: **CR6 surveyed, blocked on a compression codec** (session [60fd47]; section 4b item 12). Pak layer
+- 2026-10-07: **CR6 surveyed, blocked on a compression codec** (section 4b item 12). Pak layer
   (RFRM / PACK / TOCC / ADIR / META) mapped from the files; texture and model GPU data use an unidentified codec (codes
   3, 12, 13, 14) that none of the standard codecs decode. Owner's call before anything is built.

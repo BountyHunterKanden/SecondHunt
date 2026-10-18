@@ -41,7 +41,8 @@ namespace MphRead
             float amb = float.Parse(Arg("--amb", "0.45"), ci);
 
             string repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-            string dir = Path.Combine(repo, "brawl_extract", "Converted", trophy);
+            // --dir <folder>: an imported HD folder instead of brawl_extract/Converted/<Trophy>
+            string dir = Arg("--dir", Path.Combine(repo, "brawl_extract", "Converted", trophy));
             string dae = Directory.GetFiles(dir, "*.dae").First();
             if (!TrophyRigs.TryHunterFor(trophy, out Hunter h)) { Console.WriteLine($"{trophy}: unknown trophy"); return; }
             TrophyRig? rig = key == "default"
@@ -53,7 +54,14 @@ namespace MphRead
             Model dsModel = Read.GetModelInstance(Metadata.HunterModels[h][0]).Model;
             var sk = new DsSkeleton(dsModel);
             if (!args.Contains("--nosettle")) TrophyFeet.Settle(rig, dsModel, sk, Console.WriteLine);
-            var frames = Arg("--frames", "0") == "all" ? Enumerable.Range(0, dsModel.AnimationGroups.Node[clip].FrameCount).ToList()
+            // --flourish <clip>: the import's Prime 4 flourish clip (<Stem>.flourish.bin, Anim/TrophyFlourish) over the game's
+            // pose at weight --flw (default 1); --frames are then that clip's frames
+            TrophyFlourish? flo = Arg("--flourish", "") != "" ? TrophyFlourish.Load(TrophyFlourish.PathFor(dae)) : null;
+            int floClip = flo?.Clips.FindIndex(c => c.Name == Arg("--flourish", "")) ?? -1;
+            if (flo != null && floClip < 0) { Console.WriteLine($"no flourish clip '{Arg("--flourish", "")}' (have {string.Join(", ", flo.Clips.Select(c => c.Name))})"); return; }
+            float floW = float.Parse(Arg("--flw", "1"), ci);
+            int[] floMap = flo?.MapTo(sk.Names) ?? Array.Empty<int>();
+            var frames = Arg("--frames", "0") == "all" ? Enumerable.Range(0, flo != null ? flo.Clips[floClip].Frames : dsModel.AnimationGroups.Node[clip].FrameCount).ToList()
                 : Arg("--frames", "0").Split(',').Select(int.Parse).ToList();
 
             string? brres = Directory.GetFiles(dir, "*.brres").FirstOrDefault();
@@ -104,7 +112,7 @@ namespace MphRead
             }
             // framing: the standing Idle's height, feet on the floor at y = 0
             Pose((int)PlayerAnimation.Idle, 0);
-            float top = posed.Max(p => p.Y), H = top - Math.Min(0f, posed.Min(p => p.Y));
+            float top = posed.Max(p => p.Y), H = top - Math.Min(0f, posed.Min(p => p.Y)), idleLow = posed.Min(p => p.Y);
             float half = 0.62f * H, cy = 0.5f * top;
 
             var nws = new NativeWindowSettings { ClientSize = new Vector2i(64, 64), StartVisible = false, APIVersion = new Version(4, 3), Profile = ContextProfile.Core, Title = "hdanim" };
@@ -148,7 +156,16 @@ namespace MphRead
 
             foreach (int f in frames)
             {
-                Pose(clip, f);
+                Pose(clip, flo != null ? 0 : f);
+                if (flo != null)
+                {
+                    // as the app (SuitFlourish): Spine_1 and up from the clip, kept at the game's hips; --flfull = every bone
+                    bool full = args.Contains("--flfull");
+                    flo.Blend(floClip, f / flo.Clips[floClip].Fps, floW, rig, floMap, world, full ? null : sk.Subtree("Spine_1"), full ? -1 : sk.IndexOf("Spine_1"));
+                    HdRigTool.Deform(rig, bind, world, posed);
+                    for (int i = 0; i < sk.Count; i++) skin[i] = rig.InvBind[i] * world[i];
+                    Console.WriteLine(string.Create(ci, $"  {flo.Clips[floClip].Name} frame {f}: lowest point {posed.Min(p => p.Y):0.###} (standing Idle: {idleLow:0.###}, height {top:0.###})"));
+                }
                 if (bindOnly) { Array.Copy(bind, posed, bind.Length); for (int i = 0; i < sk.Count; i++) skin[i] = Matrix4.Identity; }
                 foreach (float yaw in yaws)
                 {
@@ -223,7 +240,7 @@ namespace MphRead
                             if (y == floor && (bgPx || x % 6 < 3)) px = new Rgba32(90, 200, 90, 255);
                             img[x, y] = px;
                         }
-                    string tag = (bindOnly ? "Bind" : ((PlayerAnimation)clip).ToString()) + (legsClip >= 0 ? "+" + (PlayerAnimation)legsClip : "") + (args.Contains("--nooffhand") ? "_nooff" : "");
+                    string tag = (bindOnly ? "Bind" : flo != null ? flo.Clips[floClip].Name + (floW < 1 ? string.Create(ci, $"_w{floW:0.##}") : "") : ((PlayerAnimation)clip).ToString()) + (legsClip >= 0 ? "+" + (PlayerAnimation)legsClip : "") + (args.Contains("--nooffhand") ? "_nooff" : "");
                     string file = Path.Combine(outDir, string.Create(ci, $"{trophy}_{key}_{tag}_{f}_y{yaw:0}.png"));
                     img.SaveAsPng(file);
                 }

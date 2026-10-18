@@ -45,7 +45,11 @@ namespace MphRead.Entities
             }
             else if (BombType == BombType.Lockjaw)
             {
-                if (Recolor == 0)
+                if (Owner.HostSyluxTrailRecolor >= 0)
+                {
+                    _trailModel = Read.GetModelInstance("arcWelder1"); // recomp: a host colour's set (HostSyluxTrailRecolor)
+                }
+                else if (Recolor == 0)
                 {
                     _trailModel = Read.GetModelInstance("arcWelder");
                 }
@@ -55,7 +59,8 @@ namespace MphRead.Entities
                 }
                 Countdown = 900 * 2;
                 // bombStartSylux, bombStartSyluxR, bombStartSyluxP, bombStartSyluxW, bombStartSyluxO, or bombStartSyluxG
-                effectId = Metadata.SyluxBombEffects[Recolor];
+                // recomp: a host colour (HostSyluxBombColor) on the white one's glow
+                effectId = Owner.HostSyluxBombColor != null ? Metadata.SyluxBombEffects[3] : Metadata.SyluxBombEffects[Recolor];
                 if (Owner.SyluxBombCount == 1)
                 {
                     CollisionResult colRes = default;
@@ -78,17 +83,39 @@ namespace MphRead.Entities
             {
                 Effect = _scene.SpawnEffectGetEntry(effectId, Transform);
                 Effect?.SetElementExtension(true);
+                if (Effect != null && BombType == BombType.Lockjaw && Owner.HostSyluxBombColor is Vector3 host)
+                {
+                    Effect.HostColor = host; // recomp
+                    Effect.HostColorElement = "glow";
+                }
             }
             if (_trailModel != null)
             {
-                int recolor = Recolor;
-                if (Recolor > 0)
-                {
-                    recolor--;
-                }
+                int recolor = TrailRecolor();
                 Material material = _trailModel.Model.Materials[0];
                 _bindingId = _scene.BindGetTexture(_trailModel.Model, material.TextureId, material.PaletteId, recolor);
             }
+        }
+
+        // the Lockjaw trail's recolor: arcWelder1's set Recolor - 1 (arcWelder's 0 for Recolor 0), or the owner's host
+        // colour's (recomp)
+        private int TrailRecolor()
+        {
+            if (Owner.HostSyluxTrailRecolor >= 0 && _trailModel != null && Owner.HostSyluxTrailRecolor < _trailModel.Model.Recolors.Count)
+            {
+                return Owner.HostSyluxTrailRecolor;
+            }
+            return Recolor > 0 ? Recolor - 1 : Recolor;
+        }
+
+        // recomp: Kanden's tail bomb in its owner's host colour (HostBombLookRecolor)
+        protected override int GetModelRecolor(ModelInstance inst, int index)
+        {
+            if (Owner != null && Owner.HostBombLookRecolor >= 0 && Owner.HostBombLookRecolor < inst.Model.Recolors.Count)
+            {
+                return Owner.HostBombLookRecolor;
+            }
+            return base.GetModelRecolor(inst, index);
         }
 
         public void Reposition(Vector3 offset)
@@ -170,7 +197,8 @@ namespace MphRead.Entities
                 foreach (EnemyInstanceEntity enemy in _scene.GetEnemyInstanceEntities())
                 {
                     if (enemy.Flags.TestFlag(EnemyFlags.CollideBeam) && enemy.EnemyType == EnemyType.Temroid && enemy.StateA == 8
-                        && ((Enemy02Entity)enemy).CheckTemroidHitByBomb(this))
+                        && (enemy is Enemy02Entity temroid ? temroid.CheckTemroidHitByBomb(this) // recomp: or First Hunt's Metroid
+                            : enemy is FirstHunt.FhMetroidEntity fhMetroid && fhMetroid.CheckMetroidHitByBomb(this)))
                     {
                         hitEntity = enemy;
                     }
@@ -563,11 +591,7 @@ namespace MphRead.Entities
                 return;
             }
             int count = 4 * segments;
-            int recolor = Recolor;
-            if (Recolor > 0)
-            {
-                recolor--;
-            }
+            int recolor = TrailRecolor();
             Vector3 vec = point2 - point1;
             Texture texture = _trailModel.Model.Recolors[recolor].Textures[0];
             float uvT = (texture.Height - (1 / 16f)) / texture.Height;
@@ -633,10 +657,15 @@ namespace MphRead.Entities
             _soundSource.PlaySfx(sfx);
         }
 
-        public static BombEntity? Spawn(PlayerEntity owner, Matrix4 transform, Scene scene)
+        // recomp: asType = this kind whatever the owner (the turret's bomb slot: Samus's bomb for every hunter)
+        public static BombEntity? Spawn(PlayerEntity owner, Matrix4 transform, Scene scene, BombType? asType = null)
         {
             BombType type = BombType.MorphBall;
-            if (owner.Hunter == Hunter.Kanden)
+            if (asType is BombType forced)
+            {
+                type = forced;
+            }
+            else if (owner.Hunter == Hunter.Kanden)
             {
                 type = BombType.Stinglarva;
             }

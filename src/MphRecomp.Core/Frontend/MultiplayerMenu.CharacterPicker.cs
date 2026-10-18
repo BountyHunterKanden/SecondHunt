@@ -29,7 +29,7 @@ namespace MphRecomp.Frontend
     public sealed partial class MultiplayerMenu
     {
         // the row: slot k's icon centre, DS touch px (vanilla's: 26 + 34k)
-        private const int PickerSlots = 9, TrooperSlot = 7, DarkSamusSlot = 8;
+        private const int PickerSlots = 9, TrooperSlot = 7, DarkSamusSlot = 8, SyluxSlot = 5; // (SyluxSlot: HunterOrder's Sylux)
         private const float SlotStep = 28.4f, SlotMid = 128, IconRowY = 134, VanillaFirstX = 26, VanillaStep = 34;
         private const float IconScale = 0.93f;
         // calls of our own (the ROM's are 0-461, the recomp's 950-2241): select slot k, and its focus companion
@@ -55,7 +55,7 @@ namespace MphRecomp.Frontend
 
         private static Character? SlotCharacter(int slot) => slot switch
         {
-            0 => Characters.Samus, TrooperSlot => Characters.Trooper, DarkSamusSlot => Characters.DarkSamus, _ => null
+            0 => Characters.Samus, SyluxSlot => Characters.Sylux, TrooperSlot => Characters.Trooper, DarkSamusSlot => Characters.DarkSamus, _ => null
         };
 
         private static Hunter SlotHunter(int slot) => slot < HunterOrder.Length ? HunterOrder[slot] : SlotCharacter(slot)!.Base;
@@ -233,7 +233,7 @@ namespace MphRecomp.Frontend
             if (page is not (HunterPage or JoinHunterPage or LobbyPage or JoinLobbyPage)) return;
             RefreshSkins();
             // the pictures this page can show, drawn now if they aren't yet (the new characters first)
-            foreach (Character c in new[] { Characters.Trooper, Characters.DarkSamus, Characters.Samus })
+            foreach (Character c in new[] { Characters.Trooper, Characters.DarkSamus, Characters.Samus, Characters.Sylux })
             {
                 foreach (string skin in SkinsOf(c)) CharacterPictures.For(PickerHdRoot, PickerPicturesDir, skin);
             }
@@ -258,7 +258,7 @@ namespace MphRecomp.Frontend
             if (PickerHdRoot == null || PickerPicturesDir == null) return;
             RefreshSkins();
             int queued = 0;
-            foreach (Character c in new[] { Characters.Trooper, Characters.DarkSamus, Characters.Samus })
+            foreach (Character c in new[] { Characters.Trooper, Characters.DarkSamus, Characters.Samus, Characters.Sylux })
             {
                 foreach (string skin in SkinsOf(c))
                 {
@@ -306,6 +306,7 @@ namespace MphRecomp.Frontend
             seat.Hunter = hunter;
             seat.Skin = s;
             seat.Character = character;
+            OnlineHunterPicked = true;
             menu.GoTo(AfterHunter); // (the lobby; ONLINE PLAY's CREATE goes on to its own page)
         }
 
@@ -362,6 +363,9 @@ namespace MphRecomp.Frontend
             public bool Hint = true; // "tap outside to close" (left out when the rows need its room)
             public (float X, float Y)[] Centres = Array.Empty<(float, float)>();
             public int Tick;
+            // RECOMP SETTINGS "menu art" (OpenArtChooser): the pick goes here instead of a seat, drawn on this item
+            public Action<string>? OnPick;
+            public int Layer = -1;
         }
 
         private Chooser? _chooser;
@@ -422,6 +426,12 @@ namespace MphRecomp.Frontend
             Chooser ch = _chooser!;
             string skin = ch.Skins[ch.Focus];
             _chooser = null;
+            if (ch.OnPick != null)
+            {
+                Sound(menu, (int)SfxId.CREATE_CONFIRM_SCR, "menu art picked");
+                ch.OnPick(skin);
+                return;
+            }
             if (ch.Page is HunterPage or JoinHunterPage)
             {
                 Sound(menu, SelectSound(menu, ch.Slot), "skin picked");
@@ -462,7 +472,7 @@ namespace MphRecomp.Frontend
         // FrontendSession's input, before the page's: true when the chooser (or a lobby badge) took it
         public bool CapturePress(MenuEngine menu, MenuKeys keys)
         {
-            if (!ChooserLive(menu)) return false;
+            if (!ChooserLive(menu)) return TryPress(menu, keys); // (TRY CONTROLS' pop-up: MultiplayerMenu.TryPicker.cs)
             if ((keys & MenuKeys.A) != 0) ChooserPick(menu);
             else if ((keys & MenuKeys.B) != 0) CloseChooser(menu, sound: true);
             return true;
@@ -470,7 +480,7 @@ namespace MphRecomp.Frontend
 
         public bool CaptureNavigate(MenuEngine menu, int dx, int dy)
         {
-            if (!ChooserLive(menu)) return false;
+            if (!ChooserLive(menu)) return TryNavigate(menu, dx, dy);
             Chooser ch = _chooser!;
             int f = ch.Focus;
             if (dx != 0) f = Wrap(f, Math.Sign(dx), ch.Skins.Count);
@@ -507,6 +517,7 @@ namespace MphRecomp.Frontend
                 if (x < ch.X0 || x > ch.X1 || -my < ch.Y0 || -my > ch.Y1) CloseChooser(menu, sound: true);
                 return true;
             }
+            if (TryTouch(menu, x, my)) return true;
             // a lobby seat's badge: that seat's skins (this player's and the bots'; the joiner's lobby only shows them)
             if (menu.Page?.Index == LobbyPage && menu.PendingPage == -1)
             {
@@ -536,6 +547,123 @@ namespace MphRecomp.Frontend
             int page = menu.Page.Index;
             if (_picker.TryGetValue(page, out PickerItems? pi)) DrawHunterPage(menu, tris, start, pi);
             else if (page is LobbyPage or JoinLobbyPage && _lobbyLayers.TryGetValue(page, out int[]? layers)) DrawLobby(menu, tris, start, layers);
+            else if (_chooser is { OnPick: not null, Layer: >= 0 } && _try?.Layer != _chooser.Layer && !RecompMenus.IsSectionMenuPage(menu.Page)
+                && ChooserLive(menu)) // (over a section page's rows, CONTROLS' or SECOND HUNT SETTINGS': DrawTryPicker)
+            {
+                EnsureRims(menu);
+                DrawChooser(menu, tris, _chooser.Layer, _chooser);
+            }
+        }
+
+        // ---- RECOMP SETTINGS "menu art" (owner 2026-10-13: "a pop up menu with the multiplayer lobby icons with name but
+        // maybe just a little bigger but still high res ... Samus low res lobby icon to represent original and then a
+        // shuffle icon so it's different every time you go load the game") ----
+
+        public const string ShuffleChoice = "shuffle";
+        private readonly Dictionary<int, int> _artLayers = new();
+
+        // an empty item of ours on the settings page for the chooser's triangles (before the page is ever entered: the
+        // engine sizes its items as a page comes in)
+        public void AddArtLayer(MenuPage page)
+        {
+            if (!_artLayers.ContainsKey(page.Index)) _artLayers[page.Index] = AddTo(page, n => new MenuItem { Index = n });
+        }
+
+        // the chooser over the page: Samus's skins on this device (ORIGINAL = the ROM's icon) and SHUFFLE, on `current`
+        public void OpenArtChooser(MenuEngine menu, string current, Action<string> pick)
+        {
+            if (menu.Page == null || !_artLayers.TryGetValue(menu.Page.Index, out int layer)) return;
+            RefreshSkins(); // an import may have ended since
+            List<string> skins = SkinsOf(Characters.Samus).ToList();
+            if (!skins.Contains(Characters.Original)) skins.Insert(0, Characters.Original);
+            bool shuffle = skins.Count > 2; // two suits or more to shuffle between (Samus's own; SHUFFLE draws only hers)
+            // Dark Samus's imported bodies after Samus's suits (owner 2026-10-13: "get dark Samus in the picker too")
+            skins.AddRange(SkinsOf(Characters.DarkSamus).Where(s => !Characters.IsOriginal(s)));
+            if (shuffle) skins.Add(ShuffleChoice);
+            var ch = new Chooser
+            {
+                Page = menu.Page.Index, Character = Characters.Samus, Skins = skins, Title = "menu art", OnPick = pick, Layer = layer,
+                Focus = Math.Max(0, skins.FindIndex(x => x.Equals(current, StringComparison.OrdinalIgnoreCase))),
+                X0 = 18, Y0 = 22, X1 = 238,
+            };
+            // the lobby chooser's look, its icons bigger (21 / 14.6 there): as big as the rows let them be on the touch screen
+            const float title = 10, top = 5, bottom = 22, maxY1 = 180, maxGap = 34;
+            ch.Gap = maxGap;
+            int rows;
+            while (true)
+            {
+                ch.PerRow = Math.Max(1, (int)((ch.X1 - ch.X0 - 8) / ch.Gap));
+                rows = (skins.Count + ch.PerRow - 1) / ch.PerRow;
+                if (ch.Y0 + title + top + rows * ch.Gap + bottom <= maxY1 || ch.Gap <= 12) break;
+                ch.Gap -= 0.5f;
+            }
+            ch.Diameter = ch.Gap * (14.6f / 17.3f);
+            // the box only as wide as its widest row (and the title / names)
+            float width = Math.Max(Math.Min(skins.Count, ch.PerRow) * ch.Gap + 16, 150);
+            float mid = (ch.X0 + ch.X1) / 2;
+            (ch.X0, ch.X1) = (Math.Max(ch.X0, mid - width / 2), Math.Min(ch.X1, mid + width / 2));
+            ch.Y1 = ch.Y0 + title + top + rows * ch.Gap + bottom;
+            float shift = (192 - ch.Y1 - ch.Y0) / 2; // centred on the touch screen
+            ch.Y0 += shift;
+            ch.Y1 += shift;
+            ch.Centres = new (float, float)[skins.Count];
+            for (int i = 0; i < skins.Count; i++)
+            {
+                int row = i / ch.PerRow, inRow = Math.Min(ch.PerRow, skins.Count - row * ch.PerRow), col = i % ch.PerRow;
+                float x = mid + (col - (inRow - 1) / 2f) * ch.Gap;
+                float y = ch.Y0 + title + top + (row + 0.5f) * ch.Gap;
+                ch.Centres[i] = (x, -y);
+            }
+            _chooser = ch;
+            Sound(menu, MenuSounds.Neutral, "menu art chooser");
+            Log?.Invoke($"menu art chooser: {skins.Count} choices, on {skins[ch.Focus]}");
+        }
+
+        // SHUFFLE's icon: the skins' round rim around two crossing arrows (drawn here, in the chooser's gold)
+        private int ShuffleTexture(MenuEngine menu)
+        {
+            if (_rim is not { } rim) return -1;
+            return menu.Widgets.Textures.GetOrAdd("character icon shuffle", () =>
+            {
+                byte[] px = ComposeIcon(rim, null, grey: false, keepFace: false);
+                var lines = new (float X0, float Y0, float X1, float Y1)[]
+                {
+                    (32, 82, 48, 82), (48, 82, 76, 46), (76, 46, 88, 46),
+                    (32, 46, 48, 46), (48, 46, 57, 58), (67, 70, 76, 82), (76, 82, 88, 82),
+                };
+                var heads = new (float X, float Y)[] { (88, 46), (88, 82) };
+                const float half = 3.6f;
+                for (int y = 0; y < 128; y++)
+                {
+                    for (int x = 0; x < 128; x++)
+                    {
+                        float fx = x + 0.5f, fy = y + 0.5f, d = float.MaxValue;
+                        foreach (var l in lines) d = MathF.Min(d, SegmentDistance(fx, fy, l.X0, l.Y0, l.X1, l.Y1) - half);
+                        foreach (var h in heads)
+                        {
+                            // an arrowhead pointing right, its tip 11 px past the line's end, 13 px long
+                            float tx = h.X + 11 - fx, dy = MathF.Abs(fy - h.Y);
+                            d = MathF.Min(d, MathF.Max(dy - tx * 0.75f, MathF.Max(-tx, tx - 13)));
+                        }
+                        float a = Math.Clamp(0.5f - d, 0, 1);
+                        if (a <= 0) continue;
+                        int i = (y * 128 + x) * 4;
+                        px[i] = (byte)(px[i] + (255 - px[i]) * a);
+                        px[i + 1] = (byte)(px[i + 1] + (247 - px[i + 1]) * a);
+                        px[i + 2] = (byte)(px[i + 2] + (156 - px[i + 2]) * a);
+                        px[i + 3] = (byte)Math.Max(px[i + 3], 255 * a);
+                    }
+                }
+                return (128, 128, px);
+            }).Id;
+        }
+
+        private static float SegmentDistance(float px, float py, float x0, float y0, float x1, float y1)
+        {
+            float dx = x1 - x0, dy = y1 - y0;
+            float t = Math.Clamp(((px - x0) * dx + (py - y0) * dy) / (dx * dx + dy * dy), 0, 1);
+            float ex = px - (x0 + t * dx), ey = py - (y0 + t * dy);
+            return MathF.Sqrt(ex * ex + ey * ey);
         }
 
         private void DrawHunterPage(MenuEngine menu, List<WidgetTri> tris, int start, PickerItems pi)
@@ -544,6 +672,7 @@ namespace MphRecomp.Frontend
             // the ROM rims the new icons are made of: Samus's (lit) and Weavel's dark one
             _rim ??= RimOf(menu, tris, start, pi.Icon[0]);
             _greyRim ??= RimOf(menu, tris, start, pi.Off[6]);
+            _syluxIcon ??= RimOf(menu, tris, start, pi.Icon[SyluxSlot]);
             var icons = new HashSet<int>();
             for (int k = 0; k < PickerSlots; k++)
             {
@@ -563,8 +692,8 @@ namespace MphRecomp.Frontend
                 }
                 Body(menu, tris, start, pi.Portrait[slot], skin, fit: (73.9f, 113.4f, 73, 65));
             }
-            // Samus's picture shows the suit the chooser is on (ORIGINAL: the ROM's)
-            if (choosing && _chooser!.Slot == 0) Body(menu, tris, start, pi.Portrait[0], _chooser.Skins[_chooser.Focus], fit: (73.9f, 113.4f, 73, 65));
+            // Samus's and Sylux's pictures show the skin the chooser is on (ORIGINAL: the ROM's)
+            if (choosing && _chooser!.Slot is 0 or SyluxSlot) Body(menu, tris, start, pi.Portrait[_chooser.Slot], _chooser.Skins[_chooser.Focus], fit: (73.9f, 113.4f, 73, 65));
             if (choosing) DrawChooser(menu, tris, pi.Layer, _chooser!);
         }
 
@@ -573,10 +702,11 @@ namespace MphRecomp.Frontend
         // owner 2026-10-08 23:08)
         private void EnsureRims(MenuEngine menu)
         {
-            if (_rim != null && _greyRim != null || !_picker.TryGetValue(HunterPage, out PickerItems? pi)) return;
+            if (_rim != null && _greyRim != null && _syluxIcon != null || !_picker.TryGetValue(HunterPage, out PickerItems? pi)) return;
             MenuPage page = menu.File.Pages[HunterPage];
             _rim ??= RimOf(menu, IdleLook(menu, page, pi.Icon[0]), 0, pi.Icon[0]);
             _greyRim ??= RimOf(menu, IdleLook(menu, page, pi.Off[6]), 0, pi.Off[6]);
+            _syluxIcon ??= RimOf(menu, IdleLook(menu, page, pi.Icon[SyluxSlot]), 0, pi.Icon[SyluxSlot]);
             if (_rim == null && !_rimMissing) Log?.Invoke("multiplayer: no SELECT HUNTER icon rim: the skin icons can't be drawn");
             _rimMissing = _rim == null;
         }
@@ -744,11 +874,15 @@ namespace MphRecomp.Frontend
             return IconTexture(menu, skin, grey: false);
         }
 
-        // a hunter's own round icon (SELECT HUNTER's, for ORIGINAL in a lobby badge): Samus's is the lit rim
+        // a hunter's own round icon (SELECT HUNTER's, for ORIGINAL in a lobby badge): Samus's is the lit rim; Sylux's his
+        // own icon (a hunter with skins: Prime 4's)
+        private (byte[] Rgba, int W, int H, float U0, float V0, float U1, float V1)? _syluxIcon;
+
         private int RomIconTexture(MenuEngine menu, Hunter hunter)
         {
-            if (hunter != Hunter.Samus || _rim is not { } rim) return -1;
-            string key = "character icon rom samus";
+            var icon = hunter == Hunter.Samus ? _rim : hunter == Hunter.Sylux ? _syluxIcon : null;
+            if (icon is not { } rim) return -1;
+            string key = "character icon rom " + hunter.ToString().ToLowerInvariant();
             return menu.Widgets.Textures.GetOrAdd(key, () => (128, 128, ComposeIcon(rim, null, grey: false, keepFace: true))).Id;
         }
 
@@ -769,10 +903,12 @@ namespace MphRecomp.Frontend
                 (float cx, float cy) = ch.Centres[i];
                 float r = ch.Diameter / 2;
                 if (i == ch.Focus && halo >= 0) Halo(menu, tris, layer, halo, cx, cy, ch.Diameter * 1.55f, ch.Tick);
-                int tex = Characters.IsOriginal(ch.Skins[i]) ? RomIconTexture(menu, ch.Character.Base) : IconTexture(menu, ch.Skins[i], grey: false);
+                int tex = ch.Skins[i] == ShuffleChoice ? ShuffleTexture(menu)
+                    : Characters.IsOriginal(ch.Skins[i]) ? RomIconTexture(menu, ch.Character.Base) : IconTexture(menu, ch.Skins[i], grey: false);
                 if (tex >= 0) Quad(tris, layer, tex, cx - r, cy + r, cx + r, cy - r, 1, 1, 1, 1);
             }
-            Text(menu, tris, layer, Characters.Label(ch.Skins[ch.Focus]), (x0 + x1) / 2, y1 + (ch.Hint ? 14.6f : 4.6f), 0.84f, 255, 247, 156);
+            string label = ch.Skins[ch.Focus] == ShuffleChoice ? "SHUFFLE" : Characters.Label(ch.Skins[ch.Focus]);
+            Text(menu, tris, layer, label, (x0 + x1) / 2, y1 + (ch.Hint ? 14.6f : 4.6f), 0.84f, 255, 247, 156);
             if (ch.Hint) Text(menu, tris, layer, "tap outside to close", (x0 + x1) / 2, y1 + 6.2f, 0.58f, 150, 150, 150);
         }
 

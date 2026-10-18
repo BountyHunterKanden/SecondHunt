@@ -154,6 +154,9 @@ void main()
         _ => GLES30.GlClampToEdge
     };
 
+    // a texture the caller renders itself (the PRIME map's blurred backdrop) drawn for this UiTexture
+    public void UseGlTexture(int uiTextureId, int glTexture) => _glTextures[uiTextureId] = glTexture;
+
     int Texture(UiTexture tex)
     {
         if (_glTextures.TryGetValue(tex.Id, out int id)) return id;

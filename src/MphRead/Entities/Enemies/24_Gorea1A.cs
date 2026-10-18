@@ -300,8 +300,9 @@ namespace MphRead.Entities.Enemies
                 _spawner.Data.Fields.S11.Sphere1Radius.FloatValue), Position);
             UpdateSpeed();
             _field23C = 210 * 2; // todo: FPS stuff
-            _field23E = 510 * 2; // todo: FPS stuff
-            _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2; // todo: FPS stuff
+            // recomp: vanilla (rev 1 0x2134484) counts these down to -1 (N + 1 ticks), so + 1 frame for 60 Hz
+            _field23E = 510 * 2 + 1; // todo: FPS stuff
+            _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2 + 1; // todo: FPS stuff
             _goreaFlags |= Gorea1AFlags.Bit0;
             _goreaFlags |= Gorea1AFlags.Bit2;
             ResetMaterialColors();
@@ -558,7 +559,7 @@ namespace MphRead.Entities.Enemies
                 {
                     _arms[i].Flags &= ~EnemyFlags.Invincible;
                 }
-                _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2; // todo: FPS stuff
+                _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2 + 1; // todo: FPS stuff
             }
         }
 
@@ -701,7 +702,9 @@ namespace MphRead.Entities.Enemies
                     int shotCooldown = arm.EquipInfo.Weapon.ShotCooldown * 2;
                     int autoCooldown = arm.EquipInfo.Weapon.AutofireCooldown * 2;
                     if (shotCooldown <= frame && frame <= autoCooldown
-                        && (WeaponIndex == 5 || (frame % 8) == 7)) // the game does every 4, we do every 8
+                        // the game does every 4, we do every 8
+                        // recomp: Shock Coil fires once per 30 Hz tick in the game (rev 1 0x21377FC), not every 60 Hz frame
+                        && (WeaponIndex == 5 ? (frame % 2) == 1 : (frame % 8) == 7))
                     {
                         shoot = true;
                     }
@@ -917,8 +920,8 @@ namespace MphRead.Entities.Enemies
                 Flags |= EnemyFlags.NoHomingCo;
                 Flags &= ~EnemyFlags.OnRadar;
                 _field23C = 210 * 2; // todo: FPS stuff
-                _field23E = 510 * 2; // todo: FPS stuff
-                _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2; // todo: FPS stuff
+                _field23E = 510 * 2 + 1; // todo: FPS stuff
+                _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2 + 1; // todo: FPS stuff
                 _head.Flags &= ~EnemyFlags.Visible;
                 _head.Flags &= ~EnemyFlags.CollidePlayer;
                 _head.Flags &= ~EnemyFlags.CollideBeam;
@@ -1429,7 +1432,7 @@ namespace MphRead.Entities.Enemies
             {
                 return false;
             }
-            _field23E = 510 * 2; // todo: FPS stuff
+            _field23E = 510 * 2 + 1; // todo: FPS stuff
             if (!_arms[0].ArmFlags.TestFlag(GoreaArmFlags.Bit0) && !_arms[1].ArmFlags.TestFlag(GoreaArmFlags.Bit0))
             {
                 return false;
@@ -1471,7 +1474,7 @@ namespace MphRead.Entities.Enemies
         {
             if (_field240 < 0)
             {
-                _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2; // todo: FPS stuff
+                _field240 = (int)(Rng.GetRandomInt2(90) + 150) * 2 + 1; // todo: FPS stuff
                 return true;
             }
             return false;

@@ -13,7 +13,7 @@ namespace SecondHunt.Server
     // One WebSocket per player: the signed login, then requests and pushes (docs/ONLINE_PLAY.md sections 4-5, 13).
     public sealed partial class Hub
     {
-        public const string ServerVersion = "0.7.2"; // 0.7.2 (release 0.2.0 F1): a seat dropped for its silence gets its slot back when its device sends again (Relay.Returned, Hub.SeatReturned); 0.7.1 (release 0.2.0 F3): Find Game matches up to 8 (FindConfig.MaxPlayers; a full party of 4 plays alone after the fill wait); 0.2.0: report, delete_profile; 0.3.0: ping, Find Game; 0.4.0: rejoin, TURN; 0.5.0: chat + safety (filter, mutes, bans, report evidence), host migration; 0.6.0: games carry the extra rules (GameInfo.ExtraPickups / ExtraCharacters), Find Game filters them; 0.7.0 (release test fixes): held seats (WelcomeMsg.Held = the hub's REJOIN, FIND releases a held seat, a seat silent 90 s is dropped); T3: friend OR rival (a rival upgrades to a friend, rival links between friends removed), head to head on the server (match_result, PlayerCard.Record), typed-chat lock skipped for friends only; T2: GameInfo.ExtraArena (Find Game's backfill only into games in an imported arena the searchers all have)
+        public const string ServerVersion = "0.8.0"; // 0.8.0 (docs/DEDICATED_SERVERS.md D3): served games (GameInfo.Served: the match runs in a SecondHuntMatchHost process here on relay slot 0, Host = the lobby's owner on slot 1; JoinGameReq.Served; MemberEvent.Owner; results from the match host); 0.7.2 (release 0.2.0 F1): a seat dropped for its silence gets its slot back when its device sends again (Relay.Returned, Hub.SeatReturned); 0.7.1 (release 0.2.0 F3): Find Game matches up to 8 (FindConfig.MaxPlayers; a full party of 4 plays alone after the fill wait); 0.2.0: report, delete_profile; 0.3.0: ping, Find Game; 0.4.0: rejoin, TURN; 0.5.0: chat + safety (filter, mutes, bans, report evidence), host migration; 0.6.0: games carry the extra rules (GameInfo.ExtraPickups / ExtraCharacters), Find Game filters them; 0.7.0 (release test fixes): held seats (WelcomeMsg.Held = the hub's REJOIN, FIND releases a held seat, a seat silent 90 s is dropped); T3: friend OR rival (a rival upgrades to a friend, rival links between friends removed), head to head on the server (match_result, PlayerCard.Record), typed-chat lock skipped for friends only; T2: GameInfo.ExtraArena (Find Game's backfill only into games in an imported arena the searchers all have)
         private const int MaxPendingRequests = 100;
 
         private readonly Store _store;
@@ -322,7 +322,7 @@ namespace SecondHunt.Server
             case ListGamesReq:
                 return ListGames(me);
             case JoinGameReq r:
-                return JoinGame(me, r.GameId, r.Version, r.Mods);
+                return JoinGame(me, r.GameId, r.Version, r.Mods, r.Served);
             case LeaveGameReq:
                 return new OkMsg { Done = LeaveGame(me) };
             case StartGameReq r:

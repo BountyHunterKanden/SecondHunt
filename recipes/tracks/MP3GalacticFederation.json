@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Galactic Federation",
+  "group": "G.F.S. Olympus",
+  "role": "cutscene",
+  "files": [
+    { "name": "MP3/Audio/GF/Ginga_rempou.fsb", "sha1": "e5a60a504b0b82ee7ebd6151cde24999c3d5b87a" }
+  ],
+  "gain": 0.750
+}

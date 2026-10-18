@@ -53,6 +53,7 @@ namespace MphRead.Entities
                         _showScoreboard = false;
                     }
                 }
+                UpdateParalyzerStun(); // recomp: Zero Suit's stun counts down (PlayerParalyzer.cs)
                 if (_frozenTimer > 0)
                 {
                     _frozenTimer--;
@@ -96,7 +97,11 @@ namespace MphRead.Entities
             {
                 ShieldWallTick(); // recomp: the Trooper's Shield Wall (PlayerShield.cs)
             }
-            if (IsAltForm || IsMorphing)
+            if (HostSeated)
+            {
+                SeatInput(); // recomp: in Shooting Gallery's turret (PlayerEchoesSeat.cs)
+            }
+            else if (IsAltForm || IsMorphing)
             {
                 ProcessAlt();
             }
@@ -104,10 +109,12 @@ namespace MphRead.Entities
             {
                 ProcessBiped();
             }
+            SlotAfterInput(); // recomp: the turret's bomb slot holds a ball there (PlayerEchoesSeat.cs)
         }
 
-        // recomp: the Pirate Blaster after the Shock Coil (9 -> 10 entries; the wrap indexes below follow the length)
-        private static readonly BeamType[] _weaponOrder = new BeamType[10]
+        // recomp: the Pirate Blaster and the Paralyzer after the Shock Coil (9 -> 11 entries; the wrap indexes below follow
+        // the length; a weapon the player doesn't hold is skipped, so matches without them cycle as before)
+        private static readonly BeamType[] _weaponOrder = new BeamType[11]
         {
             /* 0 */ BeamType.PowerBeam,
             /* 1 */ BeamType.Missile,
@@ -118,7 +125,8 @@ namespace MphRead.Entities
             /* 6 */ BeamType.Magmaul,
             /* 7 */ BeamType.ShockCoil,
             /* 8 */ BeamType.PirateBlaster,
-            /* 9 */ BeamType.OmegaCannon
+            /* 9 */ BeamType.Paralyzer,
+            /* 10 */ BeamType.OmegaCannon
         };
 
         private void ProcessTouchInput()
@@ -317,6 +325,156 @@ namespace MphRead.Entities
             _facingVector = _facingVector.Normalized();
         }
 
+        // recomp: the aim's speed factor while zoomed (1 otherwise). The game (rev 1 arm9 0x020277F4 aim Y, 0x02027E68 aim X)
+        // MULTIPLIES the aim by 1 + Field70 * (half FOV - NormalFov), with the zoom's current (still easing) half FOV: 0.30 at
+        // the Imperialist's 12 degrees, 0.07 at 3 (close to the focal-length scaling modern shooters use). MphRead divided by
+        // -Field70 * (FOV - NormalFov * 2), which made the aim ~10x fast as the zoom began and 0.72 at full zoom. Off
+        // (HostVanillaZoom) only for replays recorded before the fix (MphRecomp MatchSettings.VanillaZoom), so they play exactly.
+        public float ZoomAimFactor()
+        {
+            if (!EquipInfo.Zoomed)
+            {
+                return 1;
+            }
+            if (HostVanillaZoom)
+            {
+                if (CameraInfo.Fov <= 0)
+                {
+                    return 1;
+                }
+                float factor = 1 + Fixed.ToFloat(Values.Field70) * (CameraInfo.Fov / 2 - Fixed.ToFloat(Values.NormalFov));
+                return MathF.Max(factor, 0.01f); // (under 0.4 degrees half the game's would turn negative; no arena gets there)
+            }
+            float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
+            if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
+            {
+                return 1 / (-Fixed.ToFloat(Values.Field70) * fovFactor);
+            }
+            return 1;
+        }
+
+        // recomp: the game's zoom timing at 60 Hz (see ZoomAimFactor for when it's off)
+        public bool HostVanillaZoom { get; set; } = true;
+
+        // recomp: ZOOM STEP (MphRecomp's controls option, owner 2026-10-17), from the player's input each step (MphRecomp
+        // CampaignButtons.ZoomStep / ZoomIn / ZoomOut, so replays and the host see it as the player had it). On: vanilla's two
+        // zooms, the second one only when the player asks for it. The zoom press goes to the first zoom (the weapon's), then
+        // to the target zoom if it's ready (HostZoomTargetReady), else back out; zoom in takes the target zoom when it's ready
+        // (refused otherwise) and zoom out steps back. In the target zoom the depth is vanilla's own, every frame; when the
+        // target leaves vanilla's cone the view goes back to the first zoom and the target zoom ends (owner: press again for
+        // the next target, never an auto zoom). Off: vanilla (the target zoom is automatic).
+        private bool _hostZoomStep, _hostZoomIn, _hostZoomOut, _hostZoomInPrev, _hostZoomOutPrev;
+        private bool _hostZoomTarget; // ZOOM STEP's target zoom is on
+
+        public void HostZoomButtons(bool step, bool zoomIn, bool zoomOut)
+        {
+            _hostZoomStep = step;
+            _hostZoomIn = zoomIn;
+            _hostZoomOut = zoomOut;
+        }
+
+        // the zoom press (Controls.Zoom) and the zoom in / out presses, with ZOOM STEP on
+        private void HostZoomStepPresses()
+        {
+            bool inPressed = _hostZoomIn && !_hostZoomInPrev, outPressed = _hostZoomOut && !_hostZoomOutPrev;
+            _hostZoomInPrev = _hostZoomIn;
+            _hostZoomOutPrev = _hostZoomOut;
+            if (Controls.Zoom.IsPressed)
+            {
+                if (!EquipInfo.Zoomed)
+                {
+                    _hostZoomTarget = false;
+                    UpdateZoom(true);
+                }
+                else if (!_hostZoomTarget && HostZoomTargetReady)
+                {
+                    _hostZoomTarget = true;
+                }
+                else
+                {
+                    UpdateZoom(false);
+                }
+            }
+            else if (EquipInfo.Zoomed && inPressed)
+            {
+                if (HostZoomTargetReady) _hostZoomTarget = true;
+            }
+            else if (EquipInfo.Zoomed && outPressed)
+            {
+                if (_hostZoomTarget) _hostZoomTarget = false;
+                else UpdateZoom(false);
+            }
+            if (!EquipInfo.Zoomed) _hostZoomTarget = false;
+        }
+
+        // recomp: zoomed, vanilla would zoom past the first zoom now (a target in its cone, far enough away): ZOOM STEP's target
+        // zoom can be taken, and its HUD icon is lit (PlayerZoomReady.cs)
+        public bool HostZoomTargetReady
+        {
+            get
+            {
+                if (!EquipInfo.Zoomed || EquipInfo.Weapon == null)
+                {
+                    return false;
+                }
+                float first = Fixed.ToFloat(EquipInfo.Weapon.ZoomFov);
+                return ZoomTargetHalfFov(first) < first;
+            }
+        }
+
+        // vanilla's target zoom (the game's own check, from the zoom update below): the half FOV that fits 3 units either side
+        // of the farthest target in the cone (players, enemies, objects that take weapon zoom), or `first` (the weapon's
+        // zoom) if none goes past it
+        private float ZoomTargetHalfFov(float first)
+        {
+            float zoomFov = first;
+            Vector3 facing = _facingVector;
+
+            void CheckZoomTargets(EntityType type)
+            {
+                foreach (EntityBase entity in _scene.Entities)
+                {
+                    if (entity.Type != type || entity == this || !entity.GetTargetable())
+                    {
+                        continue;
+                    }
+                    if (entity.Type == EntityType.Object
+                        && !((ObjectEntity)entity).Data.EffectFlags.TestFlag(ObjEffFlags.WeaponZoom))
+                    {
+                        continue;
+                    }
+                    entity.GetPosition(out Vector3 position);
+                    Vector3 between = position - Position;
+                    float dot = Vector3.Dot(between, facing);
+                    if (dot > 1 && dot / between.Length >= Fixed.ToFloat(4074))
+                    {
+                        float angle = MathHelper.RadiansToDegrees(MathF.Atan2(3, dot));
+                        if (angle < zoomFov)
+                        {
+                            zoomFov = angle;
+                        }
+                    }
+                }
+            }
+
+            CheckZoomTargets(EntityType.Player);
+            CheckZoomTargets(EntityType.EnemyInstance);
+            CheckZoomTargets(EntityType.Object);
+            return zoomFov;
+        }
+
+        // recomp: TRY CONTROLS (MphRecomp SoloArena.cs): every weapon but the Omega Cannon, its charge, and full ammo
+        public void HostGiveAllWeapons()
+        {
+            for (BeamType beam = BeamType.PowerBeam; beam < BeamType.OmegaCannon; beam++)
+            {
+                _availableWeapons[beam] = true;
+                _availableCharges[beam] = true;
+            }
+            _ammo[0] = _ammoMax[0];
+            _ammo[1] = _ammoMax[1];
+        }
+
         private void UpdateAimY(float amount)
         {
             if (Controls.InvertAimY)
@@ -324,14 +482,7 @@ namespace MphRead.Entities
                 amount *= -1;
             }
             float sensitivity = 1; // itodo: this
-            if (EquipInfo.Zoomed)
-            {
-                float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
-                if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
-                {
-                    sensitivity /= -Fixed.ToFloat(Values.Field70) * fovFactor;
-                }
-            }
+            sensitivity *= ZoomAimFactor(); // recomp: was MphRead's own zoomed formula, see ZoomAimFactor
             amount *= sensitivity;
             // unimpl-controls: these calculations are different when exact aim is not set
             float prevAim = _aimY;
@@ -367,14 +518,7 @@ namespace MphRead.Entities
                 amount *= -1;
             }
             float sensitivity = 1; // itodo: this
-            if (EquipInfo.Zoomed)
-            {
-                float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
-                if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
-                {
-                    sensitivity /= -Fixed.ToFloat(Values.Field70) * fovFactor;
-                }
-            }
+            sensitivity *= ZoomAimFactor(); // recomp: was MphRead's own zoomed formula, see ZoomAimFactor
             amount *= sensitivity;
             // unimpl-controls: these calculations are different when exact aim is not set
             float sin;
@@ -456,6 +600,8 @@ namespace MphRead.Entities
             }
         }
 
+        private const float IdleAimDeadZone = 0.05f;
+
         private void ProcessBiped()
         {
             if (IsMainPlayer && GameState.SinglePlayer && CameraSequence.Current != null)
@@ -515,7 +661,8 @@ namespace MphRead.Entities
                     {
                         aimX = aimY = 0;
                     }
-                    if (aimX != 0 || aimY != 0)
+                    // recomp: a gyro's drift (~0.001 a frame on a still device) isn't input, or the idle Flourish never comes (0.05 = 3 deg/s; one mouse pixel = 0.25)
+                    if (MathF.Abs(aimX) > IdleAimDeadZone || MathF.Abs(aimY) > IdleAimDeadZone)
                     {
                         Input.HasInput = true;
                     }
@@ -577,7 +724,7 @@ namespace MphRead.Entities
                 {
                     jumping = true; // recomp: the Trooper's wall jump (PlayerWallCling.cs)
                 }
-                if (!Flags2.TestAny(PlayerFlags2.BipedLock | PlayerFlags2.BipedStuck) && !ShieldWallLocked && !WallClingHeld)
+                if (!Flags2.TestAny(PlayerFlags2.BipedLock | PlayerFlags2.BipedStuck) && !ShieldWallLocked && !WallClingHeld && !ParalyzerStunned) // recomp: stunned = no moving or jumping
                 {
                     // unimpl-controls: the game also tests for either the free strafe flag, or the strafe button held
                     // and later, for up/down, it tests for either flag, or the look button not held
@@ -845,7 +992,11 @@ namespace MphRead.Entities
                     }
                     if (EquipWeapon.Flags.TestFlag(WeaponFlags.CanZoom)) // (recomp: the Trooper's barrier is off while a zooming weapon is equipped, PlayerShield.cs)
                     {
-                        if (Controls.Zoom.IsPressed)
+                        if (_hostZoomStep)
+                        {
+                            HostZoomStepPresses(); // recomp: ZOOM STEP's tiers
+                        }
+                        else if (Controls.Zoom.IsPressed)
                         {
                             UpdateZoom(!EquipInfo.Zoomed);
                         }
@@ -854,43 +1005,23 @@ namespace MphRead.Entities
                             // note: the game does this during cam seqs, resulting in the FOV thrashing a bit, but it has no visible effect
                             // since the sin/cos values for projection are set aside in the cam info update that's already occurred above.
                             float zoomFov = Fixed.ToFloat(EquipInfo.Weapon.ZoomFov);
-                            Vector3 facing = _facingVector;
-
-                            void CheckZoomTargets(EntityType type)
+                            if (!_hostZoomStep || _hostZoomTarget) // (recomp: ZOOM STEP takes the target zoom only when asked)
                             {
-                                foreach (EntityBase entity in _scene.Entities)
+                                float target = ZoomTargetHalfFov(zoomFov); // (recomp: the game's target check, moved there)
+                                if (_hostZoomStep && target >= zoomFov)
                                 {
-                                    if (entity.Type != type || entity == this || !entity.GetTargetable())
-                                    {
-                                        continue;
-                                    }
-                                    if (entity.Type == EntityType.Object
-                                        && !((ObjectEntity)entity).Data.EffectFlags.TestFlag(ObjEffFlags.WeaponZoom))
-                                    {
-                                        continue;
-                                    }
-                                    entity.GetPosition(out Vector3 position);
-                                    Vector3 between = position - Position;
-                                    float dot = Vector3.Dot(between, facing);
-                                    if (dot > 1 && dot / between.Length >= Fixed.ToFloat(4074))
-                                    {
-                                        float angle = MathHelper.RadiansToDegrees(MathF.Atan2(3, dot));
-                                        if (angle < zoomFov)
-                                        {
-                                            zoomFov = angle;
-                                        }
-                                    }
+                                    _hostZoomTarget = false; // recomp: the target left the cone: back to the first zoom
                                 }
+                                zoomFov = target;
                             }
-
-                            CheckZoomTargets(EntityType.Player);
-                            CheckZoomTargets(EntityType.EnemyInstance);
-                            CheckZoomTargets(EntityType.Object);
                             zoomFov *= 2;
                             float currentFov = CameraInfo.Fov;
+                            // recomp: the game steps 2 degrees of half FOV a 30 Hz tick (0x02025E98), 2 of full FOV a 60 Hz frame;
+                            // MphRead stepped 4 (twice as fast)
+                            float fovStep = HostVanillaZoom ? 2 : 2 * 2;
                             if (zoomFov > currentFov)
                             {
-                                currentFov += 2 * 2;
+                                currentFov += fovStep;
                                 if (currentFov > zoomFov)
                                 {
                                     currentFov = zoomFov;
@@ -898,7 +1029,7 @@ namespace MphRead.Entities
                             }
                             else if (zoomFov < currentFov)
                             {
-                                currentFov -= 2 * 2;
+                                currentFov -= fovStep;
                                 if (currentFov < zoomFov)
                                 {
                                     currentFov = zoomFov;
@@ -907,12 +1038,15 @@ namespace MphRead.Entities
                             CameraInfo.Fov = currentFov;
                         }
                     }
+                    bool paralyzerPending = ParalyzerPendingShot(); // recomp: a Paralyzer press inside its cooldown (PlayerParalyzer.cs)
                     if (Controls.Shoot.IsPressed && EquipInfo.ChargeLevel <= 1 * 2 // todo: FPS stuff
                         || EquipWeapon.Flags.TestFlag(WeaponFlags.RepeatFire) && Flags2.TestFlag(PlayerFlags2.Shooting)
-                        && (!EquipWeapon.Flags.TestFlag(WeaponFlags.CanCharge) || EquipInfo.ChargeLevel < EquipWeapon.MinCharge * 2)) // todo: FPS stuff
+                        && (!EquipWeapon.Flags.TestFlag(WeaponFlags.CanCharge) || EquipInfo.ChargeLevel < EquipWeapon.MinCharge * 2) // todo: FPS stuff
+                        || paralyzerPending)
                     {
                         if (TryFireWeapon())
                         {
+                            _paralyzerPressPending = false; // recomp
                             anim2 = PlayerAnimation.Shoot;
                             animFlags2 |= AnimFlags.NoLoop;
                             if (Biped2Anim == PlayerAnimation.Shoot)
@@ -923,7 +1057,7 @@ namespace MphRead.Entities
                     }
                     // the game doesn't require pressed here, but presumably the control scheme would have the pressed flag
                     // todo: use the ability flag for the morph touch button too, even though the game doesn't
-                    if (!Flags2.TestFlag(PlayerFlags2.BipedStuck) && !ShieldWallLocked && _abilities.TestFlag(AbilityFlags.AltForm)
+                    if (!Flags2.TestFlag(PlayerFlags2.BipedStuck) && !ShieldWallLocked && !ParalyzerStunned && _abilities.TestFlag(AbilityFlags.AltForm)
                         && Controls.Morph.IsPressed || IsMainPlayer && CameraSequence.Current?.ForceAlt == true)
                     {
                         if (TrySwitchForms() && IsMainPlayer && IsMorphing)
@@ -944,6 +1078,7 @@ namespace MphRead.Entities
                 {
                     speedDelta = WallClingSteer(speedDelta); // recomp: a wall jump's kick-off (PlayerWallCling.cs)
                 }
+                speedDelta = KnockSteerCut(speedDelta); // recomp: an Echoes turret shot's knockback (PlayerEchoesSeat.cs)
                 float magBefore = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
                 Speed += speedDelta; // todo: FPS stuff?
                 float magAfter = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
@@ -963,7 +1098,8 @@ namespace MphRead.Entities
                 if (EquipInfo.Zoomed)
                 {
                     Vector3 diff = _gunVec1 - _facingVector;
-                    _facingVector += diff * 0.3f / 2; // todo: FPS stuff
+                    // recomp: the game's 0x4CC / 4096 a 30 Hz tick (0x02026100) is 1 - sqrt(1 - 0.2998) = 0.1632 a 60 Hz frame
+                    _facingVector += diff * (HostVanillaZoom ? 0.1632f : 0.3f / 2); // todo: FPS stuff
                     _facingVector = _facingVector.Normalized();
                 }
                 if (anim1 == PlayerAnimation.None)
@@ -1034,6 +1170,10 @@ namespace MphRead.Entities
                 // --> could add more, but the min charge is reaached quickly
                 int pbAuto = Math.Min(_powerBeamAutofire / 2, 90); // todo: FPS stuff
                 pbAuto = (int)(pbAuto * 15 / 90f);
+                if (HostFirstHunt)
+                {
+                    pbAuto = 0; // recomp: First Hunt's held Power Beam keeps its rate (weapon +0x5; FirstHunt/PlayerFirstHunt.cs)
+                }
                 _autofireCooldown = (ushort)((pbAuto + EquipWeapon.AutofireCooldown) * 2); // todo: FPS stuff
             }
             if ((_timeSinceShot < EquipWeapon.ShotCooldown * 2 // todo: FPS stuff
@@ -1111,7 +1251,8 @@ namespace MphRead.Entities
                 _muzzleEffect = _scene.SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, FxMuzzlePos); // recomp: HostFxMuzzle
                 // recomp: the Pirate Blaster's first bolt with the Prime look hides the Power Beam's yellow tip blast too, as
                 // bolts 2-3 do (PlayerPirateBlaster.cs; release 0.2.0 F4: "yellow first then red ... can it just be red?")
-                if (_muzzleEffect != null && (!IsMainPlayer || CurrentWeapon == BeamType.PirateBlaster && HostOwnPirateBlasterLook))
+                if (_muzzleEffect != null && (!IsMainPlayer || CurrentWeapon == BeamType.PirateBlaster && HostOwnPirateBlasterLook
+                    || CurrentWeapon == BeamType.Paralyzer && HostOwnParalyzerLook)) // recomp: the app's Brawl look
                 {
                     _muzzleEffect.SetDrawEnabled(false);
                 }
@@ -1226,7 +1367,7 @@ namespace MphRead.Entities
             int animId = -1;
             AnimFlags animFlags = AnimFlags.None;
             Flags1 |= PlayerFlags1.UsedJump;
-            if (_frozenTimer == 0 && _health > 0)
+            if (_frozenTimer == 0 && !ParalyzerStunned && _health > 0) // recomp: a stunned alt form can't roll, attack or unmorph
             {
                 // recomp: the game also needs the stylus still (dx4 = dy4 = 0) here (PlayerTouch.cs)
                 if ((!Controls.RollRight.IsDown && !Controls.RolltLeft.IsDown && !Controls.RollUp.IsDown && !Controls.RollDown.IsDown
@@ -1433,9 +1574,13 @@ namespace MphRead.Entities
                         speedDelta.Z -= _altRollLrZ * traction;
                     }
                 }
-                if (!IsMorphing)
+                if (!IsMorphing && !SlotBombInput()) // recomp: in the bomb slot the others lay Samus's bomb (PlayerEchoesSeat.cs)
                 {
-                    if (_abilities.TestFlag(AbilityFlags.Bombs) && Controls.AltAttack.IsPressed
+                    if (!HostSlotHeld) // recomp: in the turret's bomb slot she lays bombs (owner D3, PlayerEchoesSeat.cs)
+                    {
+                        HyperBallInput(); // recomp: Dark Samus's ball hop + Hyper Ball (PlayerHyperBall.cs); no bombs with it
+                    }
+                    if (_abilities.TestFlag(AbilityFlags.Bombs) && Controls.AltAttack.IsPressed && (!HostHyperBall || HostSlotHeld)
                         && _bombAmmo > 0 && _bombCooldown == 0 && _field35C == null)
                     {
                         SpawnBomb();
@@ -1666,7 +1811,7 @@ namespace MphRead.Entities
                 }
                 // the game doesn't require pressed here, but presumably the control scheme would have the pressed flag
                 // the game also doesn't check the ability flag here
-                if (_abilities.TestFlag(AbilityFlags.AltForm) && Controls.Morph.IsPressed
+                if (_abilities.TestFlag(AbilityFlags.AltForm) && Controls.Morph.IsPressed && !HostSlotHeld // recomp: no unmorphing in the bomb slot
                     || IsMainPlayer && CameraSequence.Current?.ForceBiped == true)
                 {
                     TrySwitchForms();
@@ -1954,6 +2099,17 @@ namespace MphRead.Entities
             {
                 UpdateAimY(0);
             }
+            if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && _jumpPadKeepPush && IsAltForm)
+            {
+                // host hook (First Hunt pads): FH holds the ball's flight to its top speed (_hSpeedCap) every tick before
+                // the push comes off, so it flies at about that speed (a boost raises it); measured in BizHawk on the cart
+                float padMag = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
+                if (padMag > _hSpeedCap && padMag > 0)
+                {
+                    float f = _hSpeedCap / padMag;
+                    Speed = new Vector3(Speed.X * f, Speed.Y, Speed.Z * f);
+                }
+            }
             if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && _jumpPadSameArc && JumpPadEntity.HostSameArcSteer && SameArcCut())
             {
                 // host hook (Echoes arenas): the push excluded and cut along the flight only, see SameArcCut
@@ -1963,14 +2119,14 @@ namespace MphRead.Entities
                 // basically exclude the jump pad speed for the rest of the speed calc, then restore it below
                 float prevX = Speed.X;
                 Speed = Speed.AddX(-_jumpPadAccel.X);
-                if (prevX <= 0 && Speed.X > 0 || prevX > 0 && Speed.X < 0)
+                if (!_jumpPadKeepPush && (prevX <= 0 && Speed.X > 0 || prevX > 0 && Speed.X < 0))
                 {
                     _jumpPadAccel.X += Speed.X / 2; // todo: FPS stuff
                     Speed = Speed.WithX(0);
                 }
                 float prevZ = Speed.Z;
                 Speed = Speed.AddZ(-_jumpPadAccel.Z);
-                if (prevZ <= 0 && Speed.Z > 0 || prevZ > 0 && Speed.Z < 0)
+                if (!_jumpPadKeepPush && (prevZ <= 0 && Speed.Z > 0 || prevZ > 0 && Speed.Z < 0))
                 {
                     _jumpPadAccel.Z += Speed.Z / 2; // todo: FPS stuff
                     Speed = Speed.WithZ(0);
@@ -1983,6 +2139,12 @@ namespace MphRead.Entities
                 if (Flags2.TestFlag(PlayerFlags2.AltAttack) && (Hunter == Hunter.Trace || Hunter == Hunter.Weavel))
                 {
                     speedFactor = 0.96f;
+                }
+                else if (HostFhBallRules && IsAltForm)
+                {
+                    // host hook (First Hunt rooms): FH's ball keeps 0.98 of its speed a tick, on the floor and in the air
+                    // (MPH: 0.965 / 0.85); measured in BizHawk on the cart (pad flights and rolling out)
+                    speedFactor = 0.98f;
                 }
                 else if (Flags1.TestFlag(PlayerFlags1.Standing))
                 {
@@ -2285,6 +2447,7 @@ namespace MphRead.Entities
                     if (player.LoadFlags.TestFlag(LoadFlags.Active))
                     {
                         player.AiData.ProcessInput();
+                        player.HyperBallBotInput(); // recomp: Dark Samus's Hyper Ball for her bots (PlayerHyperBall.cs)
                     }
                     continue;
                 }
@@ -2428,12 +2591,13 @@ namespace MphRead.Entities
                     if (player.LoadFlags.TestFlag(LoadFlags.Active))
                     {
                         player.AiData.ProcessInput();
+                        player.HyperBallBotInput(); // recomp: Dark Samus's Hyper Ball for her bots (PlayerHyperBall.cs)
                     }
                     continue;
                 }
                 // network play: a remote seat takes its buttons from its own Controls and its view from its absolute
                 // target (PlayerNet.cs); the local seat is MainPlayerIndex (0 unless this device is a match client)
-                bool remote = player.HostRemote && i != MainPlayerIndex;
+                bool remote = player.HostRemote && (i != MainPlayerIndex || HostNoLocalSeat); // (recomp: a served host has no local seat, PlayerServedHost.cs)
                 if (!remote && (noPlayerInput || i != MainPlayerIndex))
                 {
                     continue;

@@ -34,7 +34,8 @@ namespace MphRecomp.Multiplayer.Net
         public SeatAbilities? Abilities;
         // LAN only (14): the detail stats as the host counts them (online sends them in Extras); null = not this snapshot
         public SeatExtras.SeatStats[]? Stats;
-        // the Echoes arenas' crates + breakables (NetWorld: LAN protocol 16 / online 15; null = the arena has none)
+        // the Echoes arenas' crates + breakables (NetWorld: LAN protocol 16 / online 15; null = the arena has none) and
+        // Shooting Gallery's turret (NetWorld.Turret: LAN 21 / online 19)
         public NetWorld? World;
 
         public const int HeaderSize = 10;

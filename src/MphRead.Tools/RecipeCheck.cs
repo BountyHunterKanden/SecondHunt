@@ -37,7 +37,7 @@ namespace MphRead
         static readonly string[] Games = { "mp1", "mp2", "mp3", "mp4" };
 
         // never shipped (docs/IMPORT_PIPELINE.md section 6, board S26): community fan-rig meshes and the dropped MP3 suit
-        static readonly string[] NeverShips = { "KandenRest", "SyluxRest", "MP3ZeroSuit" };
+        static readonly string[] NeverShips = { "KandenRest", "SyluxRest" };
 
         static readonly Regex Sha1Rx = new("^[0-9a-fA-F]{40}$", RegexOptions.Compiled);
         static readonly Regex B64Rx = new("[A-Za-z0-9+/]{65,}", RegexOptions.Compiled);

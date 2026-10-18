@@ -24,6 +24,7 @@ namespace MphRecomp.Frontend
 
         // our callbacks (2740-2799)
         private const int ChOpenCall = 2740, ChTypeCall = 2741, LicMuteCall = 2742;
+        private const int ChStartCall = 2743; // Start on CHAT / REPORT: in a match's pause, resume (as the pause page does)
         private const int ChPresetCall = 2750; // + the quick message (18 of them, to 2767)
         private const int ChMuteCall = 2770, ChReportCall = 2776; // + the log row
         private const int RpReasonCall = 2785; // + the reason
@@ -61,8 +62,12 @@ namespace MphRecomp.Frontend
 
         private static bool IsChatPage(int page) => page >= 0 && (page == s_onChat || page == s_onReport);
 
-        // the lobby's game (hosted or joined) and the connection its chat goes on
-        private OnlineMatch? ChatMatch => _hosting ?? _joined;
+        // the lobby's game (hosted or joined) and the connection its chat goes on; in a match's pause menu, the match's
+        // (PauseChat: the pause's CHAT row opens this page, its back goes to the pause again: EnterOnline)
+        private OnlineMatch? ChatMatch => _hosting ?? _joined ?? PauseChat;
+
+        // the in-game pause of an online match (PauseOverlay sets it as it opens): its CHAT row and page; null = none
+        public OnlineMatch? PauseChat { get; set; }
 
         // pages that keep the lobby's game while they're up (EnterOnline, TickLobby)
         private bool KeepsLobby(int page) => page == s_onChat || page == s_onReport || _chatTyping && page == MultiplayerMenu.NamePage;
@@ -73,7 +78,7 @@ namespace MphRecomp.Frontend
             MenuItem Px(MenuPage page, float x, float y, float w, float h, int call) => page.AddItem(i => input(i, Mx(x), My(y), Mx(x + w), My(y + h), call));
 
             // ---- CHAT: back to the lobby ----
-            MenuPage chat = addFramePage(s_onLobby, Array.Empty<MenuAction>());
+            MenuPage chat = addFramePage(s_onLobby, new[] { Call(MenuKeys.Start, ChStartCall) });
             s_onChat = chat.Index;
             _chPanel = chat.AddItem(i => panelAt(i, Mx(70), Mx(1150))).Index;
             _chSide = chat.AddItem(i => panelAt(i, Mx(1190), Mx(1850))).Index;
@@ -94,7 +99,7 @@ namespace MphRecomp.Frontend
             InstallVoice(chat, input); // (VOICE + STRANGERS under the quick messages: OnlineMenus.Voice.cs)
 
             // ---- REPORT A HUNTER: back (B and the arrow) runs LEAVE's call: back where it was opened from ----
-            MenuPage report = addFramePage(-1, Array.Empty<MenuAction>());
+            MenuPage report = addFramePage(-1, new[] { Call(MenuKeys.Start, ChStartCall) });
             s_onReport = report.Index;
             _rpPanel = report.AddItem(i => panelAt(i, Mx(70), Mx(1850))).Index;
             back(report, -1);
@@ -203,6 +208,9 @@ namespace MphRecomp.Frontend
                 break;
             case ChTypeCall:
                 TypeChat(menu);
+                break;
+            case ChStartCall:
+                if (PauseChat != null) Requested?.Invoke(FrontendRequestKind.Resume); // (the lobby: Start does nothing here)
                 break;
             case LicMuteCall:
                 if (_licCard is PlayerCard lc) AskMute(lc.Code, OnlineNames.Display(lc.Name, lc.Tag));

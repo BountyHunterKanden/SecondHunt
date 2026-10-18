@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using MphRead;
 using MphRead.Formats;
 
@@ -15,6 +16,35 @@ namespace MphRecomp.Multiplayer
     {
         public enum Look { None = -1, PowerTrooper, IceTrooper, WaveTrooper, PlasmaTrooper, DarkSamus }
 
+        // a seat's version of its look, MPH's own palette slots: First-Fourth = the first to fourth seat in the match with
+        // that look (MPH's same-hunter palettes pal_01-04), OrangeTeam/GreenTeam in a team mode (pal_Team01/02). The same
+        // number as the seat's MPH Recolor (MatchSettings.AssignRecolors, GameState's team recolor)
+        // Fifth-Eighth (8-player matches, owner 10-12): the 5th-8th seat with the look, our own colours (MPH has four); their
+        // MPH Recolor is 0-3 again (gameplay), the variant is drawing only (VariantFor)
+        public enum Variant { First, Second, Third, Fourth, OrangeTeam, GreenTeam, Fifth, Sixth, Seventh, Eighth }
+
+        // the variant for a seat's MPH recolor (0-5; 6-9 = Fifth-Eighth)
+        public static Variant VariantOf(int recolor) => (Variant)Math.Clamp(recolor, 0, 9);
+
+        // a seat's drawn variant: its team's in a team mode, else the nth seat with its look (or hunter: SameLookKey),
+        // First-Fourth then Fifth-Eighth (MatchSettings.AssignRecolors gives the same seats MPH's 0-3, round again)
+        public static Variant VariantFor(MatchSettings settings, int seat)
+        {
+            int slot = settings.RecolorSlot(seat);
+            if (slot >= 4 || seat < 0 || seat >= settings.Players.Count) return VariantOf(slot);
+            string key = SameLookKey(settings.Players[seat], settings.RecolorPerSkin != false);
+            int before = 0;
+            for (int j = 0; j < seat; j++)
+            {
+                if (SameLookKey(settings.Players[j], settings.RecolorPerSkin != false) == key) before++;
+            }
+            int n = before % 8;
+            return n < 4 ? (Variant)n : (Variant)(n + 2);
+        }
+
+        // the 5th-8th's index (0-3) of a variant, -1 for the others (HunterColours' sets)
+        public static int NewCopy(Variant v) => v >= Variant.Fifth ? v - Variant.Fifth : -1;
+
         static readonly Look[] TrooperLooks = { Look.PowerTrooper, Look.IceTrooper, Look.WaveTrooper, Look.PlasmaTrooper };
         static readonly Look[] DarkLooks = { Look.DarkSamus };
 
@@ -26,10 +56,15 @@ namespace MphRecomp.Multiplayer
             ["WeavelAlt_lod0"] = TrooperLooks, ["WeavelAlt_Turret_lod0"] = TrooperLooks,
             ["PsychoBit"] = TrooperLooks,
             ["Samus_lod0"] = DarkLooks, ["Samus_lod1"] = DarkLooks, ["SamusAlt_lod0"] = DarkLooks,
+            // the first-person guns (owner 10-11: the arm cannon in the seat's colours too; PlayerEntity.HostGunLookRecolor)
+            ["WeavelGun"] = TrooperLooks, ["SamusGun"] = DarkLooks,
         };
 
-        // MPH's own recolor count per model, recorded as the looks are appended
-        static readonly Dictionary<string, int> _baseCount = new(StringComparer.Ordinal);
+        // MPH's own recolor count per model and the (look, variant) sets appended after it, recorded as the model loads
+        static readonly Dictionary<string, (int Count, List<(Look, Variant)> Sets)> _built = new(StringComparer.Ordinal);
+        static readonly object _lock = new();
+        // the (look, variant) sets models get as they load (Register)
+        static readonly List<(Look, Variant)> _sets = new();
         static bool _registered;
 
         // dev/test switch: draw look-alikes even where the skin is imported (pictures next to the real looks)
@@ -38,12 +73,27 @@ namespace MphRecomp.Multiplayer
         // the look-alikes and the character names (D7) are on for this match (set before it starts)
         public static bool On { get; set; }
 
-        // before any of these models loads (models are cached: ones already loaded are dropped so they reload with them)
-        public static void Register()
+        // before any of these models loads (models are cached: ones already loaded are dropped so they reload with them).
+        // No argument: every look in every variant (tests); else the sets a match needs, kept with the ones registered
+        // before (a later match needing none new reloads nothing)
+        // the recolor hook (these sets and HunterColours') without registering any look
+        public static void InstallHook() => Read.HostExtraRecolors = Build;
+
+        public static void Register() =>
+            Register(Enum.GetValues<Look>().Where(l => l != Look.None).SelectMany(l => Enum.GetValues<Variant>().Select(v => (l, v))));
+
+        public static void Register(IEnumerable<(Look Look, Variant Variant)> wanted)
         {
-            if (_registered) return;
-            _registered = true;
-            Read.HostExtraRecolors = Build;
+            lock (_lock)
+            {
+                var add = wanted.Where(w => w.Look != Look.None && !_sets.Contains(w)).Distinct().ToList();
+                if (_registered && add.Count == 0) return;
+                _registered = true;
+                _sets.AddRange(add);
+                _sets.Sort((a, b) => ((int)a.Item1 * 16 + (int)a.Item2).CompareTo((int)b.Item1 * 16 + (int)b.Item2));
+                Read.HostExtraRecolors = Build;
+                _built.Clear();
+            }
             foreach (string name in ModelLooks.Keys) Read.RemoveModel(name);
         }
 
@@ -91,30 +141,43 @@ namespace MphRecomp.Multiplayer
 
         // the recolor index of a look on a model (-1: the model doesn't carry it, or it hasn't loaded yet); phase: which of
         // a shimmering look's sets
-        public static int RecolorFor(Look look, string model, int phase = 0)
+        public static int RecolorFor(Look look, string model, int phase = 0) => RecolorFor(look, Variant.First, model, phase);
+
+        public static int RecolorFor(Look look, Variant variant, string model, int phase = 0)
         {
-            if (look == Look.None || !ModelLooks.TryGetValue(model, out Look[]? looks) || !_baseCount.TryGetValue(model, out int n)) return -1;
-            int k = Array.IndexOf(looks, look);
-            if (k < 0) return -1;
-            for (int i = 0; i < k; i++) n += SetsOf(looks[i]);
-            return n + Math.Clamp(phase, 0, SetsOf(look) - 1);
+            if (look == Look.None) return -1;
+            lock (_lock)
+            {
+                if (!_built.TryGetValue(model, out var built)) return -1;
+                int n = built.Count;
+                foreach ((Look l, Variant v) in built.Sets)
+                {
+                    if (l == look && v == variant) return n + Math.Clamp(phase, 0, SetsOf(look) - 1);
+                    n += SetsOf(l);
+                }
+                return -1;
+            }
         }
 
         static IEnumerable<Recolor>? Build(string name, IReadOnlyList<Recolor> recolors)
         {
-            if (!ModelLooks.TryGetValue(name, out Look[]? looks) || recolors.Count == 0) return null;
-            _baseCount[name] = recolors.Count;
-            var list = new List<Recolor>(looks.Length);
-            foreach (Look look in looks)
+            // the hunters' 5th-8th colours first, right after MPH's own (HunterColours), then the looks'
+            List<Recolor> list = HunterColours.Build(name, recolors);
+            if (!ModelLooks.TryGetValue(name, out Look[]? looks) || recolors.Count == 0) return list.Count > 0 ? list : null;
+            List<(Look, Variant)> sets;
+            lock (_lock) sets = _sets.Where(s => Array.IndexOf(looks, s.Item1) >= 0).ToList();
+            int first = recolors.Count + list.Count;
+            foreach ((Look look, Variant variant) in sets)
             {
-                for (int phase = 0; phase < SetsOf(look); phase++) list.Add(Recolored(recolors[0], look, phase));
+                for (int phase = 0; phase < SetsOf(look); phase++) list.Add(Recolored(recolors[0], look, variant, phase));
             }
+            lock (_lock) _built[name] = (first, sets);
             return list;
         }
 
-        static Recolor Recolored(Recolor src, Look look, int phase)
+        static Recolor Recolored(Recolor src, Look look, Variant variant, int phase)
         {
-            Scheme s = SchemeOf(look) with { Phase = SetsOf(look) > 1 ? phase / (float)SetsOf(look) : -1 };
+            Scheme s = SchemeOf(look, variant) with { Phase = SetsOf(look) > 1 ? phase / (float)SetsOf(look) : -1 };
             var palettes = new List<IReadOnlyList<PaletteData>>(src.PaletteData.Count);
             foreach (IReadOnlyList<PaletteData> pal in src.PaletteData)
             {
@@ -135,7 +198,8 @@ namespace MphRecomp.Multiplayer
                 for (int i = 0; i < data.Count; i++) d[i] = new TextureData(Map((ushort)data[i].Data, s), data[i].Alpha);
                 textures.Add(d);
             }
-            return new Recolor(phase == 0 ? $"look_{look}" : $"look_{look}_{phase}", src.Textures, src.Palettes, textures, palettes);
+            string name = variant == Variant.First ? $"look_{look}" : $"look_{look}_{variant}";
+            return new Recolor(phase == 0 ? name : $"{name}_{phase}", src.Textures, src.Palettes, textures, palettes);
         }
 
         // a look's colours: the source's brightness through a ramp (shadow -> armour -> highlight); its saturated bright
@@ -143,7 +207,117 @@ namespace MphRecomp.Multiplayer
         // saturated (orange, red): for her only the green lights (and the morph ball's hot core) glow.
         readonly record struct Scheme((float R, float G, float B) Shadow, (float R, float G, float B) Armour,
             (float R, float G, float B) Highlight, (float R, float G, float B) Glow, float Gamma, bool GreenGlowOnly = false,
-            float Phase = -1);
+            float Phase = -1, (float R, float G, float B)? Lift = null);
+
+        // the team colours (MPH Metadata.TeamColors orange 31,19,0 / green 0,31,0, a little softened for armour)
+        // the orange is redder and drawn brighter (owner 10-11: MPH's orange read as gold on Dark Samus, the first
+        // redder one as brown; the troopers' as vivid as hers)
+        public static (float R, float G, float B) TeamColor(Variant v, bool darkSamus = false) =>
+            v == Variant.GreenTeam ? (0.30f, 1f, 0.30f) : (1f, 0.45f, 0.04f);
+
+        // a look in a seat's variant. A team seat is that team's colour over the look's dark armour; a trooper duplicate
+        // the same in its own colour (owner 10-11: armour-only duplicates read too alike); a Dark Samus duplicate keeps
+        // her phazon lights on another armour
+        static Scheme SchemeOf(Look look, Variant v)
+        {
+            Scheme s = SchemeOf(look);
+            bool dark = look == Look.DarkSamus;
+            if (Copy(v) is int n)
+            {
+                // two-tone copies (owner 10-12, sheet_looks_v6): a body colour over the armour by brightness, the lights
+                // in their own colour
+                var (a, b) = dark ? DarkCopy[n] : TrooperCopy[n];
+                return s with { Shadow = Lerp(Scale(a, 0.08f), (0.04f, 0.04f, 0.04f), 0.4f), Armour = Scale(a, 0.44f),
+                    Highlight = Scale(a, 0.97f), Glow = b, Lift = b, Gamma = 0.9f };
+            }
+            if (v is Variant.OrangeTeam or Variant.GreenTeam)
+            {
+                var c = TeamColor(v, dark);
+                // (her orange brighter all over: vivid, not brown; the troopers' lights well above their plates, white-hot,
+                // owner 10-11)
+                return dark
+                    ? v == Variant.OrangeTeam
+                        ? s with { Shadow = Scale(c, 0.07f), Armour = Scale(c, 0.42f), Highlight = Scale(c, 0.95f), Glow = Lerp(c, (1f, 1f, 1f), 0.25f), Lift = c }
+                        : s with { Shadow = Scale(c, 0.03f), Armour = Scale(c, 0.20f), Highlight = Scale(c, 0.62f), Glow = Lerp(c, (1f, 1f, 1f), 0.25f), Lift = c }
+                    : v == Variant.OrangeTeam
+                        ? s with { Shadow = Scale(c, 0.07f), Armour = Scale(c, 0.40f), Highlight = Scale(c, 0.85f), Glow = Lerp(c, (1f, 1f, 1f), 0.40f) }
+                        : s with { Shadow = Lerp(Scale(c, 0.05f), (0.05f, 0.05f, 0.05f), 0.5f), Armour = Scale(c, 0.22f), Highlight = Scale(c, 0.68f), Glow = Lerp(c, (1f, 1f, 1f), 0.40f) };
+            }
+            return s;
+        }
+
+        // the copy number (2-8) of a same-look variant, null for the 1st and the teams
+        static int? Copy(Variant v) => v switch
+        {
+            Variant.Second => 2, Variant.Third => 3, Variant.Fourth => 4,
+            Variant.Fifth => 5, Variant.Sixth => 6, Variant.Seventh => 7, Variant.Eighth => 8, _ => null,
+        };
+
+        // copies 2-8 (body, lights), owner-approved as one set 10-12 (handoffs/team-colours-5-8_2026-10-12_0206-files/
+        // sheet_looks_v6.png); the 1st is the character's own look
+        static readonly ((float R, float G, float B), (float R, float G, float B))[] TrooperCopy =
+        {
+            default, default,
+            ((0.20f, 0.45f, 1f), (1f, 0.55f, 0.10f)),     // 2 blue, orange lights
+            ((1f, 0.25f, 0.90f), (0.60f, 1f, 0.15f)),     // 3 magenta, lime
+            ((0.05f, 0.80f, 0.70f), (1f, 1f, 1f)),        // 4 teal, white
+            ((1f, 0.95f, 0.10f), (0.55f, 0.25f, 1f)),     // 5 yellow, violet
+            ((0.88f, 0.90f, 0.94f), (1f, 0.10f, 0.08f)),  // 6 white, red
+            ((1f, 0.08f, 0.06f), (0.20f, 0.95f, 1f)),     // 7 red, cyan
+            ((1f, 0.42f, 0.05f), (0.25f, 0.45f, 1f)),     // 8 orange, blue
+        };
+        static readonly ((float R, float G, float B), (float R, float G, float B))[] DarkCopy =
+        {
+            default, default,
+            ((0.55f, 0.20f, 1f), (1f, 0.90f, 0.20f)),     // 2 violet, yellow lights
+            ((0.15f, 0.90f, 0.20f), (1f, 1f, 1f)),        // 3 green, white
+            ((1f, 0.12f, 0.10f), (0.45f, 0.85f, 1f)),     // 4 crimson, her cyan
+            ((0.90f, 0.92f, 0.95f), (1f, 0.15f, 0.10f)),  // 5 white, red
+            ((1f, 0.92f, 0.20f), (0.60f, 0.30f, 1f)),     // 6 yellow-gold, violet
+            ((1f, 0.40f, 0.02f), (0.30f, 1f, 0.20f)),     // 7 orange, green
+            ((1f, 0.45f, 0.85f), (1f, 1f, 1f)),           // 8 light pink, white
+        };
+
+        // a copy's lights colour on a real body (GxShader uTint2 with w 9+k), zero otherwise
+        public static (float R, float G, float B) BodyLight(bool darkSamus, Variant v) =>
+            Copy(v) is int n ? (darkSamus ? DarkCopy[n] : TrooperCopy[n]).Item2 : (0f, 0f, 0f);
+
+        // the same variants on a REAL (imported) body, as a draw tint (GxShader uTint): w 3+k pulls the whole colour toward
+        // the team's by its brightness (7+k: its bright parts lit well above the rest), w 9+k the copies' two tones (uTint2 =
+        // BodyLight); null = drawn as imported
+        public static (float R, float G, float B, float W)? BodyTint(bool darkSamus, Variant v)
+        {
+            // (troopers: w 7+k, the same with their bright parts lit well above the plates; Dark Samus's orange: 1.8x
+            // and k 0.9, vivid rather than brown)
+            if (v is Variant.OrangeTeam or Variant.GreenTeam)
+            {
+                var c = TeamColor(v, darkSamus);
+                if (v == Variant.OrangeTeam) return (c.R * 1.8f, c.G * 1.8f, c.B * 1.8f, darkSamus ? 3.9f : 7.9f);
+                return (c.R, c.G, c.B, darkSamus ? 3.72f : 7.9f);
+            }
+            if (Copy(v) is not int n) return null;
+            // copies: w 9+k two-tone, the body colour (white and yellow drawn brighter to read as such) with the lights in
+            // BodyLight's
+            var bc = (darkSamus ? DarkCopy[n] : TrooperCopy[n]).Item1;
+            float wk = bc.R > 0.8f && bc.G > 0.8f ? (bc.B > 0.8f ? 1.7f : 1.35f) : 1f;
+            return (bc.R * wk, bc.G * wk, bc.B * wk, 9.9f);
+        }
+
+        // the key MPH's same-hunter palettes count by (MatchSettings.AssignRecolors): the same character in the same skin
+        // (perSkin, 2026-10-17: Echoes and Corruption Dark Samus, Samus's HD suits and her DS model, Zero
+        // Suit, Prime 4 Sylux are each their own look, so a different skin keeps its default colour). A trooper counts by
+        // his look (no skin = the Power Trooper). Only the seat's own strings: every device and replay gets the same key
+        // whatever it has imported. perSkin false (replays before format 43): by look, others by hunter
+        public static string SameLookKey(MatchPlayer seat, bool perSkin = true)
+        {
+            Look look = For(seat);
+            if (!perSkin) return look != Look.None ? "look:" + look : seat.Hunter.ToString();
+            if (look is not (Look.None or Look.DarkSamus)) return "look:" + look;
+            string skin = Characters.IsOriginal(seat.Skin) ? "" : seat.Skin!.ToLowerInvariant();
+            return seat.Hunter + "/" + (seat.Character?.ToLowerInvariant() ?? "") + "/" + skin;
+        }
+
+        static (float R, float G, float B) Scale((float R, float G, float B) c, float k) => (c.R * k, c.G * k, c.B * k);
 
         static Scheme SchemeOf(Look look) => look switch
         {
@@ -185,7 +359,8 @@ namespace MphRecomp.Multiplayer
                 // the phazon shimmer: a light-blue lift riding the wave, more on the brighter (raised) plates (owner 10-09:
                 // kept faint)
                 float lift = wave * (0.04f + 0.09f * t);
-                o = (o.R + 0.40f * lift, o.G + 0.70f * lift, o.B + 1.00f * lift);
+                var lc = s.Lift ?? (0.40f, 0.70f, 1.00f);
+                o = (o.R + lc.R * lift, o.G + lc.G * lift, o.B + lc.B * lift);
             }
             int R = Math.Clamp((int)MathF.Round(o.R * 31), 0, 31);
             int G = Math.Clamp((int)MathF.Round(o.G * 31), 0, 31);

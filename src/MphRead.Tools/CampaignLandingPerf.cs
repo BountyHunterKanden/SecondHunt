@@ -141,6 +141,12 @@ namespace MphRead
             }
             string room = args.Length >= 2 && !args[1].All(Char.IsDigit) ? args[1] : "UNIT2_LAND";
             int after = args.Skip(1).FirstOrDefault(a => a.All(Char.IsDigit)) is string n ? Int32.Parse(n) : 240;
+            // "primehud": the radar + mini map on, as CampaignRenderer.SetPlayerHooks with RECOMP SETTINGS hud PRIME
+            if (args.Contains("primehud"))
+            {
+                PlayerEntity.HostPrimeHud = true;
+                MphRecomp.Frontend.HudMiniMap.Install(Paths.FileSystem);
+            }
             // as CampaignRenderer sets them
             Scene.HostPlaysMovies = true;
             Scene.HostPredecodeTextures = true;
@@ -270,6 +276,7 @@ namespace MphRead
             {
                 Scene.HostPlaysMovies = false;
                 Scene.HostPredecodeTextures = false;
+                PlayerEntity.HostPrimeHud = false;
                 RoomEntity.HostTransitionGc = true;
                 Scene.HostEntityInitTrace = null;
                 MusicPlayer.Host = musicBefore;

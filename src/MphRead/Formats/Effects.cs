@@ -585,6 +585,10 @@ namespace MphRead.Effects
         // recomp: its particles drawn in this colour at their own brightness (a skin's morph sphere, e.g. Dark Samus's
         // blue samusFurl); null = the effect's own colours. Cleared when the entry is reused (Scene.InitEffectEntry)
         public Vector3? HostColor { get; set; }
+        // recomp: HostColor only on this element (e.g. a Sylux bomb's "glow", not its ring); null = all. Cleared with it
+        public string? HostColorElement { get; set; }
+        internal Vector3? HostColorFor(EffectElementEntry element)
+            => HostColorElement == null || HostColorElement == element.ElementName ? HostColor : null;
         public List<EffectElementEntry> Elements { get; } = new List<EffectElementEntry>(); // todo: pre-size?
 
         public bool IsFinished
@@ -1398,7 +1402,7 @@ namespace MphRead.Effects
                     texcoordMtx = Matrix4.CreateScale(material.ScaleS, material.ScaleT, 1.0f) * texcoordMtx;
                     texcoordMtx = DetMatrix.CreateRotationZ(material.RotateZ) * texcoordMtx;
                 }
-                material.CurrentDiffuse = Owner.EffectEntry?.HostColor is Vector3 host ? host * MathF.Max(Color.X, MathF.Max(Color.Y, Color.Z)) : Color;
+                material.CurrentDiffuse = Owner.EffectEntry?.HostColorFor(Owner) is Vector3 host ? host * MathF.Max(Color.X, MathF.Max(Color.Y, Color.Z)) : Color;
                 material.CurrentAlpha = Alpha;
                 Debug.Assert(model.NodeMatrixIds.Count == 0);
                 scene.UpdateMaterials(model, 0); // probably not necessary unless the model has texture animation
@@ -1452,7 +1456,7 @@ namespace MphRead.Effects
                 {
                     transform = Matrix4.CreateTranslation(Position);
                 }
-                Vector3 color = Owner.EffectEntry?.HostColor is Vector3 host ? host * MathF.Max(Color.X, MathF.Max(Color.Y, Color.Z)) : Color;
+                Vector3 color = Owner.EffectEntry?.HostColorFor(Owner) is Vector3 host ? host * MathF.Max(Color.X, MathF.Max(Color.Y, Color.Z)) : Color;
                 scene.AddRenderItem(RenderItemType.Particle, Alpha, scene.GetNextPolygonId(), color, xRepeat, yRepeat,
                     scaleS, scaleT, transform, uvsAndVerts, bindingId, BillboardMode);
             }

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A dedicated match host (docs/DEDICATED_SERVERS.md): runs one online match at a time as its authoritative host with
+       no player of its own; every human joins it. Headless (no window, GPU or audio): it needs the extracted game files
+       (paths.txt beside it, as the Tools), which stay on the machine that runs it and are never sent anywhere.
+       Runs on Linux (the Linode) and Windows (PC tests). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>SecondHuntMatchHost</AssemblyName>
+    <RootNamespace>SecondHunt.MatchHost</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MphRead\MphRead.csproj" />
+    <ProjectReference Include="..\MphRecomp.Core\MphRecomp.Core.csproj" />
+  </ItemGroup>
+
+</Project>

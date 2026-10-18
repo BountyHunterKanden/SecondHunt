@@ -897,7 +897,7 @@ namespace MphRead.Entities
             NodeRef curNodeRef = PlayerEntity.Main.CameraInfo.NodeRef;
             // recomp: a HostView (replay spectator camera) sees from the room part it's in (the frustum is already its own)
             if (_scene.HostView is { } hostView && curNodeRef.PartIndex != -1
-                && GetNodeRefContaining(hostView.Position) is { PartIndex: not -1 } viewNodeRef)
+                && HostViewNodeRef(hostView.Position) is { PartIndex: not -1 } viewNodeRef)
             {
                 curNodeRef = viewNodeRef;
             }
@@ -1317,6 +1317,79 @@ namespace MphRead.Entities
                 }
             }
             return best.PartIndex != -1 ? best : planes;
+        }
+
+        // recomp: a HostView's part. A seat's own camera there (eyes, ball cam) has its part already; else the part walked
+        // through the portals from the nearest player to the view, while that part has geometry there; else the lookup.
+        // GetNodeRefContaining alone was wrong where Council Chamber's parts overlap (Trace culled in a replay's ball cam,
+        // 10-15: rmTop2 part 7 read as part 1)
+        private NodeRef HostViewNodeRef(Vector3 position)
+        {
+            PlayerEntity? nearest = null;
+            float best = Single.MaxValue;
+            foreach (PlayerEntity p in PlayerEntity.Players)
+            {
+                if (!p.LoadFlags.TestFlag(LoadFlags.Active) || p.NodeRef.PartIndex == -1) continue;
+                if (p.CameraInfo.NodeRef.PartIndex != -1 && (p.CameraInfo.Position - position).LengthSquared < 0.05f * 0.05f)
+                {
+                    return p.CameraInfo.NodeRef;
+                }
+                float dist = (p.Position - position).LengthSquared;
+                if (dist < best)
+                {
+                    best = dist;
+                    nearest = p;
+                }
+            }
+            if (nearest != null)
+            {
+                NodeRef walked = UpdateNodeRef(nearest.NodeRef, nearest.Position, position);
+                if (PartHasGeometryAt(walked.PartIndex, position)) return walked;
+            }
+            return GetNodeRefContaining(position);
+        }
+
+        // recomp: whether part partIndex has geometry around a spot (GetNodeRefContaining's box test and margins): a network
+        // snap keeps the part it walked into when that part is still there (PlayerEntity.NetSnapNodeRef)
+        public bool PartHasGeometryAt(int partIndex, Vector3 position)
+        {
+            if (_models.Count == 0 || partIndex < 0)
+            {
+                return false;
+            }
+            Model model = _models[0].Model;
+            var stack = new Stack<int>();
+            foreach (Node part in model.Nodes)
+            {
+                if (part.RoomPartId != partIndex || part.ChildIndex == -1)
+                {
+                    continue;
+                }
+                stack.Push(part.ChildIndex);
+                while (stack.Count > 0)
+                {
+                    for (int i = stack.Pop(); i != -1; i = model.Nodes[i].NextIndex)
+                    {
+                        Node node = model.Nodes[i];
+                        if (node.ChildIndex != -1)
+                        {
+                            stack.Push(node.ChildIndex);
+                        }
+                        if (node.MeshCount == 0)
+                        {
+                            continue;
+                        }
+                        Vector3 min = node.MinBounds;
+                        Vector3 max = node.MaxBounds;
+                        if (position.X >= min.X - 0.5f && position.X <= max.X + 0.5f && position.Z >= min.Z - 0.5f
+                            && position.Z <= max.Z + 0.5f && position.Y >= min.Y - 1.5f && position.Y <= max.Y + 1.5f)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
         }
 
         public NodeRef UpdateNodeRef(NodeRef current, Vector3 prevPos, Vector3 curPos)

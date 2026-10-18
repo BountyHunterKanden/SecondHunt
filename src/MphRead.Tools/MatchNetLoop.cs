@@ -49,6 +49,7 @@ namespace MphRead
             public float RejoinWait = 12; // rejoinwait=<s>: how long it stays away (past 10 s: the host's match drops the seat first)
             public int HostPort; // -lanjoin hostport=<n>: only this host (several sessions run -lantest on one PC at once)
             public bool Again; // -lanjoin again=1: the restarted app, rejoining its held seat from the LAN list
+            public string? Fh; // -lantest fh=<import root>: a First Hunt deathmatch (arena=Level MP1..3; Samus, no bots, ROM key FIRST HUNT)
         }
 
         private static Options Parse(string[] args)
@@ -81,6 +82,7 @@ namespace MphRead
                 case "rejoinwait": o.RejoinWait = Single.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
                 case "again": o.Again = value != "0"; break;
                 case "hostport": o.HostPort = Int32.Parse(value); break;
+                case "fh": o.Fh = value; break;
                 default: throw new ArgumentException($"unknown option {arg}");
                 }
             }
@@ -92,7 +94,17 @@ namespace MphRead
             return $"mode={o.Mode} \"arena={o.Arena}\" bots={o.Bots} level={o.Level} "
                 + $"time={o.Time.ToString(System.Globalization.CultureInfo.InvariantCulture)} delay={o.Delay} "
                 + $"hunter={o.Hunter} remote={o.Remote} leave={o.Leave.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
-                + (o.Looks ? " looks=1" : "") + $" players={o.Players}" + (o.Jitter > 0 ? $" jitter={o.Jitter}" : "") + (o.Trooper ? " trooper=1" : "");
+                + (o.Looks ? " looks=1" : "") + $" players={o.Players}" + (o.Jitter > 0 ? $" jitter={o.Jitter}" : "") + (o.Trooper ? " trooper=1" : "")
+                + (o.Fh != null ? $" \"fh={o.Fh}\"" : "");
+        }
+
+        // fh=<import root>: First Hunt's game registered (its arenas, Core FirstHunt/FirstHuntGame.cs), its own lobbies
+        private static string FhSetup(Options o)
+        {
+            MphRecomp.Arenas.EchoesArena.ImportRoot = o.Fh;
+            if (!MphRecomp.FirstHunt.FirstHuntGame.Register(o.Fh!)) throw new InvalidOperationException($"no First Hunt import in {o.Fh}");
+            o.Hunter = o.Remote = Hunter.Samus;
+            return "FIRST HUNT";
         }
 
         // -lantest delay=<frames each way> jitter=<ms>: this device's LAN sends leave late (Wi-Fi in a test)
@@ -419,15 +431,16 @@ namespace MphRead
                 return;
             }
             GameMode mode = Enum.Parse<GameMode>(o.Mode.Replace(" ", ""), ignoreCase: true);
-            RoomMetadata arena = MatchArenas.Find(o.Arena) ?? throw new ArgumentException($"no arena {o.Arena}");
-            MatchSettings template = MatchSettings.Quick(mode, arena.Name, o.Hunter, o.Bots, o.Level);
+            string romKey = o.Fh != null ? FhSetup(o) : Paths.MphKey;
+            string arenaName = o.Fh != null ? o.Arena : (MatchArenas.Find(o.Arena) ?? throw new ArgumentException($"no arena {o.Arena}")).Name;
+            MatchSettings template = MatchSettings.Quick(mode, arenaName, o.Hunter, o.Fh != null ? 0 : o.Bots, o.Level);
             template.TimeLimitSeconds = o.Time;
             if (o.Looks)
             {
                 SeatLooksTest.Dress(template);
             }
             string? hostLooks = null, hostAbilities = null;
-            using LanSession net = LanSession.Host(template, Paths.MphKey, "PC host", Math.Max(o.Players, template.Players.Count),
+            using LanSession net = LanSession.Host(template, romKey, "PC host", Math.Max(o.Players, template.Players.Count),
                 port: 0); // (any free port: never GamePort, where a real host on this PC may be listening)
             SimulateLink(net, o);
             Console.WriteLine("host: " + net.Status);
@@ -461,7 +474,7 @@ namespace MphRead
             {
                 Thread.Sleep(20);
             }
-            string? hostScores = null, hostEvents = null, hostResults = null, hostResultsProblem = null, hostEnd = null;
+            string? hostScores = null, hostEvents = null, hostBoard = null, hostResults = null, hostResultsProblem = null, hostEnd = null;
             if (net.Joiners.Count(j => !j.Left) < o.Players - 1)
             {
                 Console.WriteLine($"host: {net.Joiners.Count(j => !j.Left)} of {o.Players - 1} joined in 30 s");
@@ -506,10 +519,12 @@ namespace MphRead
                 Console.WriteLine("host scoreboard:\n" + MatchStatus.Scoreboard());
                 hostScores = OnlineMatchTool.Scores(net.Settings!.Players.Count, host.Scene);
                 hostEvents = OnlineMatchTool.ObjectiveEvents();
+                hostBoard = OnlineMatchTool.Board();
                 hostResults = OnlineMatchTool.Results(net.Settings!.Players.Count);
                 hostResultsProblem = OnlineMatchTool.ResultsProblem(net.Settings!.Players.Count);
                 Console.WriteLine(hostScores);
                 Console.WriteLine(hostEvents);
+                Console.WriteLine(hostBoard);
                 Console.WriteLine(hostResults);
                 host.Dispose();
             }
@@ -543,6 +558,12 @@ namespace MphRead
                         && !(o.Rejoin > 0 && k == clients.Count - 1)) // (the killed app: the restarted one's scores count)
                     {
                         problems.Add($"client {k + 1} {scores ?? "no SCORES"} / {events ?? "no OBJEVENTS"}");
+                    }
+                    // the held-Select live scoreboard as the joiner draws it
+                    string? board = output.FirstOrDefault(l => l.StartsWith("BOARD "));
+                    if (o.Leave == 0 && o.HostLeave == 0 && board != hostBoard && !(o.Rejoin > 0 && k == clients.Count - 1))
+                    {
+                        problems.Add($"client {k + 1} {board ?? "no BOARD"} vs host {hostBoard}");
                     }
                     // release 0.2.0 F1: the same RESULTS places, at about the same time
                     if (o.Leave == 0 && o.HostLeave == 0 && !(o.Rejoin > 0 && k == clients.Count - 1))
@@ -627,7 +648,7 @@ namespace MphRead
             {
                 return;
             }
-            using LanSession net = LanSession.Browse(Paths.MphKey);
+            using LanSession net = LanSession.Browse(o.Fh != null ? FhSetup(o) : Paths.MphKey);
             SimulateLink(net, o);
             var found = Stopwatch.StartNew();
             LanHostInfo? target = null;
@@ -648,7 +669,7 @@ namespace MphRead
             {
                 Console.WriteLine(SeatLooksTest.OldLanJoin(target.Address, Paths.MphKey));
             }
-            Hunter[] joinerHunters = { o.Remote, Hunter.Sylux, Hunter.Weavel, Hunter.Noxus, Hunter.Trace, Hunter.Spire, Hunter.Samus };
+            Hunter[] joinerHunters = o.Fh != null ? new[] { Hunter.Samus } : new[] { o.Remote, Hunter.Sylux, Hunter.Weavel, Hunter.Noxus, Hunter.Trace, Hunter.Spire, Hunter.Samus };
             Hunter hunter = joinerHunters[Math.Clamp(o.Index - 1, 0, joinerHunters.Length - 1)];
             string name = JoinerName(o);
             if (!(o.Looks ? net.Join(target.Address, SeatLooksTest.JoinerHunter, "PC client",
@@ -693,6 +714,7 @@ namespace MphRead
                 + $"{host.LocalCorrections} times, ended {host.Ended}");
             Console.WriteLine("client scoreboard:\n" + MatchStatus.Scoreboard());
             Console.WriteLine(OnlineMatchTool.Scores(net.Settings!.Players.Count, host.Scene));
+            Console.WriteLine(OnlineMatchTool.Board());
             Console.WriteLine(OnlineMatchTool.Results(net.Settings!.Players.Count));
             Console.WriteLine(OnlineMatchTool.ObjectiveEvents());
             host.Dispose();

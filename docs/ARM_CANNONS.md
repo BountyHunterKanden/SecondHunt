@@ -1,6 +1,6 @@
 # Arm cannons for the native bodies (Trooper, Dark Samus)
 
-Thread: "First-person arm cannons (Trooper + Dark Samus)" (2026-10-08/09). Plan items D1 and D2 in
+First-person arm cannons for the Trooper and Dark Samus (2026-10-08/09). Plan items D1 and D2 in
 `docs/CHARACTERS_AND_SKINS.md`. Everything here is drawing only. Shots, aim, hitboxes, the sim and replays are unchanged
 (`-replaygolden` 9/9 exact after each change).
 

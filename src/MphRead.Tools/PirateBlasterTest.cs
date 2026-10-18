@@ -6,6 +6,7 @@ using System.Linq;
 using MphRead.Entities;
 using MphRecomp.Campaign;
 using MphRecomp.Multiplayer;
+using OpenTK.Mathematics;
 
 namespace MphRead
 {
@@ -37,6 +38,7 @@ namespace MphRead
                 case "time": time = Single.Parse(value); break;
                 case "bots": Bots(arenaName, time); return;
                 case "pictures": Pictures(arenaName); return;
+                case "markpictures": SquadMarkPictures(arenaName); return;
                 case "icons": Icons(weaponIcon: false); Icons(weaponIcon: true); return;
                 case "impact": // (T4 N7) the Prime hit effect on its own: PirateBlasterImpactProbe.cs
                     string Opt(string k, string d) => args.Skip(1).FirstOrDefault(a => a.StartsWith(k + "="))?[(k.Length + 1)..] ?? d;
@@ -80,6 +82,8 @@ namespace MphRead
 
             RingCheck(settings, errors);
             OmegaCheck(settings, errors);
+            SquadMarkCheck(arena, errors, teams: false);
+            SquadMarkCheck(arena, errors, teams: true);
 
             CampaignHost host = CampaignHost.StartMatch(settings);
             PlayerEntity me = PlayerEntity.Players[0];
@@ -354,6 +358,133 @@ namespace MphRead
             {
                 errors.Add("omega: picking the blaster threw the Omega Cannon away");
             }
+        }
+
+        // Squad Mark (Players/PlayerSquadMark.cs): seat 0 (the Trooper) fires the blaster at seat 1 held 4 in front of it; a
+        // full burst marks seat 1 with seat 0's bit for SquadMarkFrames. Seat 0 sees it; seat 2 (on the Trooper's team in the
+        // team match) sees it only with teams; seat 1 never sees its own; it wears off SquadMarkFrames after the last burst
+        private static void SquadMarkCheck(RoomMetadata arena, List<string> errors, bool teams)
+        {
+            string what = teams ? "squad mark (teams)" : "squad mark (free for all)";
+            var settings = new MatchSettings { Mode = teams ? GameMode.BattleTeams : GameMode.Battle, Arena = arena.Name, TimeLimitSeconds = 60 };
+            settings.Players.Add(new MatchPlayer { Hunter = Characters.Trooper.Base, Nickname = "Player1", Character = Characters.Trooper.Id, Team = 0 });
+            settings.Players.Add(new MatchPlayer { Hunter = Hunter.Samus, Bot = true, BotLevel = 0, Team = 1 });
+            settings.Players.Add(new MatchPlayer { Hunter = Hunter.Kanden, Bot = true, BotLevel = 0, Team = 0 });
+            CampaignHost host = CampaignHost.StartMatch(settings);
+            PlayerEntity me = PlayerEntity.Players[0], target = PlayerEntity.Players[1], third = PlayerEntity.Players[2];
+            // everyone spawned and past the spawn invulnerability
+            for (int i = 0; i < 900 && (i < 240 || me.Health == 0 || target.Health == 0); i++)
+            {
+                host.Step(new CampaignInput { Buttons = i % 2 == 0 ? CampaignButtons.Shoot : 0 });
+            }
+            for (int i = 0; i < 30; i++) host.Step(default);
+            me.HostPickUpWeapon(ItemType.AffinityWeapon);
+            void Hold()
+            {
+                Vector3 ahead = me.FacingVector;
+                ahead.Y = 0;
+                ahead = ahead.LengthSquared > 1e-6f ? ahead.Normalized() : Vector3.UnitZ;
+                target.Position = me.Position + ahead * 4;
+                target.Speed = Vector3.Zero;
+            }
+            int bolts0 = me.HostPirateBlasterBolts, markedAt = -1;
+            bool meSees = false, thirdSees = false, selfSees = false;
+            for (int i = 0; i < 240 && markedAt < 0 && target.Health > 0; i++)
+            {
+                Hold();
+                host.Step(new CampaignInput { Buttons = CampaignButtons.Shoot });
+                if (target.NetSquadMark != 0)
+                {
+                    markedAt = i;
+                    meSees = target.SquadMarkSeenBy(me);
+                    thirdSees = target.SquadMarkSeenBy(third);
+                    selfSees = target.SquadMarkSeenBy(target);
+                }
+            }
+            int bolts = me.HostPirateBlasterBolts - bolts0;
+            byte mask = target.NetSquadMark;
+            // stop firing: the mark lasts SquadMarkFrames from the burst that set it
+            int clearedAfter = -1;
+            bool died = false;
+            for (int i = 0; i < PlayerEntity.SquadMarkFrames + 120 && markedAt >= 0; i++)
+            {
+                Hold();
+                host.Step(default);
+                died |= target.Health == 0;
+                if (target.NetSquadMark == 0)
+                {
+                    clearedAfter = i + 1;
+                    break;
+                }
+            }
+            Console.WriteLine($"{what}: marked after {markedAt} frames ({bolts} bolts), mask {mask}, seen by the Trooper {meSees}, by seat 2 {thirdSees}, "
+                + $"by itself {selfSees}; cleared {clearedAfter} frames after{(died ? " (target died)" : "")} (SquadMarkFrames {PlayerEntity.SquadMarkFrames})");
+            if (markedAt < 0)
+            {
+                errors.Add($"{what}: the Trooper's bursts never marked the target ({bolts} bolts, target health {target.Health})");
+                return;
+            }
+            if (mask != 1)
+            {
+                errors.Add($"{what}: mask {mask}, not seat 0's bit");
+            }
+            if (bolts < PlayerEntity.SquadMarkHits)
+            {
+                errors.Add($"{what}: marked after {bolts} bolts (a full burst is {PlayerEntity.SquadMarkHits})");
+            }
+            if (!meSees || selfSees || thirdSees != teams)
+            {
+                errors.Add($"{what}: who sees it is wrong (Trooper {meSees}, itself {selfSees}, seat 2 {thirdSees})");
+            }
+            // (the last burst may have set it up to two bursts' bolts before the fire stopped)
+            if (clearedAfter < 0 || !died && (clearedAfter > PlayerEntity.SquadMarkFrames + 2 || clearedAfter < PlayerEntity.SquadMarkFrames - 50))
+            {
+                errors.Add($"{what}: cleared {clearedAfter} frames after the fire stopped (SquadMarkFrames {PlayerEntity.SquadMarkFrames})");
+            }
+        }
+
+        // -pirateblastertest markpictures: the HUD as the app records it (Headless) with seat 1 marked, held in front of the
+        // Trooper (the locator over it) and behind it (the edge arrow) -> extract_out/pirate_blaster/mark_front.png, mark_behind.png
+        private static void SquadMarkPictures(string arenaName)
+        {
+            Trace.Listeners.Clear();
+            if (!ToolPaths.UseDesktopExtraction())
+            {
+                return;
+            }
+            RoomMetadata arena = MatchArenas.Find(arenaName) ?? throw new ArgumentException($"no arena {arenaName}");
+            var settings = new MatchSettings { Mode = GameMode.Battle, Arena = arena.Name, TimeLimitSeconds = 60 };
+            settings.Players.Add(new MatchPlayer { Hunter = Characters.Trooper.Base, Nickname = "Player1", Character = Characters.Trooper.Id });
+            settings.Players.Add(new MatchPlayer { Hunter = Hunter.Samus, Bot = true, BotLevel = 0 });
+            CampaignHost host = CampaignHost.StartMatch(settings, collectDrawItems: true, viewWidth: 1920, viewHeight: 1080);
+            PlayerEntity me = PlayerEntity.Players[0], target = PlayerEntity.Players[1];
+            for (int i = 0; i < 900 && (i < 240 || me.Health == 0 || target.Health == 0); i++)
+            {
+                host.Step(new CampaignInput { Buttons = i % 2 == 0 ? CampaignButtons.Shoot : 0 });
+            }
+            for (int i = 0; i < 30; i++) host.Step(default);
+            me.HostPickUpWeapon(ItemType.AffinityWeapon);
+            void Hold(float dist)
+            {
+                Vector3 ahead = me.FacingVector;
+                ahead.Y = 0;
+                ahead = ahead.LengthSquared > 1e-6f ? ahead.Normalized() : Vector3.UnitZ;
+                target.Position = me.Position + ahead * dist;
+                target.Speed = Vector3.Zero;
+            }
+            for (int i = 0; i < 240 && target.NetSquadMark == 0; i++)
+            {
+                Hold(4);
+                host.Step(new CampaignInput { Buttons = CampaignButtons.Shoot });
+            }
+            string dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "pirate_blaster"));
+            Directory.CreateDirectory(dir);
+            for (int i = 0; i < 10; i++) { Hold(8); host.Step(default); }
+            CampaignSim.RenderHud(host.Scene, 1920, 1080, Path.Combine(dir, "mark_front.png"));
+            int front = host.Scene.HudItemCount;
+            for (int i = 0; i < 10; i++) { Hold(-8); host.Step(default); }
+            CampaignSim.RenderHud(host.Scene, 1920, 1080, Path.Combine(dir, "mark_behind.png"));
+            Console.WriteLine($"marked {target.NetSquadMark != 0} (timer {target.HostSquadMarkTimer}); HUD items front {front}, behind {host.Scene.HudItemCount}; wrote {dir}\\mark_front.png + mark_behind.png");
         }
 
         // -pirateblastertest pictures: the weapon menu with seven slots (corner arc, then the L2 ring), the blaster picked,

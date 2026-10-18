@@ -37,6 +37,9 @@ namespace MphRecomp.Multiplayer
         public int LocalSeat { get; set; }
         // this device mirrors a host (MatchClient.ForSeat): damage and scores come from the host's snapshots
         public bool IsClient { get; set; }
+        // a served match host (docs/DEDICATED_SERVERS.md): this device plays no seat, every human is remote (LocalSeat
+        // only keeps PlayerEntity.Main set); never sent to the players
+        public bool ServedHost { get; set; }
 
         public int? PointGoal { get; set; } // kills / octoliths / node points; spare lives in survival
         public float? TimeLimitSeconds { get; set; }
@@ -70,6 +73,13 @@ namespace MphRecomp.Multiplayer
         // bots in Echoes arenas take the graph's double-jump, gap and boost links and skip items they can't get
         // (PlayerEntity.HostBotMoves, T7 N24): null = on; replays recorded before it (format < 28) read as off
         public bool? EchoesBotMoves { get; set; }
+        // bots think at vanilla's 30 Hz pace: aim turn speed, per-tick random rolls, shot leading (PlayerEntity
+        // HostBotTickPace): null = on; replays recorded before it (format < 30) read as off, so they play exactly
+        public bool? BotTickPace { get; set; }
+        // with friendly fire off, a teammate's hit is no hit at all (PlayerEntity.HostTeamHitsIgnored: no knockback,
+        // invulnerability, hurt sound or bot reaction; vanilla does those with 0 damage): null = on; replays recorded
+        // before it (format < 31) read as off, so they play exactly
+        public bool? TeamHitsIgnored { get; set; }
         // the Trooper's Wall Cling only after a jump or a real fall (PlayerEntity.HostWallClingJumpRule, T5 N10) and his
         // Scout Drone on a jump pad flying the pad's normal arc (HostDronePadArc, T5 N9): null = on; replays recorded
         // before them (format < 25) read as off, so they play exactly
@@ -78,6 +88,51 @@ namespace MphRecomp.Multiplayer
         // Dark Samus without the walk bob (PlayerEntity.HostHoverWalk, T5 N13; the bob moves her muzzle): null = on;
         // replays recorded before it (format < 25) read as off
         public bool? HoverWalk { get; set; }
+        // Dark Samus's morph ball: the jump button hops it as high as a bomb jump and the bomb button held is Corruption's
+        // Hyper Ball, paid from UA, instead of bombs (PlayerEntity.HostBallJump / HostHyperBall, docs/DARK_SAMUS_HYPER.md):
+        // null = on; replays recorded before it (format < 32) read as off, so they play exactly
+        public bool? HyperBall { get; set; }
+        // Zero Suit Samus's kit (owner 2026-10-12, docs/ZERO_SUIT_SAMUS.md section 7): her affinity weapon is the Paralyzer
+        // (its charged shot stuns, MphRead PlayerParalyzer.cs) and she has 90 health (PlayerEntity.HostHealthPercent):
+        // null = on; replays recorded before it (format < 33) read as off, so they play exactly
+        public bool? Paralyzer { get; set; }
+        // Dark Samus's Hyper Ball by Corruption's own rules (owner 2026-10-12 "Match corruption": every enemy in reach
+        // zapped in turn, its arcs to the surfaces kick the ball; PlayerEntity.HostHyperBallCorruption): null = on;
+        // replays recorded before it (format < 34) read as off, so they play exactly
+        public bool? HyperBallCorruption { get; set; }
+        // headshots on the Trooper's standing body while his Scout Drone is out (owner 2026-10-15; PlayerEntity
+        // HostDroneBodyHeadshots): the same zone as on any hunter, not the turret's none: null = on; replays recorded before
+        // it (format < 35) read as off, so they play exactly
+        public bool? DroneBodyHeadshots { get; set; }
+        // with EXTRA PICKUPS (PirateBlaster) on: every Echoes arena weapon crate's pool also holds the Pirate Blaster
+        // (owner 2026-10-15; EchoesCrates.Blaster; the placed affinity crates keep theirs): null = on; replays recorded
+        // before it (format < 36) read as off, so they play exactly
+        public bool? CrateBlaster { get; set; }
+        // Shooting Gallery's manned turret and bomb slot (Echoes' PlayerTurret, owner 2026-10-15; Arenas/EchoesTurret.cs):
+        // null = on (LAN/online too: not on the wire, null on every device; clients mirror the host's, Net/NetWorld.cs);
+        // replays recorded before it (format < 37) read as off, so they play exactly
+        public bool? EchoesTurret { get; set; }
+        // bots use that turret (owner D7/D8 2026-10-16: they sometimes get in and shoot from it, and roll into its bomb slot
+        // against an enemy in it; EchoesTurretBots): null = on (the host's bots only); replays recorded before it
+        // (format < 41) read as off, so they play exactly
+        public bool? EchoesTurretBots { get; set; }
+        // same-hunter recolours count copies per character + skin (owner 2026-10-17: Echoes and Corruption
+        // Dark Samus, an HD suit and the DS-model hunter are different looks, each in its default colour; LookAlikes.SameLookKey):
+        // null = on (every device works it out from the same seats); replays recorded before it (format < 43) read as off
+        // (copies per look / hunter), so they play exactly
+        public bool? RecolorPerSkin { get; set; }
+        // continuous shots (Shock Coil) scale their headshot damage like their damage, as the game does (2026-10-16, a
+        // user report: Shock Coil head hits did full damage every frame; PlayerEntity.HostContinuousHeadshots): null = on
+        // (not on the wire: the host decides damage); replays recorded before it (format < 38) read as off, so they play exactly
+        public bool? ContinuousHeadshots { get; set; }
+        // the Shock Coil's ramp kept through one missed tick, dropped after 2 without a hit, as the game does (2026-10-16;
+        // PlayerEntity.HostShockCoilGrace): null = on (not on the wire: the host decides damage); replays recorded before it
+        // (format < 40) read as off, so they play exactly
+        public bool? ShockCoilGrace { get; set; }
+        // the zoom (Imperialist) as the game does it (2026-10-16, owner: the zoom felt bad; PlayerEntity.HostVanillaZoom):
+        // the zoomed aim speed, the zoom's step in and ease out, the facing's catch-up. null = on (not on the wire: each
+        // device plays its own seat's aim); replays recorded before it (format < 39) read as off, so they play exactly
+        public bool? VanillaZoom { get; set; }
         // the Pirate Blaster's own weapon key (PlayerEntity.HostPirateBlasterKey, T4 N22: D-pad / wheel cycling reaches it,
         // and a LAN/online guest's pick of it works on the host): null = on; replays recorded before it (format < 27) read
         // as off, so they play exactly
@@ -100,6 +155,10 @@ namespace MphRecomp.Multiplayer
         // dev launcher "Solo arena" (App Campaign/SoloArena.cs): the local player alone in the arena, no bots or remote
         // seats (MphRead's Features.AllowInvalidTeams keeps a one-player match going). Never sent or recorded
         public bool Solo { get; set; }
+
+        // First Hunt's three deathmatch arenas (docs/FIRST_HUNT_PORT.md P5, from the imported cart): the match runs First
+        // Hunt's rules (Core FirstHunt/FirstHuntStart.cs StartFirstHuntMatch)
+        public static bool IsFirstHuntArena(string arena) => arena is "Level MP1" or "Level MP2" or "Level MP3";
 
         public static bool IsTeamMode(GameMode mode) => mode is GameMode.BattleTeams or GameMode.SurvivalTeams
             or GameMode.Capture or GameMode.BountyTeams or GameMode.NodesTeams or GameMode.DefenderTeams;
@@ -153,12 +212,15 @@ namespace MphRecomp.Multiplayer
             {
                 throw new ArgumentException($"{Mode} is not a multiplayer mode");
             }
-            if (Players.Count < (Solo ? 1 : 2) || Players.Count > (Solo ? 1 : MaxSeats))
+            // a solo run: one player, and only bots beside them (the dev launcher's practice targets)
+            int people = 0;
+            foreach (MatchPlayer p in Players) people += p.Bot ? 0 : 1;
+            if (Solo ? people != 1 || Players.Count > MaxSeats : Players.Count < 2 || Players.Count > MaxSeats)
             {
-                throw new ArgumentException(Solo ? $"a solo run is one player (has {Players.Count})"
+                throw new ArgumentException(Solo ? $"a solo run is one player and its bots (has {people} players)"
                     : $"a match needs 2-{MaxSeats} players (has {Players.Count})");
             }
-            if (LocalSeat < 0 || LocalSeat >= Players.Count || Players[LocalSeat].Bot || Players[LocalSeat].Remote)
+            if (LocalSeat < 0 || LocalSeat >= Players.Count || !ServedHost && (Players[LocalSeat].Bot || Players[LocalSeat].Remote))
             {
                 throw new ArgumentException($"seat {LocalSeat} is the local player: it must exist and be neither a bot nor remote");
             }
@@ -169,7 +231,7 @@ namespace MphRecomp.Multiplayer
                     throw new ArgumentException($"seat {i} can't be both a bot and a remote player");
                 }
             }
-            if (!MatchArenas.IsArena(Arena))
+            if (!MatchArenas.IsArena(Arena) && !IsFirstHuntArena(Arena))
             {
                 throw new ArgumentException($"{Arena} is not a multiplayer arena");
             }
@@ -187,18 +249,36 @@ namespace MphRecomp.Multiplayer
         // suit palette 0, the next ones 1, 2, 3 (then round again), so they can be told apart. Vanilla's suits are pal_01-04
         // per hunter plus pal_team01/02; in team modes the team's palette replaces this (MphRead GameState: 4 / 5), as the
         // ROM's body loader does. A seat's colour is the lobby's pick in vanilla (arm9 0x20E83FC); the order is ours.
+        // "The same hunter" for the Trooper and Dark Samus is the same character look (LookAlikes.SameLookKey, 2026-10-11:
+        // a Trooper doesn't push a Weavel onto palette 1; their own palettes/tints follow this number, MatchSkins.cs).
+        // Since 2026-10-17 (C16, RecolorPerSkin) it's the same character in the same skin: a different skin is never a copy.
         public void AssignRecolors()
         {
             for (int i = 0; i < Players.Count; i++)
             {
-                Hunter hunter = Players[i].Hunter;
+                string key = LookAlikes.SameLookKey(Players[i], RecolorPerSkin != false);
                 int before = 0;
                 for (int j = 0; j < i; j++)
                 {
-                    if (Players[j].Hunter == hunter) before++;
+                    if (LookAlikes.SameLookKey(Players[j], RecolorPerSkin != false) == key) before++;
                 }
                 Players[i].Recolor = before % 4;
             }
+        }
+
+        // the palette slot a seat's body ends up in once the match starts: its team's (4 orange / 5 green, MphRead
+        // GameState) in a team mode, else AssignRecolors' (worked out here without changing the seats)
+        public int RecolorSlot(int seat)
+        {
+            if (seat < 0 || seat >= Players.Count) return 0;
+            if (IsTeamMode(Mode)) return TeamAssignment()[seat] == 0 ? 4 : 5;
+            string key = LookAlikes.SameLookKey(Players[seat], RecolorPerSkin != false);
+            int before = 0;
+            for (int j = 0; j < seat; j++)
+            {
+                if (LookAlikes.SameLookKey(Players[j], RecolorPerSkin != false) == key) before++;
+            }
+            return before % 4;
         }
 
         // Each seat's team in a team mode: explicit teams are kept, the rest fill whichever team is smaller.

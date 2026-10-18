@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -16,7 +16,7 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace MphRead
 {
-    // ONLINE PLAY's menus (Core Frontend/OnlineMenus.cs; Online play menus thread), on the PC:
+    // ONLINE PLAY's menus (Core Frontend/OnlineMenus.cs), on the PC:
     //   -onlinemenu                 the hub, BROWSE, a game's details, WHO CAN JOIN, the friends pages, HUNTER LICENSE, ONLINE
     //                               SETTINGS and the first-visit notice with
     //                               sample data (no server), 1920 x 1080 -> extract_out/online_menus/build/online_<page>.png,
@@ -40,6 +40,12 @@ namespace MphRead
     //                               level, REMOVE takes it out and ADD BOT on the freed seat puts one back, the joiner seeing each;
     //                               with teams=1 the joiner asks for the other team (RequestTeam), the host's TEAM swaps it back
     //                               and the joiner's repeating LOOKs don't undo that)
+    //                               (rulesedit=1, owner 2026-10-15: the host taps its own seat card, SELECT HUNTER's MODE tab
+    //                               opens the mode page (it used to be dead), BOUNTY -> its rules -> SELECT HUNTER -> a pick
+    //                               -> the same lobby; the joiner and the server's card see Bounty, the game still hosted)
+    //                               (served: a server from 0.8.0 with --matchhost (DEDICATED_SERVERS.md D4) runs the game: the
+    //                               menus own its lobby (a joiner with the host's controls); lobbyedit / rulesedit go to the
+    //                               server's match host as OWNER messages; START is the server's; the rematch isn't checked)
     //                               live: the menus CREATE a game, a PC joiner joins, START; then the rematch: both matches
     //                               over, the menus on RESULTS, PLAY AGAIN -> the same lobby (the joiner shown on the
     //                               results until its LOOK), the joiner back as Spire, START again
@@ -278,6 +284,7 @@ namespace MphRead
             int seats = int.Parse(a.GetValueOrDefault("seats", "3")), bots = int.Parse(a.GetValueOrDefault("bots", "1"));
             int whoRow = int.Parse(a.GetValueOrDefault("who", "0"));
             bool teamPlay = a.GetValueOrDefault("teams", "0") == "1"; // (T8: TEAM PLAY on, the rules page's last row)
+            if (a.ContainsKey("server")) RecompMenus.OnlineServerOverride = uri.ToString(); // (the menus too, not just the PC joiner)
             Console.WriteLine($"onlinecreatetest: {uri}, {seats} seats, {bots} bots, who {whoRow}");
             string? fail = null;
             var requests = new List<FrontendRequest>();
@@ -331,14 +338,21 @@ namespace MphRead
                 Run(s, 60);
                 Shot(s, "online_live_who");
                 s.Recomp.OnCall(s.Menu, 2570, inPause: false); // CREATE
-                if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Recomp.OnlineHosting != null && s.Menu.PendingPage == -1, 15))
+                if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Recomp.OnlineRunner != null && s.Menu.PendingPage == -1, 20))
                 {
                     fail = $"CREATE didn't open the lobby (page {s.Menu.Page?.Index})";
                     return;
                 }
-                OnlineMatch host = s.Recomp.OnlineHosting!;
+                // (a served game: the menus own its lobby, the server's match host runs it)
+                OnlineMatch host = s.Recomp.OnlineRunner!;
+                bool served = host.Served;
                 GameInfo info = host.Game.Info;
-                Console.WriteLine($"  hosting {host.Game.Id}: {info.Mode} in {info.Arena}, max {info.MaxPlayers}, public {info.Public}, friends {info.Friends}, rivals {info.Rivals}");
+                Console.WriteLine($"  {(served ? "owning served game" : "hosting")} {host.Game.Id}: {info.Mode} in {info.Arena}, max {info.MaxPlayers}, public {info.Public}, friends {info.Friends}, rivals {info.Rivals}");
+                if (a.GetValueOrDefault("served") == "1" && !(served && host.Net.IsOwner && !host.Net.IsHost))
+                {
+                    fail = "served=1: the server didn't run the game (or the menus don't own its lobby)";
+                    return;
+                }
                 Run(s, 60);
                 Shot(s, "online_live_lobby_host");
                 // a PC joiner (its own key) joins it by id
@@ -370,6 +384,11 @@ namespace MphRead
                     fail = LobbyEdit(s, host, joiner, seats - bots, teamPlay);
                     if (fail != null) return;
                 }
+                if (a.GetValueOrDefault("rulesedit") == "1")
+                {
+                    fail = LobbyRulesEdit(s, host, joiner, lobby, uri, joiner.Client);
+                    if (fail != null) return;
+                }
                 if (a.GetValueOrDefault("talk") == "1")
                 {
                     fail = LobbyTalk(s);
@@ -389,17 +408,19 @@ namespace MphRead
                 Console.WriteLine("  seats " + string.Join(", ", hs?.Players.Select((p, i) => $"{i}:{p.Hunter}{(p.Bot ? " bot" : p.Remote ? " " + p.Nickname : " local")}") ?? Array.Empty<string>()));
                 int expect = Math.Min(8, 2 + bots); // (P8: up to 8 seats)
                 if (launch.GetValueOrDefault("net") != "online") fail = "the launch isn't an online match";
-                else if (OnlineMatch.Current != host || !host.Net.IsHost || hs == null || hs.LocalSeat != 0) fail = "OnlineMatch.Current isn't the hosted match as seat 0";
+                else if (served && (OnlineMatch.Current != host || host.Net.IsHost || hs == null || hs.LocalSeat < 0)) fail = "OnlineMatch.Current isn't the owned served match";
+                else if (!served && (OnlineMatch.Current != host || !host.Net.IsHost || hs == null || hs.LocalSeat != 0)) fail = "OnlineMatch.Current isn't the hosted match as seat 0";
                 else if (hs.Players.Count != expect) fail = $"{hs.Players.Count} seats, expected {expect} (2 people + {bots} bots)";
                 else if (!joinerStarted) fail = "the joiner never got START";
                 else if (FrontendSession.ReturnPage() != hub) fail = $"after the match the menus wouldn't come back to the hub (ReturnPage {FrontendSession.ReturnPage()})";
-                if (fail == null) fail = HostRematch(dir, lobby, host, joiner, hs!, requests);
+                // (served: the server's match runs to its time limit before its lobby comes back: -onlinetest served=hub matches=2 checks that)
+                if (fail == null && !served) fail = HostRematch(dir, lobby, host, joiner, hs!, requests);
             }
             finally
             {
                 joiner?.Dispose();
                 OnlineMatch.Current?.Dispose();
-                s.Recomp.OnlineHosting?.Dispose();
+                s.Recomp.OnlineRunner?.Dispose();
                 Thread.Sleep(500);
                 DeleteTestProfiles(uri, dir, (joinerId, "PCJOIN"));
                 Console.WriteLine(fail == null ? "PASS onlinecreatetest: CREATE -> setup -> WHO CAN JOIN -> lobby -> a joiner -> START -> the host plays it (net=online) -> RESULTS -> PLAY AGAIN -> the same lobby -> rematch"
@@ -435,9 +456,53 @@ namespace MphRead
             return null;
         }
 
+        // rulesedit=1: the host changes the made game's mode from its own seat card; null = all good
+        private static string? LobbyRulesEdit(FrontendSession s, OnlineMatch host, OnlineMatch joiner, int lobby, Uri uri, OnlineClient jc)
+        {
+            GameMode before = host.Net.Settings!.Mode;
+            s.Recomp.OnCall(s.Menu, 2588, inPause: false); // the GAME panel's EDIT RULES (the host's own card, 2580, does the same)
+            if (!RunUntil(s, () => s.Menu.Page?.Index == MultiplayerMenu.HunterPage && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: EDIT RULES didn't open SELECT HUNTER (page {s.Menu.Page?.Index})";
+            Run(s, 30);
+            s.Multiplayer.OnCall(s.Menu, new MenuAction { TargetPage = 0xFF }, 0, -1); // the MODE tab
+            if (!RunUntil(s, () => s.Menu.Page?.Index == MultiplayerMenu.ModePage && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: SELECT HUNTER's MODE tab didn't open the mode page (page {s.Menu.Page?.Index})";
+            Run(s, 30);
+            Shot(s, "online_live_host_modetab");
+            // (owner 2026-10-16: the focused mode's description in its own box under the panel, not over the settings)
+            s.Navigate(0, -1); // (from the MODE tab into the modes)
+            Run(s, 20);
+            s.Navigate(1, 0);
+            Run(s, 30);
+            Shot(s, "online_live_host_modedesc");
+            s.TouchDs(167, 54); // bounty -> its rules
+            Run(s, 40);
+            if (s.Menu.Page?.Index is not (> MultiplayerMenu.ModePage and < MultiplayerMenu.HunterPage))
+                return $"rulesedit: BOUNTY didn't open its rules (page {s.Menu.Page?.Index})";
+            Shot(s, "online_live_host_rules");
+            s.TouchDs(212, 173); // -> SELECT HUNTER
+            if (!RunUntil(s, () => s.Menu.Page?.Index == MultiplayerMenu.HunterPage && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: the rules page didn't go on to SELECT HUNTER (page {s.Menu.Page?.Index})";
+            Run(s, 30);
+            s.Multiplayer.OnCall(s.Menu, new MenuAction(), 132, -1); // Samus -> the lobby
+            if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: the pick didn't come back to the lobby (page {s.Menu.Page?.Index})";
+            if (s.Recomp.OnlineRunner != host) return "rulesedit: the hosted game was closed on the way";
+            // (a served game: the server's match host takes it and its LOBBY comes back)
+            if (!RunUntil(s, () => host.Net.Settings?.Mode == GameMode.Bounty, 5)) return $"rulesedit: the hosted match is {host.Net.Settings?.Mode}, not Bounty";
+            if (!RunUntil(s, () => joiner.Net.Settings?.Mode == GameMode.Bounty, 5)) return $"rulesedit: the joiner still sees {joiner.Net.Settings?.Mode}";
+            if (!RunUntil(s, () => host.Game.Info.Mode == nameof(GameMode.Bounty), 5)) return $"rulesedit: the server's card still says {host.Game.Info.Mode}";
+            GamesMsg list = Wait(jc.RequestAsync<GamesMsg>(new ListGamesReq()));
+            string? listed = list.Games.FirstOrDefault(g => g.Id == host.Game.Id)?.Info.Mode;
+            Console.WriteLine($"  rulesedit: {before} -> {host.Net.Settings.Mode} (joiner sees it; the server's list says {listed ?? "not listed"})");
+            Run(s, 60);
+            Shot(s, "online_live_lobby_rulesedit");
+            return null;
+        }
+
         private static string? LobbyEdit(FrontendSession s, OnlineMatch host, OnlineMatch joiner, int k, bool teams)
         {
-            MatchSettings H() => host.Net.Settings!;
+            MatchSettings H() => host.Net.IsHost ? host.Net.Settings! : host.Net.OwnerLobby()!; // (served: the match host's lobby)
             int BotSeat() => H().Players.FindIndex(p => p.Bot);
             bool JoinerSees(Func<MatchSettings, bool> ok) => RunUntil(s, () => joiner.Net.Settings is MatchSettings js && ok(js), 5);
             int b = BotSeat();

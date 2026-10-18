@@ -45,6 +45,13 @@ internal sealed partial class CampaignRenderer
     void ConfigureMatch(LaunchArgs args)
     {
         CampaignRenderer renderer = this;
+        // TRY CONTROLS' and the solo run's statics off for every match (menu, LAN, online, replay, dev); only ConfigureTry /
+        // ConfigureSolo turn them on again (owner 10-17: the try mode must not touch real multiplayer; SoloArena.cs)
+        ResetSoloStatics();
+        // dev --es turrettest 1: Shooting Gallery's bots go straight for the turret (EchoesTurretBots.ForceSeat); off otherwise
+        MphRecomp.Arenas.EchoesTurretBots.ForceSeat = args.Get("turrettest") == "1" && !MphRecomp.Config.RecompSettings.PublicBuild;
+        // dev --es dronetest 1: Trooper bots fire their drone whenever they have a target (PlayerEntity.HostDroneTest)
+        MphRead.Entities.PlayerEntity.HostDroneTest = args.Get("dronetest") == "1" && !MphRecomp.Config.RecompSettings.PublicBuild;
         if (ConfigureReplay(args)) return; // --es replay: a recorded match played back (MatchReplay.cs)
         string? mode = args.Get("match");
         string? net = args.Get("net");
@@ -59,6 +66,7 @@ internal sealed partial class CampaignRenderer
             try
             {
                 MatchSettings menuSettings = MphRecomp.Frontend.MatchSetupText.Read(setup);
+                if (args.Get("try") != null) ConfigureSolo(args, menuSettings); // TRY CONTROLS' practice run (SoloArena.cs)
                 menuSettings.Validate();
                 renderer._matchSettings = menuSettings;
                 renderer._hunter = menuSettings.Players[menuSettings.LocalSeat].Hunter;
@@ -83,7 +91,11 @@ internal sealed partial class CampaignRenderer
             }
             renderer._netSession = online.Net;
             renderer.SetThirdPerson(false); // ReloadAimFromSettings ran before this (CampaignLaunch): drop a saved THIRD
-            if (renderer.PauseMenu != null) renderer.PauseMenu.NetMatch = true;
+            if (renderer.PauseMenu != null)
+            {
+                renderer.PauseMenu.NetMatch = true;
+                renderer.PauseMenu.OnlineChat = online; // the pause's CHAT (PauseOverlay)
+            }
             renderer._netOwner = online.TakeScreenHold();
             renderer._online = online;
             renderer._matchSettings = online.Net.Settings;
@@ -98,8 +110,7 @@ internal sealed partial class CampaignRenderer
                 renderer._error = "LAN match: the connection from the launcher is gone -- host or join again";
                 return;
             }
-            renderer._netSession = session;
-            renderer.SetThirdPerson(false); // ReloadAimFromSettings ran before this (CampaignLaunch): drop a saved THIRD
+            renderer._netSession = session; // LAN: the match camera setting, third person too (owner 2026-10-17; CampaignLaunch)
             if (renderer.PauseMenu != null) renderer.PauseMenu.NetMatch = true;
             renderer._netOwner = session;
             renderer._matchSettings = session.Settings;
@@ -187,6 +198,7 @@ internal sealed partial class CampaignRenderer
                 // as vanilla: the game's fade to black, then the menus' RESULTS page (MultiplayerMenu); a LAN match's
                 // session ends here (the other device hears BYE once its own match is over too)
                 MphRecomp.Frontend.MatchResults.Last = MphRecomp.Frontend.MatchResults.Capture(_matchSettings!.LocalSeat);
+                RecordFirstHuntMatch(); // a First Hunt deathmatch: its results page instead (FirstHuntSession.cs)
                 _matchEndedAt = double.MaxValue; // once
                 ShipSink?.Invoke("");
                 _online?.EndMatch(); // (an online match goes on in the menus: RESULTS, PLAY AGAIN; its hold then lets it be)
@@ -237,10 +249,12 @@ internal sealed partial class CampaignRenderer
         }
         if (_statusMode == 2)
         {
-            return "";
+            return _paused ? PauseText() : "";
         }
         RoomMetadata? meta = Metadata.GetRoomById(_host.RoomId);
         string net = _netDriver != null ? "\n" + _netDriver.StatusLine() : ReplayStatusLine() + SoloStatusLine();
-        return $"{meta?.InGameName}  {_fps:0} fps  sim {_simMs:0.0} ms  draw {_drawMs:0.0} ms{net}\n" + MatchStatus.Scoreboard();
+        // the gun-adjust pause's lines (L3 + R3) show in a match too, above the scoreboard
+        string pause = _paused ? "\n" + PauseText() : "";
+        return $"{meta?.InGameName}  {_fps:0} fps  sim {_simMs:0.0} ms  draw {_drawMs:0.0} ms{net}{pause}\n" + MatchStatus.Scoreboard();
     }
 }

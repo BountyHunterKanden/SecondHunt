@@ -1,6 +1,6 @@
 namespace MphRead.Entities
 {
-    public class PointModuleEntity : EntityBase
+    public partial class PointModuleEntity : EntityBase
     {
         private readonly PointModuleEntityData _data;
         public PointModuleEntity? Next { get; private set; }
@@ -24,11 +24,11 @@ namespace MphRead.Entities
         public override void Initialize()
         {
             base.Initialize();
-            if (_data.NextId != 0 && _scene.TryGetEntity(_data.NextId, out EntityBase? entity))
+            if (_data.NextId != 0 && !FirstHuntSelfLink(_data.NextId) && _scene.TryGetEntity(_data.NextId, out EntityBase? entity))
             {
                 Next = (PointModuleEntity)entity;
             }
-            if (_data.PrevId != 0 && _scene.TryGetEntity(_data.PrevId, out entity))
+            if (_data.PrevId != 0 && !FirstHuntSelfLink(_data.PrevId) && _scene.TryGetEntity(_data.PrevId, out entity))
             {
                 Prev = (PointModuleEntity)entity;
             }
@@ -36,7 +36,7 @@ namespace MphRead.Entities
 
         public override bool Process()
         {
-            if (_current == null && Id == StartId)
+            if (_current == null && (Id == StartId || FirstHuntStart))
             {
                 SetCurrent();
             }

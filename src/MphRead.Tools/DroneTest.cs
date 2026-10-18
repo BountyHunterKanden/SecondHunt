@@ -6,13 +6,14 @@ using System.Linq;
 using MphRead.Entities;
 using MphRecomp.Campaign;
 using MphRecomp.Multiplayer;
+using MphRecomp.Multiplayer.Net;
 using MphRecomp.Replay;
 using OpenTK.Mathematics;
 
 namespace MphRead
 {
     // The Trooper's Scout Drone (docs/CHARACTERS_AND_SKINS.md D10/D10a, MphRead Players/PlayerScoutDrone.cs), headless:
-    //   -dronetest [arena=Combat Hall] [time=120] [bots=2] [out=<dir>] [lookback=<frames>]
+    //   -dronetest [arena=Combat Hall] [time=120] [bots=2] [out=<dir>] [lookback=<frames>] [force=1: PlayerEntity.HostDroneTest]
     // seat 0 is a local Trooper (Weavel + Character "trooper") driven by a script, over and over: split (Morph), hold
     // Jump and fly forward firing the blasters, let go and sink, wander a little, merge (Morph). Seat 1 is a Trooper bot.
     // Checks:
@@ -55,6 +56,7 @@ namespace MphRead
                 case "trace": traceFrom = Int64.Parse(value); break;
                 case "lookback": lookBack = Int32.Parse(value); break;
                 case "rules": t5Rules = value; break;
+                case "force": PlayerEntity.HostDroneTest = value == "1"; break; // the launcher's Drone kill test (--es dronetest 1)
                 default: throw new ArgumentException($"unknown option {arg}");
                 }
             }
@@ -511,6 +513,165 @@ namespace MphRead
                 && fullLasers[0] >= 1 && lasers[1] >= 1;
             Console.WriteLine(pass ? "dronetest PASS" : "dronetest FAIL");
             Environment.ExitCode = pass ? 0 : 1;
+        }
+
+        //   -dronekilltest: the kill message (owner 2026-10-17: "(sentry drone)"). Seat 0 a local Samus, seat 1
+        // a Trooper bot with the drone; each case starts a fresh match, kills seat 0 one way and reads its HUD's "(...)" line,
+        // and what its snapshot sends a match client (LastBeam, through Snapshot's bytes):
+        //   - a drone blaster shot (its own pool) -> (SENTRY DRONE), LastBeam 0x40 (Power Beam + the drone bit)
+        //   - the cutting laser (source = the drone's player) -> (SENTRY DRONE), LastBeam 0x49 (no beam + the drone bit)
+        //   - a Power Beam shot of his own -> (POWER BEAM), LastBeam 0 (unchanged)
+        //   - Shooting Gallery's turret (owner 2026-10-17: "killed by [player] (heavy turret)"): a turret shot -> (HEAVY TURRET),
+        //     LastBeam 0x20 (Power Beam + the turret bit); the entry kill -> (HEAVY TURRET), LastBeam 0x29 (no beam + the turret bit)
+        //   - a match client given those snapshots -> the same lines
+        public static void RunKillMessage()
+        {
+            Trace.Listeners.Clear();
+            if (!ToolPaths.UseDesktopExtraction())
+            {
+                return;
+            }
+            Characters.ScoutDroneOn = true;
+            var settings = new MatchSettings { Mode = GameMode.Battle, Arena = MatchArenas.Find("Combat Hall")!.Name, TimeLimitSeconds = 60 };
+            settings.Players.Add(new MatchPlayer { Hunter = Hunter.Samus, Nickname = "Player1" });
+            settings.Players.Add(new MatchPlayer { Hunter = Characters.Trooper.Base, Character = Characters.Trooper.Id, Bot = true, BotLevel = 0 });
+            var queueField = typeof(PlayerEntity).GetField("_hudMessageQueue",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+            var laserField = typeof(PlayerEntity).GetField("_droneLaserApplying",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+            IEnumerable<object> Queue() => ((System.Collections.IEnumerable)queueField.GetValue(null)!).Cast<object>();
+            string? KilledBy()
+            {
+                foreach (object m in Queue())
+                {
+                    float life = (float)m.GetType().GetProperty("Lifetime")!.GetValue(m)!;
+                    string text = new string(((char[])m.GetType().GetProperty("Text")!.GetValue(m)!).TakeWhile(c => c != '\0').ToArray());
+                    if (life > 0 && text.StartsWith('('))
+                    {
+                        return text;
+                    }
+                }
+                return null;
+            }
+            var errors = new List<string>();
+            var turretShot = typeof(BeamProjectileEntity).GetProperty(nameof(BeamProjectileEntity.HostTurretShot))!;
+            sbyte[] sent = new sbyte[5];
+            string[] names = { "drone blaster", "cutting laser", "own Power Beam", "turret shot", "turret entry kill" };
+            string[] wantText = { "(SENTRY DRONE)", "(SENTRY DRONE)", "(POWER BEAM)", "(HEAVY TURRET)", "(HEAVY TURRET)" };
+            sbyte[] wantBeam = { 0x40, 0x49, 0, 0x20, 0x29 };
+            for (int pass = 0; pass < 2; pass++)
+            {
+                bool client = pass == 1;
+                string side = client ? "match client" : "host";
+                for (int k = 0; k < names.Length; k++)
+                {
+                    CampaignHost host = CampaignHost.StartMatch(settings);
+                    PlayerEntity p0 = PlayerEntity.Players[0];
+                    PlayerEntity p1 = PlayerEntity.Players[1];
+                    for (int f = 0; f < 600 && (p0.Health == 0 || p1.Health == 0); f++)
+                    {
+                        var input = new CampaignInput();
+                        if (f % 2 == 0) input.Buttons |= CampaignButtons.Shoot; // spawn
+                        host.Step(input);
+                    }
+                    if (p0.Health == 0 || p1.Health == 0 || p1.DroneBeams == null)
+                    {
+                        errors.Add($"{side} {names[k]}: seats not spawned / no drone pool");
+                        continue;
+                    }
+                    foreach (object m in Queue())
+                    {
+                        m.GetType().GetProperty("Lifetime")!.SetValue(m, 0f);
+                    }
+                    if (client)
+                    {
+                        PlayerNetState s = p0.NetCapture();
+                        s.Health = 0;
+                        s.LastAttacker = 1;
+                        s.LastBeam = sent[k];
+                        s.LastFlags = 0;
+                        PlayerEntity.NetClient = true;
+                        try
+                        {
+                            p0.NetApply(s, pose: false);
+                        }
+                        finally
+                        {
+                            PlayerEntity.NetClient = false;
+                        }
+                    }
+                    else
+                    {
+                        BeamProjectileEntity beam = k == 0 ? p1.DroneBeams[0] : p1.EquipInfo.Beams![0];
+                        beam.Owner = p1;
+                        beam.Beam = BeamType.PowerBeam;
+                        if (k == 4)
+                        {
+                            PlayerEntity.HostTurretKillApplying = true;
+                            try
+                            {
+                                p0.TakeDamage(999u, DamageFlags.NoDmgInvuln | DamageFlags.IgnoreInvuln, Vector3.UnitX, p1);
+                            }
+                            finally
+                            {
+                                PlayerEntity.HostTurretKillApplying = false;
+                            }
+                        }
+                        else if (k == 3)
+                        {
+                            turretShot.SetValue(beam, true);
+                            try
+                            {
+                                p0.TakeDamage(999u, DamageFlags.IgnoreInvuln, Vector3.UnitX, beam);
+                            }
+                            finally
+                            {
+                                turretShot.SetValue(beam, false);
+                            }
+                        }
+                        else if (k == 1)
+                        {
+                            laserField.SetValue(null, true);
+                            try
+                            {
+                                p0.TakeDamage(999u, DamageFlags.NoDmgInvuln | DamageFlags.IgnoreInvuln, Vector3.UnitX, p1); // (past the spawn invulnerability)
+                            }
+                            finally
+                            {
+                                laserField.SetValue(null, false);
+                            }
+                        }
+                        else
+                        {
+                            p0.TakeDamage(999u, DamageFlags.IgnoreInvuln, Vector3.UnitX, beam);
+                        }
+                        byte[] bytes = new byte[Snapshot.SeatSize];
+                        Snapshot.WriteSeat(bytes, p0.NetCapture(), 0, 0, 0);
+                        sent[k] = Snapshot.ReadSeat(bytes, out _, out _, out _).LastBeam;
+                        if (sent[k] != wantBeam[k])
+                        {
+                            errors.Add($"{names[k]}: snapshot LastBeam 0x{sent[k]:x2}, want 0x{wantBeam[k]:x2}");
+                        }
+                    }
+                    string? text = KilledBy();
+                    Console.WriteLine($"{side}, {names[k]}: health {p0.Health}, message {text ?? "(none)"}"
+                        + (client ? $" (from LastBeam 0x{sent[k]:x2})" : $", snapshot LastBeam 0x{sent[k]:x2}"));
+                    if (p0.Health != 0)
+                    {
+                        errors.Add($"{side} {names[k]}: not killed");
+                    }
+                    if (text != wantText[k])
+                    {
+                        errors.Add($"{side} {names[k]}: {text ?? "no message"}, want {wantText[k]}");
+                    }
+                }
+            }
+            foreach (string e in errors)
+            {
+                Console.WriteLine($"  WRONG {e}");
+            }
+            Console.WriteLine(errors.Count == 0 ? "dronekilltest PASS" : "dronekilltest FAIL");
+            Environment.ExitCode = errors.Count == 0 ? 0 : 1;
         }
     }
 }

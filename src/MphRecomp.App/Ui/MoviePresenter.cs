@@ -27,7 +27,7 @@ internal sealed class MoviePresenter : IDisposable
 
     int _program, _vao, _vbo, _texTop, _texBottom;
     int _uploadedVersion = -1;
-    MoviePlayer? _uploadedFor;
+    IMoviePlayback? _uploadedFor;
     readonly float[] _verts = new float[16];
     MovieAudio? _audio;
 
@@ -83,7 +83,7 @@ void main() { color = vec4(texture(tex, vUv).rgb, 1.0); }";
     }
 
     // keeps TopTexture / BottomTexture on the player's current frames
-    public void Upload(MoviePlayer player)
+    public void Upload(IMoviePlayback player)
     {
         if (player == _uploadedFor && player.FrameVersion == _uploadedVersion)
         {
@@ -107,7 +107,7 @@ void main() { color = vec4(texture(tex, vUv).rgb, 1.0); }";
     }
 
     // Clears the viewport to black and draws the movie letterboxed into it; also keeps the audio running.
-    public void Draw(MoviePlayer player, int width, int height, bool paused = false)
+    public void Draw(IMoviePlayback player, int width, int height, bool paused = false)
     {
         Audio(player, paused);
         GLES30.GlViewport(0, 0, width, height);
@@ -182,7 +182,7 @@ void main() { color = vec4(texture(tex, vUv).rgb, 1.0); }";
     }
 
     // starts the sound once the first frame is up, pauses/resumes it, and stops it when the movie ends
-    public void Audio(MoviePlayer player, bool paused)
+    public void Audio(IMoviePlayback player, bool paused)
     {
         if (_audio != null && _audio.Player != player)
         {
@@ -241,7 +241,7 @@ void main() { color = vec4(texture(tex, vUv).rgb, 1.0); }";
     }
 }
 
-// A MoviePlayer's PCM on a PCM track, fed from its own thread (blocking writes pace it in real time).
+// A movie's PCM (MoviePlayer, First Hunt's FhMoviePlayer) on a PCM track, fed from its own thread (blocking writes pace it in real time).
 internal sealed class MovieAudio : IDisposable
 {
     // The DS plays a movie's sound at the movie's own volume from data/sound/MOVIEVOLINFO.DAT (01 = 96, 02 = 76, the
@@ -249,7 +249,7 @@ internal sealed class MovieAudio : IDisposable
     // vol/128 and pans linearly: a two-screen movie's two channels play hard left/right (BizHawk SOUNDxCNT, movie
     // 01: vol 96, pan 127/0, matched the decoded PCM x 96/128 within 0.2 dB), a one-screen movie's single channel
     // plays centred, half per side (AlinosLanding = 04.vx: one PCM16 channel, vol 127, pan 64, div 0, 2026-10-01).
-    float VolumeGain => DsVolume(Player.Name) / 128f * (Player.AudioChannels == 2 ? 1f : 0.5f);
+    float VolumeGain => (Player.DsVolume ?? DsVolume(Player.Name)) / 128f * (Player.AudioChannels == 2 ? 1f : 0.5f);
 
     // MOVIEVOLINFO.DAT: u32 count, then count x {u32 top name offset, u32 bottom name offset, u32 rsr name offset,
     // u32 volume}, names being "movies/NN_top.vx" / "movies/NN.vx" strings later in the file. Player.Name is either
@@ -284,13 +284,13 @@ internal sealed class MovieAudio : IDisposable
         return 96;
     }
 
-    public MoviePlayer Player { get; }
+    public IMoviePlayback Player { get; }
     readonly IPcmTrack _track;
     readonly Thread _thread;
     volatile bool _stop;
     volatile bool _paused;
 
-    public MovieAudio(MoviePlayer player)
+    public MovieAudio(IMoviePlayback player)
     {
         Player = player;
         // small buffer (>= 50 ms): the sound should follow the picture, not run far ahead of it

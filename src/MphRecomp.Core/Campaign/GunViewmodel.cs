@@ -52,6 +52,9 @@ namespace MphRecomp.Campaign
         // "glow <unit>": a gun whose lights share their materials with the plating (Beyond's: an incandescence map added
         // in its own TEV stage) -- only what that texture unit reads takes the colour, in every material that has it
         public int GlowUnit = -1;
+        // "updown hold": MPH's raise/lower state (unmorphing, the idle lowering) holds the pose the gun was in, for a gun
+        // with no raise of its own (Sylux's coil: its switch-in clip is a strike recovery, owner 2026-10-17)
+        public bool UpDownHold;
 
         // how a material takes MPH's light colour: 0 not at all, 1 the whole material, 2 only texture unit GlowUnit
         public float TintMode(int material, bool hasGlowLayer)
@@ -146,6 +149,10 @@ namespace MphRecomp.Campaign
                     {
                         g.Scale = Single.Parse(t[1], System.Globalization.CultureInfo.InvariantCulture);
                     }
+                    else if (t.Length >= 2 && t[0] == "updown" && t[1] == "hold")
+                    {
+                        g.UpDownHold = true;
+                    }
                     else if (t.Length >= 2 && t[0] == "glow")
                     {
                         g.GlowUnit = Int32.Parse(t[1]);
@@ -191,6 +198,9 @@ namespace MphRecomp.Campaign
         public readonly HdGun Gun;
         readonly HdGun.Anim _base, _shoot, _chargeUp, _chargeLoop, _chargeShoot, _missOpen, _missShoot, _missAway, _toHolster, _fromHolster;
         readonly bool[] _hatchBones; // bones the missile hatch moves (from the end of missile-open)
+        // a missile charge of its own (a Prime 4 recipe's "missileChargeUp/Loop/Shoot", from and back to the missiles-open
+        // pose; owner 2026-10-17: missile and beam charges look different) -- without them, the beam's charge + hatch open
+        readonly HdGun.Anim? _missChargeUp, _missChargeLoop, _missChargeShoot;
         public readonly Matrix4[] World;
         public readonly int MuzzleBone, ChargeBone;
 
@@ -198,6 +208,13 @@ namespace MphRecomp.Campaign
         float _oneShotTime, _loopTime;
         GunAnimation _prevState = GunAnimation.Idle;
         int _prevFrame;
+        HdGun.Anim? _lastAnim;   // the last pose drawn outside MPH's raise/lower state (HdGun.UpDownHold)
+        float _lastTime;
+        bool _lastHatch, _holding;
+        // a continuous beam held down (Shock Coil): MPH restarts its shot every frame, which shows as the shot frozen
+        // part way and finishing on release (owner 2026-10-17, vanilla) -- Prime's shot is held at its furthest pose
+        readonly float _shootPeak;
+        int _sinceContinuous = 99;
         public string Playing { get; private set; } = "";
 
         public GunViewmodel(HdGun gun, string beam = "power")
@@ -221,6 +238,9 @@ namespace MphRecomp.Campaign
             _missAway = Get(beam + "MissleAway");
             _toHolster = Get(beam + "ToHolster");
             _fromHolster = Get(beam + "FromHolster");
+            gun.Anims.TryGetValue("missileChargeUp", out _missChargeUp);
+            gun.Anims.TryGetValue("missileChargeLoop", out _missChargeLoop);
+            gun.Anims.TryGetValue("missileChargeShoot", out _missChargeShoot);
             World = new Matrix4[gun.BoneCount];
             // the hatch: bones whose pose at the end of missile-open differs from the resting pose
             _hatchBones = new bool[gun.BoneCount];
@@ -231,6 +251,23 @@ namespace MphRecomp.Campaign
                 float dot = r0.X * r1.X + r0.Y * r1.Y + r0.Z * r1.Z + r0.W * r1.W;
                 float angle = 2 * MathF.Acos(Math.Clamp(MathF.Abs(dot), 0, 1));
                 _hatchBones[b] = angle > 0.05f || (t1 - t0).Length > 0.005f;
+            }
+            float best = -1;
+            for (int k = 0; k <= 30; k++)
+            {
+                float t = _shoot.Duration * k / 30;
+                float far = 0;
+                for (int b = 0; b < gun.BoneCount; b++)
+                {
+                    gun.Sample(_shoot, 0, b, out Quaternion r0, out Vector3 t0);
+                    gun.Sample(_shoot, t, b, out Quaternion r1, out Vector3 t1);
+                    float dot = r0.X * r1.X + r0.Y * r1.Y + r0.Z * r1.Z + r0.W * r1.W;
+                    far = MathF.Max(far, 2 * MathF.Acos(Math.Clamp(MathF.Abs(dot), 0, 1)) + (t1 - t0).Length);
+                }
+                if (far > best)
+                {
+                    best = far; _shootPeak = t;
+                }
             }
             MuzzleBone = gun.BoneIndex("LBEAM");
             ChargeBone = gun.BoneIndex("LCHRG");
@@ -245,7 +282,12 @@ namespace MphRecomp.Campaign
             int frame = player.GunAnimFrame, count = player.GunAnimFrameCount;
             float ratio = count > 1 ? Math.Clamp(frame / (float)(count - 1), 0, 1) : 0;
             bool restarted = state != _prevState || frame < _prevFrame;
+            GunAnimation was = _prevState;
             _prevState = state; _prevFrame = frame;
+            bool fired = player.Flags1.TestFlag(PlayerFlags1.ShotUncharged) || player.Flags1.TestFlag(PlayerFlags1.ShotCharged);
+            _sinceContinuous = fired && player.EquipInfo.Weapon != null && player.EquipInfo.Weapon.Flags.TestFlag(WeaponFlags.Continuous)
+                ? 0 : Math.Min(_sinceContinuous + 1, 99);
+            bool streaming = _sinceContinuous <= 4 && _oneShot == _shoot;
             // shots play out on Prime's own clock (MPH's shot state is shorter than Prime's shot animation)
             if (restarted)
             {
@@ -253,10 +295,12 @@ namespace MphRecomp.Campaign
                 {
                     GunAnimation.Shot => _shoot,
                     GunAnimation.ChargeShot => _chargeShoot,
+                    // a full missile charge let go: MPH plays its missile shot; the charge's own release when there is one
+                    GunAnimation.MissileShot when was == GunAnimation.FullChargeMissile && _missChargeShoot != null => _missChargeShoot,
                     GunAnimation.MissileShot or GunAnimation.Unknown9 => _missShoot,
                     _ => null
                 };
-                if (start != null)
+                if (start != null && !(streaming && start == _shoot))
                 {
                     _oneShot = start; _oneShotTime = 0;
                 }
@@ -265,10 +309,19 @@ namespace MphRecomp.Campaign
                     _oneShot = null;
                 }
             }
+            if (restarted && state is GunAnimation.FullCharge or GunAnimation.FullChargeMissile) _loopTime = 0; // the loop from its start: where the charge-up ended
             _loopTime += dt;
+            _holding = state == GunAnimation.UpDown && Gun.UpDownHold && _lastAnim != null;
+            if (_holding)
+            {
+                _oneShot = null;
+                Pose(_lastAnim!, _lastTime, _lastHatch);
+                return;
+            }
             if (_oneShot != null)
             {
                 _oneShotTime += dt;
+                if (streaming) _oneShotTime = MathF.Min(_oneShotTime, _shootPeak);
                 bool holdEnd = _oneShot == _missShoot;
                 if (_oneShotTime < _oneShot.Duration || holdEnd && state is GunAnimation.MissileShot or GunAnimation.Unknown9)
                 {
@@ -287,6 +340,10 @@ namespace MphRecomp.Campaign
                 Pose(_missOpen, ratio * _missOpen.Duration); break;
             case GunAnimation.MissileClose:
                 Pose(_missAway, ratio * _missAway.Duration); break;
+            case GunAnimation.ChargingMissile when _missChargeUp != null:
+                Pose(_missChargeUp, ratio * _missChargeUp.Duration); break;
+            case GunAnimation.FullChargeMissile when _missChargeLoop != null:
+                Pose(_missChargeLoop, _loopTime % _missChargeLoop.Duration); break;
             case GunAnimation.ChargingMissile:
                 Pose(_chargeUp, ratio * _chargeUp.Duration, hatchOpen: true); break;
             case GunAnimation.FullChargeMissile:
@@ -309,6 +366,10 @@ namespace MphRecomp.Campaign
         void Pose(HdGun.Anim a, float t, bool hatchOpen = false)
         {
             Playing = hatchOpen ? a.Name + " + hatch open" : a.Name;
+            if (!_holding)
+            {
+                _lastAnim = a; _lastTime = t; _lastHatch = hatchOpen;
+            }
             HdGun g = Gun;
             foreach (int b in g.Order)
             {
@@ -323,6 +384,9 @@ namespace MphRecomp.Campaign
                 World[b] = g.Parent[b] >= 0 ? local * World[g.Parent[b]] : local;
             }
         }
+
+        // one animation alone at time t, not driven by MPH's gun state (Tools -guntest clips)
+        public void PoseClip(string anim, float t) => Pose(Gun.Anims[anim], t);
 
         // bone position in gun space
         public Vector3 BonePosition(int bone) => bone >= 0 ? World[bone].ExtractTranslation() : Vector3.Zero;
@@ -347,22 +411,24 @@ namespace MphRecomp.Campaign
         // (the muzzle flash, charge glow and beam spawn all come from MPH's muzzle point)
         public Matrix4 ModelMatrix(PlayerEntity player, float scale, Vector3 restMuzzle)
         {
-            const float mphMuzzleForward = 1548 / 4096f; // Samus's MuzzleOffset (Metadata Player.cs)
+            float mphMuzzleForward = Fixed.ToFloat(player.Values.MuzzleOffset); // the hunter's (Samus's 1548 / 4096: Metadata Player.cs)
             Vector3 shift = new Vector3(0, 0, mphMuzzleForward) - restMuzzle * scale;
             return Gun.Root * Matrix4.CreateScale(scale) * Matrix4.CreateTranslation(shift) * player.GunDrawTransform;
         }
 
-        // MPH's own first-person gun among the scene's draw items (the host draws the Prime gun in its place)
-        public static bool IsMphGunItem(Scene scene, RenderItem item)
+        // MPH's own first-person gun among the scene's draw items (the host draws the Prime gun in its place): SamusGun, or
+        // the hunter's own (`gunModel`: a skin's gun, CampaignRenderer's MatchSkinGun.cs)
+        public static bool IsMphGunItem(Scene scene, RenderItem item, string gunModel = "SamusGun")
         {
             return item.Type == RenderItemType.Mesh && item.ListId >= 1 && item.ListId <= scene.HostMeshes.Count
-                && scene.HostMeshes[item.ListId - 1].Model.Name == "SamusGun";
+                && scene.HostMeshes[item.ListId - 1].Model.Name == gunModel;
         }
 
         // the colour MPH gives the gun's lights for the current weapon: its per-weapon material animation (slot 1)
         // drives material "lambert10" (Power/Volt/Missile amber, Battlehammer green, Imperialist red, Judicator violet,
-        // Magmaul orange, Shock Coil blue). False when MPH drew no first-person gun this frame.
-        public static bool TryMphLightColour(Scene scene, out Vector3 colour)
+        // Magmaul orange, Shock Coil blue); SyluxGun's is "VLight_Material" (the same per beam, the Power Beam green).
+        // False when MPH drew no first-person gun this frame.
+        public static bool TryMphLightColour(Scene scene, out Vector3 colour, string gunModel = "SamusGun")
         {
             colour = Vector3.One;
             bool drawn = false;
@@ -371,13 +437,13 @@ namespace MphRecomp.Campaign
                 for (int i = 0; i < list.Count; i++)
                 {
                     RenderItem item = list[i];
-                    if (!IsMphGunItem(scene, item))
+                    if (!IsMphGunItem(scene, item, gunModel))
                     {
                         continue;
                     }
                     drawn = true;
                     (Model model, Mesh mesh, bool _) = scene.HostMeshes[item.ListId - 1];
-                    if (model.Materials[mesh.MaterialId].Name == "lambert10")
+                    if (model.Materials[mesh.MaterialId].Name is "lambert10" or "VLight_Material")
                     {
                         colour = item.Diffuse;
                         return true;

@@ -119,8 +119,13 @@ namespace MphRecomp.Render
             // a recolour for the first-person gun's lights (MPH's per-weapon colour): the brightest channel times the tint.
             // w = 0 leaves the material alone (the default); w = 1 recolours the whole material (Retro's light materials);
             // w = 2 recolours only what texture unit uTintUnit reads (Beyond's glow map, which shares its material with
-            // the plating it lights)
-            "uniform vec4 uTint; uniform int uTintUnit;\n" +
+            // the plating it lights); w = 3+k (k < 1) a match seat's team colour on a native body: the colour pulled k of
+            // the way toward the tint by its brightness (blacks lifted a little); w = 5+k the same on its unsaturated
+            // armour only, its lights keep their colour (a same-character duplicate); w = 7+k as 3+k with the bright parts
+            // lit well above the rest (the troopers; LookAlikes.BodyTint); w = 9+k two tones (a same-look copy): its
+            // armour toward uTint by brightness, its lights (saturated and bright) toward uTint2; w = -1 multiplies the
+            // material by the tint (an Echoes model particle's colour: CCubeMaterial's extra KONST x CPREV stage)
+            "uniform vec4 uTint; uniform int uTintUnit; uniform vec4 uTint2;\n" +
             // a normal-mapped material (GxJson "nmap"): channel 0 and the reflection texcoords again, per pixel
             "in vec3 vP; in vec3 vN;\n" +
             "uniform int uNmap; uniform int uNmapTc;\n" +   // the normal map's texmap unit + 1 (0 = none, as an unset uniform is) and texcoord
@@ -199,7 +204,7 @@ namespace MphRecomp.Render
             "    if(s>=uNumStages) break;\n" +
             "    int tm=uDst[s].z;\n" +
             "    gTex = tm>=0 ? swz(smp(tm, tc(uDst[s].w)), uSwap[uKsel[s].w]) : vec4(0.0);\n" +
-            "    if(uTint.w>1.5 && tm==uTintUnit) gTex.rgb=uTint.rgb*max(gTex.r,max(gTex.g,gTex.b));\n" +
+            "    if(uTint.w>1.5 && uTint.w<2.5 && tm==uTintUnit) gTex.rgb=uTint.rgb*max(gTex.r,max(gTex.g,gTex.b));\n" +
             "    int rc = uRasChan[s];\n" +
             "    gRas = rc==0 ? ch0 : (rc==1 ? vChan1 : vec4(0.0));\n" +
             "    gRas = swz(gRas, uSwap[uKsel[s].z]);\n" +
@@ -219,6 +224,16 @@ namespace MphRecomp.Render
             "    if(!pass) discard; }\n" +
             "  vec3 fc=clamp(gC[0],0.0,1.0);\n" +
             "  if(uTint.w>0.5 && uTint.w<1.5) fc=uTint.rgb*max(fc.r,max(fc.g,fc.b));\n" +
+            "  if(uTint.w<-0.5) fc*=uTint.rgb;\n" +
+            "  if(uTint.w>2.5 && uTint.w<8.5){ bool glo=uTint.w>6.5; bool arm=uTint.w>4.5 && !glo; float tk=uTint.w-(glo?7.0:(arm?5.0:3.0));\n" +
+            "    float tl=max(fc.r,max(fc.g,fc.b)); float ts=tl>0.0?(tl-min(fc.r,min(fc.g,fc.b)))/tl:0.0;\n" +
+            "    vec3 tt=uTint.rgb*(0.16+0.84*tl);\n" +
+            "    if(glo) tt=mix(tt*0.8, uTint.rgb*0.8+vec3(0.35), smoothstep(0.45,0.85,tl));\n" +
+            "    fc=mix(fc, tt, arm ? tk*(1.0-smoothstep(0.25,0.6,ts)) : tk); }\n" +
+            "  if(uTint.w>8.5){ float tk=uTint.w-9.0; float tl=max(fc.r,max(fc.g,fc.b)); float ts=tl>0.0?(tl-min(fc.r,min(fc.g,fc.b)))/tl:0.0;\n" +
+            "    float lm=smoothstep(0.35,0.6,ts)*smoothstep(0.35,0.6,tl);\n" +
+            "    vec3 ta=uTint.rgb*(0.28+1.0*tl); vec3 tb=min(uTint2.rgb*(0.55+0.75*tl)+vec3(0.10*tl),vec3(1.0));\n" +
+            "    fc=mix(fc, mix(ta,tb,lm), tk); }\n" +
             "  o = vec4(fc*uExposure, uBlendAlpha==1?outa:1.0);\n" +
             "}\n";
 
@@ -279,7 +294,7 @@ namespace MphRecomp.Render
                 int mode = L == null ? 0 : (L.MapMode == 0 && m.TexGenSrc[t] == 1 ? 1 : L.MapMode switch { 1 or 3 or 4 => 1, _ => 0 });
                 p.TgMode[t] = mode;
                 var mt = L == null ? Identity3 : L.UvMtx ?? MayaSrt(L.Scale, L.RotDeg, L.Trans);
-                if (L != null && L.ScrollPerSec != Vector2.Zero) p.Scrolls = true;
+                if (L != null && L.Moves) p.Scrolls = true;
                 Array.Copy(mt, 0, p.TexMtx, t * 9, 9);
                 if (L != null && L.TexMapId >= 0 && L.TexMapId < 8) p.Units[L.TexMapId] = L;
             }
@@ -301,9 +316,10 @@ namespace MphRecomp.Render
             for (int i = 0; i < 8; i++)
             {
                 var L = m.Layers[i];
-                if (L == null || L.ScrollPerSec == Vector2.Zero) continue;
-                t[i * 9 + 6] += (float)(L.ScrollPerSec.X * seconds % 1.0);
-                t[i * 9 + 7] += (float)(L.ScrollPerSec.Y * seconds % 1.0);
+                if (L == null || !L.Moves) continue;
+                Vector2 d = L.UvShift(seconds);
+                t[i * 9 + 6] += d.X;
+                t[i * 9 + 7] += d.Y;
             }
             return t;
         }

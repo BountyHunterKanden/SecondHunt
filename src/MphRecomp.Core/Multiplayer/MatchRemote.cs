@@ -32,6 +32,8 @@ namespace MphRecomp.Campaign
             }
             RemoteInputTap?.Invoke(seat, applied);
             SetControls(p.Controls, input.MoveX, input.MoveY, input.Buttons, input.SelectWeapon);
+            p.HostZoomButtons((input.Buttons & CampaignButtons.ZoomStep) != 0, (input.Buttons & CampaignButtons.ZoomIn) != 0,
+                (input.Buttons & CampaignButtons.ZoomOut) != 0); // ZOOM STEP (CampaignHost.CampaignButtons)
             // T11: the touch controls' stylus (PlayerTouch.cs: touch roll, flick boost, double-tap jump)
             p.HostTouchDown = input.Touching;
             p.HostTouchDx = input.TouchDx;

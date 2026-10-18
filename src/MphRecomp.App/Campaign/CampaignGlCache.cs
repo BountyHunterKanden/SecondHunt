@@ -16,9 +16,13 @@ internal static class CampaignGlCache
     const string Tag = "MPHCampaign";
     const int ProgramBinaryRetrievableHint = 0x8257; // GL_PROGRAM_BINARY_RETRIEVABLE_HINT
 
-    static readonly Dictionary<string, int> _programs = new();
+    // one table per GL thread: each GLSurfaceView has its own thread and context, and the menus' (GameActivity) keeps its
+    // context through a match (PreserveEGLContextOnPause), so one shared table handed the menus the match's program
+    // names (2026-10-17: the HD Samus backdrop drew nothing after a match)
+    [ThreadStatic] static Dictionary<string, int>? t_programs;
+    static Dictionary<string, int> _programs => t_programs ??= new();
 
-    // the GL context was recreated: every program name is gone
+    // this thread's GL context was recreated: every program name in it is gone
     public static void Reset() => _programs.Clear();
 
     // GL thread: the linked program for these sources (0 if they do not compile / link)

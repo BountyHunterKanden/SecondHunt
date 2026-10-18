@@ -81,10 +81,11 @@ namespace MphRecomp.Frontend
             // 14..17 are overlays the menu shows on top of its logo pages (BEGIN GAME and its fade, the connection
             // pages): they go where the logo pages' controls go
             if (page.Index >= 14 && page.Index <= 17) return MainFamily();
-            if (MultiplayerMenu.IsSetupPage(page)) return Setup();
+            if (MultiplayerMenu.IsSetupPage(page)) return Setup(modePage: page.Index == MultiplayerMenu.ModePage);
             if (MultiplayerMenu.IsCardPage(page)) return License();
             if (RecompMenus.IsReplaysPage(page)) return Replays();
             if (RecompMenus.IsOnlinePage(page)) return Replays(); // ONLINE PLAY's pages: the same widened setup look (OnlineMenus.cs)
+            if (RecompMenus.IsSectionMenuPage(page)) return Replays(); // CONTROLS' and SECOND HUNT SETTINGS' section pages (RecompMenus.Controls.cs)
             // the credits (6-12) and the ending's results (49 / 50) as one screen each (owner 2026-10-07, Reports R3 / R6)
             if (page.Index is >= GameEnding.CreditsPage and <= 12) return Credits();
             if (page.Index is GameEnding.GoodPage or GameEnding.BadPage) return EndingResults();
@@ -106,6 +107,9 @@ namespace MphRecomp.Frontend
         }
 
         // The two DS screens next to each other; with `extra`, smaller, and the recomp's column after the touch screen.
+        // needWidth: both screens (and the column) shrink to fit a canvas narrower than 16:9, as the other layouts do --
+        // without it a 4:3 window cut the touch screen off past DS x ~183 (page 57's down arrow drawn and tapped off the
+        // canvas, -menutapcheck 2026-10-14)
         public static MenuLayout SideBySide(bool extra = false)
         {
             if (!extra)
@@ -114,7 +118,7 @@ namespace MphRecomp.Frontend
                 {
                     new LayoutRegion { Name = "top", X0 = 0, Y0 = TopY0, X1 = 256, Y1 = TopY1, AnchorX = 0.5f, PivotX = 1, OffsetX = -4, Scale = 0.82f },
                     new LayoutRegion { Name = "bottom", X0 = 0, Y0 = BottomY0, X1 = 256, Y1 = BottomY1, AnchorX = 0.5f, PivotX = 0, OffsetX = 4, Scale = 0.82f },
-                });
+                }, needWidth: 2 * (256 * 0.82f + 4));
             }
             const float s = 0.68f;
             return new(LayoutKind.SideBySide, new[]
@@ -122,7 +126,7 @@ namespace MphRecomp.Frontend
                 new LayoutRegion { Name = "top", X0 = 0, Y0 = TopY0, X1 = 256, Y1 = TopY1, AnchorX = 0.5f, PivotX = 1, OffsetX = -4 - 38 * s, Scale = s },
                 new LayoutRegion { Name = "bottom", X0 = 0, Y0 = BottomY0, X1 = 256, Y1 = BottomY1, AnchorX = 0.5f, PivotX = 0, OffsetX = 4 - 38 * s, Scale = s },
                 new LayoutRegion { Name = "extra", X0 = 256, Y0 = BottomY0, X1 = 332, Y1 = BottomY1, AnchorX = 0.5f, PivotX = 0, OffsetX = 4 + 218 * s, Scale = s },
-            });
+            }, needWidth: 2 * (294 * s + 4));
         }
 
         // The two screens one above the other, as the DS holds them, fitting the canvas height.
@@ -163,16 +167,34 @@ namespace MphRecomp.Frontend
         // ADVANCED) pinned to the left edge and its right boxes (GAME MODE, ARENA with the preview, PLAYERS) to the right,
         // the menus' backdrop over the whole canvas. Below ~20:9 everything shrinks together to fit the width.
         public const float SetupSplitX = 124;
+        // the mode page's description box (MultiplayerMenu.ModeDescription.cs): its scale, and its width in menu units (the
+        // mode panel's on the canvas: x -4.3..258.1 at the touch scale)
+        public const float SetupDescScale = 0.9f, SetupDescWidth = 262.4f * 1.1f / SetupDescScale;
 
-        public static MenuLayout Setup()
+        // (owner 2026-10-16: the back arrow in the bottom left corner, as HUNTER LICENSE's and REPLAYS'; on the mode page
+        // the descriptions in a box of their own under the panel, a little smaller than the touch screen, the box's top 3
+        // canvas units under the panel's bottom edge)
+        public static MenuLayout Setup(bool modePage = false)
         {
             const float touch = 1.1f, side = 0.7f, margin = 4;
-            return new(LayoutKind.Setup, new[]
+            var regions = new List<LayoutRegion>
             {
-                new LayoutRegion { Name = "controls", X0 = 0, Y0 = BottomY0, X1 = 256, Y1 = BottomY1, AnchorX = 0.5f, AnchorY = 0.5f, Scale = touch },
-                new LayoutRegion { Name = "left", X0 = 0, Y0 = TopY0, X1 = SetupSplitX, Y1 = TopY1, AnchorX = 0, PivotX = 0, OffsetX = margin, Scale = side },
-                new LayoutRegion { Name = "right", X0 = SetupSplitX, Y0 = TopY0, X1 = 256, Y1 = TopY1, AnchorX = 1, PivotX = 1, OffsetX = -margin, Scale = side },
-            }, needWidth: 256 * touch + 256 * side + 4 * margin);
+                // (the back arrow: x 10..30, y -182..-162 on every setup page; the rules pages' OK at x 196+ stays)
+                new LayoutRegion { Name = "back", X0 = 0, Y0 = BottomY0, X1 = 40, Y1 = -158, AnchorX = 0, AnchorY = 1, PivotX = 0, PivotY = 1, OffsetX = 6, OffsetY = -4, Scale = 0.9f },
+            };
+            if (modePage)
+            {
+                const float top = MultiplayerMenu.DescPanelBottom - 1.5f, panelBottom = -MultiplayerMenu.DescPanelBottom + BottomY0 / 2;
+                regions.Add(new LayoutRegion
+                {
+                    Name = "description", X0 = 40, Y0 = -230, X1 = 216, Y1 = top, AnchorX = 0.5f, AnchorY = 0.5f, PivotX = 0.5f, PivotY = 0,
+                    OffsetY = panelBottom * touch + 3, Scale = SetupDescScale,
+                });
+            }
+            regions.Add(new LayoutRegion { Name = "controls", X0 = 0, Y0 = BottomY0, X1 = 256, Y1 = BottomY1, AnchorX = 0.5f, AnchorY = 0.5f, Scale = touch });
+            regions.Add(new LayoutRegion { Name = "left", X0 = 0, Y0 = TopY0, X1 = SetupSplitX, Y1 = TopY1, AnchorX = 0, PivotX = 0, OffsetX = margin, Scale = side });
+            regions.Add(new LayoutRegion { Name = "right", X0 = SetupSplitX, Y0 = TopY0, X1 = 256, Y1 = TopY1, AnchorX = 1, PivotX = 1, OffsetX = -margin, Scale = side });
+            return new(LayoutKind.Setup, regions, needWidth: 256 * touch + 256 * side + 4 * margin);
         }
 
         // HUNTER LICENSE (page 60 as the multiplayer menu's card) as ONE combined screen (owner 2026-10-07: "I wanted a 16:9
@@ -247,7 +269,7 @@ namespace MphRecomp.Frontend
                 {
                     new LayoutRegion { Name = "top", X0 = 0, Y0 = TopY0, X1 = 256, Y1 = TopY1, AnchorX = 0.5f, PivotX = 1, OffsetX = -4, Scale = s },
                     new LayoutRegion { Name = "bottom", X0 = OptionsX0, Y0 = BottomY0, X1 = OptionsX1, Y1 = BottomY1, AnchorX = 0.5f, PivotX = 0, OffsetX = 4, Scale = s * 256 / width },
-                });
+                }, needWidth: 2 * (256 * s + 4));
             }
             const float controls = 0.76f, margin = 8;
             return new(LayoutKind.MainFamily, new[]

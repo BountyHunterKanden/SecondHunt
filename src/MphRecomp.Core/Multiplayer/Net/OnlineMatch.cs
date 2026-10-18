@@ -50,18 +50,36 @@ namespace MphRecomp.Multiplayer.Net
             net.CanMigrate = client.ServerAtLeast(MigrateSinceServer);
             ReturnClient = ReturnClientsToMenus;
             client.EventReceived += OnServerEvent;
-            _ = Task.Run(StartTurnAsync);
+            // (a served game's match host is on the server itself: TURN would only add a hop in front of it)
+            if (game.Info.Served)
+            {
+                TurnNote = "served";
+                net.CanMigrate = false;
+            }
+            else
+            {
+                _ = Task.Run(StartTurnAsync);
+            }
             _usageTimer = new Timer(_ => _ = ReportTurnUsageAsync(), null, UsageEveryMs, UsageEveryMs);
         }
 
         private const int UsageEveryMs = 30_000;
         // host migration (O5b): servers from this version name a new host (MemberEvent.HostSlot)
         public const string MigrateSinceServer = "0.5.0";
+        // served games (docs/DEDICATED_SERVERS.md): servers from this version run the match themselves when they can
+        public const string ServedSinceServer = "0.8.0";
+        public bool Served => Game.Info.Served;
 
         // (the server connection's thread) the server moved this match to a new host, or closed it
         private void OnServerEvent(OnlineMsg msg)
         {
-            if (msg is MemberEvent { HostSlot: int slot } moved && moved.GameId == Game.Id)
+            if (msg is MemberEvent { Owner: string owner } passed && passed.GameId == Game.Id)
+            {
+                // a served game's owner left its lobby: the next player owns it (the menus make its card the game's host: TickLobby)
+                MatchLog?.Invoke($"lobby owner: {owner} now (slot {passed.Slot} left)");
+                Net.OwnerMoved(owner == Client.Me.Code);
+            }
+            else if (msg is MemberEvent { HostSlot: int slot } moved && moved.GameId == Game.Id)
             {
                 MatchLog?.Invoke($"host migration: slot {slot} hosts now (slot {moved.Slot} left)");
                 // the game's host as the menus show it (lobby cards, RESULTS, PLAY AGAIN's lobby) is the new one
@@ -78,8 +96,8 @@ namespace MphRecomp.Multiplayer.Net
         }
 
         // the relay slot of the game's host (0 unless the host moved: O5b)
-        private static int HostSlotOf(GameCard game) =>
-            game.Members.FirstOrDefault(m => m.Code == game.Host.Code)?.Slot ?? 0;
+        private static int HostSlotOf(GameCard game) => game.Info.Served ? 0 // (a served game's match host: DEDICATED_SERVERS.md)
+            : game.Members.FirstOrDefault(m => m.Code == game.Host.Code)?.Slot ?? 0;
         private readonly Timer _usageTimer;
         private long _usageReported;
 
@@ -232,27 +250,94 @@ namespace MphRecomp.Multiplayer.Net
 
         // open a game on the server and host its match (template seat 0 = this device, then bots); who sees it: PUBLIC and
         // the host's friends / rivals (all three off = invite only; the ONLINE PLAY menus' WHO CAN JOIN)
+        // A server from ServedSinceServer runs the match itself when it can (askServed; docs/DEDICATED_SERVERS.md): this device
+        // then joins it like anyone else and owns its lobby (Net.IsOwner: the rules, bots and START go to the server's match
+        // host as OWNER messages); when it can't, this device hosts as before.
         public static async Task<OnlineMatch> HostAsync(OnlineClient client, Uri server, MatchSettings template, string romKey,
-            int maxPlayers, bool isPublic = true, bool friends = true, bool rivals = true)
+            int maxPlayers, bool isPublic = true, bool friends = true, bool rivals = true, bool askServed = true)
         {
-            GameMsg game = await client.RequestAsync<GameMsg>(new HostGameReq
+            var info = new GameInfo
             {
-                Info = new GameInfo
-                {
-                    Mode = template.Mode.ToString(), Arena = template.Arena, MaxPlayers = maxPlayers, Public = isPublic,
-                    Friends = friends, Rivals = rivals, Version = VersionKey(romKey),
-                    Rules = template.TimeLimitSeconds is float t ? $"{t:0} s" : null,
-                    // the ADVANCED box's extra rules (the list's icons, ONLINE SETTINGS' filters; server 0.6.0)
-                    ExtraPickups = template.PirateBlaster != false,
-                    ExtraCharacters = template.PirateBlaster != false && template.ExtraCharacters != false,
-                    ExtraArena = ExtraArenas.IsExtra(template.Arena), // (server 0.7.0: Find Game's backfill)
-                },
-            });
+                MaxPlayers = maxPlayers, Public = isPublic, Friends = friends, Rivals = rivals, Version = VersionKey(romKey),
+                Served = askServed && client.ServerAtLeast(ServedSinceServer),
+            };
+            CardRules(info, template);
+            GameMsg game = await client.RequestAsync<GameMsg>(new HostGameReq { Info = info });
             RelayTransport relay = RelayTransport.For(game.Relay, server);
             var link = new HybridTransport(relay);
+            if (game.Game.Info.Served)
+            {
+                MatchLog?.Invoke($"served game {game.Game.Id}: this device owns its lobby (relay slot {game.Relay.Slot})");
+                var owned = new OnlineMatch(client, relay, link, NetMatchSession.Client(link, romKey, 0), game.Game);
+                owned.Net.IsOwner = true;
+                try
+                {
+                    MatchPlayer me = template.Players[0];
+                    // (the match host comes up on the relay a moment after the server answers: Join retries until it does)
+                    if (!await Task.Run(() => owned.Net.Join(me.Hunter, me.Nickname ?? "", me.RankLevel, 15000, me.Character, me.Skin)))
+                    {
+                        throw new OnlineException("refused", owned.Net.Status);
+                    }
+                    await owned.OwnerSetupAsync(template);
+                }
+                catch
+                {
+                    owned.Dispose();
+                    throw;
+                }
+                return owned;
+            }
             // the match's seats: the people (maxPlayers) and the template's bots (P8: past 4, so a joiner doesn't push a bot out)
             int seatLimit = maxPlayers + template.Players.Count(p => p.Bot);
             return new OnlineMatch(client, relay, link, NetMatchSession.Host(link, template, romKey, seatLimit), game.Game);
+        }
+
+        // a served game's new lobby: the creator's mode, arena, rules and bots (the match host opened it with the card's mode
+        // and arena only); OWNER SETTINGS goes over UDP, so again until the match host's LOBBY shows it (5 s at most: the lobby
+        // can still be edited from its RULES)
+        private async Task OwnerSetupAsync(MatchSettings template)
+        {
+            int bots = template.Players.Count(p => p.Bot);
+            for (int i = 0; i < 20; i++)
+            {
+                if (Net.OwnerLobby() is MatchSettings lobby)
+                {
+                    if (lobby.Mode == template.Mode && lobby.Arena == template.Arena && lobby.TimeLimitSeconds == template.TimeLimitSeconds
+                        && lobby.Players.Count(p => p.Bot) == bots)
+                    {
+                        return;
+                    }
+                    Net.OwnerRules(template, bots: true);
+                }
+                await Task.Delay(250);
+            }
+            MatchLog?.Invoke("served game: the lobby didn't take the creator's rules in 5 s");
+        }
+
+        // the card's mode, arena and rules from the match's template (who may join, seats, version and mods stay)
+        private static void CardRules(GameInfo info, MatchSettings template)
+        {
+            info.Mode = template.Mode.ToString();
+            info.Arena = template.Arena;
+            info.Rules = template.TimeLimitSeconds is float t ? $"{t:0} s" : null;
+            // the ADVANCED box's extra rules (the list's icons, ONLINE SETTINGS' filters; server 0.6.0)
+            info.ExtraPickups = template.PirateBlaster != false;
+            info.ExtraCharacters = template.PirateBlaster != false && template.ExtraCharacters != false;
+            info.ExtraArena = ExtraArenas.IsExtra(template.Arena); // (server 0.7.0: Find Game's backfill)
+        }
+
+        // host: the lobby's game changed (the host's MODE / RULES tabs from its own seat): the server's card says so too
+        public async Task UpdateGameAsync(MatchSettings template)
+        {
+            GameInfo old = Game.Info;
+            var info = new GameInfo
+            {
+                MaxPlayers = old.MaxPlayers, Public = old.Public, Friends = old.Friends, Rivals = old.Rivals,
+                Version = old.Version, Mods = old.Mods,
+            };
+            CardRules(info, template);
+            GameMsg reply = await Client.RequestAsync<GameMsg>(new UpdateGameReq { Info = info });
+            Game.Info = reply.Game.Info;
         }
 
         // join a game by id, or QUICK MATCH's pick from the open games list: this version's, a friend's or rival's first, then
@@ -271,7 +356,7 @@ namespace MphRecomp.Multiplayer.Net
                     ?? throw new OnlineException("no_games", list.Games.Count == 0 ? "no open games on the server"
                         : $"{list.Games.Count} open game(s), none for this game version ({version})");
             }
-            GameMsg game = await client.RequestAsync<GameMsg>(new JoinGameReq { GameId = gameId, Version = version });
+            GameMsg game = await client.RequestAsync<GameMsg>(new JoinGameReq { GameId = gameId, Version = version, Served = true });
             RelayTransport relay = RelayTransport.For(game.Relay, server);
             var link = new HybridTransport(relay);
             return new OnlineMatch(client, relay, link, NetMatchSession.Client(link, romKey, HostSlotOf(game.Game)), game.Game);
@@ -282,7 +367,7 @@ namespace MphRecomp.Multiplayer.Net
         // then Net.Join + WaitForStart as for any join: the host re-sends the START and a full snapshot
         public static async Task<OnlineMatch> RejoinAsync(OnlineClient client, Uri server, string romKey)
         {
-            GameMsg game = await client.RequestAsync<GameMsg>(new JoinGameReq { GameId = "", Version = VersionKey(romKey) });
+            GameMsg game = await client.RequestAsync<GameMsg>(new JoinGameReq { GameId = "", Version = VersionKey(romKey), Served = true });
             RelayTransport relay = RelayTransport.For(game.Relay, server);
             var link = new HybridTransport(relay);
             return new OnlineMatch(client, relay, link, NetMatchSession.Client(link, romKey, HostSlotOf(game.Game)), game.Game);
@@ -291,8 +376,11 @@ namespace MphRecomp.Multiplayer.Net
         // host: everyone's in; the match settings go out and the server shows the game as started
         public void Start()
         {
-            Net.SendStart();
-            _ = Client.RequestAsync<OkMsg>(new StartGameReq { Started = true });
+            Net.SendStart(); // (a served game's owner: OWNER START, the match host starts it and tells the server)
+            if (Net.IsHost)
+            {
+                _ = Client.RequestAsync<OkMsg>(new StartGameReq { Started = true });
+            }
         }
 
         // the ONLINE PLAY menus: when the match is disposed, its server connection goes back to them (TakeReturnedClientAsync)

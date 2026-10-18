@@ -5,6 +5,18 @@
     {
       "name": "MP3/Metroid6.pak",
       "sha1": "07ae7f08dfe7363522e1e81c6c75e81c77b893d1"
+    },
+    {
+      "name": "MP3/SamGunFx.pak",
+      "sha1": "20cb01f79f8f846358f6954ed2cf0fdf66a13cf9"
+    },
+    {
+      "name": "MP3/InGameNAND.PAK",
+      "sha1": "234b4970fe5b03a98421215c86cbdf7b0af89690"
+    },
+    {
+      "name": "MP3/InGameAudio.PAK",
+      "sha1": "20c973bfae7fc1a29c45c6432cb98f13bd36c00b"
     }
   ],
   "chars": [
@@ -14,5 +26,22 @@
   "skip": [
     "b_dash_left_dark_samus",
     "b_dash_right_dark_samus"
-  ]
+  ],
+  "hyperfx": {
+    "beam": "06fe1d75af37114a",
+    "burst": "019855c26606c969",
+    "muzzle": "e694dbadf484b47b",
+    "charge": "192f13da8ff3ff56",
+    "burstmuzzle": "7fa2a74e3923db6c",
+    "ballspikes": "aab065969602e73f",
+    "ballglow": "90bc1f5a1997eded",
+    "wake": "80efe360c0a5855d",
+    "contacts": "0c581c8ba10d4429",
+    "fire": "04f4f7c2c217a6e0",
+    "chargefire": "5cec3a793be7b616",
+    "ballloop": "2b91ce7603b3abd1",
+    "ballimpact": "1c1a8eba57ecf57f",
+    "ballbolts": "d6558a90ff59e86a",
+    "ballparams": "248eaae62c74481e"
+  }
 }

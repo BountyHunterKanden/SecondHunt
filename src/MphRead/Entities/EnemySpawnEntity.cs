@@ -538,7 +538,7 @@ namespace MphRead.Entities
         }
     }
 
-    public class FhEnemySpawnEntity : EntityBase
+    public partial class FhEnemySpawnEntity : EntityBase
     {
         private readonly FhEnemySpawnEntityData _data;
         protected override Vector4? OverrideColor { get; } = new ColorRgb(0x00, 0x00, 0x8B).AsVector4();

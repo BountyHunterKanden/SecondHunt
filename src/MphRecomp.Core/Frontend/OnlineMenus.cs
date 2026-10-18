@@ -13,7 +13,7 @@ using MphRecomp.Multiplayer;
 using MphRecomp.Multiplayer.Net;
 using MphRecomp.Online;
 
-// ONLINE PLAY (Online play menus thread, owner 2026-10-09; picks in memory project_online_menus.md, mockups in
+// ONLINE PLAY (owner 2026-10-09; mockups in
 // extract_out/online_menus/mockups): the multiplayer menu's ONLINE PLAY door (MultiplayerMenu call 92) opens the hub
 // (mockup H_C): QUICK MATCH (the first open game for this game version, vanilla's FIND GAME; none open: it offers to CREATE
 // one), BROWSE and CREATE under it, and a FRIENDS ONLINE panel on the right (JOIN on a friend in an open lobby). BROWSE
@@ -75,6 +75,7 @@ namespace MphRecomp.Frontend
         private const int OnPlayersCall = 2564, OnPlayersLeftCall = 2565, OnPlayersRightCall = 2566;
         private const int OnBotsCall = 2567, OnBotsLeftCall = 2568, OnBotsRightCall = 2569, OnCreateGameCall = 2570;
         private const int OnSeatCall = 2580; // + the seat
+        private const int OnRulesCall = 2588; // the host's EDIT RULES (GAME panel): as its own seat card's tap
         private const int OnInviteCall = 2590, OnStartCall = 2591, OnLeaveCall = 2592;
         private const int OnBotLevelCall = 2593, OnBotLevelLeftCall = 2594, OnBotLevelRightCall = 2595;
         private const int OnTeamCall = 2596; // + the seat (to 2599)
@@ -110,7 +111,7 @@ namespace MphRecomp.Frontend
         private int _onBrowseTitle = -1, _onDetailTitle = -1, _onLobbyTitle = -1;
         private int _wPanel = -1, _wSide = -1, _wTitle = -1, _wPlayers = -1, _wPlayersL = -1, _wPlayersR = -1, _wBots = -1, _wBotsL = -1, _wBotsR = -1, _wCreate = -1;
         private readonly int[] _wRow = { -1, -1, -1, -1 };
-        private int _lbPanel = -1, _lbSide = -1, _lbTitle = -1, _lbInvite = -1, _lbStart = -1;
+        private int _lbPanel = -1, _lbSide = -1, _lbTitle = -1, _lbInvite = -1, _lbStart = -1, _lbRules = -1;
         private readonly int[] _lbSeat = { -1, -1, -1, -1 }, _lbTeam = { -1, -1, -1, -1 };
         private int _wLevel = -1, _wLevelL = -1, _wLevelR = -1;
         private readonly Dictionary<int, int> _onBack = new(); // each page's back arrow
@@ -140,10 +141,15 @@ namespace MphRecomp.Frontend
         private volatile bool _createCancelled;
         // the lobby: the game this device hosts or joined (its match owns the connection), and who's in it (the server's cards)
         private OnlineMatch? _hosting, _joined;
+        // who runs the lobby: the game this device hosts, or the served game it joined and owns (docs/DEDICATED_SERVERS.md:
+        // the server runs the match, the owner's MODE / RULES, bots, teams and START go to it as OWNER messages)
+        private OnlineMatch? Runner => _hosting ?? (_joined is { Net.IsOwner: true } owned ? owned : null);
         private MatchSettings? _hostTemplate;
         private bool _invitePending;
         // a joiner waiting in a lobby gives up on a host it hasn't heard for this long (the host sends LOBBY every second)
         private const long HostSilentMs = 30000;
+        // a served game's owner pressed START: the server's match host answers well within this, or it refused (an arena missing)
+        private const int StartWaitMs = 6000;
         // the match the match screen handed back for RESULTS (PLAY AGAIN or QUIT), when it isn't in the lobby yet
         private static OnlineMatch? Kept => OnlineMatch.Current is { HandedBack: true, Disposed: false } k ? k : null;
         // a JOIN waiting on its SELECT HUNTER (the lobby page starts it), and the page the JOIN was on
@@ -156,6 +162,7 @@ namespace MphRecomp.Frontend
         internal static (int Hub, int Browse, int Detail) OnlinePages => (s_onHub, s_onBrowse, s_onDetail);
         internal static (int Who, int Lobby) OnlineCreatePages => (s_onWho, s_onLobby);
         internal OnlineMatch? OnlineHosting => _hosting;
+        internal OnlineMatch? OnlineRunner => Runner; // (the hosted game, or the served game whose lobby this device owns)
         internal bool OnlineInLobby => _joined != null;
         internal bool OnlineConnected => _client != null;
         internal bool OnlineJoining => _joining;
@@ -177,9 +184,47 @@ namespace MphRecomp.Frontend
         private static readonly GameMode[] OnModes =
             { GameMode.Battle, GameMode.Bounty, GameMode.Capture, GameMode.Defender, GameMode.Nodes, GameMode.PrimeHunter, GameMode.Survival };
 
+        // ONLINE PLAY with imports an update made stale (owner 2026-10-17): the game's box asks to update them first, once
+        // per run (NO goes online) -- a stale arena counts as not imported, so online leaves it out (ImportedContent.Usable)
+        public const string StaleOnlineText = "some imports are out of date, so their maps are left out online.\n\nupdate them first?";
+        private bool _staleOnlineAsked;
+
         public void OpenOnline(MenuEngine menu)
         {
-            if (s_onHub >= 0) menu.GoTo(s_onHub);
+            if (s_onHub < 0) return;
+            if (!_staleOnlineAsked && Import.Popup != null && _importRows != null && StaleImportCount() > 0)
+            {
+                _staleOnlineAsked = true;
+                int back = menu.Page?.Index ?? -1;
+                Import.Popup.Ask(StaleOnlineText, yes =>
+                {
+                    if (yes && _importRows != null)
+                    {
+                        _importBackPage = back;
+                        menu.GoTo(_importRows.Page);
+                    }
+                    else menu.GoTo(s_onHub);
+                });
+                return;
+            }
+            menu.GoTo(s_onHub);
+        }
+
+        private int StaleImportCount()
+        {
+            int stale = 0;
+            try
+            {
+                foreach (MphRecomp.Import.ImportGameInfo g in Import.Service?.Games ?? Array.Empty<MphRecomp.Import.ImportGameInfo>())
+                {
+                    foreach (MphRecomp.Import.ImportItemInfo i in g.Items) if (i.Status == MphRecomp.Import.ItemImportStatus.Stale) stale++;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return 0;
+            }
+            return stale;
         }
 
         private string? ProfileDir => _settingsPath != null ? Path.GetDirectoryName(_settingsPath) : null;
@@ -358,8 +403,10 @@ namespace MphRecomp.Frontend
             }
             InstallLobby8(lobby, Input); // (P8: 5-8 seats, OnlineMenus.Seats8.cs)
             InstallLobbyBots(lobby, Input); // (the host's LEVEL / REMOVE / ADD BOT: OnlineMenus.LobbyBots.cs)
-            _lbInvite = lobby.AddItem(i => Input(i, Mx(1450), My(730), Mx(1830), My(790), OnInviteCall)).Index;
-            _lbStart = lobby.AddItem(i => Input(i, Mx(1446), My(806), Mx(1836), My(894), OnStartCall)).Index;
+            // (owner 2026-10-16: the host's EDIT RULES in the GAME panel, over INVITE FRIENDS; both a little lower for it)
+            _lbRules = lobby.AddItem(i => Input(i, Mx(1450), My(LbRulesY), Mx(1830), My(LbRulesY + LbBarH), OnRulesCall)).Index;
+            _lbInvite = lobby.AddItem(i => Input(i, Mx(1450), My(LbInviteY), Mx(1830), My(LbInviteY + LbBarH), OnInviteCall)).Index;
+            _lbStart = lobby.AddItem(i => Input(i, Mx(1446), My(LbStartY), Mx(1836), My(LbStartY + 88), OnStartCall)).Index;
 
             // ---- FRIENDS AND RIVALS, FIND A HUNTER (OnlineMenus.Friends.cs) ----
             InstallFriends(AddFramePage, Input, Touch, Panel, Back, panel, title);
@@ -422,6 +469,7 @@ namespace MphRecomp.Frontend
             for (int k = 0; k < LobbySeats8; k++) Like(s_onLobby, _lbSeat8[k], MainMenuPage, _soundCampaign);
             for (int k = 0; k < LobbySeats8; k++) Like(s_onLobby, _lbTeam8[k], OptionBoxPage, _soundToggle);
             Like(s_onLobby, _lbInvite, MainMenuPage, _soundCampaign);
+            Like(s_onLobby, _lbRules, MainMenuPage, _soundCampaign);
             Like(s_onLobby, _lbStart, FileSelect.Page, _soundFileStart);
             ApplyLobbyBotsSounds(Like);
             ApplyFriendsSounds(Like);
@@ -449,6 +497,17 @@ namespace MphRecomp.Frontend
         // RecompMenus.OnPageEntered
         private void EnterOnline(MenuEngine menu, int page)
         {
+            if (PauseChat != null)
+            {
+                // an online match's pause: only CHAT (and its keyboard, REPORT A HUNTER) are ours; its back (the lobby) is the pause
+                if (page == s_onLobby) menu.GoTo(PausePage);
+                else if (IsChatPage(page))
+                {
+                    _onlineMenu = menu;
+                    EnterChat(menu, page);
+                }
+                return;
+            }
             bool online = IsOnline(page);
             if (page == MultiplayerMenu.ResultsPage)
             {
@@ -514,10 +573,20 @@ namespace MphRecomp.Frontend
                     t.Players[0].Hunter = hunter;
                     t.Players[0].Skin = skin;
                     t.Players[0].Character = character;
+                    if (MultiplayerMenu.TakeOnlineRulesEdit()) TakeRulesEdit(_hosting, t);
                     _hosting.Net.SetHostChoosing(false);
                     _hosting.Net.LobbyChanged();
                 }
-                else _joined?.Net.SetLook(hunter, character, skin, choosing: false, Me().Rank);
+                else if (_joined is OnlineMatch j)
+                {
+                    j.Net.SetLook(hunter, character, skin, choosing: false, Me().Rank);
+                    // (a served game's owner back from its MODE / RULES tabs: the match host's lobby takes them)
+                    if (j.Net.IsOwner && MultiplayerMenu.TakeOnlineRulesEdit() && j.Net.OwnerLobby() is MatchSettings lobby)
+                    {
+                        TakeRulesEdit(j, lobby);
+                        j.Net.OwnerRules(lobby);
+                    }
+                }
                 ShowLobby(menu, focus: true);
             }
             else if (page == s_onHub)
@@ -653,6 +722,8 @@ namespace MphRecomp.Frontend
                 if (ev is not MemberEvent member || member.GameId != m.Game.Id) continue;
                 m.Members.RemoveAll(c => c.Code == member.Player.Code);
                 if (member.Joined) m.Members.Add(member.Player);
+                // (a served game: its owner left the lobby, the next player owns it and is the game's host on every screen)
+                if (member.Owner is string owner && m.Members.FirstOrDefault(c => c.Code == owner) is PlayerCard next) m.Game.Host = next;
                 changed = true;
             }
             // once a second: the host's LOBBY to everyone (also from RESULTS), a joiner's LOOK while it's in the lobby (or
@@ -733,8 +804,7 @@ namespace MphRecomp.Frontend
                             FetchReplayRecord(); // (a replay's license open: its head to head from the server)
                         });
                     }
-                    catch (Exception ex) when (ex is OnlineException or System.Net.WebSockets.WebSocketException or OperationCanceledException
-                        or HttpRequestException or IOException or UriFormatException)
+                    catch (Exception ex) // (every kind: an unlisted one, such as Wine's crypto error, left "connecting..." for good)
                     {
                         Console.Error.WriteLine("online: can't connect: " + ex);
                         Post(() =>
@@ -1235,6 +1305,18 @@ namespace MphRecomp.Frontend
                             return;
                         }
                         Import.Popup?.Close();
+                        if (match.Served)
+                        {
+                            // the server runs the match: this device is a joiner that owns the lobby, waiting for its START
+                            _joined = match;
+                            _joining = true;
+                            _joinCancelled = false;
+                            match.Net.PlayersChanged += LobbyChangedThere;
+                            Console.WriteLine($"online: the server runs {match.Game.Id}, this device owns its lobby ({template.Mode} in {template.Arena}, {note})");
+                            menu.GoTo(s_onLobby);
+                            Task.Run(() => WaitThenPlay(match));
+                            return;
+                        }
                         _hosting = match;
                         _hostTemplate = template;
                         match.Net.PlayersChanged += LobbyChangedThere;
@@ -1288,6 +1370,10 @@ namespace MphRecomp.Frontend
             int local = _hosting != null ? 0 : s.LocalSeat;
             // (a joiner's match has no bots of its own, MatchClient.ForSeat: the host's LOBBY says which seats are)
             bool IsBot(int i) => s.Players[i].Bot || i < m.Net.Lobby.Count && m.Net.Lobby[i].Bot;
+            // (a served game's owner: the bots as the match host's LOBBY has them, with their levels, for its bot controls)
+            MatchSettings? hostLobby = m == Runner && !m.Net.IsHost ? m.Net.OwnerLobby() : null;
+            if (hostLobby != null && hostLobby.Players.Count != s.Players.Count) hostLobby = null;
+            MatchPlayer BotOf(int i) => hostLobby?.Players[i] ?? s.Players[i];
             for (int i = 0; i < s.Players.Count; i++)
             {
                 MatchPlayer p = s.Players[i];
@@ -1300,17 +1386,18 @@ namespace MphRecomp.Frontend
                 }
                 else c = CardOf(p.Nickname);
                 // (seat 0 is always the host's: NetMatchSession puts the host's own players first)
-                seats.Add(new LobbySeat(i == local ? SeatKind.You : SeatKind.Person, p, c, i == 0, i));
+                // (a served game: the owner's card, wherever it sits)
+                seats.Add(new LobbySeat(i == local ? SeatKind.You : SeatKind.Person, p, c, m.Served ? c?.Code == hostCode : i == 0, i));
             }
             foreach (PlayerCard c in cards) seats.Add(new LobbySeat(SeatKind.Person, null, c, c.Code == hostCode));
             int people = seats.Count;
-            List<MatchPlayer> bots = s.Players.Where((p, i) => IsBot(i)).ToList();
+            List<int> bots = Enumerable.Range(0, s.Players.Count).Where(IsBot).ToList();
             int total = Math.Min(MaxSeats, Math.Max(people, m.Game.Info.MaxPlayers + bots.Count));
             int fit = Math.Max(0, Math.Min(bots.Count, total - people));
             int open = Math.Max(0, Math.Min(total - people - fit, m.Game.Info.MaxPlayers - people));
             open = Math.Min(open + FreedSeats(m), Math.Max(0, MaxSeats - people - fit)); // (seats bots left: ADD BOT, OnlineMenus.LobbyBots.cs)
             for (int i = 0; i < open; i++) seats.Add(new LobbySeat(SeatKind.Open, null, null, false));
-            for (int i = 0; i < fit; i++) seats.Add(new LobbySeat(SeatKind.Bot, bots[i], null, false, s.Players.IndexOf(bots[i])));
+            for (int i = 0; i < fit; i++) seats.Add(new LobbySeat(SeatKind.Bot, BotOf(bots[i]), null, false, bots[i]));
             return seats.Take(LobbySeats8).ToList();
         }
 
@@ -1329,7 +1416,7 @@ namespace MphRecomp.Frontend
                 else if (focus) menu.SetState(item, k == Math.Max(0, you) ? MenuState.Focused : MenuState.Idle);
                 else if (menu.ItemState(item) == MenuState.Hidden) menu.SetState(item, MenuState.Idle);
             }
-            bool host = _hosting != null;
+            bool host = Runner != null;
             bool teams = (_hosting ?? _joined)?.Net.Settings is MatchSettings ts && MatchSettings.IsTeamMode(ts.Mode);
             // (TEAM: the host's on every seat, a guest's on its own: release 0.2.0 F2)
             for (int k = 0; k < LobbySeats; k++) Show(menu, _lbTeam[k], !eight && teams && k < seats.Count && TeamBoxShown(seats[k], host));
@@ -1337,8 +1424,9 @@ namespace MphRecomp.Frontend
             ShowLobbyBots(menu, seats);
             if (!host) menu.SetState(_lbInvite, MenuState.Hidden);
             else if (menu.ItemState(_lbInvite) == MenuState.Hidden) menu.SetState(_lbInvite, MenuState.Idle);
+            Show(menu, _lbRules, host);
             if (!host) menu.SetState(_lbStart, MenuState.Hidden);
-            else if (_hosting!.Net.Joined == 0) menu.SetState(_lbStart, MenuState.State5);
+            else if (Runner!.Net.Joined == 0) menu.SetState(_lbStart, MenuState.State5);
             else if (menu.ItemState(_lbStart) is MenuState.State5 or MenuState.Hidden) menu.SetState(_lbStart, MenuState.Idle);
             Show(menu, _lbTalk, LobbyTalkShown()); // (voice's TALK under START: OnlineMenus.Voice.cs)
             int filled = seats.Count(x => x.Kind != SeatKind.Open);
@@ -1354,19 +1442,9 @@ namespace MphRecomp.Frontend
                 List<LobbySeat> seats = SeatsNow();
                 int k = call - OnSeatCall;
                 if (k >= seats.Count) break;
-                if (seats[k].Kind == SeatKind.You && Multiplayer != null && (_hosting ?? _joined) is OnlineMatch mine)
-                {
-                    // SELECT HUNTER, then back here; the others see "choosing a hunter" meanwhile
-                    if (mine.Net.IsHost) mine.Net.SetHostChoosing(true);
-                    else
-                    {
-                        (Hunter look, string? sk, string? ch) = MultiplayerMenu.MyLook;
-                        mine.Net.SetLook(look, ch, sk, choosing: true, Me().Rank);
-                    }
-                    Multiplayer.BeginOnlineSetup(menu, s_onLobby, s_onLobby, fresh: false);
-                }
-                else if (seats[k].Kind == SeatKind.Bot && _hosting != null) StepBotHunter(seats[k]); // (OnlineMenus.LobbyBots.cs)
-                else if (seats[k].Kind == SeatKind.Open && _hosting != null) Invite();
+                if (seats[k].Kind == SeatKind.You && Multiplayer != null && (_hosting ?? _joined) is OnlineMatch mine) EditOwnSeat(menu, mine);
+                else if (seats[k].Kind == SeatKind.Bot && Runner != null) StepBotHunter(seats[k]); // (OnlineMenus.LobbyBots.cs)
+                else if (seats[k].Kind == SeatKind.Open && Runner != null) Invite();
                 else if (seats[k].Kind == SeatKind.Person && seats[k].Card is PlayerCard card) OpenLicense(menu, card); // (the game stays)
                 break;
             }
@@ -1376,14 +1454,14 @@ namespace MphRecomp.Frontend
                 // other team on its own card (release 0.2.0 F2)
                 List<LobbySeat> seats = SeatsNow();
                 int k = call - (call >= OnTeam8Call ? OnTeam8Call : OnTeamCall);
-                if (_hosting == null && _joined is OnlineMatch jm && jm.Net.Settings is MatchSettings js && k < seats.Count
+                if (Runner == null && _joined is OnlineMatch jm && jm.Net.Settings is MatchSettings js && k < seats.Count
                     && seats[k].Kind == SeatKind.You && seats[k].Index >= 0 && seats[k].Index < js.Players.Count)
                 {
                     int[] now = js.TeamAssignment();
                     jm.Net.RequestTeam(1 - now[seats[k].Index]);
                     break;
                 }
-                if (_hosting is not OnlineMatch hm || hm.Net.Settings is not MatchSettings hs || k >= seats.Count || seats[k].Index < 0) break;
+                if (Runner is not OnlineMatch hm || hm.Net.Settings is not MatchSettings hs || k >= seats.Count || seats[k].Index < 0) break;
                 int[] teams = hs.TeamAssignment();
                 if (seats[k].Index < teams.Length) hm.Net.SetTeam(seats[k].Index, 1 - teams[seats[k].Index]);
                 break;
@@ -1392,10 +1470,13 @@ namespace MphRecomp.Frontend
                 LobbyBotsCall(call);
                 break;
             case OnInviteCall:
-                if (_hosting != null) Invite();
+                if (Runner != null) Invite();
+                break;
+            case OnRulesCall:
+                if (Runner is OnlineMatch hosted && Multiplayer != null) EditOwnSeat(menu, hosted);
                 break;
             case OnStartCall:
-                if (_hosting is OnlineMatch m) TryStart(m);
+                if (Runner is OnlineMatch m) TryStart(m);
                 break;
             case OnLeaveCall:
                 if (_hosting is { } h && h.Net.Joined > 0 && Import.Popup != null)
@@ -1408,6 +1489,20 @@ namespace MphRecomp.Frontend
                 else menu.GoTo(s_onHub); // (EnterOnline closes the game, or ends the joiner's wait)
                 break;
             }
+        }
+
+        // this player's own seat card (or the host's EDIT RULES): SELECT HUNTER, then back here; the others see "choosing a
+        // hunter" meanwhile. The host's has its MODE / RULES tabs live, and its changes come back to this lobby
+        // (TakeRulesEdit); a guest's is the hunter only.
+        private void EditOwnSeat(MenuEngine menu, OnlineMatch mine)
+        {
+            if (mine.Net.IsHost) mine.Net.SetHostChoosing(true);
+            else
+            {
+                (Hunter look, string? sk, string? ch) = MultiplayerMenu.MyLook;
+                mine.Net.SetLook(look, ch, sk, choosing: true, Me().Rank);
+            }
+            Multiplayer!.BeginOnlineSetup(menu, s_onLobby, s_onLobby, fresh: false, edit: mine.Net.RunsLobby);
         }
 
         // START: nobody joined, a team mode with an empty team, someone still on the results (start without them?) or still
@@ -1432,7 +1527,7 @@ namespace MphRecomp.Frontend
             {
                 Import.Popup.Ask($"{Names(away)} {(away.Count == 1 ? "is" : "are")} still on the results.\n\nstart without them?", yes =>
                 {
-                    if (!yes || _hosting != m) return;
+                    if (!yes || Runner != m) return;
                     m.Net.KickNotBack("the game started without you.");
                     TryStart(m);
                 });
@@ -1442,7 +1537,7 @@ namespace MphRecomp.Frontend
             {
                 Import.Popup.Ask($"{Names(choosing)} {(choosing.Count == 1 ? "is" : "are")} still choosing a hunter.\n\nstart anyway?", yes =>
                 {
-                    if (yes && _hosting == m) StartNow(m);
+                    if (yes && Runner == m) StartNow(m);
                 });
                 return;
             }
@@ -1451,6 +1546,18 @@ namespace MphRecomp.Frontend
 
         private void StartNow(OnlineMatch m)
         {
+            if (!m.Net.IsHost)
+            {
+                // a served game's owner: the server's match host starts it, and the lobby's wait (WaitThenPlay) plays it
+                m.Start();
+                Import.Popup?.BusyCancel("starting the match...", () => { }); // (Play closes it)
+                _ = Task.Delay(StartWaitMs).ContinueWith(_ => Post(() =>
+                {
+                    if (_joined != m || m.Net.Started || m.Disposed) return;
+                    Import.Popup?.Inform("the server didn't start the match.\n\nsomeone may not have this arena: try another.");
+                }));
+                return;
+            }
             _hosting = null;
             _hostTemplate = null;
             m.Start(); // the others get the final match; this device plays it
@@ -1469,7 +1576,7 @@ namespace MphRecomp.Frontend
         // INVITE FRIENDS (and an open seat): the host's friends and rivals who are online and not in a game, after a yes
         private void Invite()
         {
-            OnlineMatch? m = _hosting;
+            OnlineMatch? m = Runner;
             if (m == null || _invitePending) return;
             _invitePending = true;
             Task.Run(async () =>
@@ -1681,6 +1788,7 @@ namespace MphRecomp.Frontend
         private void JoinEnded(OnlineMatch? match, OnlineClient? client, Exception ex)
         {
             bool cancelled = ex is OperationCanceledException;
+            bool served = match?.Served == true; // (its match host is the server's: "the host" is no player)
             if (!cancelled) Console.Error.WriteLine("online: can't join: " + ex);
             if (match != null) match.Dispose();
             else if (client != null) _ = Task.Run(async () => await client.DisposeAsync());
@@ -1696,6 +1804,7 @@ namespace MphRecomp.Frontend
                 else if (ex is OnlineException { Code: "no_games" } && _onlineMenu != null) NoOpenGames(_onlineMenu);
                 else Import.Popup?.Inform(ex switch
                 {
+                    OnlineException { Code: "host_left" or "host_gone" } when served => "the server closed the game.\n\ntry another one.",
                     OnlineException { Code: "host_left" } => "the host left.\n\nthe game is closed.",
                     OnlineException { Code: "host_gone" } => "lost the host.\n\nthe game is closed.",
                     OnlineException { Code: "kicked" } k => k.Message.ToLowerInvariant() + "\n\nthe others are playing.",
@@ -1710,6 +1819,51 @@ namespace MphRecomp.Frontend
         // here as soon as the hub has a connection (TryRehost)
         private static MatchSettings? s_lastMatch;
         private (MatchSettings Template, int People)? _rehost;
+
+        // the host back from its MODE / RULES tabs (the lobby's own seat): the setup's mode, arena and rules into the hosted
+        // game's template (its people and bots stay), the joiners hear it with the lobby (LobbyChanged), and the server's
+        // card (the browse list, FIND GAME's filters) is updated too
+        private void TakeRulesEdit(OnlineMatch hosting, MatchSettings t)
+        {
+            MatchSettings now;
+            try
+            {
+                now = MultiplayerMenu.BuildMatch();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException or IndexOutOfRangeException)
+            {
+                Import.Popup?.Inform("can't change this game.\n\n" + ex.Message.ToLowerInvariant());
+                return;
+            }
+            t.Mode = now.Mode;
+            t.Arena = now.Arena;
+            t.PointGoal = now.PointGoal;
+            t.TimeLimitSeconds = now.TimeLimitSeconds;
+            t.TimeGoalSeconds = now.TimeGoalSeconds;
+            t.DamageLevel = now.DamageLevel;
+            t.FriendlyFire = now.FriendlyFire;
+            t.OctolithReset = now.OctolithReset;
+            t.RadarPlayers = now.RadarPlayers;
+            t.AffinityWeapons = now.AffinityWeapons;
+            t.Crates = now.Crates;
+            t.Breakables = now.Breakables;
+            t.PirateBlaster = now.PirateBlaster;
+            t.ExtraCharacters = now.ExtraCharacters;
+            if (!MatchSettings.IsTeamMode(t.Mode)) foreach (MatchPlayer p in t.Players) p.Team = -1;
+            Console.WriteLine($"online: host changed the game to {t.Mode} in {t.Arena}");
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await hosting.UpdateGameAsync(t);
+                }
+                catch (Exception ex) when (ex is OnlineException or System.Net.WebSockets.WebSocketException or OperationCanceledException
+                    or ObjectDisposedException or InvalidOperationException or IOException)
+                {
+                    Console.Error.WriteLine("online: can't update the game's card: " + ex.Message);
+                }
+            });
+        }
 
         private (MatchSettings, int)? RehostTemplate(MatchSettings? last)
         {
@@ -2138,7 +2292,7 @@ namespace MphRecomp.Frontend
             OnlineMatch? m = _hosting ?? _joined;
             MatchSettings? settings = m?.Net.Settings;
             if (m == null || settings == null) return;
-            bool host = _hosting != null;
+            bool host = Runner != null;
             List<LobbySeat> seats = SeatsNow();
             int[]? teams = MatchSettings.IsTeamMode(settings.Mode) ? settings.TeamAssignment() : null;
             for (int k = 0; k < seats.Count; k++)
@@ -2198,7 +2352,8 @@ namespace MphRecomp.Frontend
                 if (choosing) TextS("choosing a hunter...", Mx(cx + 240), My(cy + 150), 0, Cyan, tag, SizeX);
                 else if (away) TextS("on the results...", Mx(cx + 240), My(cy + 150), 0, OnGrey, tag, SizeX);
                 else TextS(what, Mx(cx + 240), My(cy + 150), 0, Orange, tag, SizeX);
-                string third = you ? "tap to change hunter"
+                // (the host's own card: no hint, its EDIT RULES is in the GAME panel; owner 2026-10-16)
+                string third = you ? (host ? "" : "tap to change hunter")
                     : seat.Kind != SeatKind.Bot ? "" : host ? "" : $"bot level {seat.Player?.BotLevel + 1 ?? 1}";
                 TextS(third, Mx(cx + 240), My(cy + 196), 0, you ? Pale : OnGrey, tag, SizeX);
                 if (ping >= 0) Ping(Mx(cx + 240), My(cy + 238), Mw(34), ping, tag);
@@ -2227,10 +2382,12 @@ namespace MphRecomp.Frontend
             }
             if (host)
             {
-                Bar(Mx(1450), My(730), Mx(1830), My(790), _lbInvite, glows);
-                TextS("invite friends", Mx(1640), My(748), 2, Orange, _lbInvite, SizeX);
-                Capsule(Mx(1446), My(806), Mw(390), Mw(88), "start", _hosting!.Net.Joined > 0, _lbStart, glows, SizeM);
-                if (_hosting.Net.Joined == 0) TextS("waiting for hunters...", Mx(1640), My(906), 2, Pale, side, SizeX);
+                Bar(Mx(1450), My(LbRulesY), Mx(1830), My(LbRulesY + LbBarH), _lbRules, glows);
+                TextS("edit rules", Mx(1640), My(LbRulesY + 13), 2, Orange, _lbRules, SizeX);
+                Bar(Mx(1450), My(LbInviteY), Mx(1830), My(LbInviteY + LbBarH), _lbInvite, glows);
+                TextS("invite friends", Mx(1640), My(LbInviteY + 13), 2, Orange, _lbInvite, SizeX);
+                Capsule(Mx(1446), My(LbStartY), Mw(390), Mw(88), "start", Runner!.Net.Joined > 0, _lbStart, glows, SizeM);
+                if (Runner.Net.Joined == 0) TextS("waiting for hunters...", Mx(1640), My(LbStartY + 98), 2, Pale, side, SizeX);
             }
             else
             {
@@ -2240,6 +2397,9 @@ namespace MphRecomp.Frontend
             DrawLobbyChat(glows, seats); // (OnlineMenus.Chat.cs)
             if (_onBack.TryGetValue(s_onLobby, out int back)) TextS("leave", Mx(200), My(990), 0, Orange, back, SizeM);
         }
+
+        // the GAME panel's host buttons (EDIT RULES, INVITE FRIENDS, START), top edges; TALK goes at 922 (OnlineMenus.Voice.cs)
+        private const float LbRulesY = 698, LbInviteY = 756, LbBarH = 50, LbStartY = 816;
 
         // a seat's round icon: SELECT HUNTER's (TROOPER / DARK SAMUS too, RecompMenus.SeatIcons.cs), or the person disc (a
         // hunter not known yet)

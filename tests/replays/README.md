@@ -26,5 +26,5 @@ the version bump. If the failure is a bug, `-replayplay <file> trace=a-b` prints
 
 On a device (Android, PC <-> device; `device_check.sh` explains itself): `tests/replays/device_check.sh verify`
 plays these on the device and says which are exact; `device_check.sh record` plays a bot match on the device and
-checks its replay on the PC. Install the build first (the board's install rules); the script doesn't install.
+checks its replay on the PC. Install the build first; the script doesn't install.
 `SLEEP=0` keeps the screen on at the end (a phone in use). Done 2026-10-07: PC <-> Odin <-> Samsung all exact.

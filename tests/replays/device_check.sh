@@ -11,8 +11,7 @@
 #       device -> PC: plays a bot match on the device (3 bots, level 2), pulls the replay it saves to
 #       extract_out/replay/device/ and checks it on the PC with -replayverify.
 #
-# Installing is not part of this: that goes through the board (COORDINATION.md rules 4-5: INSTALLING line, wake
-# check, foreground gate). This script refuses to start if the device is awake with the app in front (the owner may
+# Installing is not part of this. This script refuses to start if the device is awake with the app in front (the owner may
 # be mid-test), and sends the device home and to sleep when it's done.
 # Env: ADB, DOTNET, TOOLS (the Tools build folder, default src/MphRead.Tools/bin/Replay/net9.0), SLEEP=0 (don't sleep
 # the device at the end).

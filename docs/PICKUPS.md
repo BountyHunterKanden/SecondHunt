@@ -2,7 +2,7 @@
 
 Pickups track (board row "Pickups: Pirate Blaster + affinity pickups"), from 2026-10-09. Owner steps: (1) census,
 (2) affinity pickups in Echoes arenas, (3) Pirate Blaster pickup art + recoloured Power Beam fallback, (4) placement
-behind a match option (pure vanilla + replay goldens stay exact). Beam design itself: thread [7d1e5b].
+behind a match option (pure vanilla + replay goldens stay exact).
 
 ## Census summary (2026-10-09)
 
@@ -929,6 +929,6 @@ Every change is saved to `<data>/placements/<room name>.json` on the device
 `Pickups` (item, floor position, respawn s), `Crates` (pool, centre, floor), `RemovedItems` (the arena's own spawners
 deleted: entity id + item + position), `RemovedCrates` (the arena's own Echoes crates deleted, by position). An Echoes
 arena with no file yet starts with the owner's picked affinity crate from the table above. These files are the
-owner's picks for step (4): the Pickups thread bakes them into the "Extra pickups" placement data.
+owner's picks for step (4): they are baked into the "Extra pickups" placement data.
 Code: `MphRecomp.Core/Arenas/PickupPlacement.cs` (logic + file), `MphRecomp.App/Campaign/PickupPlacer.cs` (controls +
 status); test `-placetest` (Tools).

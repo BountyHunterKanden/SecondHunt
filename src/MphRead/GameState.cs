@@ -350,7 +350,8 @@ namespace MphRead
                 {
                     // recomp: a negative match time never runs out (no time limit: the dev Solo arena); it read as under a
                     // minute here, so the last-minute tempo and the alarm ran the whole match
-                    if (Multiplayer && MatchTime > 0)
+                    // recomp: First Hunt's own countdown beeps (FirstHuntMission.StepMatch), no tempo change
+                    if (Multiplayer && MatchTime > 0 && !PlayerEntity.HostFirstHunt)
                     {
                         var time = TimeSpan.FromSeconds(MatchTime);
                         if (time.TotalMinutes < 1 && time.Seconds <= 59 && !_tempoChanged)
@@ -408,6 +409,14 @@ namespace MphRead
                     // todo: 1P time up? isn't that handled by death countdown etc.?
                     MatchState = MatchState.GameOver;
                     MatchTime = 90 / 30f;
+                    if (PlayerEntity.HostFirstHunt)
+                    {
+                        // recomp: a First Hunt deathmatch (docs/FIRST_HUNT_PORT.md P5) goes straight to its 5 s banner (cart
+                        // 0x202e460: no winner camera), with its own jingle (FirstHuntMission.StepMatch)
+                        MatchState = MatchState.Ending;
+                        MatchTime = 150 / 30f;
+                        FirstHuntMission.MatchOver(PlayerEntity.Main);
+                    }
                     scene.SetFade(FadeType.None, length: 0, overwrite: true);
                     _stateChanged = true;
                     _matchEndTime = scene.GlobalElapsedTime;
@@ -415,7 +424,7 @@ namespace MphRead
                     Sfx.Instance.StopAllSound();
                     PlayerEntity.Main.StopLongSfx();
                     // sfxtodo: stop more kinds of SFX? fade for 1P mode?
-                    if (!GameState.SinglePlayer)
+                    if (!GameState.SinglePlayer && !PlayerEntity.HostFirstHunt)
                     {
                         Music.PlaySeq(SeqId.TIMEOUT);
                     }
@@ -1171,8 +1180,12 @@ namespace MphRead
                     int teamIndex = players[slot].TeamIndex;
                     int nextTeamIndex = players[nextSlot].TeamIndex;
                     // the game passes team_ids[wslot/nslot] instead of the player fields to CompareTeams
-                    if (Teams && teamIndex != nextTeamIndex && CompareTeams(teamIndex, nextTeamIndex) < 0
-                        || ComparePlayers(slot, nextSlot) < 0)
+                    // recomp: two teams compare by team only, teammates by player (was "team behind || player behind", so
+                    // a losing-team player who outscored a winner sorted above him: teams interleaved on the scoreboard,
+                    // a TEAM header per switch, and ResultSlots[0] could be on the losing team; owner 2026-10-11)
+                    if (Teams && teamIndex != nextTeamIndex
+                        ? CompareTeams(teamIndex, nextTeamIndex) < 0
+                        : ComparePlayers(slot, nextSlot) < 0)
                     {
                         ResultSlots[index] = nextSlot;
                         ResultSlots[nextIndex] = slot;

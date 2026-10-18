@@ -34,6 +34,10 @@ internal sealed partial class CampaignRetroBody
     {
         public int Material, Start, Count, Pass; // pass: 0 opaque, 1 blended, 2 additive
         public int Spec = -1, Prog;
+        // a Brawl body's own pixel-engine state (her layered hair: back faces culled, blended shells still writing
+        // depth); the Retro bodies draw unculled, blended parts without depth, as before
+        public int Cull;            // GX cull mode: 0 none, 1 front, 2 back, 3 all
+        public bool BlendDepth;
         public bool DepthFirst => Pass == 0 && P.AlphaTest[3] != 1;
         public GxMaterial Gx = null!;
         public GxShader.Params P = null!;
@@ -50,6 +54,11 @@ internal sealed partial class CampaignRetroBody
     bool _glReady, _fadeOk, _interpOnly;
     Vector4 _tint;
     static readonly Vector4 DamageTint = new(1f, 0.28f, 0.22f, 1f);
+    // the seat being drawn's team / duplicate tint (LookAlikes.BodyTint; w = 0 none), set by MatchSkins around each draw:
+    // the body is shared by every seat wearing it
+    public Vector4 SeatTint { get; set; }
+    // ... and a same-look copy's lights colour (LookAlikes.BodyLight: GxShader uTint2 with w 9+k)
+    public Vector4 SeatTint2 { get; set; }
     readonly Dictionary<(int, string), int> _u = new();
     readonly Dictionary<string, int> _texIds = new();
     readonly float[] _mvp16 = new float[16], _m16 = new float[16], _viewRot = new float[9], _pal = new float[32 * 16];
@@ -120,7 +129,8 @@ internal sealed partial class CampaignRetroBody
         _dir = dir;
         Body = body;
         Clips = clips;
-        List<GxMaterial> mats = GxJson.Read(Path.Combine(dir, "body.gx.json"));
+        List<GxMaterial> mats = Materials(dir, body.Data.Materials.Length);
+        bool brawl = body.Game == "ssbb";
         int total = 0, at = 0;
         foreach (HdGun.Material m in body.Data.Materials) total += m.Vertices.Length;
         _verts = new float[total];
@@ -133,6 +143,7 @@ internal sealed partial class CampaignRetroBody
             {
                 Material = m, Start = at / HdGun.FloatsPerVertex, Count = mat.VertexCount, Gx = gx, P = GxShader.Pack(gx),
                 Pass = gx.Additive ? 2 : gx.BlendEnable ? 1 : 0,
+                Cull = brawl ? gx.CullMode & 3 : 0, BlendDepth = brawl && gx.DepthWrite,
             };
             GameRegister1(id, batch.P);
             at += mat.Vertices.Length;
@@ -156,6 +167,25 @@ internal sealed partial class CampaignRetroBody
         FlipV(_verts);
         AppendCannon(); // the first-person arm cannon's cut after the body (CampaignArmCannon.cs)
         foreach (string name in _texNames) _pixels[name] = ReadPng(name);
+    }
+
+    // each written material's GX program: body.gx.json's (Retro bodies), or a Brawl fighter's (Import/BrawlBody: body.cfg
+    // "material <index> <name> [<file>]" = that MDL0 material out of body.brres, or the named .brres beside it)
+    static List<GxMaterial> Materials(string dir, int count)
+    {
+        if (!File.Exists(Path.Combine(dir, "body.brres"))) return GxJson.Read(Path.Combine(dir, "body.gx.json"));
+        var files = new Dictionary<string, List<GxMaterial>>(StringComparer.OrdinalIgnoreCase);
+        var res = new GxMaterial[count];
+        foreach (string line in File.ReadAllLines(Path.Combine(dir, "body.cfg")))
+        {
+            string[] t = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (t.Length < 3 || t[0] != "material" || !int.TryParse(t[1], out int i) || i < 0 || i >= count) continue;
+            string file = t.Length >= 4 ? t[3] : "body.brres";
+            if (!files.TryGetValue(file, out List<GxMaterial>? mats)) files[file] = mats = Mdl0Gx.Read(Path.Combine(dir, file));
+            res[i] = mats.Find(m => m.Name == t[2]) ?? throw new InvalidDataException($"{file} has no material {t[2]}");
+        }
+        for (int i = 0; i < count; i++) if (res[i] == null) throw new InvalidDataException($"body.cfg names no material {i}");
+        return new List<GxMaterial>(res);
     }
 
     // body.bin keeps Retro's raw V but its PNGs are stored row-flipped (like the trophies'): sample (u, 1 - v) as the HD suits do
@@ -364,8 +394,8 @@ internal sealed partial class CampaignRetroBody
         if (alpha <= 0f || Failed || !Warm(1000)) return;
         try
         {
-            _interpOnly = flash;
-            _tint = flash ? DamageTint : Vector4.Zero;
+            _interpOnly = flash || SeatTint.W > 0;
+            _tint = flash ? DamageTint : SeatTint;
             bool rebuild = pass == SuitPass.DepthRebuild;
             int p = rebuild ? 0 : (int)pass;
             bool fade = alpha < 0.999f && _fadeOk;
@@ -399,6 +429,7 @@ internal sealed partial class CampaignRetroBody
         {
             _interpOnly = false;
             _tint = Vector4.Zero;
+            GLES30.GlDisable(0x0B44); // GL_CULL_FACE: as Begin left it
             GLES30.GlActiveTexture(GLES30.GlTexture0);
             GLES30.GlBindVertexArray(0);
         }
@@ -471,13 +502,21 @@ internal sealed partial class CampaignRetroBody
         {
             GLES30.GlEnable(GLES30.GlBlend);
             GLES30.GlBlendFunc(SrcFactor(P.BlendSrc), DstFactor(P.BlendDst));
-            GLES30.GlDepthMask(false);
+            GLES30.GlDepthMask(b.BlendDepth);
         }
         else
         {
             GLES30.GlDisable(GLES30.GlBlend);
             GLES30.GlDepthMask(true);
         }
+        if (b.Cull != 0)
+        {
+            // GX's "inside" = the faces turned away (her export winds the outside counter-clockwise)
+            GLES30.GlEnable(0x0B44); // GL_CULL_FACE
+            GLES30.GlFrontFace(GLES30.GlCcw);
+            GLES30.GlCullFace(b.Cull == 1 ? GLES30.GlFront : b.Cull == 2 ? GLES30.GlBack : 0x0408); // GL_FRONT_AND_BACK
+        }
+        else GLES30.GlDisable(0x0B44);
         int func = DepthFunc(P.DepthFunc);
         GLES30.GlDepthFunc(lequal && func == GLES30.GlLess ? GLES30.GlLequal : func);
         GLES30.GlDrawArrays(GLES30.GlTriangles, b.Start, b.Count);
@@ -525,6 +564,7 @@ internal sealed partial class CampaignRetroBody
         GLES30.GlUniform1f(U(prog, "uExposure"), 1f);
         GLES30.GlUniform1i(U(prog, "uRawEnvNormal"), 0);
         GLES30.GlUniform4f(U(prog, "uTint"), _tint.X, _tint.Y, _tint.Z, _tint.W);
+        GLES30.GlUniform4f(U(prog, "uTint2"), SeatTint2.X, SeatTint2.Y, SeatTint2.Z, 0);
         for (int t = 0; t < 8; t++) GLES30.GlUniform1i(U(prog, "uTex" + t), t);
     }
 

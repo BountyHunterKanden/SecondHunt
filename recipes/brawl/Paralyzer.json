@@ -1,0 +1,28 @@
+{
+  "game": "ssbb",
+  "discId": "RSBE01",
+  "files": [
+    {
+      "name": "effect/fighter/ef_szerosuit.pac",
+      "sha1": "c6403e22e40f34afaeb7c5a14ed0166cf4c84e70"
+    },
+    {
+      "name": "effect/ef_common.pac",
+      "sha1": "03be8393f6bbfbef46bc8d831b355383b47ad9f4"
+    }
+  ],
+  "archive": "effect/fighter/ef_szerosuit.pac",
+  "commonArchive": "effect/ef_common.pac",
+  "effects": [
+    "PtcSzerosuitParalyzerBulletS", "PtcSzerosuitParalyzerBulletL", "ParalyzerBulletLTsubu", "ParalyzerBulletLRing",
+    "ParalyzerBulletLTsubu2", "PtcSzerosuitParalyzerShot", "ParalyzerShotFlash", "ParalyzerShotThunder",
+    "PtcSzerosuitParalyzerHold", "ParalyzerHoldRing", "ParalyzerHoldLTsubu", "ParalyzerHoldLine",
+    "PtcSzerosuitParalyzerHit", "ParalyzerHitRing1", "ParalyzerHitFlash", "ParalyzerHitRing2", "ParalyzerHitThunder",
+    "ParalyzerHitTsubu", "ParalyzerHitFlash2", "PtcSzerosuitMuzzleFlash", "MuzzleFlashFlare"
+  ],
+  "commonTextures": [
+    "ptc_cmn_tsubuB", "ptc_cmn_flashA", "ptc_cmn_lazer", "ptc_cmn_ringA", "ptc_cmn_ringE",
+    "ptc_cmn_ringF", "ptc_cmn_shockA", "ptc_cmn_shockB", "ptc_cmn_thunder_01", "ptc_cmn_thunder_02",
+    "ptc_cmn_thunder_03", "ptc_cmn_thunder_04", "ptc_cmn_wind"
+  ]
+}

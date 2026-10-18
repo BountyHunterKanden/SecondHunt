@@ -42,6 +42,7 @@ namespace MphRead
             MultiplayerMenu.CharacterHdRoot = hd;
             MultiplayerMenu.CharacterPicturesDir = pictures;
             WithModels(dir);
+            MenuArt(dir);
             // the lobby pictures' fades (owner 2026-10-08 22:30), with pictures to draw
             string fadePictures = Path.Combine(dir, "fade_pictures");
             Directory.CreateDirectory(fadePictures);
@@ -176,6 +177,59 @@ namespace MphRead
                 Console.WriteLine($"shot {path}");
                 S.Build(640, 360);
             }
+        }
+
+        // RECOMP SETTINGS "menu art" (owner 2026-10-13): A on its row opens the skin chooser over the page -- Samus's skins
+        // (ORIGINAL first) and SHUFFLE last -- and a pick sets MenuArtHd / MenuArtSuit and bumps the backdrop's version
+        private static void MenuArt(string dir)
+        {
+            var h = new Harness(dir, "menuart");
+            h.S.Start(18);
+            h.Run(30);
+            h.S.Menu.GoTo(h.S.Recomp.SettingsPage);
+            h.Run(40);
+            for (int i = 0; i < 30 && h.S.Recomp.FocusedSetting(h.S.Menu) != "menu\nart"; i++)
+            {
+                h.S.Navigate(0, -1);
+                h.Run(4);
+            }
+            Check(h.S.Recomp.FocusedSetting(h.S.Menu) == "menu\nart", $"menu art row focused ({h.S.Recomp.FocusedSetting(h.S.Menu)?.Replace('\n', ' ')})");
+            MphRecomp.Config.RecompSettings set = h.S.Recomp.Settings;
+            void Open()
+            {
+                h.S.Press(MenuKeys.A);
+                h.Run(10);
+            }
+            Open();
+            var probe = h.S.Multiplayer.ChooserProbe;
+            Check(probe is { Title: "menu art" }, $"A opens the menu art chooser ({probe?.Title})");
+            if (probe is not { } p) return;
+            Check(p.Skins[0] == Characters.Original && p.Skins[^1] == MultiplayerMenu.ShuffleChoice && p.Skins.Count > 3,
+                $"ORIGINAL first, SHUFFLE last ({string.Join(" ", p.Skins)})");
+            // nothing picked yet: on the suit the recipe's order shows (Echoes' Varia first)
+            Check(p.Skins[p.Focus] == "MP2VariaSuit", $"on the recipe's first suit before a pick ({p.Skins[p.Focus]})");
+            h.Shot("menu_art");
+            int next = p.Focus + 1;
+            h.S.Navigate(1, 0);
+            h.Run(4);
+            h.Shot("menu_art_focus");
+            h.S.Press(MenuKeys.A);
+            h.Run(10);
+            Check(h.S.Multiplayer.ChooserProbe == null && set.MenuArtHd && set.MenuArtSuit == p.Skins[next] && h.S.MenuArtVersion == 1,
+                $"A picks {p.Skins[next]} (hd {set.MenuArtHd}, suit '{set.MenuArtSuit}', version {h.S.MenuArtVersion})");
+            Open();
+            Check(h.S.Multiplayer.ChooserProbe?.Focus == next, $"reopened on the pick (focus {h.S.Multiplayer.ChooserProbe?.Focus})");
+            var last = h.S.Multiplayer.ChooserProbe!.Value.Taps[^1];
+            h.Tap(last.X, last.Y, 10);
+            Check(set.MenuArtHd && set.MenuArtSuit == MphRecomp.Config.RecompSettings.MenuArtShuffle, $"SHUFFLE picked ('{set.MenuArtSuit}')");
+            Open();
+            Check(h.S.Multiplayer.ChooserProbe?.Focus == p.Skins.Count - 1, $"reopened on SHUFFLE (focus {h.S.Multiplayer.ChooserProbe?.Focus})");
+            var tap = h.S.Multiplayer.ChooserProbe!.Value.Taps[0];
+            h.Tap(tap.X, tap.Y, 10);
+            Check(!set.MenuArtHd && h.S.Multiplayer.ChooserProbe == null && h.S.MenuArtVersion == 3, $"a tap on ORIGINAL: the DS picture (hd {set.MenuArtHd}, version {h.S.MenuArtVersion})");
+            Open();
+            h.Tap(4, 4, 10);
+            Check(h.S.Multiplayer.ChooserProbe == null && !set.MenuArtHd, "a tap outside closes it, nothing changed");
         }
 
         private static void WithModels(string dir)

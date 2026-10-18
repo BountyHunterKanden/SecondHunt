@@ -27,22 +27,14 @@ namespace MphRead.Entities
         public Vector3 NetAimVector => _gunVec1;
 
         // host aim deltas (mouse units, as HostAimX/Y) that move the current aim onto the remote target this frame;
-        // mirrors UpdateAimX/Y: degrees = -delta / 4 * sensitivity (zoomed sensitivity scales with the FOV)
+        // mirrors UpdateAimX/Y: degrees = -delta / 4 * sensitivity (zoomed sensitivity scales with the FOV: ZoomAimFactor)
         private (float X, float Y) HostRemoteAimDelta()
         {
             if (HostRemoteAimEpoch != NetAimEpoch)
             {
                 return (0, 0);
             }
-            float sensitivity = 1;
-            if (EquipInfo.Zoomed)
-            {
-                float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
-                if (fovFactor != 0)
-                {
-                    sensitivity /= -Fixed.ToFloat(Values.Field70) * fovFactor;
-                }
-            }
+            float sensitivity = ZoomAimFactor();
             float yaw = HostRemoteYaw - NetYaw;
             yaw -= 360 * MathF.Floor((yaw + 180) / 360); // shortest way round
             float pitch = HostRemotePitch - _aimY;
@@ -100,7 +92,7 @@ namespace MphRead.Entities
         public PlayerNetState NetCapture()
         {
             int weapons = 0;
-            for (int i = 0; i < 12; i++) // recomp: 0-8 + bit 11 (the Pirate Blaster); 9-10 are never held
+            for (int i = 0; i < 14; i++) // recomp: 0-8 + bit 11 (the Pirate Blaster) + bit 13 (the Paralyzer); 9-10 are never held
             {
                 if (_availableWeapons[i])
                 {
@@ -126,7 +118,7 @@ namespace MphRead.Entities
                 Ammo1 = (short)_ammo[1],
                 Controls = NetControlBits(),
                 LastAttacker = NetLastAttacker,
-                LastBeam = (sbyte)NetLastBeam,
+                LastBeam = (sbyte)((int)NetLastBeam | (NetLastDrone ? NetDroneBeamBit : 0) | (NetLastTurret ? NetTurretBeamBit : 0)),
                 LastFlags = (byte)NetLastFlags
             };
         }
@@ -135,6 +127,15 @@ namespace MphRead.Entities
         public sbyte NetLastAttacker { get; private set; } = -1;
         public BeamType NetLastBeam { get; private set; } = BeamType.Platform;
         public DamageFlags NetLastFlags { get; private set; }
+        // the hit was the Scout Drone's (its blaster shots or laser): the kill message says (SENTRY DRONE). It rides in
+        // LastBeam's 0x40 bit (beams are 0..13, Platform = no beam, -1 none) so the snapshot layout stays as it was
+        public bool NetLastDrone { get; private set; }
+        private const int NetDroneBeamBit = 0x40;
+        private static bool _netDamageDrone;
+        // the hit was Shooting Gallery's turret's (shots or entry kill): (HEAVY TURRET), in LastBeam's 0x20 bit the same way
+        public bool NetLastTurret { get; private set; }
+        private const int NetTurretBeamBit = 0x20;
+        private static bool _netDamageTurret;
         private static PlayerEntity? _netDamageAttacker;
         private static BeamType _netDamageBeam = BeamType.Platform;
 
@@ -142,6 +143,8 @@ namespace MphRead.Entities
         {
             NetLastAttacker = (sbyte)(attacker?.SlotIndex ?? -1);
             NetLastBeam = beam?.Beam ?? BeamType.Platform;
+            NetLastDrone = DroneHit(attacker, beam);
+            NetLastTurret = TurretHit(beam);
             NetLastFlags = flags & (DamageFlags.Headshot | DamageFlags.Burn | DamageFlags.Deathalt | DamageFlags.Halfturret);
         }
 
@@ -186,7 +189,9 @@ namespace MphRead.Entities
             {
                 _netApplyingDamage = true;
                 _netDamageAttacker = s.LastAttacker >= 0 && s.LastAttacker < MaxPlayers ? Players[s.LastAttacker] : null;
-                _netDamageBeam = (BeamType)s.LastBeam;
+                _netDamageDrone = s.LastBeam >= 0 && (s.LastBeam & NetDroneBeamBit) != 0;
+                _netDamageTurret = s.LastBeam >= 0 && (s.LastBeam & NetTurretBeamBit) != 0;
+                _netDamageBeam = (BeamType)(s.LastBeam >= 0 ? s.LastBeam & ~(NetDroneBeamBit | NetTurretBeamBit) : s.LastBeam);
                 try
                 {
                     TakeDamage((uint)(_health - s.Health), DamageFlags.IgnoreInvuln | (DamageFlags)s.LastFlags,
@@ -196,6 +201,8 @@ namespace MphRead.Entities
                 {
                     _netApplyingDamage = false;
                     _netDamageAttacker = null;
+                    _netDamageDrone = false;
+                    _netDamageTurret = false;
                 }
             }
             else if (s.Health > 0 && _health == 0 && (s.Flags & PlayerNetState.Spawned) != 0)
@@ -208,7 +215,7 @@ namespace MphRead.Entities
             {
                 _health = s.Health;
             }
-            for (int i = 0; i < 12; i++) // recomp: + the Pirate Blaster (bit 11)
+            for (int i = 0; i < 14; i++) // recomp: + the Pirate Blaster (bit 11) + the Paralyzer (bit 13)
             {
                 _availableWeapons[i] = (s.Weapons & (1 << i)) != 0;
             }
@@ -282,19 +289,41 @@ namespace MphRead.Entities
         // keeping the old part, and then the room draws only what that part sees (Council Chamber black on a joiner,
         // 10-10): it takes the part the spot is in (NetSpawnNodeRef: a spawn point's own part, else the geometry
         // there; GetNodeRefByPosition's planes gave the wrong part at 10 of Council Chamber's 14 spawns). -noderefsnaptest
+        // A jump that isn't onto a spawn keeps the part it walked into while that part has geometry there: the lookup
+        // alone was wrong on 6.9% of real play frames in Council Chamber (overlapping parts), so a lag correction there
+        // drew the room black for that player (online Bounty, 10-15). -noderefsnaptest replay=<file>
         public static NodeRef NetSnapNodeRef(Scene scene, NodeRef current, Vector3 prev, Vector3 cur)
         {
             if (current.PartIndex != -1 && (cur - prev).LengthSquared <= 1)
             {
                 return scene.UpdateNodeRef(current, prev, cur);
             }
-            NodeRef at = NetSpawnNodeRef(scene, cur);
+            if (NearestSpawnNodeRef(scene, cur) is { PartIndex: not -1 } spawn)
+            {
+                return spawn;
+            }
+            if (current.PartIndex != -1)
+            {
+                NodeRef walked = scene.UpdateNodeRef(current, prev, cur);
+                if (scene.PartHasGeometryAt(walked.PartIndex, cur))
+                {
+                    return walked;
+                }
+            }
+            NodeRef at = scene.GetNodeRefContaining(cur);
             return at.PartIndex != -1 || current.PartIndex == -1 ? at : scene.UpdateNodeRef(current, prev, cur);
         }
 
         // The room part for a spawn the host placed: the host spawns at a spawn point with that point's own (authored)
         // part, so the nearest one within a few units gives the same; elsewhere the part whose geometry is there
         public static NodeRef NetSpawnNodeRef(Scene scene, Vector3 position)
+        {
+            NodeRef best = NearestSpawnNodeRef(scene, position);
+            return best.PartIndex != -1 ? best : scene.GetNodeRefContaining(position);
+        }
+
+        // the authored part of the spawn point within a few units of a spot, else None
+        private static NodeRef NearestSpawnNodeRef(Scene scene, Vector3 position)
         {
             NodeRef best = NodeRef.None;
             float bestDist = 3 * 3;
@@ -307,7 +336,7 @@ namespace MphRead.Entities
                     best = spawn.NodeRef;
                 }
             }
-            return best.PartIndex != -1 ? best : scene.GetNodeRefContaining(position);
+            return best;
         }
 
         // online match host (O5 lag compensation, MphRecomp Net/LagCompensation): how many frames behind the host this
@@ -489,6 +518,8 @@ namespace MphRead.Entities
                 // the hit before it left isn't its last hit any more (a client would credit it again)
                 NetLastAttacker = -1;
                 NetLastBeam = BeamType.Platform;
+                NetLastDrone = false;
+                NetLastTurret = false;
                 NetLastFlags = 0;
             }
         }

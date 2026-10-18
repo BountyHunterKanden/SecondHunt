@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Chozo Shrine",
+  "group": "Tallon Overworld",
+  "role": "area",
+  "files": [
+    { "name": "Audio/over-stonehengeL.dsp", "sha1": "fbde96437f000019808789839d38107258cb233d" },
+    { "name": "Audio/over-stonehengeR.dsp", "sha1": "5d7a1143cd6343e0d3b2aff6f207e2718c2bdd24" }
+  ],
+  "gain": 0.840
+}

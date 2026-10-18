@@ -17,11 +17,13 @@ public static unsafe class GLES30
     // ---------------------------------------------------------------- constants (GL ES 3.0 values)
 
     public const int GlZero = 0, GlOne = 1;
-    public const int GlTriangles = 0x0004, GlTriangleStrip = 0x0005, GlTriangleFan = 0x0006;
+    public const int GlLines = 0x0001, GlTriangles = 0x0004, GlTriangleStrip = 0x0005, GlTriangleFan = 0x0006;
+    public const int GlAliasedLineWidthRange = 0x846E;
     public const int GlNever = 0x0200, GlLess = 0x0201, GlEqual = 0x0202, GlLequal = 0x0203, GlGreater = 0x0204,
         GlNotequal = 0x0205, GlGequal = 0x0206, GlAlways = 0x0207;
     public const int GlSrcColor = 0x0300, GlOneMinusSrcColor = 0x0301, GlSrcAlpha = 0x0302, GlOneMinusSrcAlpha = 0x0303,
         GlDstAlpha = 0x0304, GlOneMinusDstAlpha = 0x0305, GlDstColor = 0x0306, GlOneMinusDstColor = 0x0307;
+    public const int GlConstantAlpha = 0x8003, GlOneMinusConstantAlpha = 0x8004;
     public const int GlFront = 0x0404, GlBack = 0x0405, GlCw = 0x0900, GlCcw = 0x0901;
     public const int GlDepthTest = 0x0B71, GlStencilTest = 0x0B90, GlBlend = 0x0BE2,
         GlScissorTest = 0x0C11, GlPolygonOffsetFill = 0x8037;
@@ -70,6 +72,7 @@ public static unsafe class GLES30
         p_glBindTexture = (delegate* unmanaged<int, int, void>)Need("glBindTexture");
         p_glBindVertexArray = (delegate* unmanaged<int, void>)Need("glBindVertexArray");
         p_glBlendFunc = (delegate* unmanaged<int, int, void>)Need("glBlendFunc");
+        p_glBlendColor = (delegate* unmanaged<float, float, float, float, void>)Need("glBlendColor");
         p_glBlitFramebuffer = (delegate* unmanaged<int, int, int, int, int, int, int, int, int, int, void>)Need("glBlitFramebuffer");
         p_glBufferData = (delegate* unmanaged<int, nint, void*, int, void>)Need("glBufferData");
         p_glBufferSubData = (delegate* unmanaged<int, nint, nint, void*, void>)Need("glBufferSubData");
@@ -111,6 +114,8 @@ public static unsafe class GLES30
         p_glGenerateMipmap = (delegate* unmanaged<int, void>)Need("glGenerateMipmap");
         p_glGetError = (delegate* unmanaged<int>)Need("glGetError");
         p_glGetIntegerv = (delegate* unmanaged<int, int*, void>)Need("glGetIntegerv");
+        p_glGetFloatv = (delegate* unmanaged<int, float*, void>)Need("glGetFloatv");
+        p_glLineWidth = (delegate* unmanaged<float, void>)Need("glLineWidth");
         p_glGetProgramBinary = (delegate* unmanaged<int, int, int*, int*, void*, void>)Need("glGetProgramBinary");
         p_glGetProgramInfoLog = (delegate* unmanaged<int, int, int*, byte*, void>)Need("glGetProgramInfoLog");
         p_glGetProgramiv = (delegate* unmanaged<int, int, int*, void>)Need("glGetProgramiv");
@@ -196,6 +201,9 @@ public static unsafe class GLES30
 
     static delegate* unmanaged<int, int, void> p_glBlendFunc;
     public static void GlBlendFunc(int sfactor, int dfactor) => p_glBlendFunc(sfactor, dfactor);
+
+    static delegate* unmanaged<float, float, float, float, void> p_glBlendColor;
+    public static void GlBlendColor(float r, float g, float b, float a) => p_glBlendColor(r, g, b, a);
 
     static delegate* unmanaged<int, int, int, int, int, int, int, int, int, int, void> p_glBlitFramebuffer;
     public static void GlBlitFramebuffer(int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0, int dstX1, int dstY1,
@@ -360,6 +368,12 @@ public static unsafe class GLES30
 
     static delegate* unmanaged<int, int*, void> p_glGetIntegerv;
     public static void GlGetIntegerv(int pname, int[] values, int offset) { fixed (int* p = values) p_glGetIntegerv(pname, p + offset); }
+
+    static delegate* unmanaged<int, float*, void> p_glGetFloatv;
+    public static void GlGetFloatv(int pname, float[] values, int offset) { fixed (float* p = values) p_glGetFloatv(pname, p + offset); }
+
+    static delegate* unmanaged<float, void> p_glLineWidth;
+    public static void GlLineWidth(float width) => p_glLineWidth(width);
 
     static delegate* unmanaged<int, int, int*, int*, void*, void> p_glGetProgramBinary;
     public static void GlGetProgramBinary(int program, int bufSize, int[] length, int lengthOffset, int[] binaryFormat,

@@ -55,6 +55,7 @@ namespace MphRead.Entities
             if (_burstShots == 1)
             {
                 HostPirateBlasterBolts++;
+                OnSquadMarkBurst(); // the Trooper's Squad Mark counts this burst's hits (PlayerSquadMark.cs)
             }
         }
 

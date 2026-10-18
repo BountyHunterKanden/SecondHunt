@@ -3,9 +3,9 @@
 Owner, 2026-10-07: "We need all pieces of multiplayer to be as accurate and reliable as possible." Also: when a new
 version changes an importer, the user is made to import again, and the same for the MPH ROM unpack.
 
-This doc holds the plan for import versions (section 2) and the queue of open items (section 3, mirrored on the board
-as "Multiplayer reliability queue", MR1-MR7). Nothing here is built yet unless its status says so. Written by Replay
-mode (cont. 2) from what the code does today (section 1).
+This doc holds the plan for import versions (section 2) and the queue of open items (section 3,
+MR1-MR7). Nothing here is built yet unless its status says so. Written from
+what the code does today (section 1).
 
 ## 1. Where things stand (checked 2026-10-07)
 
@@ -100,14 +100,14 @@ makes that data again before it's used. Devices on the same app version then hol
 
 ## 3. The queue (MR1-MR7)
 
-Same TAKEN / DONE convention as the board's other queues.
+Each item is TAKEN while it's being worked on and DONE when it's finished.
 
 | # | Item | Done when | Thread (to confirm) | Needs |
 |---|---|---|---|---|
 | MR1 | Import versions and forced re-import (section 2, V0-V3) | a changed importer forces its data to be made again before use, on Android and Windows; the guard fails a changed output without a bump | Clean-room queue + Start menu and UI (+ RomSetup's owner) | GO + D1-D4 yes (owner 10-07 ~15:30) |
 | MR2 | Echoes importer on our own trig (`DetMathF` in `EchoesArena` / `ArenaCannons`; the MphRead alias doesn't reach Core) | the arena files come out byte-identical on Windows and Android (Tools `-importcheck arenas` on the PC plus an Odin import compared), arenas version bumped | Echoes arenas (MP2 multiplayer import) | MR1 first, so the bump forces old imports out |
-| MR3 | The join check compares what a match plays on: game logic version (done, protocol 5), importer versions, an arena fingerprint (`ReplayData.Fingerprint`, at START for the chosen arena), mods. It refuses with the reason. Replaces the ROM-key check as the board's cross-session note suggests. Online play, when built, uses the same check | a guest with different files or mods can't start a match and is told which | multiplayer menu (LanSession) + Multiplayer | MR1 for the versions; the fingerprint is ready |
-| MR4 | Other regions: compare the European and Japanese multiplayer files with the US ones. If identical, let them play together (as rev 0 and rev 1); MR3's fingerprint makes this automatic. Also fix docs/MULTIPLAYER.md section 1 ("differ in weapon and item data" is wrong for US rev 0/1, already on the board) | each region's match files diffed and the join rule set from the result | ROM revisions / Multiplayer | the European and Japanese ROMs (the owner's own copies) |
+| MR3 | The join check compares what a match plays on: game logic version (done, protocol 5), importer versions, an arena fingerprint (`ReplayData.Fingerprint`, at START for the chosen arena), mods. It refuses with the reason. Replaces the ROM-key check. Online play, when built, uses the same check | a guest with different files or mods can't start a match and is told which | multiplayer menu (LanSession) + Multiplayer | MR1 for the versions; the fingerprint is ready |
+| MR4 | Other regions: compare the European and Japanese multiplayer files with the US ones. If identical, let them play together (as rev 0 and rev 1); MR3's fingerprint makes this automatic. Also fix docs/MULTIPLAYER.md section 1 ("differ in weapon and item data" is wrong for US rev 0/1) | each region's match files diffed and the join rule set from the result | ROM revisions / Multiplayer | the European and Japanese ROMs (the owner's own copies) |
 | MR5 | MatchSim (Multiplayer's headless bot sim) runs with `Scene.HostDrawFreeSim`, so Spire's rocks don't leave phantom hits when no frame draws (found in R0) | a headless Spire match equals the drawn one (`-drawinvariance`) | Multiplayer | - |
 | MR6 | Replays exact across devices (R2b device half) | the 9 goldens exact on the Odin and the Samsung (`tests/replays/device_check.sh verify`), and a device recording exact on the PC (`record`) | Replay mode | the Odin back on adb |
 | MR7 | Replays name an older import: store the importer versions next to the fingerprint and say "recorded with an older import of this arena" instead of only "differs" | a replay from before a forced re-import is refused with that reason | Replay mode | MR1 V0 |

@@ -83,7 +83,7 @@ namespace MphRecomp.Frontend
         private bool LobbyTalkShown()
         {
             if (_lbTalk < 0 || VoiceChat.Current == null || VoiceSettings.Current.Mode != VoiceMode.PushToTalk) return false;
-            return _hosting == null ? _joined != null : _hosting.Net.Joined > 0;
+            return Runner == null ? _joined != null : Runner.Net.Joined > 0;
         }
 
         private void VoiceCall(int call)

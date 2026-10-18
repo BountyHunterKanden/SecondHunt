@@ -1,6 +1,6 @@
 # Multiplayer: local wireless + online, like vanilla
 
-**Owner GO 2026-09-30.** Thread owner: session "Multiplayer (local + online)" (see `COORDINATION.md`).
+**Owner GO 2026-09-30.**
 
 Vanilla MPH has both local wireless play (multi-card, single-card download play, bots) and online play (Nintendo Wi-Fi
 Connection: friend codes, friends and rivals, worldwide matchmaking). The recomp keeps that structure. Local and online

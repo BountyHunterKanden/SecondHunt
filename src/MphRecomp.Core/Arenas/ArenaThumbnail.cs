@@ -24,6 +24,11 @@ namespace MphRecomp.Arenas
     public static class ArenaThumbnail
     {
         public const string FileName = "thumb.png";
+        // the picture's look (2, owner 2026-10-16: the water, the breakables, Spires' pillars and the crates drawn too):
+        // a picture without this stamp beside it (thumb.version; none = 1) is drawn again (RefreshStale); 3: its lens is
+        // kept beside it too (thumb.view), the view before a match's first spawn
+        public const int Version = 3;
+        const string StampFile = "thumb.version", ViewFile = "thumb.view";
         // the stage picture frame is 116 x 74 menu units; this is it at 3.3x for the HD canvases
         public const int Width = 384, Height = 245;
         const int Super = 2;
@@ -39,12 +44,72 @@ namespace MphRecomp.Arenas
             public double Ms;
         }
 
+        // dev (with THUMB_PLACED=1): a placed pass's model matrix (null: that pass not drawn); passes not in it as written
+        public static Dictionary<int, Matrix4x4?>? PassModels;
+
+        // what a match draws besides the world mesh at its start (owner 2026-10-16: the pictures lacked the water and the
+        // grates): a placed pass (a breakable or a static actor, written in place) or the weapon crate's model (the prop
+        // pass) at its spot, lit with Echoes' lighting there (EchoesCrates.Lighting: ambient, and per light [the way to
+        // it, its colour]); or a water box (Pipeline's: WaterMax set, At its low corner), not drawn: a lens inside it
+        // takes the underwater tint the device gives the view there (CampaignArena.DrawArenaUnderwater)
+        public sealed class Extra
+        {
+            public int Pass;
+            public Vector3 At;
+            public float[]? Ambient;
+            public List<float[]>? Lights;
+            public Vector3? WaterMax;
+        }
+
+        // how much of Echoes' underwater fog colour (EchoesArena.WaterFog) covers the view under water (as
+        // CampaignArena.UnderwaterTint)
+        const float UnderwaterTint = 0.35f;
+
+        // the extras an arena's info lists: its breakables, static actors, weapon crates and water boxes
+        public static List<Extra> Extras(EchoesArena.Info info)
+        {
+            var list = new List<Extra>();
+            foreach (EchoesArena.BreakSpot s in info.Breakables ?? new()) list.Add(new Extra { Pass = s.Pass, Ambient = s.Ambient, Lights = s.Lights });
+            foreach (EchoesArena.StaticSpot s in info.Statics ?? new()) list.Add(new Extra { Pass = s.Pass, Ambient = s.Ambient, Lights = s.Lights });
+            foreach (EchoesArena.CrateSpot c in info.Crates)
+            {
+                list.Add(new Extra { Pass = ArenaHdWriter.PropPass, At = new Vector3(c.Pos[0], c.Pos[1], c.Pos[2]), Ambient = c.Ambient, Lights = c.Lights });
+            }
+            foreach (EchoesArena.FluidSpot f in info.Fluids ?? new())
+            {
+                if (f.Kind == "water") list.Add(new Extra { Pass = -1, At = new Vector3(f.Min[0], f.Min[1], f.Min[2]), WaterMax = new Vector3(f.Max[0], f.Max[1], f.Max[2]) });
+            }
+            return list;
+        }
+
+        // the extras from an imported arena's arena.json (in the HD look's folder: the in-app import's item folder; or
+        // beside it: _archives/<archive>/hd); null when it can't be read
+        public static List<Extra>? ReadExtras(string hdDir)
+        {
+            string file = Path.Combine(hdDir, "arena.json");
+            if (!File.Exists(file))
+            {
+                string? dir = Path.GetDirectoryName(Path.GetFullPath(hdDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                file = Path.Combine(dir ?? "", "arena.json");
+            }
+            if (!File.Exists(file)) return null;
+            try
+            {
+                return JsonSerializer.Deserialize<EchoesArena.Info>(File.ReadAllText(file)) is { } info ? Extras(info) : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         // writes <hdDir>/thumb.png (or outPath); null when the bundle can't be read
         // inside: keep the lens within the world's bounds, under its top (a view into the arena, as the ROM's pictures),
         // else views from above it are candidates too
         public static Result? Write(string hdDir, IReadOnlyList<Vector3> focus, string? outPath = null, Action<string>? log = null,
-            bool inside = false)
+            bool inside = false, IReadOnlyList<Extra>? extras = null)
         {
+            extras ??= ReadExtras(hdDir); // the breakables, static actors and crates (arena.json beside the folder, if any)
             var clock = System.Diagnostics.Stopwatch.StartNew();
             Bundle? b = Bundle.Read(hdDir, log);
             if (b == null) return null;
@@ -61,8 +126,21 @@ namespace MphRecomp.Arenas
                 log?.Invoke($"thumbnail: {Debug.Count} candidates");
                 foreach (var d in Debug.OrderByDescending(d => d.Score).Take(6)) log?.Invoke(FormattableString.Invariant($"  {d.Score:0.00} {d.Line}"));
             }
-            byte[] rgba = Render(b, pick.Eye, pick.Target, Width, Height);
-            PngOut.Write(outPath ?? Path.Combine(hdDir, FileName), rgba, Width, Height);
+            byte[] rgba = Render(b, pick.Eye, pick.Target, Width, Height, extras);
+            if (outPath != null)
+            {
+                PngOut.Write(outPath, rgba, Width, Height);
+            }
+            else
+            {
+                // whole or not at all (the menu may read it meanwhile: RefreshStale), then this look's stamp
+                string file = Path.Combine(hdDir, FileName), part = file + ".part";
+                PngOut.Write(part, rgba, Width, Height);
+                File.Move(part, file, overwrite: true);
+                File.WriteAllText(Path.Combine(hdDir, ViewFile), FormattableString.Invariant(
+                    $"{pick.Eye.X} {pick.Eye.Y} {pick.Eye.Z} {pick.Target.X} {pick.Target.Y} {pick.Target.Z}"));
+                File.WriteAllText(Path.Combine(hdDir, StampFile), Version.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
             // THUMB_ALTS=n (with THUMB_DEBUG=1): the n best candidates with lenses 3 m apart, as <picture>_alt<k>.png
             if (Debug != null && Int32.TryParse(Environment.GetEnvironmentVariable("THUMB_ALTS"), out int alts))
             {
@@ -73,7 +151,7 @@ namespace MphRecomp.Arenas
                     if (shown.Any(e => Vector3.DistanceSquared(e, d.Eye) < 9)) continue;
                     shown.Add(d.Eye);
                     string alt = Path.ChangeExtension(outPath ?? Path.Combine(hdDir, FileName), null) + $"_alt{shown.Count}.png";
-                    PngOut.Write(alt, Render(b, d.Eye, d.Target, Width, Height), Width, Height);
+                    PngOut.Write(alt, Render(b, d.Eye, d.Target, Width, Height, extras), Width, Height);
                     log?.Invoke(FormattableString.Invariant($"thumbnail: alt {shown.Count} {d.Score:0.00} {d.Line}"));
                 }
             }
@@ -86,6 +164,91 @@ namespace MphRecomp.Arenas
             log?.Invoke($"thumbnail: eye {Fmt(pick.Eye)} -> {Fmt(pick.Target)}, {pick.Seen}/{pick.Focus} focus points seen, " +
                 $"score {pick.Score:0.00}, {pick.Ms:0} ms");
             return pick;
+        }
+
+        // the lens the picture was drawn with (Write), if any
+        public static (Vector3 Eye, Vector3 Target)? ReadView(string hdDir)
+        {
+            try
+            {
+                string file = Path.Combine(hdDir, ViewFile);
+                if (!File.Exists(file)) return null;
+                string[] f = File.ReadAllText(file).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (f.Length != 6) return null;
+                var v = new float[6];
+                for (int i = 0; i < 6; i++)
+                {
+                    if (!Single.TryParse(f[i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v[i])) return null;
+                }
+                return (new Vector3(v[0], v[1], v[2]), new Vector3(v[3], v[4], v[5]));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        // an HD look whose picture an older version drew (RefreshStale)
+        public static bool Stale(string hdDir)
+        {
+            if (!File.Exists(Path.Combine(hdDir, ArenaHdWriter.Mesh))) return false;
+            try
+            {
+                string stamp = Path.Combine(hdDir, StampFile);
+                return !File.Exists(stamp) || !Int32.TryParse(File.ReadAllText(stamp).Trim(), System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out int v) || v < Version;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        static readonly Queue<(string HdDir, Func<IReadOnlyList<Vector3>> Focus)> _refresh = new();
+        static readonly HashSet<string> _refreshQueued = new();
+        static bool _refreshing;
+
+        // an arena imported before this look (Stale): its picture drawn again as the import draws it, in the background, one
+        // arena at a time (a few seconds each), so the menu shows the old one until the new one is whole
+        public static void RefreshStale(string hdDir, Func<IReadOnlyList<Vector3>> focus, Action<string>? log = null)
+        {
+            lock (_refresh)
+            {
+                if (!_refreshQueued.Add(hdDir)) return;
+                _refresh.Enqueue((hdDir, focus));
+                if (_refreshing) return;
+                _refreshing = true;
+            }
+            var thread = new System.Threading.Thread(() =>
+            {
+                while (true)
+                {
+                    (string HdDir, Func<IReadOnlyList<Vector3>> Focus) next;
+                    lock (_refresh)
+                    {
+                        if (_refresh.Count == 0)
+                        {
+                            _refreshing = false;
+                            return;
+                        }
+                        next = _refresh.Dequeue();
+                    }
+                    try
+                    {
+                        if (Write(next.HdDir, next.Focus(), log: log, inside: true) == null) log?.Invoke($"thumbnail: {next.HdDir}: not redrawn");
+                    }
+                    catch (Exception ex)
+                    {
+                        log?.Invoke($"thumbnail: {next.HdDir}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        lock (_refresh) _refreshQueued.Remove(next.HdDir);
+                    }
+                }
+            })
+            { IsBackground = true, Priority = System.Threading.ThreadPriority.BelowNormal, Name = "ArenaThumbnail" };
+            thread.Start();
         }
 
         // THUMB_DEBUG=1: every candidate's score terms (the best few are logged)
@@ -537,7 +700,7 @@ namespace MphRecomp.Arenas
 
         // ---- the picture ----
 
-        static byte[] Render(Bundle b, Vector3 eye, Vector3 target, int width, int height)
+        static byte[] Render(Bundle b, Vector3 eye, Vector3 target, int width, int height, IReadOnlyList<Extra>? extras)
         {
             int w = width * Super, h = height * Super;
             var color = new Vector4[w * h];
@@ -546,23 +709,43 @@ namespace MphRecomp.Arenas
             Matrix4x4 skyView = view;
             skyView.Translation = Vector3.Zero; // the sky around the camera
             var rot = new Matrix4x4(view.M11, view.M12, view.M13, 0, view.M21, view.M22, view.M23, 0, view.M31, view.M32, view.M33, 0, 0, 0, 0, 1);
-            // the device's order: the sky (behind everything, batch order, back faces culled), the opaque world, then the
-            // blended and additive materials over it (depth tested; depth written as the material says)
-            // THUMB_PLACED=1 (dev, T6 2026-10-10): the placed models' passes too (breakables, static actors), lit flat
-            bool placed = Environment.GetEnvironmentVariable("THUMB_PLACED") == "1";
-            IEnumerable<int> passes = new[] { ArenaHdWriter.SkyPass, 0 };
-            if (placed) passes = passes.Concat(b.Batches.Select(t => t.Pass).Where(p => p >= ArenaHdWriter.FirstPlacedPass).Distinct().OrderBy(p => p));
-            foreach (int pass in passes.Concat(new[] { 1, 2 }))
+            // the device's order: the sky (behind everything, batch order, back faces culled), the opaque world, the
+            // breakables, static actors and crates up at a match's start (extras), then the blended and additive
+            // materials and the fluid surfaces over them (depth tested; depth written as the material says)
+            var draws = new List<(int Pass, Matrix4x4 Model, Extra? Lit)> { (ArenaHdWriter.SkyPass, Matrix4x4.Identity, null), (0, Matrix4x4.Identity, null) };
+            if (extras != null)
+            {
+                foreach (Extra e in extras.Where(e => e.WaterMax == null)) draws.Add((e.Pass, Matrix4x4.CreateTranslation(e.At), e));
+            }
+            // THUMB_PLACED=1 (dev, T6 2026-10-10): the placed models' passes (breakables, static actors) lit flat, posed
+            // by PassModels
+            if (Environment.GetEnvironmentVariable("THUMB_PLACED") == "1")
+            {
+                draws.RemoveAll(d => d.Pass >= ArenaHdWriter.FirstPlacedPass);
+                foreach (int p in b.Batches.Select(t => t.Pass).Where(p => p >= ArenaHdWriter.FirstPlacedPass).Distinct().OrderBy(p => p))
+                {
+                    Matrix4x4? pm = Matrix4x4.Identity;
+                    if (PassModels != null && PassModels.TryGetValue(p, out Matrix4x4? given)) pm = given;
+                    if (pm != null) draws.Add((p, pm.Value, null));
+                }
+            }
+            draws.Add((1, Matrix4x4.Identity, null));
+            draws.Add((2, Matrix4x4.Identity, null));
+            draws.Add((ArenaHdWriter.FluidPass, Matrix4x4.Identity, null));
+            foreach ((int pass, Matrix4x4 drawModel, Extra? lit) in draws)
             {
                 bool sky = pass == ArenaHdWriter.SkyPass;
+                Matrix4x4? model = drawModel;
                 foreach (var bt in b.Batches)
                 {
                     if (bt.Pass != pass) continue;
                     Mat m = b.Mats[bt.Mat];
                     GxMaterial g = m.Gx;
-                    Matrix4x4 vm = sky ? skyView : view;
-                    // channel 0: lit = the scene ambient (0 on the world, 1 on the sky; no lights), unlit = the material's white
-                    var rasc = new Vector3(g.Lit ? (sky ? 1 : pass >= ArenaHdWriter.FirstPlacedPass ? 0.7f : 0) : 1);
+                    Matrix4x4 vm = sky ? skyView : model.Value * view;
+                    // channel 0: lit = the scene ambient (0 on the world, 1 on the sky; no lights; an extra: Echoes' lights
+                    // there, else flat), unlit = the material's white
+                    var rasc = new Vector3(g.Lit ? (sky ? 1 : pass >= ArenaHdWriter.FirstPlacedPass || pass == ArenaHdWriter.PropPass ? 0.7f : 0) : 1);
+                    Extra? light = g.Lit && lit?.Ambient != null ? lit : null;
                     for (int v = bt.Start; v + 2 < bt.Start + bt.Count; v += 3)
                     {
                         Vector3 a = Vector3.Transform(b.Pos(v), vm), b2 = Vector3.Transform(b.Pos(v + 1), vm), c = Vector3.Transform(b.Pos(v + 2), vm);
@@ -571,7 +754,7 @@ namespace MphRecomp.Arenas
                         {
                             int i = y * w + x;
                             if (!sky && depth[i] > 0 && iz < depth[i] * 0.9999f) return;
-                            Vector4 src = Shade(b, m, v0, wt, rot, rasc);
+                            Vector4 src = Shade(b, m, v0, wt, rot, light != null ? Light(light, b, v0, wt, model.Value) : rasc);
                             if (g.AlphaTest && src.W < 128 / 255f) return;
                             Vector4 dst = color[i];
                             Vector4 o = g.BlendEnable ? Blend(src, dst, g.BlendSrc, g.BlendDst) : src;
@@ -580,6 +763,13 @@ namespace MphRecomp.Arenas
                         });
                     }
                 }
+            }
+            // a lens inside a water box: the device's underwater tint over the room (Pipeline's flooded cave)
+            if (extras != null && extras.Any(e => e.WaterMax is Vector3 max && eye.X >= e.At.X && eye.X <= max.X && eye.Z >= e.At.Z
+                && eye.Z <= max.Z && eye.Y >= e.At.Y && eye.Y < max.Y))
+            {
+                var fog = new Vector4(EchoesArena.WaterFog[0], EchoesArena.WaterFog[1], EchoesArena.WaterFog[2], 1);
+                for (int i = 0; i < color.Length; i++) color[i] = Vector4.Lerp(color[i], fog, UnderwaterTint);
             }
             // down to the picture's size (a box over each Super x Super block), opaque
             var rgba = new byte[width * height * 4];
@@ -601,6 +791,22 @@ namespace MphRecomp.Arenas
                 }
             }
             return rgba;
+        }
+
+        // an extra's lit channel at a pixel: Echoes' ambient there plus its lights as directional ones (as the device
+        // lights the crates and breakables)
+        static Vector3 Light(Extra e, Bundle b, int v, Vector3 wt, Matrix4x4 model)
+        {
+            Vector3 n = Vector3.TransformNormal(b.Nrm(v) * wt.X + b.Nrm(v + 1) * wt.Y + b.Nrm(v + 2) * wt.Z, model);
+            if (n.LengthSquared() > 1e-12f) n = Vector3.Normalize(n);
+            float[] a = e.Ambient!;
+            var c = new Vector3(a[0], a[1], a[2]);
+            foreach (float[] l in e.Lights ?? new())
+            {
+                if (l.Length < 6) continue;
+                c += new Vector3(l[3], l[4], l[5]) * MathF.Max(0, Vector3.Dot(n, new Vector3(l[0], l[1], l[2])));
+            }
+            return Vector3.Min(c, Vector3.One);
         }
 
         static Vector4 Shade(Bundle b, Mat m, int v, Vector3 wt, Matrix4x4 rot, Vector3 rasc)

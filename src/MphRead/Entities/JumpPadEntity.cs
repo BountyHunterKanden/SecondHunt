@@ -28,6 +28,11 @@ namespace MphRead.Entities
         // Echoes jumps (MPH's rule: a 0.25 s sideways tap fell ~20 short); Tools env PAD_MPHSTEER=1 turns it off to compare
         public static bool HostSameArcSteer { get; set; } = true;
         public bool SameArc => HostSameArcBit != 0 && (_data.Unused28 & HostSameArcBit) != 0;
+        // host hook (imported First Hunt arenas): pads whose Unused28 has this bit keep their push against a wall or the
+        // stick as First Hunt's pads do (its flight has no sign-flip-and-halve step, arm9 0x200e1e4-0x200e458), so a pad
+        // that throws the player up a wall carries them over the lip; 0 = off
+        public static uint HostKeepPushBit { get; set; }
+        public bool KeepPush => HostKeepPushBit != 0 && (_data.Unused28 & HostKeepPushBit) != 0;
 
         public JumpPadEntity(JumpPadEntityData data, string nodeName, Scene scene)
             : base(EntityType.JumpPad, nodeName, scene)
@@ -78,7 +83,7 @@ namespace MphRead.Entities
             {
                 if (!_invSetUp)
                 {
-                    _invPos = Matrix.Vec3MultMtx4(Position, _parent.CollisionTransform.Inverted());
+                    _invPos = Matrix.Vec3MultMtx4(Position, DetMatrix.Inverted(_parent.CollisionTransform));
                     _invSetUp = true;
                 }
                 Position = Matrix.Vec3MultMtx4(_invPos, _parent.CollisionTransform);

@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "SkyTown",
+  "group": "SkyTown Elysia",
+  "role": "area",
+  "files": [
+    { "name": "MP3/Audio/Skytown/skytown3mix.fsb", "sha1": "ec49cb40606952383f5140a0ba94117d1325848c" }
+  ],
+  "gain": 0.897
+}

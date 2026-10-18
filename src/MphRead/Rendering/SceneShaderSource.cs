@@ -169,11 +169,23 @@ public static class SceneShaderSource
         uniform float u_matAlpha;
         uniform int u_polyMode;
         uniform vec3 u_toonRamp[32];
+        uniform bool u_dsModulate;
         """;
 
     private const string FragmentMath = """
         // The surface colour before the alpha pass and fog, as (rgb, alpha). c is the interpolated vertex colour;
         // texel is the texture sample (only read when u_textured).
+        // recomp: the DS's own modulate (u_dsModulate, set by hosts for First Hunt rooms): both colours as 6-bit (a 5-bit
+        // x becomes 2x+1, 0 stays 0), then ((texture+1)*(vertex+1)-1)/64, truncated. The +1s lift dark vertex colours: First
+        // Hunt's rooms are lit by baked COLOR values around 5..7 of 31, which a plain float multiply drew ~10% darker
+        // than the cart (measured in BizHawk at the same camera pose).
+        vec3 dsModulate(vec3 v, vec3 t)
+        {
+            vec3 v6 = v * 62.0 + step(1.0 / 64.0, v);
+            vec3 t6 = t * 62.0 + step(1.0 / 64.0, t);
+            return floor(((t6 + 1.0) * (v6 + 1.0) - 1.0) / 64.0) / 63.0;
+        }
+
         vec4 surfaceColor(vec4 c, vec4 texel)
         {
             vec3 rgb;
@@ -194,7 +206,7 @@ public static class SceneShaderSource
                     alpha = (u_matAlpha * t.a) * c.a;
                 } else {
                     // modulate (shadow polygons are drawn this way too)
-                    rgb = c.rgb * t.rgb;
+                    rgb = u_dsModulate ? dsModulate(c.rgb, t.rgb) : c.rgb * t.rgb;
                     alpha = c.a * (u_matAlpha * t.a);
                 }
                 if (u_colorOverrideOn) {

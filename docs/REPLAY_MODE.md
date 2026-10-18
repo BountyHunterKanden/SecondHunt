@@ -323,8 +323,8 @@ and `SimVersion` must be bumped. UI-only updates keep old replays working. It do
 effects at any speed other than 1x. Verified/incomplete marks, the auto-record switch, rename, delete, pin, and
 share the file (Android share sheet).
 
-R3 status (2026-10-08, Replay thread [da90a3]):
-- **Playback controls BUILT** (App `Campaign/MatchReplay.cs`; hooks logged on the board 00:53-00:58): A or a tap =
+R3 status (2026-10-08):
+- **Playback controls BUILT** (App `Campaign/MatchReplay.cs`): A or a tap =
   pause / play; L1 / R1 or the D-pad's left / right = 1/4x, 1/2x, 1x, 2x, 4x (steps per frame; a frame may run up
   to 4 steps per 1x to catch up); away from 1x the sound effects are muted (music plays on); paused, music and
   sound pause. No touch controls in a replay. The status line reads `REPLAY 1:23 / 3:45  2x` (or `PAUSED`) plus the
@@ -341,8 +341,7 @@ R3 status (2026-10-08, Replay thread [da90a3]):
   play it on the campaign screen like START GAME (`--es replay <path>`) and the menus come back at
   `FrontendSession.ReturnPage()`. A replay never touches `MatchResults.Last` (no HUNTER LICENSE counting): its end
   shows the scoreboard panel; A / B / Start / a tap goes back.
-- **The REPLAYS list page BUILT 2026-10-08 ~01:37** (Replay mode (cont.) [f9751f]; owner ~01:10: this thread builds
-  it). Core `Frontend/RecompMenus.Replays.cs` (a partial of RecompMenus: IMPORT GAMES' rows-page machinery, the
+- **The REPLAYS list page BUILT 2026-10-08 ~01:37**. Core `Frontend/RecompMenus.Replays.cs` (a partial of RecompMenus: IMPORT GAMES' rows-page machinery, the
   Controls page's frame and SENSITIVITY rows from the ROM); hooks (board cross-session row ~01:25-01:33): RecompMenus.cs
   (`partial`, `RowsPage.Entered`, `InstallReplays`, AllRowPages), MultiplayerMenu.cs (`OpenReplays`, call 93),
   FrontendSession.cs (2 wiring lines). The REPLAYS button opens "REPLAYS n/m": row 1 = the "record replays" switch

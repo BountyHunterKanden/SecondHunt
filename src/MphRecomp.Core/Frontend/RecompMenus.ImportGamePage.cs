@@ -21,7 +21,7 @@ namespace MphRecomp.Frontend
         private static int s_gamePage = -1;
 
         private const int GameTiles = 10, GameColumns = 5;
-        private const int GamePickCall = 2210, GameKeyCall = 2211, GameAllCall = 2212, GamePrevCall = 2213, GameNextCall = 2214;
+        private const int GamePickCall = 2210, GameKeyCall = 2211, GameAllCall = 2212, GamePrevCall = 2213, GameNextCall = 2214, GameUpdateCall = 2215;
         private const int GameRightCall = 2240, GameLeftCall = 2241;
         private const int GameTileCall = 2220, GameTileDeleteCall = 2230; // + the tile
 
@@ -37,19 +37,24 @@ namespace MphRecomp.Frontend
         private const float PickX = 774, PickY = 222, PickW = 180, PickH = 64;
         private const float KeyX = 994, KeyW = 330;
         private const float AllX = 1344, AllW = 482;
+        // IMPORT ALL and UPDATE ALL share its place (owner 2026-10-17: "an update all button by import all"): two pills
+        private const float AllPillW = (AllW - 30) / 2, UpdX = AllX + 10 + AllPillW + 10;
         private const float TileX0 = 99, TileY0 = 342, TileW = 330, TileH = 268, TileGapX = 18, TileGapY = 16;
         private const float NameWidth = 530; // "your disc"'s second line: up to the PICK box
 
         // our items on the page (-1 = none)
-        private int _gPick = -1, _gKey = -1, _gAll = -1, _gPrev = -1, _gNext = -1, _gameSettle = -1;
+        private int _gPick = -1, _gKey = -1, _gAll = -1, _gUpd = -1, _gPrev = -1, _gNext = -1, _gameSettle = -1;
         private readonly int[] _gTile = Enumerable.Repeat(-1, GameTiles).ToArray(), _gTileX = Enumerable.Repeat(-1, GameTiles).ToArray();
         private int _tileOffset, _tileFocus;
         private MenuSounds? _gameSounds;
 
         // what the page shows, read as it comes in and after every import (ImportGames.Game sorts: not each frame)
         private List<ImportItemInfo>? _gameItems;
+        // every item of the game, its songs among them (the tiles show the songs as one MUSIC tile: ImportGames.SongsTile)
+        private List<ImportItemInfo> _gameAll = new(), _gameSongs = new();
         private ImportPicked? _gameSource;
-        private bool _keyShown, _keyNeeded, _hasKey;
+        private bool _keyShown, _keyNeeded, _hasKey, _switchKeys;
+        private int _gameStale; // the items an update made stale (UPDATE ALL)
 
         private int GamePages => Math.Max(1, ((_gameItems?.Count ?? 0) + GameTiles - 1) / GameTiles);
 
@@ -104,7 +109,8 @@ namespace MphRecomp.Frontend
 
             _gPick = page.AddItem(i => GameInput(i, glow, GX(PickX), GY(PickY), GX(PickX + PickW), GY(PickY + PickH), GamePickCall)).Index;
             _gKey = page.AddItem(i => GameInput(i, glow, GX(KeyX), GY(StripY), GX(KeyX + KeyW), GY(StripY + StripH), GameKeyCall)).Index;
-            _gAll = page.AddItem(i => GameInput(i, glow, GX(AllX + 10), GY(StripY + 6), GX(AllX + AllW - 10), GY(StripY + 70), GameAllCall)).Index;
+            _gAll = page.AddItem(i => GameInput(i, glow, GX(AllX + 10), GY(StripY + 6), GX(AllX + 10 + AllPillW), GY(StripY + 70), GameAllCall)).Index;
+            _gUpd = page.AddItem(i => GameInput(i, glow, GX(UpdX), GY(StripY + 6), GX(UpdX + AllPillW), GY(StripY + 70), GameUpdateCall)).Index;
             for (int k = 0; k < GameTiles; k++)
             {
                 (float x, float y) = TileAt(k);
@@ -133,11 +139,18 @@ namespace MphRecomp.Frontend
         private void ReadGame()
         {
             string id = _importGame;
-            _gameItems = Import.Game(id)?.Items.ToList();
+            List<ImportItemInfo>? items = Import.Game(id)?.Items.ToList();
+            _gameAll = items ?? new();
+            _gameSongs = _gameAll.Where(ImportGames.IsSong).ToList();
+            _gameStale = _gameAll.Count(ImportGames.NeedsUpdate);
+            _gameItems = items?.Where(i => !ImportGames.IsSong(i)).ToList();
+            if (_gameItems != null && _gameSongs.Count > 0) _gameItems.Add(ImportGames.SongsTile(_gameSongs));
             _gameSource = Import.Source(id);
-            _keyShown = Import.TakesWiiDiscs(id);
-            _keyNeeded = _keyShown && Import.WiiKeyNeeded(id);
-            _hasKey = Import.HasWiiKey;
+            // the key box: the Wii key for a Wii disc, the player's Switch keys for a Switch game file (Prime 4)
+            _switchKeys = Import.TakesSwitchFiles(id);
+            _keyShown = _switchKeys || Import.TakesWiiDiscs(id);
+            _keyNeeded = _keyShown && (_switchKeys ? Import.SwitchKeysNeeded(id) : Import.WiiKeyNeeded(id));
+            _hasKey = _switchKeys ? Import.HasSwitchKeys : Import.HasWiiKey;
         }
 
         // RecompMenus.OnPageEntered (by EnterImportCards): the first ten; the focus on PICK until a disc is picked, else
@@ -150,11 +163,22 @@ namespace MphRecomp.Frontend
             _tileFocus = 0;
             ReadGame();
             foreach (int item in GameItems()) menu.SetState(item, MenuState.Idle);
+            int songs = _songsReturn ? _gameItems?.FindIndex(i => i.Kind == ImportGames.SongsTileKind) ?? -1 : -1;
+            _songsReturn = false;
+            if (songs >= 0)
+            {
+                // back from the song list: the MUSIC tile's page, the tile focused
+                _tileOffset = songs / GameTiles * GameTiles;
+                _tileFocus = songs % GameTiles;
+                ShowGame(menu);
+                menu.SetState(_gTile[_tileFocus], MenuState.Focused);
+                return;
+            }
             ShowGame(menu);
             menu.SetState(_gameSource == null || (_gameItems?.Count ?? 0) == 0 ? _gPick : _gTile[0], MenuState.Focused);
         }
 
-        private IEnumerable<int> GameItems() => new[] { _gPick, _gKey, _gAll, _gPrev, _gNext }.Concat(_gTile).Concat(_gTileX).Where(i => i >= 0);
+        private IEnumerable<int> GameItems() => new[] { _gPick, _gKey, _gAll, _gUpd, _gPrev, _gNext }.Concat(_gTile).Concat(_gTileX).Where(i => i >= 0);
 
         // the tiles past the list's end hidden, the X boxes of the imported ones shown, the wii key box only while the disc
         // needs one, the arrows while there's more than one page; the title's page number. The focus stays where it is
@@ -199,7 +223,7 @@ namespace MphRecomp.Frontend
             if (ReferenceEquals(sounds, _gameSounds)) return;
             _gameSounds = sounds;
             if (_soundCampaign < 0) return;
-            foreach (int item in new[] { _gPick, _gKey, _gAll }.Concat(_gTile))
+            foreach (int item in new[] { _gPick, _gKey, _gAll, _gUpd }.Concat(_gTile))
             {
                 if (item >= 0) sounds.ItemLike(s_gamePage, item, MainMenuPage, _soundCampaign);
             }
@@ -244,18 +268,22 @@ namespace MphRecomp.Frontend
                 Import.PickDisc(id);
                 return true;
             case GameKeyCall:
-                if (_keyNeeded) Import.PickWiiKey();
+                if (_keyNeeded && _switchKeys) Import.PickSwitchKeys();
+                else if (_keyNeeded) Import.PickWiiKey();
                 return true;
             case GameAllCall:
                 Import.ImportAll(id);
                 return true;
+            case GameUpdateCall:
+                Import.UpdateAll(id);
+                return true;
             case GameRightCall:
             case GameLeftCall:
                 {
-                    // PICK, the wii key box (while it's there), IMPORT ALL; a tile to the next on its row. The ends stay
-                    // put (the engine has already made the direction's sound)
+                    // PICK, the wii key box (while it's there), IMPORT ALL, UPDATE ALL; a tile to the next on its row. The
+                    // ends stay put (the engine has already made the direction's sound)
                     int step = call == GameRightCall ? 1 : -1, focused = menu.FocusedItem();
-                    int[] strip = _keyNeeded ? new[] { _gPick, _gKey, _gAll } : new[] { _gPick, _gAll };
+                    int[] strip = _keyNeeded ? new[] { _gPick, _gKey, _gAll, _gUpd } : new[] { _gPick, _gAll, _gUpd };
                     int at = Array.IndexOf(strip, focused), tile = Array.IndexOf(_gTile, focused);
                     if (at >= 0 && at + step >= 0 && at + step < strip.Length) menu.SetState(strip[at + step], MenuState.Focused);
                     else if (tile >= 0 && tile % GameColumns + step >= 0 && tile % GameColumns + step < GameColumns
@@ -271,6 +299,18 @@ namespace MphRecomp.Frontend
             int k = call - (delete ? GameTileDeleteCall : GameTileCall), i = _tileOffset + k;
             if (_gameItems == null || i >= _gameItems.Count) return true;
             ImportItemInfo item = _gameItems[i];
+            if (item.Kind == ImportGames.SongsTileKind)
+            {
+                // the MUSIC tile: A its song list, X every imported song (after the ask box)
+                List<ImportItemInfo> made = _gameSongs.Where(ImportGames.Imported).ToList();
+                if (!delete)
+                {
+                    _tileFocus = k;
+                    OpenSongList(id);
+                }
+                else if (made.Count > 0) Import.Clear(id, made, made.Count == 1 ? ImportGames.ItemName(made[0]) : $"{made.Count} songs");
+                return true;
+            }
             if (!delete)
             {
                 _tileFocus = k;
@@ -287,7 +327,7 @@ namespace MphRecomp.Frontend
             _drawMenu = menu;
             _out = tris;
             // our items' glows: lifted out of the engine's triangles, drawn again round each in its place in the order
-            var mine = new HashSet<int>(new[] { _gPick, _gKey, _gAll }.Concat(_gTile));
+            var mine = new HashSet<int>(new[] { _gPick, _gKey, _gAll, _gUpd }.Concat(_gTile));
             var glows = new Dictionary<int, List<WidgetTri>>();
             for (int t = tris.Count - 1; t >= 0; t--)
             {
@@ -348,29 +388,40 @@ namespace MphRecomp.Frontend
             // the picked disc's own banner (ImportBanners: a GameCube disc's) in place of "your disc", 2.4 times its size
             string? banner = ImportBanners.For(ImportRoot, _gameSource);
             bool shown = banner != null && DrawPng(banner, GX(StripX + 136), GY(StripY + 6), GX(StripX + 136 + 96 * 2.4f), GY(StripY + 6 + 32 * 2.4f), tag);
-            if (!shown) ScaledText("your disc", GX(StripX + 140), GY(StripY + 20), 0, Orange, tag, 1);
-            string second = _gameSource == null ? row.Platform + " disc" : FitWidth(_gameSource.Name.ToLowerInvariant(), GL(NameWidth), 0.62f);
+            // (Prime 4: its game file or a RomFS folder)
+            bool folder = Import.FolderOnly(_importGame) || _gameSource?.Folder == true;
+            if (!shown) ScaledText(folder || _switchKeys ? "your files" : "your disc", GX(StripX + 140), GY(StripY + 20), 0, Orange, tag, 1);
+            string second = _gameSource == null ? row.Platform + (folder ? " romfs folder" : _switchKeys ? " game file" : " disc")
+                : FitWidth(_gameSource.Name.ToLowerInvariant(), GL(NameWidth), 0.62f);
             ScaledText(second, GX(StripX + 140), GY(StripY + (shown ? 88 : 80)), 0, _gameSource == null ? Pale : White, tag, 0.62f);
             Box(GX(PickX), GY(PickY), GX(PickX + PickW), GY(PickY + PickH), _gPick);
             Glow(glows, _gPick, GX(PickX), GY(PickY), GX(PickX + PickW), GY(PickY + PickH), _gPick);
             ScaledText(_gameSource == null ? "pick" : "change", GX(PickX + PickW / 2), GY(PickY + 12), 2, Orange, _gPick, 0.8f);
 
-            // the wii key: greyed while the disc needs none (a GameCube disc, an .rvz / .wia, a game no Wii disc makes)
+            // the wii key (or the switch keys): greyed while the disc needs none (a GameCube disc, an .rvz / .wia, a game no
+            // Wii disc makes, a dumped folder)
             bool key = _keyNeeded;
             int keyTag = key ? _gKey : tag;
             Plate(KeyX, StripY, KeyW, StripH, 90, keyTag, greyed: !key);
             if (key) Glow(glows, _gKey, GX(KeyX), GY(StripY), GX(KeyX + KeyW), GY(StripY + StripH), _gKey);
             Picture(ImportCardPictures.Key, GX(KeyX + 14), GY(StripY + 30), GL(72), off: !key, keyTag);
-            ScaledText("wii key", GX(KeyX + 100), GY(StripY + 26), 0, key ? Orange : Grey, keyTag, 0.8f);
+            ScaledText(_switchKeys ? "switch keys" : "wii key", GX(KeyX + 100), GY(StripY + 26), 0, key ? Orange : Grey, keyTag, _switchKeys ? 0.66f : 0.8f);
             ScaledText(key ? _hasKey ? "set" : "none" : "not needed", GX(KeyX + 100), GY(StripY + 76), 0, key ? White : Grey, keyTag, 0.62f);
 
-            // IMPORT ALL (the lobby's START GAME pill; dimmed until there's a disc), how many are imported, the bar
+            // IMPORT ALL and UPDATE ALL (the lobby's START GAME pill each; IMPORT ALL dimmed until there's a disc, UPDATE ALL
+            // until an update made something stale: its red badge then), how many are imported, the bar
             bool live = _gameSource != null;
-            float ax = GX(AllX + 10), atop = GY(StripY + 6), aw = GL(AllW - 20), ah = GL(64);
+            float ax = GX(AllX + 10), atop = GY(StripY + 6), aw = GL(AllPillW), ah = GL(64);
             Model(@"startgame\startgame", ax, atop, aw, ah, _gAll, alpha: live ? 1 : 0.4f);
             Glow(glows, _gAll, ax, atop, ax + aw, atop - ah, _gAll);
-            ScaledText("import all", ax + aw * 0.36f, atop - (ah - 8) / 2 - 0.2f, 2, live ? Orange : Grey, _gAll, 1);
-            int done = _gameItems?.Count(i => i.Status == ItemImportStatus.Complete) ?? 0, total = _gameItems?.Count ?? 0;
+            ScaledText("import all", ax + aw * 0.38f, GY(StripY + 27), 2, live ? Orange : Grey, _gAll, 0.5f);
+            bool stale = _gameStale > 0;
+            float ux = GX(UpdX);
+            Model(@"startgame\startgame", ux, atop, aw, ah, _gUpd, alpha: stale ? 1 : 0.4f);
+            Glow(glows, _gUpd, ux, atop, ux + aw, atop - ah, _gUpd);
+            ScaledText("update all", ux + aw * 0.38f, GY(StripY + 27), 2, stale ? Orange : Grey, _gUpd, 0.5f);
+            if (stale) Picture(ImportCardPictures.Alert, GX(UpdX + AllPillW - 22), GY(StripY - 10), GL(30), off: false, _gUpd); // (over the pill's right end)
+            int done = _gameAll.Count(i => i.Status == ItemImportStatus.Complete), total = _gameAll.Count;
             ScaledText($"{done}/{total}", GX(AllX + AllW - 10), GY(StripY + 86), 1, White, tag, 0.8f);
             Bar(GX(AllX + 10), GY(StripY + 88), GX(AllX + AllW - 170), done, total, tag); // clear of a two-digit count
         }
@@ -398,6 +449,9 @@ namespace MphRecomp.Frontend
             Box(GX(x + 50), GY(vy), GX(x + TileW - 50), GY(vy + 42), tag);
             string value = ImportGames.ItemValue(_importGame, item).ToLowerInvariant();
             ScaledText(value, GX(x + TileW / 2), GY(vy + 7), 2, item.Status == ItemImportStatus.Complete ? Pale : Orange, tag, 0.6f);
+            // import again: the cards' red badge in the corner across from the X (the MUSIC tile: any of its songs)
+            bool stale = item.Kind == ImportGames.SongsTileKind ? _gameSongs.Any(s => s.Status == ItemImportStatus.Stale) : item.Status == ItemImportStatus.Stale;
+            if (stale) Picture(ImportCardPictures.Alert, GX(x + 12), GY(y + 12), GL(44), off: false, tag);
             if (!made) return;
             Fill(GX(x + TileW - 52), GY(y + 16), GX(x + TileW - 16), GY(y + 52), 0, 0, 0, 160 / 255f, tag);
             Box(GX(x + TileW - 52), GY(y + 16), GX(x + TileW - 16), GY(y + 52), tag);
@@ -425,7 +479,7 @@ namespace MphRecomp.Frontend
         private static string KindPicture(ImportItemInfo item) => ImportGames.IsSuit(item) ? ImportCardPictures.Suit
             : ImportGames.IsBall(item) ? ImportCardPictures.Ball
             : item.Kind == "arenas" ? ImportCardPictures.Radar
-            : item.Kind == "music" ? ImportCardPictures.Music
+            : item.Kind is "music" or ImportGames.SongsTileKind ? ImportCardPictures.Music
             : ImportCardPictures.Creature;
 
         // a dark box in the setup boxes' outline (mockup pixels; alpha out of 255)

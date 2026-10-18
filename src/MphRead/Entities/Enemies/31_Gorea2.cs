@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Effects;
@@ -30,6 +30,8 @@ namespace MphRead.Entities.Enemies
         private int _field23C = 0;
         private float _field23E = 0; // angle
         private float _field240 = 0; // angle
+        private float _hoverRand1 = 0; // recomp: hover jitter, rolled once per 30 Hz tick like vanilla
+        private float _hoverRand2 = 0;
         private byte _field242 = 0;
         private byte _field243 = 0;
         private byte _field244 = 0;
@@ -141,7 +143,9 @@ namespace MphRead.Entities.Enemies
                 return;
             }
             Vector3 between = PlayerEntity.Main.Position - Position;
-            PlayerEntity.Main.Speed += between / 4 / 2; // todo: FPS stuff
+            // recomp: vanilla (rev 1 0x2140854) zeroes Y (push is horizontal) and adds between / 4 to the speed once per 30 Hz tick;
+            // spread over the two 60 Hz frames (per-frame speed is half) so held contact matches
+            PlayerEntity.Main.Speed += between.WithY(0) / 4 / 4;
             PlayerEntity.Main.TakeDamage(10, DamageFlags.None, direction: null, source: this);
         }
 
@@ -289,7 +293,8 @@ namespace MphRead.Entities.Enemies
             }
             else
             {
-                _laserTargetPos += posToPlayer * (1 / (12 * 2f)); // todo: FPS stuff
+                // recomp: vanilla (rev 1 0x213F614) closes 0x155/4096 of the gap per 30 Hz tick; per 60 Hz frame that's 1 - sqrt(1 - 341/4096)
+                _laserTargetPos += posToPlayer * 0.04253039f;
                 GoreaFlags &= ~Gorea2Flags.LaserOnTarget;
             }
             Vector3 spherePos = _sealSphere.Position;
@@ -543,10 +548,11 @@ namespace MphRead.Entities.Enemies
             _field20C += _speed; // todo: FPS stuff?
         }
 
-        // todo: this is pretty jerky
+        // recomp: was "todo: this is pretty jerky": MphRead stepped the angles and rolled the jitter every 60 Hz frame,
+        // double vanilla's rate (rev 1 0x213D58C: +4 and +2 degrees and two rolls per 30 Hz tick)
         private void UpdateHoverPosition()
         {
-            _field23E += 4;
+            _field23E += 2;
             if (_field23E >= 360)
             {
                 _field23E -= 360;
@@ -558,16 +564,21 @@ namespace MphRead.Entities.Enemies
             {
                 v6 = 3 - v6;
             }
-            _field240 += 2;
+            _field240 += 1;
             if (_field240 >= 360)
             {
                 _field240 -= 360;
             }
-            float rand1 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;
+            if (_scene.FrameCount % 2 == 0)
+            {
+                _hoverRand1 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;
+                _hoverRand2 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;
+            }
+            float rand1 = _hoverRand1;
             var mtx = DetMatrix.CreateFromAxisAngle(FacingVector, MathHelper.DegreesToRadians(_field240));
             Vector3 vec = Matrix.Vec3MultMtx3(Vector3.Cross(UpVector, FacingVector), mtx);
             Position = _field20C + vec * (v6 - 1.5f - rand1);
-            float rand2 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;
+            float rand2 = _hoverRand2;
             vec = Matrix.Vec3MultMtx3(UpVector, mtx);
             Position += vec * (v5 - rand2);
         }
@@ -770,7 +781,8 @@ namespace MphRead.Entities.Enemies
                 _field22C = _field236;
                 if (_field23C == 0)
                 {
-                    _field23C = Math.Max(_field22C, 15 * 2); // todo: FPS stuff
+                    // recomp: vanilla (rev 1 0x213F124) clamps to at most 15 ticks (min, not max)
+                    _field23C = Math.Min(_field22C, 15 * 2);
                 }
             }
         }
@@ -1004,7 +1016,8 @@ namespace MphRead.Entities.Enemies
         {
             Vector3 vec = Func21405FC();
             Vector3 between = _field20C - vec;
-            if (between.LengthSquared > 1 / (3 * 2f)) // todo: FPS stuff
+            // recomp: vanilla (rev 1 0x213D7C8) snap threshold is distance squared 0x555 = 1/3 (a distance, not a per-frame step)
+            if (between.LengthSquared > 1 / 3f)
             {
                 vec = Func213F9B8(vec).Normalized();
                 _field20C += vec * (1 / (3 * 2f)); // todo: FPS stuff
@@ -1229,6 +1242,7 @@ namespace MphRead.Entities.Enemies
                     if (index != 0)
                     {
                         _field244 |= (byte)(1 << (index - 1));
+                        _field243 = _state1; // recomp: vanilla (rev 1 0x2140088) saves the return state here too
                         // bugfix/feature?: due to the fact that field232 is never set to a non-zero value,
                         // this code never executes and regen never occurs -- we could implement it
                         _field232 = 0;
@@ -1291,7 +1305,7 @@ namespace MphRead.Entities.Enemies
                         if (trigger != null)
                         {
                             Teleport(trigger, null);
-                            _field234 = _state1;
+                            _field243 = _state1; // recomp: vanilla (rev 1 0x213FCF4 / 0x21402D4) writes field 0x243, not 0x234
                             return true;
                         }
                     }
@@ -1462,7 +1476,7 @@ namespace MphRead.Entities.Enemies
                         if (trigger != null)
                         {
                             Teleport(trigger, null);
-                            _field234 = _state1;
+                            _field243 = _state1; // recomp: vanilla (rev 1 0x213FCF4 / 0x21402D4) writes field 0x243, not 0x234
                             return true;
                         }
                     }

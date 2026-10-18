@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace MphRead
 {
-    // recomp: the Pirate Blaster (owner 2026-10-09, thread "Pirate Blaster + Trooper abilities online"): Metroid Prime 1's
+    // recomp: the Pirate Blaster (owner 2026-10-09): Metroid Prime 1's
     // Space Pirate beam as a multiplayer pickup for everyone and the Trooper's affinity weapon. A 3-bolt BURST (owner pick):
     // 12 a bolt (16 to the head), the bolts 3 frames apart, a burst every 20 frames (about 1.5x the Power Beam's held fire,
     // 54 a second), 5 UA a burst, no charge. Drawn and heard as a recoloured Power Beam (its ROM effects and sounds:
@@ -21,18 +21,22 @@ namespace MphRead
             {
                 return affinity ? WeaponMPAffinity : WeaponMP;
             }
+            if (beam == BeamType.Paralyzer) // recomp: Zero Suit's Paralyzer (Metadata/Paralyzer.cs) reads its rows here too
+            {
+                return affinity ? Paralyzer.WeaponMPAffinity : Paralyzer.WeaponMP;
+            }
             return Weapons.Current[(int)beam + (affinity ? 9 : 0)];
         }
 
         // vanilla tables indexed by beam (ROM effects, sounds, gun animations, HUD icon frames, effectiveness): the blaster
-        // uses the Power Beam's rows
-        public static BeamType BaseBeam(BeamType beam) => beam == BeamType.PirateBlaster ? BeamType.PowerBeam : beam;
+        // uses the Power Beam's rows (and so does the Paralyzer)
+        public static BeamType BaseBeam(BeamType beam) => beam == BeamType.PirateBlaster || beam == BeamType.Paralyzer ? BeamType.PowerBeam : beam;
 
         public static int BaseIndex(BeamType beam) => (int)BaseBeam(beam);
 
-        // a beam the player can hold: vanilla's 0-8 and the blaster
+        // a beam the player can hold: vanilla's 0-8, the blaster and the Paralyzer
         public static bool IsPlayerBeam(BeamType beam) => beam >= BeamType.PowerBeam && beam <= BeamType.OmegaCannon
-            || beam == BeamType.PirateBlaster;
+            || beam == BeamType.PirateBlaster || beam == BeamType.Paralyzer;
 
         // Space Pirate red-orange bolts (RGB555: 31,12,4 core and 31,24,16 glow; the Power Beam is 9055, 21407)
         private static readonly ushort[] _colors = { 4511, 17183 };

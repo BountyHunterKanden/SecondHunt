@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using MphRecomp.Online;
 using MphRecomp.Online.Voice;
 
-// ONLINE PLAY's ONLINE SETTINGS (Online play menus thread, owner 2026-10-09: "finish everything you can"; pick 9 findable by
+// ONLINE PLAY's ONLINE SETTINGS (owner 2026-10-09: "finish everything you can"; pick 9 findable by
 // name ON by default with a switch; decision 3's backup / transfer code). The hub's SETTINGS (its bottom-right corner, where
 // REPLAYS keeps "record replays") opens one page of rows in the WHO CAN JOIN look: FINDABLE BY NAME on / off (the server's
 // search: its value comes with the login, a switch sends SetFindableReq), YOUR FRIEND CODE, BACKUP CODE (shown on a tap:

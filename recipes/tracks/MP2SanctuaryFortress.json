@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Sanctuary Fortress",
+  "group": "Sanctuary Fortress",
+  "role": "area",
+  "files": [
+    { "name": "Audio/Cliff-vocal32.dsp", "sha1": "58411ac81d45f8d350d4748f72e59fad7f0399d2" }
+  ],
+  "gain": 0.803
+}

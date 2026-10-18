@@ -100,7 +100,7 @@ namespace MphRecomp.Import.Guns
     }
 
     // the "guns" item kind: recipes/guns/<Suit>.json -> <root>/guns/<Suit>/ (Prime 1 / Echoes: GunImporter; Corruption,
-    // game "mp3": Gun3Importer; Beyond, game "mp4": Gun4Builder, not importable yet -- see Run)
+    // game "mp3": Gun3Importer; Beyond, game "mp4": Gun4Builder on our Beyond readers, Gun4Sources)
     public sealed class GunImportKind : IImportKind
     {
         public string Kind => "guns";
@@ -109,8 +109,7 @@ namespace MphRecomp.Import.Guns
         {
             if (Gun4Recipe.Applies(recipe))
             {
-                // TODO (Beyond RomFS readers): the CHPR and the model are resources inside a RomFS pak (Gun4Recipe.Pak),
-                // checked against chprSha1 (+ the model's hash) once the pak reader can hand them out
+                // Prime 4: the RomFS paks are read in place; the character file is checked against chprSha1 as it's read
                 yield break;
             }
             if (Gun3Recipe.Applies(recipe))
@@ -127,11 +126,30 @@ namespace MphRecomp.Import.Guns
         {
             if (Gun4Recipe.Applies(recipe))
             {
-                // TODO: game "mp4" is not registered in ImportService yet. Gun4Builder.Build is ready (golden-checked by
-                // -importcheck guns4 on test-only adapters); it needs IBeyondModelSource / IBeyondLookSource from our
-                // own Beyond readers (RomFS pak + SMDL/CMDL + MATI/TXTR + the material conversion: the rigging
-                // session's) and ChprCharacter.Load on the CHPR's bytes
-                throw new NotSupportedException($"{recipe.Id}: Metroid Prime 4 guns need the Beyond RomFS readers (not in yet)");
+                // Prime 4: the RomFS paks read in place (as HdImportKind), the look converted into a scratch folder beside
+                // the output (Gun4Builder copies the textures it draws), then the gun built (-importcheck guns4 --romfs)
+                Gun4Recipe g4 = Gun4Recipe.From(recipe);
+                var archives = new List<Beyond.BeyondArchive>();
+                string work = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outDir)) ?? outDir, Path.GetFileName(outDir) + ".look");
+                try
+                {
+                    foreach (string name in g4.Paks)
+                    {
+                        if (!ctx.Source.Contains(name)) throw new FileNotFoundException($"{name} is not in these files");
+                        archives.Add(new Beyond.BeyondArchive(ctx.Source.OpenRead(name), name));
+                    }
+                    Directory.CreateDirectory(work);
+                    progress(0.02f, "reading the model, materials and textures");
+                    Gun4Sources.Inputs inp = Gun4Sources.FromGame(archives, g4, work, (f, s) => progress(0.02f + 0.5f * f, s), ct);
+                    Gun4Builder.Build(inp.Model, inp.Look, inp.Character, g4, outDir, (f, s) => progress(0.52f + 0.48f * f, s), ct);
+                }
+                finally
+                {
+                    foreach (Beyond.BeyondArchive a in archives) a.Dispose();
+                    try { if (Directory.Exists(work)) Directory.Delete(work, recursive: true); }
+                    catch (IOException) { }
+                }
+                return;
             }
             if (Gun3Recipe.Applies(recipe))
             {

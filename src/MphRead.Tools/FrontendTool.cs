@@ -295,6 +295,8 @@ namespace MphRead
             MenuLayout.Proposals = Environment.GetEnvironmentVariable("FE_PROPOSE") == "1";
             // FE_PUBLIC=1: as a public build (as -frontend: the rows and IMPORT GAMES items a public build leaves out)
             MphRecomp.Config.RecompSettings.PublicBuild = Environment.GetEnvironmentVariable("FE_PUBLIC") == "1";
+            // FE_PAD=1: as with a controller connected (the settings tabs' L1 / R1)
+            if (Environment.GetEnvironmentVariable("FE_PAD") == "1") MphRecomp.Frontend.RecompMenus.PadConnected = () => true;
             // FE_SETTINGS=<file>: a settings file (its folder also takes IMPORT GAMES' outputs: hd/, guns/, import/)
             FrontendSession session = FrontendSession.Load(root ?? Paths.FileSystem, settingsPath: Environment.GetEnvironmentVariable("FE_SETTINGS"),
                 modsDir: Environment.GetEnvironmentVariable("FE_MODS"), savesDir: Environment.GetEnvironmentVariable("FE_SAVES"));
@@ -321,6 +323,26 @@ namespace MphRead
                 session.Start(FrontendSession.ReturnPage());
             }
             else if (Environment.GetEnvironmentVariable("FE_START") == "pause") session.OpenPause();
+            else if (Environment.GetEnvironmentVariable("FE_START") == "pausechat") // an online match's pause (CHAT)
+            {
+                // FE_PAUSECHATSTUB=1: a stand-in match (no connection) so the CHAT row opens the CHAT page (page flow only)
+                if (Environment.GetEnvironmentVariable("FE_PAUSECHATSTUB") == "1")
+                {
+                    var stub = (MphRecomp.Multiplayer.Net.OnlineMatch)System.Runtime.CompilerServices.RuntimeHelpers
+                        .GetUninitializedObject(typeof(MphRecomp.Multiplayer.Net.OnlineMatch));
+                    object client = Activator.CreateInstance(typeof(MphRecomp.Online.OnlineClient), nonPublic: true)!; // (not connected)
+                    typeof(MphRecomp.Multiplayer.Net.OnlineMatch).GetField("<Client>k__BackingField",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(stub, client);
+                    typeof(MphRecomp.Multiplayer.Net.OnlineMatch).GetField("<Game>k__BackingField",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(stub,
+                        new MphRecomp.Online.GameCard { Id = "stub" });
+                    session.Recomp.PauseChat = stub;
+                }
+                session.OpenPause();
+                session.Menu.Enter(session.Recomp.PauseChatPageForTools);
+            }
+            else if (Environment.GetEnvironmentVariable("FE_START") == "padcontrols") session.OpenControls(keys: false); // the controller customizer
+            else if (Environment.GetEnvironmentVariable("FE_START") == "keycontrols") session.OpenControls(keys: true); // the keyboard & mouse one
             else if (Environment.GetEnvironmentVariable("FE_START") == "import") session.Start(session.Recomp.ImportPage);
             else session.Start(Int32.TryParse(Environment.GetEnvironmentVariable("FE_START"), out int startPage) ? startPage : 0);
             // FE_EVERY=<ticks>: the snapshot interval; FE_SHOTS=<t>,<t>,...: extra snapshots at those ticks
@@ -352,6 +374,7 @@ namespace MphRead
                     case "l": session.Press(MenuKeys.L); break;
                     case "r": session.Press(MenuKeys.R); break;
                     case "x": session.Press(MenuKeys.X); break;
+                    case "y": session.Press(MenuKeys.Y); break; // the control customizer: remove one button (RowRemove)
                     case "ok": // a tap on the results page's OK (touch only, as vanilla's)
                         if (session.Menu.Page != null && MphRecomp.Frontend.GameEnding.TryOkPoint(session.Menu.Page, out float okX, out float okY))
                         {
@@ -374,15 +397,43 @@ namespace MphRead
                         break;
                     }
                     default:
-                        if (st.Input.StartsWith("sleep")) // sleep<ms>: real time passes (a worker runs on), e.g. to press B mid-import
+                        if (st.Input.StartsWith("cap=")) // cap=<button>: the control customizer's capture gets a press and its
+                        {                                // release (each part of an "A+B" combo pressed, then all let go)
+                            string[] parts = st.Input[4..].Split('+');
+                            foreach (string part in parts) session.Recomp.CaptureInput(part);
+                            foreach (string part in parts) session.Recomp.CaptureInput("-" + part);
+                        }
+                        else if (st.Input.StartsWith("sleep")) // sleep<ms>: real time passes (a worker runs on), e.g. to press B mid-import
                         {
                             System.Threading.Thread.Sleep(Int32.Parse(st.Input[5..]));
                             log.Add($"{f}: slept, import {(session.Recomp.Import.Running ? "running: " + session.Recomp.Import.ProgressLine : "not running")}");
+                        }
+                        else if (st.Input.StartsWith("type=")) // type=<chars>: a PC keyboard typing on the name keyboard / keypad
+                        {
+                            log.Add($"{f}: typing {(session.Typing ? "on" : "OFF")} (page {session.Menu.Page?.Index})");
+                            foreach (char c in st.Input[5..]) session.TypeChar(c == '_' ? ' ' : c); // ('_' = a space)
+                        }
+                        else if (st.Input is "bksp" or "enter") // a PC keyboard's Backspace / Enter there
+                        {
+                            session.TypeKey(backspace: st.Input == "bksp");
                         }
                         else if (st.Input.StartsWith("touch@"))
                         {
                             var xy = st.Input[6..].Split('/');
                             session.TouchCanvas(Single.Parse(xy[0]), Single.Parse(xy[1]));
+                        }
+                        else if (st.Input.StartsWith("hold@")) // hold@x/y/kind: a touch's down 0 / move 1 / up 2 / cancel 3 (drags)
+                        {
+                            var xyk = st.Input[5..].Split('/');
+                            session.TouchCanvas(Single.Parse(xyk[0]), Single.Parse(xyk[1]), Int32.Parse(xyk[2]));
+                        }
+                        else if (st.Input.StartsWith("wheel@")) // wheel@notches: the mouse wheel (+ up)
+                        {
+                            session.ScrollWheel(Single.Parse(st.Input[6..], System.Globalization.CultureInfo.InvariantCulture));
+                        }
+                        else if (st.Input.StartsWith("stick@")) // stick@y: the right stick's up / down (+ down), held until the next
+                        {
+                            session.ScrollStick(Single.Parse(st.Input[6..], System.Globalization.CultureInfo.InvariantCulture));
                         }
                         else if (st.Input.StartsWith("ds@")) // a DS touch-screen pixel, y down (as BizHawk routes give them)
                         {
@@ -855,7 +906,7 @@ namespace MphRead
                     float w0 = ((b.X - sx) * (c.Y - sy) - (c.X - sx) * (b.Y - sy)) / area;
                     float w1 = ((c.X - sx) * (a.Y - sy) - (a.X - sx) * (c.Y - sy)) / area;
                     float w2 = 1 - w0 - w1;
-                    if (w0 < -1e-4f || w1 < -1e-4f || w2 < -1e-4f) continue;
+                    if (w0 < 0 || w1 < 0 || w2 < 0) continue;
                     float r = w0 * a.R + w1 * b.R + w2 * c.R;
                     float g = w0 * a.G + w1 * b.G + w2 * c.G;
                     float bl = w0 * a.B + w1 * b.B + w2 * c.B;
@@ -916,11 +967,13 @@ namespace MphRead
                 {
                     for (int x = x0; x <= x1; x++)
                     {
-                        float sx = x + 0.5f, sy = y + 0.5f;
+                        // (the sample a hair off the centre: a pixel centre on an edge two triangles share goes to one of them,
+                        // not both, so a quad's diagonal doesn't blend twice)
+                        float sx = x + 0.5f + 1.3e-3f, sy = y + 0.5f + 0.7e-3f;
                         float w0 = ((px[1] - sx) * (py[2] - sy) - (px[2] - sx) * (py[1] - sy)) / area;
                         float w1 = ((px[2] - sx) * (py[0] - sy) - (px[0] - sx) * (py[2] - sy)) / area;
                         float w2 = 1 - w0 - w1;
-                        if (w0 < -1e-4f || w1 < -1e-4f || w2 < -1e-4f) continue;
+                        if (w0 < 0 || w1 < 0 || w2 < 0) continue;
                         float r = w0 * v[0].R + w1 * v[1].R + w2 * v[2].R;
                         float g = w0 * v[0].G + w1 * v[1].G + w2 * v[2].G;
                         float b = w0 * v[0].B + w1 * v[1].B + w2 * v[2].B;
