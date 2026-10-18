@@ -141,7 +141,7 @@ namespace MphRecomp.Frontend
                 if (row.Id == ImportGames.TrilogyId)
                 {
                     (int tDone, int tTotal) = Import.TrilogyCount();
-                    bool tStale = ImportGames.TrilogyGames.Any(id => Import.Game(id)?.Items.Any(i => i.Status == ItemImportStatus.Stale) == true);
+                    bool tStale = ImportGames.TrilogyGames.Any(id => Import.Game(id)?.Items.Any(ImportGames.NeedsUpdate) == true);
                     cards[k] = new CardInfo(row, tTotal > 0, tDone, tTotal, new(), Import.Source(row.Id), Stale: tStale);
                     continue;
                 }
@@ -165,7 +165,7 @@ namespace MphRecomp.Frontend
                 var shown = g.Items.Where(ImportGames.Imported).OrderBy(i => ImportGames.IsSuit(i) ? 0 : i.Kind == "hd" && !ImportGames.IsBall(i) ? 1
                     : ImportGames.IsBall(i) ? 2 : 3).ToList();
                 cards[k] = new CardInfo(row, true, g.Items.Count(i => i.Status == ItemImportStatus.Complete), g.Items.Count, kinds,
-                    Import.Source(row.Id), shown, g.Items.Any(i => i.Status == ItemImportStatus.Stale));
+                    Import.Source(row.Id), shown, g.Items.Any(ImportGames.NeedsUpdate));
             }
             _cardInfos = cards;
         }

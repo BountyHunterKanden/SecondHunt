@@ -17,6 +17,7 @@
     "MP1GravitySuit": { "hide": ["DolMP1GravitySuit_mat10"], "opaque": ["DolMP1GravitySuit_mat4"] },
     "MP1FusionSuit": { "hide": ["DolMP1FusionSuit_mat1"], "opaque": ["DolMP1FusionSuit_mat2"] },
     "Phazonsuit": { "hide": ["DolPhazonsuit_mat3"], "opaque": ["DolPhazonsuit_mat7"] },
+    "MP1BetaPhazonSuit": { "hide": ["DolMP1BetaPhazonSuit_mat6"], "opaque": ["DolMP1BetaPhazonSuit_mat5"] },
     "MP3PEDSuit": { "hide": ["DolMP3PEDSuit_mat5", "DolMP3PEDSuit_mat0", "DolMP3PEDSuit_mat1"], "opaque": ["DolMP3PEDSuit_mat8"] }
   },
   "camera": {

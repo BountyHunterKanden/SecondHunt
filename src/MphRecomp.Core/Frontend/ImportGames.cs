@@ -317,6 +317,7 @@ namespace MphRecomp.Frontend
         {
             ItemImportStatus.Complete => "DONE",
             ItemImportStatus.Stale => "UPDATE",
+            ItemImportStatus.Missing when item.New => "NEW",
             ItemImportStatus.HashMismatch when OnlyFromOriginal(item) && gameId is "mp1" or "mp2" => "GC ONLY",
             ItemImportStatus.HashMismatch => "WRONG",
             ItemImportStatus.Failed => "FAILED",
@@ -334,6 +335,7 @@ namespace MphRecomp.Frontend
             {
                 ItemImportStatus.Complete => $"{ItemName(item)}: {what}. imported. a: import it again.",
                 ItemImportStatus.Stale => $"{ItemName(item)}: {what}. this version of the game makes it a newer way. a: import it again.",
+                ItemImportStatus.Missing when item.New => $"{ItemName(item)}: {what}. new in this version of the game. a: import it.",
                 ItemImportStatus.HashMismatch when OnlyFromOriginal(item) => $"{ItemName(item)}: {OnlyFromOriginalText(gameId)}",
                 ItemImportStatus.HashMismatch => $"{ItemName(item)}: your disc isn't the version this was made from ({ExpectedDisc(gameId, item)}). "
                     + "other versions aren't supported yet.",
@@ -736,7 +738,7 @@ namespace MphRecomp.Frontend
         // ---- UPDATE ALL (owner 2026-10-17: "an update all button by import all and a notice when you go to the screen"): the
         //      items an update made stale (the red badge), imported again from the discs already picked, a disc at a time ----
 
-        public static bool NeedsUpdate(ImportItemInfo item) => item.Status == ItemImportStatus.Stale;
+        public static bool NeedsUpdate(ImportItemInfo item) => item.Status == ItemImportStatus.Stale || item.New;
 
         // the games an UPDATE ALL reaches: a game page's own (the Trilogy page: its three), or (null) every game
         private IEnumerable<string> UpdateGames(string? gameId)

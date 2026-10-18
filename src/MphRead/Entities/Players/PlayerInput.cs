@@ -463,13 +463,18 @@ namespace MphRead.Entities
             return zoomFov;
         }
 
-        // recomp: TRY CONTROLS (MphRecomp SoloArena.cs): every weapon but the Omega Cannon, its charge, and full ammo
+        // recomp: TRY CONTROLS (MphRecomp SoloArena.cs): every weapon but the Omega Cannon, its charge, and full ammo; the
+        // Pirate Blaster too where the match has it (its number is after the Omega Cannon's; it has no charge)
         public void HostGiveAllWeapons()
         {
             for (BeamType beam = BeamType.PowerBeam; beam < BeamType.OmegaCannon; beam++)
             {
                 _availableWeapons[beam] = true;
                 _availableCharges[beam] = true;
+            }
+            if (HostSevenWeaponSlots)
+            {
+                _availableWeapons[BeamType.PirateBlaster] = true;
             }
             _ammo[0] = _ammoMax[0];
             _ammo[1] = _ammoMax[1];

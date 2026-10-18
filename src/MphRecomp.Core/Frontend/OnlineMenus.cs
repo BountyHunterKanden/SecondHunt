@@ -217,7 +217,7 @@ namespace MphRecomp.Frontend
             {
                 foreach (MphRecomp.Import.ImportGameInfo g in Import.Service?.Games ?? Array.Empty<MphRecomp.Import.ImportGameInfo>())
                 {
-                    foreach (MphRecomp.Import.ImportItemInfo i in g.Items) if (i.Status == MphRecomp.Import.ItemImportStatus.Stale) stale++;
+                    foreach (MphRecomp.Import.ImportItemInfo i in g.Items) if (ImportGames.Offered(i) && ImportGames.NeedsUpdate(i)) stale++;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

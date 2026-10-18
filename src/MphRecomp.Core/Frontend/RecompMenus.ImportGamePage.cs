@@ -450,7 +450,7 @@ namespace MphRecomp.Frontend
             string value = ImportGames.ItemValue(_importGame, item).ToLowerInvariant();
             ScaledText(value, GX(x + TileW / 2), GY(vy + 7), 2, item.Status == ItemImportStatus.Complete ? Pale : Orange, tag, 0.6f);
             // import again: the cards' red badge in the corner across from the X (the MUSIC tile: any of its songs)
-            bool stale = item.Kind == ImportGames.SongsTileKind ? _gameSongs.Any(s => s.Status == ItemImportStatus.Stale) : item.Status == ItemImportStatus.Stale;
+            bool stale = item.Kind == ImportGames.SongsTileKind ? _gameSongs.Any(ImportGames.NeedsUpdate) : ImportGames.NeedsUpdate(item);
             if (stale) Picture(ImportCardPictures.Alert, GX(x + 12), GY(y + 12), GL(44), off: false, tag);
             if (!made) return;
             Fill(GX(x + TileW - 52), GY(y + 16), GX(x + TileW - 16), GY(y + 52), 0, 0, 0, 160 / 255f, tag);

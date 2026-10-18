@@ -29,9 +29,9 @@ namespace MphRecomp.Arenas
         public static bool CratesEnabled { get; set; }
 
         // on with EXTRA PICKUPS, unless the settings turn them off; never in the dev solo run (its placement editor
-        // loads the device's own files: SoloArena, PickupPlacer)
+        // loads the device's own files: SoloArena, PickupPlacer) unless the run asks for them (TRY CONTROLS sets true)
         public static bool For(MatchSettings settings) =>
-            (settings.PlacedPickups ?? true) && (settings.PirateBlaster ?? true) && !settings.Solo;
+            (settings.PirateBlaster ?? true) && (settings.Solo ? settings.PlacedPickups == true : settings.PlacedPickups ?? true);
 
         // MatchStart, before the arena loads (the entity hook lives in EchoesArena's static constructor: run it here, as a
         // vanilla-only session may never have touched an Echoes arena)

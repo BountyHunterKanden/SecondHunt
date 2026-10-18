@@ -179,6 +179,7 @@ internal sealed partial class CampaignRenderer
         PlayerEntity.HostIdleBots = !active;
         if (active) settings.PointGoal = 99; // as good as never (0 = no goal, but the HUD then shows "0 / 0")
         settings.Solo = true;
+        settings.PlacedPickups = true; // the arena's placed pickups as in a match (the Pirate Blaster's; PlacedPickups.For)
         settings.Mode = GameMode.Battle;
         for (int i = settings.Players.Count - 1; i >= 1; i--)
         {

@@ -40,6 +40,7 @@ namespace MphRecomp.Import
     {
         public string Id = "", Kind = "", Name = "";
         public ItemImportStatus Status;
+        public bool New;   // not imported and added since the game's last import: UPDATE ALL takes it, a red badge marks it
         public string Message = "";
         public double Seconds;
     }
@@ -225,7 +226,7 @@ namespace MphRecomp.Import
                 foreach (GameDef def in KnownGames)
                 {
                     var g = new ImportGameInfo { Id = def.Id, Title = def.Title, Platform = def.Platform };
-                    Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)> state = ReadState(def.Id, out string? discId, out bool provided);
+                    Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)> state = ReadState(def.Id, out string? discId, out bool provided, out HashSet<string>? known);
                     g.DiscId = discId;
                     foreach (ImportRecipe r in Recipes.ForGame(def.Id))
                     {
@@ -242,6 +243,10 @@ namespace MphRecomp.Import
                                 _ => ItemImportStatus.Missing,
                             };
                         }
+                        // new since the last import: the app didn't have it then (a state file from before the list: the
+                        // items Beta 3 added to a game a player may have imported already)
+                        it.New = provided && it.Status == ItemImportStatus.Missing && !state.ContainsKey(r.Id)
+                            && (known != null ? !known.Contains(r.Id) : AddedBeforeKnownList.Contains(r.Id));
                         g.Items.Add(it);
                     }
                     int complete = g.Items.Count(i => i.Status == ItemImportStatus.Complete);
@@ -353,7 +358,7 @@ namespace MphRecomp.Import
             List<ImportRecipe> recipes = Recipes.ForGame(gameId)
                 .Where(r => only == null || only.Contains(r.Id) || only.Contains(r.Name)).ToList();
             var sourceHashes = new Dictionary<string, string>();
-            Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)>? before = edition != null ? ReadState(gameId, out _, out _) : null;
+            Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)>? before = edition != null ? ReadState(gameId, out _, out _, out _) : null;
             try
             {
                 for (int i = 0; i < recipes.Count; i++)
@@ -550,7 +555,7 @@ namespace MphRecomp.Import
 
         void WriteState(ImportReport report, Dictionary<string, string> sourceHashes)
         {
-            Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)> old = ReadState(report.GameId, out _, out _);
+            Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)> old = ReadState(report.GameId, out _, out _, out _);
             string path = StatePath(report.GameId);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var ms = new MemoryStream();
@@ -600,15 +605,23 @@ namespace MphRecomp.Import
                     w.WriteEndObject();
                 }
                 w.WriteEndObject();
+                // every item the app has for this game now: one added later reads as new (ImportItemInfo.New)
+                w.WriteStartArray("recipes");
+                foreach (ImportRecipe r in Recipes.ForGame(report.GameId)) w.WriteStringValue(r.Id);
+                w.WriteEndArray();
                 w.WriteEndObject();
             }
             File.WriteAllBytes(path, ms.ToArray());
         }
 
-        Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)> ReadState(string gameId, out string? discId, out bool provided)
+        // the items Beta 3 added to games that had imports before it; a state file without "recipes" (Beta 3.3 and older)
+        // reads only these as new
+        static readonly HashSet<string> AddedBeforeKnownList = new(StringComparer.Ordinal) { "hd/MP1BetaPhazonSuit", "hd/MP1BetaPhazonSuitBall" };
+
+        Dictionary<string, (string Status, string RecipeSha1, string Message, int Importer)> ReadState(string gameId, out string? discId, out bool provided, out HashSet<string>? known)
         {
             var d = new Dictionary<string, (string, string, string, int)>();
-            discId = null; provided = false;
+            discId = null; provided = false; known = null;
             string path = StatePath(gameId);
             if (!File.Exists(path)) return d;
             try
@@ -617,6 +630,10 @@ namespace MphRecomp.Import
                 JsonElement root = doc.RootElement;
                 provided = true;
                 discId = root.TryGetProperty("discId", out JsonElement di) ? di.GetString() : null;
+                if (root.TryGetProperty("recipes", out JsonElement rs) && rs.ValueKind == JsonValueKind.Array)
+                {
+                    known = new HashSet<string>(rs.EnumerateArray().Select(e => e.GetString() ?? ""), StringComparer.Ordinal);
+                }
                 if (root.TryGetProperty("items", out JsonElement items))
                 {
                     foreach (JsonProperty p in items.EnumerateObject())

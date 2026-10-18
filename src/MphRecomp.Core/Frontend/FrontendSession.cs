@@ -640,7 +640,7 @@ namespace MphRecomp.Frontend
         //      red badge on their cards and tiles; they aren't used until imported again: Import/ImportedContent.cs) ----
 
         private const int MainMenuPage = 18;
-        public const string StaleImportsText = "an update changed some imported items. update them on import games: a red badge marks them.";
+        public const string StaleImportsText = "an update changed or added some items. update them on import games: a red badge marks them.";
         private bool _staleImportsChecked;
 
         private void TickStaleImports()
@@ -653,7 +653,7 @@ namespace MphRecomp.Frontend
                 stale = 0;
                 foreach (MphRecomp.Import.ImportGameInfo g in Recomp.Import.Service?.Games ?? Array.Empty<MphRecomp.Import.ImportGameInfo>())
                 {
-                    foreach (MphRecomp.Import.ImportItemInfo i in g.Items) if (i.Status == MphRecomp.Import.ItemImportStatus.Stale) stale++;
+                    foreach (MphRecomp.Import.ImportItemInfo i in g.Items) if (ImportGames.Offered(i) && ImportGames.NeedsUpdate(i)) stale++;
                 }
             }
             catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)

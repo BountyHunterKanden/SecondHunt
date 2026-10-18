@@ -969,7 +969,7 @@ namespace MphRecomp.Frontend
             {
                 Label = "update\nall",
                 Description = stale == 0 ? "nothing needs an update: everything imported is up to date."
-                    : $"imports again the {stale} an update changed (the red badge), from your disc.",
+                    : $"imports the {stale} an update changed or added (the red badge), from your disc.",
                 Value = () => stale == 0 ? "NONE" : "START",
                 Step = _ => Import.UpdateAll(id),
                 Action = true,

@@ -201,6 +201,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
     CampaignGun? _gun;
     bool _primeGun = true, _gunActive;
     Vector3 _gunTint;
+    static readonly Vector3 BlasterGunTint = new(1, 12 / 31f, 4 / 31f);
     bool _pPrevUp, _pPrevDown, _pPrevLeft, _pPrevRight;
 
     // called on the GL thread when the pause menu's RECOMP SETTINGS resumes (PauseOverlay.Resumed); a no-op unless
@@ -1379,6 +1380,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
         // MatchSkinGun.cs)
         UpdateSkinGun();
         _gunActive = _gun != null && _primeGun && !ShipOpen && GunViewmodel.TryMphLightColour(scene, out _gunTint, MphGunModel);
+        // the Pirate Blaster: MPH's gun shows the Power Beam's colour for it (PirateBlaster.BaseIndex), so the Prime gun's lights
+        // take the blaster's own red-orange instead (its bolts' core, RGB555 31,12,4; owner 10-18)
+        if (_host?.Player is PlayerEntity gunner && gunner.CurrentWeapon == BeamType.PirateBlaster) _gunTint = BlasterGunTint;
         if (UpdateArmCannon(scene)) _gunActive = false; // a native body's own arm cannon instead (MatchArmCannon.cs)
 
         UpdateBodyCut(scene);

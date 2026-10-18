@@ -26,8 +26,9 @@ namespace MphRecomp.Frontend
         // the head picture's square starts this far down: its middle, where HeadCamera puts the head's middle
         public const float HeadCropTop = (HeadH - HeadW) / 2f / HeadH;
         // v2 (owner 2026-10-09: the TROOPER and DARK SAMUS icons sat off their heads, Echoes' Dark Samus too dark to see):
-        // the head framed on its own middle, dark pictures lifted
-        public const string Look = "v2"; // a framing made anew is drawn again (in the pictures' names)
+        // the head framed on its own middle, dark pictures lifted; v3 (owner 2026-10-18: the Early Phazon suit showed Samus's
+        // eyes): its visor drawn solid like the other suits' (MenuSamus.json "visor")
+        public const string Look = "v3"; // a framing made anew is drawn again (in the pictures' names)
 
         // the app renders the jobs (it sets this); else nothing is queued
         public static bool HostRenders { get; set; }
