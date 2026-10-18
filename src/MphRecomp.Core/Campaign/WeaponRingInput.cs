@@ -56,9 +56,10 @@ namespace MphRecomp.Campaign
             return false;
         }
 
-        // one sim step: `open` = the weapon menu button is held, `stick` = the right stick (+X right, +Y up). Returns the
+        // one sim step: `open` = the weapon menu button is held, `stick` = the right stick (+X right, +Y up), `tap` = a slot
+        // tapped on the ring this step (the touch controls; -1 = its middle, which drops the pick; -2 = none). Returns the
         // direction to send as CampaignInput.WeaponWheel (zero = nothing picked).
-        public Vector2 Step(bool open, Vector2 stick, PlayerEntity player)
+        public Vector2 Step(bool open, Vector2 stick, PlayerEntity player, int tap = -2)
         {
             bool leaning = stick.LengthSquared() > RestRadius * RestRadius;
             CentrePick = BeamType.None;
@@ -78,6 +79,14 @@ namespace MphRecomp.Campaign
                     {
                         _sector = sector;
                     }
+                }
+                if (tap == -1)
+                {
+                    _sector = -1;
+                }
+                else if (tap >= 0 && player.AvailableWeapons[CampaignHost.WheelWeapon(tap)])
+                {
+                    _sector = tap;
                 }
                 return _sector < 0 ? Vector2.Zero : CampaignHost.WheelDirection(_sector);
             }

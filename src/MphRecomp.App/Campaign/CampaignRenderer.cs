@@ -1023,6 +1023,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
 
     CampaignInput BuildInput()
     {
+        _ringOpen = false; // (set again below while the ring is up)
         PadState pad = Pad;
         PlayerEntity p = _host!.Player;
         bool a = pad[PadButton.A], b = pad[PadButton.B], r1 = pad[PadButton.R1];
@@ -1105,7 +1106,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
             else if (p.ScanVisor && binds.Shares(ControlBinds.WeaponMenu, ControlBinds.Scan)) _ringScanHold = true;
             bool wheel = _weaponRing.Hold(menuHeld && !droneForm && !_ringScanHold, p, out bool tapZoom);
             if (_ringScanHold || !binds.Shares(ControlBinds.WeaponMenu, ControlBinds.Zoom)) tapZoom = false;
-            System.Numerics.Vector2 ring = _weaponRing.Step(wheel, new System.Numerics.Vector2(pad.Rx, -pad.Ry), p);
+            System.Numerics.Vector2 ring = _weaponRing.Step(wheel, new System.Numerics.Vector2(pad.Rx, -pad.Ry), p, TakeRingTap());
+            _ringOpen = wheel; // (a tap on it picks a slot: CampaignRenderer.WeaponRingTouch.cs)
             if (_weaponRing.CentrePick != BeamType.None) input.SelectWeapon = _weaponRing.CentrePick; // the ring's middle: Omega (T4 N15)
             if (TakeTouchOmega()) input.SelectWeapon = BeamType.OmegaCannon; // touch OMEGA (CampaignRenderer.WeaponSelect.cs)
             if (tapZoom)

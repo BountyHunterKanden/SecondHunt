@@ -325,6 +325,11 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         {
             return;
         }
+        // with the weapon ring open, a tap on it picks a weapon (CampaignRenderer.WeaponRingTouch.cs), in AIM ONLY too
+        if (_renderer.RingTouch(x, y))
+        {
+            return;
+        }
         bool drone = _renderer.TouchDrone;
         foreach (TouchButton b in _buttons)
         {
