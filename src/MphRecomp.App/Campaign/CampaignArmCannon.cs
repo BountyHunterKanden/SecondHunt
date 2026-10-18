@@ -17,6 +17,7 @@ internal sealed partial class CampaignRetroBody
     public BodyArmCannon? Cannon { get; private set; }
     readonly List<Batch> _cannon = new();
     float _cannonLight = 1;
+    public static float CannonAlphaDev; // dev: armcannonalpha, for a cannon with an alpha of its own (0 = its own)
 
     // after the body's vertices are read (and V-flipped): the cut's copied after them (a worker thread at load; the cut
     // is worked out once -- it poses the shared body, before any seat animates it)
@@ -43,7 +44,8 @@ internal sealed partial class CampaignRetroBody
         {
             int[] keep = Cannon.Cut[b.Material];
             if (keep.Length == 0) continue;
-            _cannon.Add(new Batch { Material = b.Material, Start = at, Count = keep.Length, Pass = b.Pass, Spec = b.Spec, Gx = b.Gx, P = b.P });
+            _cannon.Add(new Batch { Material = b.Material, Start = at, Count = keep.Length, Pass = b.Pass, Spec = b.Spec, Gx = b.Gx, P = b.P,
+                Cull = b.Cull, BlendDepth = b.BlendDepth }); // culled as the body's parts (owner 10-18: the final form's cannon too bright)
             foreach (int v in keep)
             {
                 Array.Copy(_verts, (b.Start + v) * F, all, at * F, F);
@@ -98,7 +100,10 @@ internal sealed partial class CampaignRetroBody
             }
             else if (own)
             {
-                foreach (Batch c in _cannon) if (c.Pass == p) EmitCannon(c, fade ? alpha : 1f, s);
+                // the blended parts at the cannon's alpha (the final form's shell)
+                float own1 = CannonAlphaDev > 0 && Cannon.Alpha < 1 ? CannonAlphaDev : Cannon.Alpha;
+                float a = (fade ? alpha : 1f) * (p == 1 ? own1 : 1f);
+                foreach (Batch c in _cannon) if (c.Pass == p) EmitCannon(c, a, s);
             }
         }
         catch (Exception ex)

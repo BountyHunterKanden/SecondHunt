@@ -33,6 +33,27 @@ namespace MphRecomp.Assets
                  * OpenTK.Mathematics.Matrix4.CreateTranslation(0f, r, 0f);
         }
 
+        // A vein ball (Import/Hd/VeinBall: Echoes' final-form Dark Samus): its vents are drawn front faces only (the far
+        // side's glow would shine through the see-through shell), its heart beats about the ball's centre
+        public static bool IsVent(string material) => material.EndsWith("_vent0", StringComparison.Ordinal);
+        public static bool IsHeart(string material) => material.EndsWith("_heart0", StringComparison.Ordinal);
+        public const double BeatSeconds = 0.8;
+        public const double BeatSqueeze = 0.30, BeatOver = 0.30;
+
+        // the heart's size (1 = as imported) at a time: a hard squeeze (lub), springing back past full, a smaller second
+        // squeeze (dub), a slow refill -- the mockup's beat (real_pulse.gif), BeatSeconds a beat
+        public static double Beat(double seconds)
+        {
+            double ph = seconds / BeatSeconds % 1.0;
+            double G(double c, double w) => Math.Exp(-((ph - c) / w) * ((ph - c) / w));
+            return 1 + BeatOver * G(0.26, 0.07) + 0.5 * BeatOver * G(0.55, 0.06) - BeatSqueeze * G(0.10, 0.05) - 0.6 * BeatSqueeze * G(0.42, 0.045);
+        }
+
+        // the heart's matrix before the ball's placement: Beat's scale about the ball's centre (model space)
+        public static OpenTK.Mathematics.Matrix4 BeatAbout(OpenTK.Mathematics.Vector3 center, double seconds)
+            => OpenTK.Mathematics.Matrix4.CreateTranslation(-center) * OpenTK.Mathematics.Matrix4.CreateScale((float)Beat(seconds))
+             * OpenTK.Mathematics.Matrix4.CreateTranslation(center);
+
         // The glow between the halves as a GX program: one stage giving out the core colour, unlit
         public static GxMaterial CoreMaterial(Vector3 core)
         {

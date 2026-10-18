@@ -7,7 +7,8 @@ using OpenTK.Mathematics;
 namespace MphRead
 {
     // -hyperballtest: Dark Samus's morph ball (MphRead PlayerHyperBall.cs, docs/DARK_SAMUS_HYPER.md H1).
-    //   hop: the jump button lifts the ball at once, as high as a bomb jump (vanilla Samus's own bomb jump measured too)
+    //   hop: the jump button lifts the ball at once, as high as a bomb jump (vanilla Samus's own bomb jump measured too), in
+    //   replays from format 32-43 only (Settings.NoBallJump = false); from format 44 the jump button does nothing in the ball
     //   hyper: the bomb button held spends 30 UA then 4 a frame, places no bomb, hurts an enemy in reach, never a
     //          teammate, and stops when UA runs out; by Corruption's rules (Settings.HyperBallCorruption, the default) 2 a
     //          zap every 2 frames (60 in 60 frames), by the starting ones (replays before format 34) 12 per 15 frames (48)
@@ -18,6 +19,7 @@ namespace MphRead
     //   kick: by Corruption's rules the arcs to the floor kick the ball about (it moves, and the same way on every run);
     //          by the starting ones it stays put
     //   old: with Settings.HyperBall = false (replays before format 32) she bombs like Samus and the jump button does nothing
+    //   public: a public build's match (HyperBall unset) has no Hyper Ball (owner 2026-10-18), and its replay says so
     internal static class HyperBallTest
     {
         public static void Run(string[] args)
@@ -25,7 +27,7 @@ namespace MphRead
             if (!ToolPaths.UseDesktopExtraction()) return;
             bool pass = Hop() & Hyper(teams: false, corruption: true) & Hyper(teams: true, corruption: true)
                 & Hyper(teams: false, corruption: false) & Hyper(teams: true, corruption: false) & Kick() & Reach() & Puppet()
-                & Old() & Net() & Solo();
+                & Old() & Public() & Net() & Solo();
             if (Array.IndexOf(args, "bots") >= 0)
             {
                 Bots();
@@ -33,10 +35,10 @@ namespace MphRead
             Console.WriteLine(pass ? "PASS hyperballtest" : "FAIL hyperballtest");
         }
 
-        private static CampaignHost Start(bool? hyper, bool teams, out PlayerEntity me, out PlayerEntity other, bool? corruption = null)
+        private static CampaignHost Start(bool? hyper, bool teams, out PlayerEntity me, out PlayerEntity other, bool? corruption = null, bool? noJump = null)
         {
             var settings = new MatchSettings { Mode = teams ? GameMode.BattleTeams : GameMode.Battle,
-                Arena = MatchArenas.Find("Combat Hall")!.Name, HyperBall = hyper, HyperBallCorruption = corruption };
+                Arena = MatchArenas.Find("Combat Hall")!.Name, HyperBall = hyper, HyperBallCorruption = corruption, NoBallJump = noJump };
             settings.Players.Add(new MatchPlayer { Hunter = Hunter.Samus, Character = "darksamus", Nickname = "Player1", Team = 0 });
             settings.Players.Add(new MatchPlayer { Hunter = Hunter.Kanden, Bot = true, Team = teams ? 0 : 1 });
             if (teams)
@@ -97,19 +99,33 @@ namespace MphRead
                 (bombPeak, int bombStart) = Rise(host, samus, CampaignButtons.AltAttack, 150);
                 Console.WriteLine($"[hop] bomb jump: peak {bombPeak:0.000} after {bombStart} frames");
             }
-            using (CampaignHost host = Start(hyper: null, teams: false, out PlayerEntity me, out _))
+            bool ok;
+            // a replay from before the hop was removed (format 32-43)
+            using (CampaignHost host = Start(hyper: null, teams: false, out PlayerEntity me, out _, noJump: false))
             {
                 Morph(host, me);
                 (float peak, int start) = Rise(host, me, CampaignButtons.Jump, 150);
-                Console.WriteLine($"[hop] ball hop: peak {peak:0.000} after {start} frames, hops {me.BallJumps}");
-                bool ok = me.BallJumps == 1 && start >= 0 && start <= 1 && bombPeak > 0.3f
+                Console.WriteLine($"[hop] old ball hop: peak {peak:0.000} after {start} frames, hops {me.BallJumps}");
+                ok = me.BallJumps == 1 && start >= 0 && start <= 1 && bombPeak > 0.3f
                     && Math.Abs(peak - bombPeak) <= bombPeak * 0.15f;
                 if (!ok)
                 {
                     Console.WriteLine("[hop] FAIL: expected one hop rising at once to about the bomb jump's peak");
                 }
-                return ok;
             }
+            // now (owner 2026-10-18): no hop
+            using (CampaignHost host = Start(hyper: null, teams: false, out PlayerEntity me, out _))
+            {
+                Morph(host, me);
+                (float peak, _) = Rise(host, me, CampaignButtons.Jump, 60);
+                Console.WriteLine($"[hop] now: jump button rise {peak:0.000}, hops {me.BallJumps}");
+                if (peak >= 0.05f || me.BallJumps != 0)
+                {
+                    Console.WriteLine("[hop] FAIL: expected no hop");
+                    ok = false;
+                }
+            }
+            return ok;
         }
 
         private static bool Hyper(bool teams, bool corruption)
@@ -377,6 +393,36 @@ namespace MphRead
                 Console.WriteLine("[old] FAIL: expected a bomb, no hop and no Hyper Ball (vanilla Samus)");
             }
             return ok;
+        }
+
+        private static bool Public()
+        {
+            bool saved = MphRecomp.Config.RecompSettings.PublicBuild;
+            try
+            {
+                MphRecomp.Config.RecompSettings.PublicBuild = true;
+                using CampaignHost host = Start(hyper: null, teams: false, out PlayerEntity me, out _);
+                Morph(host, me);
+                int bombs = me.HyperBallBombAmmo;
+                host.Step(new CampaignInput { Buttons = CampaignButtons.AltAttack });
+                host.Step(default);
+                var file = new MphRecomp.Replay.ReplayFile { Settings = new MatchSettings() };
+                using var ms = new System.IO.MemoryStream();
+                file.Write(ms);
+                ms.Position = 0;
+                bool? recorded = MphRecomp.Replay.ReplayFile.Read(ms).Settings.HyperBall;
+                Console.WriteLine($"[public] hyper ball {me.HostHyperBall}, bombs {bombs}->{me.HyperBallBombAmmo}, replay records {recorded}");
+                bool ok = !me.HostHyperBall && me.HyperBallBombAmmo == bombs - 1 && recorded == false;
+                if (!ok)
+                {
+                    Console.WriteLine("[public] FAIL: expected no Hyper Ball, a bomb, and a replay that records it off");
+                }
+                return ok;
+            }
+            finally
+            {
+                MphRecomp.Config.RecompSettings.PublicBuild = saved;
+            }
         }
     }
 }

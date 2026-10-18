@@ -27,12 +27,15 @@ namespace SecondHunt.Server
         public int MaxMatches { get; set; } = 4;
         // arguments before the match host's own (the selftest runs this server's binary as a stand-in: --fake-matchhost)
         public List<string> Prefix { get; set; } = new();
+        // arguments after the server's own for every served game's match host (--matchhost-args "--time 20": tests)
+        public List<string> Extra { get; set; } = new();
 
         public static ServedConfig FromArgs(string[] args, Func<string[], string, string?> arg) => new()
         {
             Exe = arg(args, "--matchhost") ?? "",
             Data = arg(args, "--matchhost-data") ?? "",
             MaxMatches = Int32.TryParse(arg(args, "--max-matches"), out int max) ? Math.Max(0, max) : 4,
+            Extra = (arg(args, "--matchhost-args") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList(),
         };
     }
 
@@ -92,6 +95,7 @@ namespace SecondHunt.Server
                 }
                 _servedVersion = version;
                 Console.WriteLine($"served games: on, game version {version}, up to {Served.MaxMatches} at once");
+                ReadServedArenas(); // (Find Game: HubServedFind.cs)
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
@@ -112,10 +116,10 @@ namespace SecondHunt.Server
 
         // (under _gamesLock) may a new game with this info be served here
         private bool CanServe(GameInfo info) => _servedVersion != null && !Draining && info.Version == _servedVersion
-            && !info.ExtraArena && info.Mods == GameInfo.NoMods && _games.Values.Count(g => g.MatchHost != null) < Served.MaxMatches;
+            && (!info.ExtraArena || _servedArenas?.Contains(info.Arena) == true) && info.Mods == GameInfo.NoMods && _games.Values.Count(g => g.MatchHost != null) < Served.MaxMatches;
 
         // (under _gamesLock) the match host for this game on relay slot 0 (null = it didn't start: the game isn't served)
-        private MatchHostProcess? StartMatchHost(Game g, Relay.Member slot0, int ownerSlot)
+        private MatchHostProcess? StartMatchHost(Game g, Relay.Member slot0, int ownerSlot, IEnumerable<string>? extra = null)
         {
             var psi = new ProcessStartInfo(Served.Exe)
             {
@@ -128,6 +132,10 @@ namespace SecondHunt.Server
                 "--owner", ownerSlot.ToString(), "--seats", g.Info.MaxPlayers.ToString(), "--mode", g.Info.Mode, "--arena", g.Info.Arena,
                 "--stats", "60",
             })
+            {
+                psi.ArgumentList.Add(a);
+            }
+            foreach (string a in (extra ?? []).Concat(Served.Extra))
             {
                 psi.ArgumentList.Add(a);
             }
@@ -218,6 +226,7 @@ namespace SecondHunt.Server
                     break;
                 case "started":
                     SetStarted(g, true);
+                    FindOwnerAfterStart(g); // (a Find Game match: HubServedFind.cs)
                     break;
                 case "lobby":
                     SetStarted(g, false);

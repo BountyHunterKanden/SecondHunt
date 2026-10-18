@@ -21,8 +21,13 @@ namespace SecondHunt.MatchHost
     //                                          !lobby             the match is over: the lobby again
     //                                          !bye <reason>      leaving
     // A closed stdin counts as stop: this process never outlives the server that started it.
+    // --find (a Find Game match the server opened, HubServedFind.cs): no owner until the first match; this host starts it
+    // itself like a player host's device did (OnlineMenus.Find.cs TickFind): all --expect players in, none choosing or on the
+    // results -> 3 s -> START; after 25 s it starts with whoever is in (2 or more), or leaves when that's fewer.
     internal static class ControlMode
     {
+        private const long FindStartDelayMs = 3000, FindStartLateMs = 25000;
+
         public static int Run(Program.Options o, string romKey)
         {
             var relayInfo = new RelayInfo { Host = o.RelayHost, Port = o.RelayPort, Token = o.Token, Slot = 0 };
@@ -36,11 +41,34 @@ namespace SecondHunt.MatchHost
             Program.Log($"served game: {template.Mode} in {template.Arena}, up to {o.Seats} seats, owner slot {o.Owner}, relay {relay.Relay}");
             Say($"ready {OnlineMatch.VersionKey(romKey)}");
             string bye = "stopped";
+            bool findStart = o.Find && o.Expect > 0;
+            long readyAt = Environment.TickCount64, startAt = 0;
             try
             {
                 while (!stop.IsCancellationRequested)
                 {
-                    if (net.TakeOwnerStart(out string reason))
+                    bool go = net.TakeOwnerStart(out string reason);
+                    if (!go && findStart)
+                    {
+                        long now = Environment.TickCount64;
+                        int joined = net.Joined;
+                        bool all = joined >= o.Expect && net.StillChoosing().Count == 0 && net.NotBack().Count == 0;
+                        if (!all) startAt = 0;
+                        else if (startAt == 0) startAt = now + FindStartDelayMs;
+                        bool late = now - readyAt >= FindStartLateMs;
+                        if (startAt > 0 && now >= startAt || late && joined >= 2)
+                        {
+                            Program.Log($"find: starting with {joined}/{o.Expect}");
+                            go = true;
+                        }
+                        else if (late)
+                        {
+                            Program.Log($"find: only {joined}/{o.Expect} came in {FindStartLateMs / 1000} s");
+                            bye = "nobody came";
+                            break;
+                        }
+                    }
+                    if (go)
                     {
                         string arena = net.Settings!.Arena;
                         if (net.Lacking(arena) is { Count: > 0 } lacking)
@@ -55,6 +83,7 @@ namespace SecondHunt.MatchHost
                             continue;
                         }
                         net.SendStart();
+                        findStart = false; // (the next matches: the lobby's owner starts them, the server names one now)
                         Say("started");
                         Program.Play(net, o.Stats, stop.Token, ended =>
                         {

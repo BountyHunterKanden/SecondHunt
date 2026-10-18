@@ -149,6 +149,11 @@ internal sealed partial class CampaignRenderer
             _orbitStart = deg;
             _soloOrbit = true;
         }
+        if (!MphRecomp.Config.RecompSettings.PublicBuild && float.TryParse(args.Get("orbitzoom"), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out float zoom))
+        {
+            _orbitZoom = Math.Clamp(zoom, OrbitZoomMin, OrbitZoomMax); // dev: the orbit's first distance (close-up captures)
+        }
         _soloFirstPerson = args.Get("fp") == "1" && !_soloOrbit;
         SetThirdPerson(!_soloFirstPerson); // whatever RECOMP SETTINGS' camera says (ReloadAimFromSettings keeps it)
         ConfigurePlacer(args); // --es place 1: the pickup placement editor (PickupPlacer.cs)

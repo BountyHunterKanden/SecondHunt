@@ -58,6 +58,7 @@
   ],
   "items": [
     "bodies/MP2DarkSamus",
+    "bodies/MP2DarkSamusFinal",
     "guns/MP2DarkSuit",
     "guns/MP2LightSuit",
     "guns/MP2VariaSuit",
@@ -65,6 +66,8 @@
     "hd/MP2DarkPirateTrooper",
     "hd/MP2DarkSamus",
     "hd/MP2DarkSamusBall",
+    "hd/MP2DarkSamusFinal",
+    "hd/MP2DarkSamusFinalBall",
     "hd/MP2DarkSuit",
     "hd/MP2DarkSuitBall",
     "hd/MP2LightSuit",

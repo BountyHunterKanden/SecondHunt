@@ -105,6 +105,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (statusText != _statusText) _statusMode = statusText ? 0 : 2;
         _statusText = statusText;
         ApplyCameraSetting(s);
+        // SETTINGS > LOOK > DISPLAY (CampaignSmoothFrames.cs); off in a public build (owner 2026-10-18: not in the next release)
+        _smoothFrames = s.SmoothFrames && !MphRecomp.Config.RecompSettings.PublicBuild;
         // the control customizer's buttons (OPTIONS > CONTROLS, the ship's OPTIONS; Config/ControlBinds.cs)
         _padBinds.Load(s);
         _chatToggle = s.ChatToggle; // the CHAT button: hold or toggle (MatchChat.cs)
@@ -404,11 +406,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
         PlayerEntity p = _host.Player;
         if (p.IsAltForm)
         {
-            if (_suit!.HasBall && p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson)) _suit.DrawBall(p, scene.ViewMatrix, scene.PerspectiveMatrix, pass);
+            if (_suit!.HasBall && p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson)) _suit.DrawBall(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass);
         }
         else if (_suit!.HasBody && PlayerEntity.HostMainBipedAlpha > 0 && !_bodyCut)
         {
-            _suit.DrawBody(p, scene.ViewMatrix, scene.PerspectiveMatrix, pass, PlayerEntity.HostMainBipedAlpha);
+            _suit.DrawBody(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, PlayerEntity.HostMainBipedAlpha);
         }
         GLES30.GlUseProgram(_program);
         GLES30.GlBindVertexArray(0);
@@ -785,6 +787,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
                         SetPlayerHooks(false);
                     }
                     _gun?.Viewmodel.Update(_host.Player, 1 / 60f);
+                    SmoothRecordStep(); // smooth frames: this step's camera and entities (CampaignSmoothFrames.cs)
                     StepBossSkip(); // CampaignBossSkip.cs: dev "Escape tests" start, a no-op otherwise
                     if (!_host.Ended)
                     {
@@ -828,7 +831,16 @@ internal sealed partial class CampaignRenderer : IGlScreen
         var draw = Stopwatch.StartNew();
         long drawAlloc = GC.GetAllocatedBytesForCurrentThread();
         GpuTimerBegin();
-        Render();
+        Scene? smoothScene = ViewScene;
+        SmoothBegin(smoothScene); // a picture between steps: the carried view (CampaignSmoothFrames.cs)
+        try
+        {
+            Render();
+        }
+        finally
+        {
+            SmoothEnd(smoothScene);
+        }
         // the in-ship menu / take-off movie (CampaignShip.cs); the control customizer opened from its OPTIONS shows over
         // it, the ship darkened a lot under it (owner 2026-10-05: it stays in the ship; drawn plain it was too busy)
         if (ShipOpen)
@@ -1548,17 +1560,17 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (pass == CampaignGun.GunPass.Full && _gun.HasDepthPass)
         {
             GLES30.GlColorMask(false, false, false, false);
-            _gun.Draw(model, scene.ViewMatrix, proj, _gunTint, seconds, CampaignGun.GunPass.Prepass);
+            _gun.Draw(model, GunView(scene), proj, _gunTint, seconds, CampaignGun.GunPass.Prepass);
             GLES30.GlColorMask(true, true, true, true);
             pass = CampaignGun.GunPass.AfterPrepass;
         }
         if (pass == CampaignGun.GunPass.Prepass)
         {
             GLES30.GlColorMask(false, false, false, false);
-            _gun.Draw(model, scene.ViewMatrix, proj, _gunTint, seconds, pass);
+            _gun.Draw(model, GunView(scene), proj, _gunTint, seconds, pass);
             GLES30.GlColorMask(true, true, true, true);
         }
-        else _gun.Draw(model, scene.ViewMatrix, proj, _gunTint, seconds, pass);
+        else _gun.Draw(model, GunView(scene), proj, _gunTint, seconds, pass);
         GLES30.GlUseProgram(_program);
         GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
         GLES30.GlDepthFunc(restoreDepthFunc);
@@ -1640,6 +1652,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             SetMatrix(U("u_bones"), item.Transform);
         }
+        SmoothItemView(item, scene); // its entity carried on (CampaignSmoothFrames.cs)
         SetMatrix(U("u_billboard"), item.BillboardMode == BillboardMode.Sphere ? scene.ViewInvRotMatrix
             : item.BillboardMode == BillboardMode.Cylinder ? scene.ViewInvRotYMatrix : Matrix4.Identity);
         // DoMaterial
@@ -1848,7 +1861,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
     int _gpuHead, _gpuCount, _gpuLogSecond, _gpuLogLines, _perfQuads, _perfItems, _gpuSlot, _gpuAvgWindow = -1;
     int _gpuWholeN, _gpuSplitN;
     double _gpuWholeSum, _gpuSplitSum;
-    bool _gpuTimer, _gpuBegun, _gpuSplit, _gpuSplitNext;
+    bool _gpuTimer, _gpuBegun, _gpuSplit, _gpuSplitNext, _gpuDisjointFlag;
 
     static int[][] NewGpuDrawn()
     {
@@ -1865,7 +1878,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
         _gpuTimer = _gpuBegun = false;
         _gpuHead = _gpuCount = 0;
         string ext = GLES30.GlGetString(GLES30.GlExtensions) ?? "";
-        if (!ext.Contains("GL_EXT_disjoint_timer_query"))
+        // desktop GL (the Windows host): ARB_timer_query (core since 3.3), the same queries without a disjoint flag
+        _gpuDisjointFlag = ext.Contains("GL_EXT_disjoint_timer_query");
+        if (!_gpuDisjointFlag && !ext.Contains("GL_ARB_timer_query"))
         {
             Log.Info("MPHGpu", "no GL_EXT_disjoint_timer_query: GPU frame times not logged");
             return;
@@ -1974,7 +1989,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
             }
             _gpuHead = (_gpuHead + 1) % GpuSlots;
             _gpuCount--;
-            GLES30.GlGetIntegerv(GpuDisjointExt, _gpuTmp, 0);
+            _gpuTmp[0] = 0;
+            if (_gpuDisjointFlag) GLES30.GlGetIntegerv(GpuDisjointExt, _gpuTmp, 0);
             if (_gpuTmp[0] != 0)
             {
                 continue; // disjoint: a GPU clock change made the time meaningless

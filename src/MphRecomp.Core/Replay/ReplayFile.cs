@@ -121,9 +121,13 @@ namespace MphRecomp.Replay
     //   aim, shots: ReplayState.AddTurret); older files' checksums were taken without it (OldTurretHash), so they verify.
     //   Format 43: the same layout; same-hunter recolours count per character + skin (Settings.RecolorPerSkin,
     //   LookAlikes.SameLookKey); older files read it as off (per look / hunter), so they play exactly.
+    //   Format 44: the same layout; Dark Samus's morph ball no longer hops on the jump button (Settings.NoBallJump); older
+    //   files read it as off, so their hops play exactly.
+    //   Format 45 adds Settings.HyperBall after PirateBlaster, as the match played it: a public build has no Hyper Ball
+    //   (owner 2026-10-18), so null no longer says on; formats 32-44 read it as on (every build had it), so they play exactly.
     public sealed class ReplayFile
     {
-        public const int FormatVersion = 43;
+        public const int FormatVersion = 45;
         // Bump when a code change alters how a match plays: an old replay then is refused instead of drifting.
         // (R2c: golden replays checked on every build say when.)
         // 2 (R1): matches play with Scene.HostDrawFreeSim (Spire's rocks placed whether or not a frame draws).
@@ -249,6 +253,7 @@ namespace MphRecomp.Replay
                 }
                 WriteOpt(w, Settings.Abilities);
                 WriteOpt(w, Settings.PirateBlaster); // format 23
+                w.Write(Settings.HyperBall ?? !MphRecomp.Config.RecompSettings.PublicBuild); // format 45: as MatchStart played it
                 w.Write(Steps.Count);
                 foreach (ReplayStep step in Steps)
                 {
@@ -388,7 +393,7 @@ namespace MphRecomp.Replay
             file.Settings.PlacedPickups = format >= 29 ? null : false; // not written: on from format 29
             file.Settings.BotTickPace = format >= 30 ? null : false; // not written: on from format 30
             file.Settings.TeamHitsIgnored = format >= 31 ? null : false; // not written: on from format 31
-            file.Settings.HyperBall = format >= 32 ? null : false; // not written: on from format 32
+            file.Settings.HyperBall = format >= 32; // on from format 32 (from format 45 the file says, after PirateBlaster)
             file.Settings.Paralyzer = format >= 33 ? null : false; // not written: on from format 33
             file.Settings.HyperBallCorruption = format >= 34 ? null : false; // not written: on from format 34
             file.Settings.DroneBodyHeadshots = format >= 35 ? null : false; // not written: on from format 35
@@ -399,6 +404,7 @@ namespace MphRecomp.Replay
             file.Settings.ShockCoilGrace = format >= 40 ? null : false; // not written: on from format 40
             file.Settings.EchoesTurretBots = format >= 41 ? null : false; // not written: on from format 41
             file.Settings.RecolorPerSkin = format >= 43 ? null : false; // not written: on from format 43
+            file.Settings.NoBallJump = format >= 44 ? null : false; // not written: on from format 44
             file.OldTurretHash = format < 42;
             file.OldEchoesWater = format < 16 && file.Settings.EchoesMoves != false
                 && file.Settings.Arena == MphRecomp.Arenas.EchoesArena.Find("M04_Pipeline")?.Room;
@@ -458,6 +464,7 @@ namespace MphRecomp.Replay
             }
             file.Settings.Abilities = format >= 22 ? (r.ReadBoolean() ? r.ReadBoolean() : null) : null;
             file.Settings.PirateBlaster = format >= 23 ? (r.ReadBoolean() ? r.ReadBoolean() : null) : false;
+            if (format >= 45) file.Settings.HyperBall = r.ReadBoolean();
             steps = r.ReadInt32();
             if (headerOnly)
             {
@@ -508,7 +515,7 @@ namespace MphRecomp.Replay
             copy.PlacedPickups = s.PlacedPickups; // format 29 (not written)
             copy.BotTickPace = s.BotTickPace; // format 30 (not written)
             copy.TeamHitsIgnored = s.TeamHitsIgnored; // format 31 (not written)
-            copy.HyperBall = s.HyperBall; // format 32 (not written)
+            copy.HyperBall = s.HyperBall; // format 32 (written from format 45)
             copy.Paralyzer = s.Paralyzer; // format 33 (not written)
             copy.HyperBallCorruption = s.HyperBallCorruption; // format 34 (not written)
             copy.DroneBodyHeadshots = s.DroneBodyHeadshots; // format 35 (not written)
@@ -519,6 +526,7 @@ namespace MphRecomp.Replay
             copy.ShockCoilGrace = s.ShockCoilGrace; // format 40 (not written)
             copy.EchoesTurretBots = s.EchoesTurretBots; // format 41 (not written)
             copy.RecolorPerSkin = s.RecolorPerSkin; // format 43 (not written)
+            copy.NoBallJump = s.NoBallJump; // format 44 (not written)
             copy.Abilities = s.Abilities; // after the Skins (format 22)
             copy.PirateBlaster = s.PirateBlaster; // after Abilities (format 23)
             copy.ExtraCharacters = s.ExtraCharacters; // (not recorded: the seats already have them stripped)

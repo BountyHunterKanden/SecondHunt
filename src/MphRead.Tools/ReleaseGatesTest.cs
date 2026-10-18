@@ -76,6 +76,9 @@ namespace MphRead
                     // (the campaign's radar + mini map: dev only; a match's radar comes with the radar rule, owner 2026-10-17)
                     Check($"{b}, settings has the hud row", labels.Contains("hud"), !pub);
                     Check($"{b}, settings has the map mode row", labels.Contains("map\nmode"), true);
+                    // high frame rate: not in the next release (owner 2026-10-18; the frame rate row is PC only anyway)
+                    Check($"{b}, settings has the smooth frames row", labels.Contains("smooth\nframes"), !pub);
+                    Check($"{b}, settings has the frame rate row", labels.Contains("frame\nrate"), false);
                     Check($"{b}, settings has Prime song rows", labels.Count(l => l.Contains("song", StringComparison.OrdinalIgnoreCase)
                         || l.StartsWith("match\nmusic", StringComparison.Ordinal) || l.StartsWith("menu\nmusic", StringComparison.Ordinal)) > 0, !pub);
                     Console.WriteLine($"  {b} rows: " + String.Join(", ", labels.Select(l => l.Replace('\n', ' '))));

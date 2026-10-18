@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -22,6 +23,12 @@ namespace SecondHunt.Server
             if (args.Contains("--version"))
             {
                 Console.WriteLine(ServedVersion);
+                return 0;
+            }
+            if (args.Contains("--arenas"))
+            {
+                Console.WriteLine("Fiend");
+                Console.WriteLine("Vault");
                 return 0;
             }
             Console.WriteLine($"!ready {ServedVersion}");
@@ -102,7 +109,89 @@ namespace SecondHunt.Server
             crash?.Kill();
             Check(cg.Game.Info.Served && (await crashed)?.Reason == "the server's match ended", "served: its match host dying closes the game");
 
-            foreach (OnlineClient c in new[] { o, a, old, p })
+            // Find Game (HubServedFind.cs): the vote is over -> the server opens the match's game, nobody is told to host; the
+            // players join it; the first start makes the vote's pick (the best ping) the lobby's owner
+            hub.Find = FindConfig.Fast;
+            OnlineClient fx = await Connect(uri, OnlineIdentity.Create(), "Findx");
+            OnlineClient fy = await Connect(uri, OnlineIdentity.Create(), "Findy");
+            FindStartReq Search(int ping, string arena) => new()
+            {
+                Version = ServedVersion, Modes = new List<string> { "Battle" }, PingMs = ping,
+                Arenas = new Dictionary<string, List<string>> { ["Battle"] = new() { arena } },
+            };
+            var gx = Next<FindEvent>(fx, e => e.State is FindState.Game or FindState.Host, 10000);
+            var gy = Next<FindEvent>(fy, e => e.State is FindState.Game or FindState.Host, 10000);
+            await fx.RequestAsync<OkMsg>(Search(20, "Fiend"));
+            await fy.RequestAsync<OkMsg>(Search(40, "Fiend"));
+            FindEvent? ex = await gx, ey = await gy;
+            string fid = ex?.GameId ?? "";
+            Check(ex?.State == FindState.Game && ey?.State == FindState.Game && fid.Length > 0 && ey.GameId == fid
+                && hub.MatchHostOf(fid) is { HasExited: false }, "served find: the server opens the match's game, both players are sent to it");
+            GameMsg jx = await fx.RequestAsync<GameMsg>(new JoinGameReq { GameId = fid, Version = ServedVersion, Served = true });
+            GameMsg jy = await fy.RequestAsync<GameMsg>(new JoinGameReq { GameId = fid, Version = ServedVersion, Served = true });
+            Check(jx.Game.Info.Served && !jx.Game.Info.Public && jx.Relay.Slot >= 1 && jy.Relay.Slot >= 1 && jx.Relay.Slot != jy.Relay.Slot,
+                "served find: the players join it as joiners (no one on the match host's slot)");
+            var ownerEv = Next<MemberEvent>(fy, e => e.GameId == fid && e.Owner != null, ms: 3000);
+            hub.MatchHostSays(fid, "!started");
+            Check((await ownerEv)?.Owner == fx.Me.Code, "served find: the first match started -> the best ping owns the lobby");
+
+            // the server is full (cap 1): the next match is player-hosted as before
+            OnlineClient fz = await Connect(uri, OnlineIdentity.Create(), "Findz");
+            OnlineClient fw = await Connect(uri, OnlineIdentity.Create(), "Findw");
+            var hz = Next<FindEvent>(fz, e => e.State is FindState.Game or FindState.Host or FindState.Join, 10000);
+            var hw = Next<FindEvent>(fw, e => e.State is FindState.Game or FindState.Host or FindState.Join, 10000);
+            await fz.RequestAsync<OkMsg>(Search(20, "Vault"));
+            await fw.RequestAsync<OkMsg>(Search(40, "Vault"));
+            FindEvent? ez = await hz, ew = await hw;
+            Check(ez?.State == FindState.Host && ew?.State == FindState.Join, "served find: at the cap a player hosts the match as before");
+            Process? fmh = hub.MatchHostOf(fid);
+            await fx.RequestAsync<OkMsg>(new LeaveGameReq());
+            await fy.RequestAsync<OkMsg>(new LeaveGameReq());
+            Check(fmh != null && fmh.WaitForExit(5000), "served find: everyone gone -> the server is free again");
+
+            // 0.8.2: an imported arena is served when the match host has it (its --arenas), else player-hosted as before
+            GameInfo echoes = Info(pub: false);
+            echoes.Served = true;
+            echoes.ExtraArena = true;
+            echoes.Arena = "ECHOES SPIRES";
+            GameMsg eg = await p.RequestAsync<GameMsg>(new HostGameReq { Info = echoes });
+            Check(!eg.Game.Info.Served && hub.MatchHostOf(eg.Game.Id) == null, "served: an imported arena the match host lacks is player-hosted");
+            await p.RequestAsync<OkMsg>(new LeaveGameReq());
+
+            // 0.8.2: a party leader's served game in an imported arena the match host has: the member is sent to it; 8 players
+            // seat on slots 1-8 (slot 0 = the match host), a 9th is turned away
+            OnlineClient lead = await Connect(uri, OnlineIdentity.Create(), "Partylead");
+            OnlineClient mem = await Connect(uri, OnlineIdentity.Create(), "Partymem");
+            await Friends(lead, mem);
+            var invite = Next<PartyInviteEvent>(mem);
+            await lead.RequestAsync<OkMsg>(new PartyInviteReq { Code = mem.Me.Code });
+            await mem.RequestAsync<PartyMsg>(new PartyJoinReq { PartyId = (await invite)!.PartyId });
+            var follow = Next<PartyGameEvent>(mem);
+            echoes.Arena = "Vault";
+            echoes.Public = true;
+            echoes.MaxPlayers = 8;
+            GameMsg vg = await lead.RequestAsync<GameMsg>(new HostGameReq { Info = echoes });
+            string vid = vg.Game.Id;
+            Check(vg.Game.Info.Served && vg.Game.Info.MaxPlayers == 8 && hub.MatchHostOf(vid) is { HasExited: false },
+                "served: an imported arena the match host has is served, 8 seats");
+            Check((await follow)?.GameId == vid, "served: the party member is sent to the leader's served game");
+            var slots = new List<int> { vg.Relay.Slot };
+            var seated = new List<OnlineClient> { lead, mem };
+            slots.Add((await mem.RequestAsync<GameMsg>(new JoinGameReq { GameId = vid, Version = ServedVersion, Served = true })).Relay.Slot);
+            for (int i = 0; i < 7; i++)
+            {
+                OnlineClient c = await Connect(uri, OnlineIdentity.Create(), $"Seat{i}");
+                seated.Add(c);
+                if (i < 6)
+                {
+                    slots.Add((await c.RequestAsync<GameMsg>(new JoinGameReq { GameId = vid, Version = ServedVersion, Served = true })).Relay.Slot);
+                }
+            }
+            Check(slots.Order().SequenceEqual(Enumerable.Range(1, 8)), $"served: 8 players sit on slots 1-8 ({string.Join(",", slots)})");
+            Check(await ErrorOf(() => seated[^1].RequestAsync<GameMsg>(new JoinGameReq { GameId = vid, Version = ServedVersion, Served = true }))
+                == "full", "served: a 9th player is turned away (full)");
+
+            foreach (OnlineClient c in new[] { o, a, old, p, fx, fy, fz, fw }.Concat(seated))
             {
                 await c.DisposeAsync();
             }

@@ -3053,8 +3053,11 @@ namespace MphRead
             AddRenderItem(item);
         }
 
+        private EntityBase? _hostItemOwner; // recomp: RenderItem.HostOwner
+
         private void AddRenderItem(RenderItem item)
         {
+            item.HostOwner = _hostItemOwner;
             if (item.RenderMode == RenderMode.Decal)
             {
                 _decalItems.Add(item);
@@ -3184,6 +3187,7 @@ namespace MphRead
                 }
                 if (player.LoadFlags.TestFlag(LoadFlags.Active))
                 {
+                    _hostItemOwner = player; // recomp: RenderItem.HostOwner
                     player.Draw();
                     // skdebug
                     player.GetDisplayVolumes();
@@ -3197,6 +3201,7 @@ namespace MphRead
                 }
                 if (entity.ShouldDraw)
                 {
+                    _hostItemOwner = entity; // recomp: RenderItem.HostOwner
                     entity.GetDrawInfo();
                 }
                 if (_showVolumes != VolumeDisplay.None)
@@ -3205,6 +3210,7 @@ namespace MphRead
                 }
             }
 
+            _hostItemOwner = null;
             if (ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
             {
                 ProcessEffects();

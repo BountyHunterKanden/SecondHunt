@@ -85,8 +85,9 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - Text chat in the lobby and in a match: hold Select and point with the right stick for quick messages, or tap Select
   to type
 - Tap any player's name for their license, your record against them, and MUTE, BLOCK or REPORT
-- Games you create run on the Second Hunt server, so nobody's device is the host. FIND GAME, _Echoes_ arenas and games
-  made while the server is full are hosted by a player as before, and if that host leaves, another player takes over.
+- Online games run on the Second Hunt server, so nobody's device is the host: FIND GAME, games you create, _Echoes_
+  arenas and 8-player games. Only a game made while the server is full is hosted by a player, and if that host
+  leaves, another player takes over.
   If your connection drops, you rejoin where you were.
 - The host can change the mode and rules after creating a game (EDIT RULES in the lobby)
 - Online matches are always in first person (LAN matches can use third person)
@@ -103,7 +104,8 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - TROOPER (from _Metroid Prime_): a Space Pirate trooper with four skins, a wall cling and a Scout Drone alt form.
   A full Pirate Blaster burst marks a target for 4 seconds (Squad Mark), showing them through walls and on the radar
   to him, or to his whole team in team games.
-- DARK SAMUS (from _Echoes_, or from _Corruption_ on either its own disc or the _Metroid Prime Trilogy_ disc)
+- DARK SAMUS (from _Echoes_, or from _Corruption_ on either its own disc or the _Metroid Prime Trilogy_ disc). The
+  _Echoes_ import also adds her overcharged final form as a skin.
 - Six _Echoes_ multiplayer arenas with their music: Sidehopper Station, Spires, Crossfire Chaos, Pipeline, Spider
   Complex and Shooting Gallery, with _Echoes_ movement (double jump, Gravity Boost). Shooting Gallery has its heavy
   turret.

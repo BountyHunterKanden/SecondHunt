@@ -103,6 +103,7 @@ namespace MphRead
             public int Index = 1;
             public Hunter Hunter = Hunter.Sylux;
             public string? Character, Skin;
+            public bool Chars; // served=hub chars=1: a Trooper and a Dark Samus seat (OnlineServedTest.cs)
             public string? Seek; // seek=<ItemType> (0.2.0 pickups bake): joiner 1 walks to that item and logs its weapons + UA
         }
 
@@ -140,6 +141,7 @@ namespace MphRead
                 case "index": o.Index = Int32.Parse(value); break;
                 case "hunter": o.Hunter = Enum.Parse<Hunter>(value, ignoreCase: true); break;
                 case "looks": o.Looks = value != "0"; break;
+                case "chars": o.Chars = value != "0"; break;
                 case "lagcomp": o.LagComp = value != "0"; break;
                 case "strafe": o.Strafe = value != "0"; break;
                 case "rejoin": o.Rejoin = Single.Parse(value, CultureInfo.InvariantCulture); break;
@@ -181,6 +183,7 @@ namespace MphRead
             {
                 return;
             }
+            UseImports();
             Process? server = null;
             var serverOut = new List<string>();
             string? dbDir = null;
@@ -227,7 +230,7 @@ namespace MphRead
                 Directory.CreateDirectory(dbDir);
                 server = Start(Environment.ProcessPath!, $"\"{dll}\" --urls http://127.0.0.1:{http} --db \"{Path.Combine(dbDir, "test.db")}\" "
                     + $"--relay-port {relayPort} --relay-delay {o.Delay} --words none.txt"
-                    + (o.ServedHub ? $" --matchhost \"{MatchHostExe()}\" --matchhost-data \"{MatchHostData()}\"" : "")
+                    + (o.ServedHub ? $" --matchhost \"{MatchHostExe()}\" --matchhost-data \"{MatchHostData()}\"" + ImportsArg() : "")
                     + (turnServer != null ? $" --turn-static \"{turnServer.Url}|{TurnTestServer.User}|{TurnTestServer.Password}\"" : ""),
                     serverOut);
                 uri = new Uri($"ws://127.0.0.1:{http}/v1/ws");
@@ -799,6 +802,7 @@ namespace MphRead
             {
                 return;
             }
+            UseImports();
             var uri = new Uri(o.Server!);
             string name = $"PC {o.Index}";
             OnlineIdentity me = (o.Code != null ? OnlineIdentity.FromBackupCode(o.Code) : null) ?? OnlineIdentity.Create();

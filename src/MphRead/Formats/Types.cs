@@ -73,6 +73,8 @@ namespace MphRead
         public int ItemCount { get; set; }
         public float ScaleS { get; set; }
         public float ScaleT { get; set; }
+        // recomp: the entity that drew it (Scene.GetDrawItems), for the host's smooth frames; null for the room and effects
+        public Entities.EntityBase? HostOwner { get; set; }
 
         public RenderItem()
         {

@@ -73,6 +73,8 @@ namespace MphRecomp.Import.Hd
             public int Textures, Materials;
             public Cinf? Skeleton;
             public readonly List<string> Log = new();
+            // textures changed as they are written, by id (VeinBall: the vents' and lines' bright parts alone)
+            public readonly Dictionary<ulong, Action<byte[]>> TexFilters = new();
         }
 
         // Prime 1 / Echoes: a character from its ANCS (or a static model by its CMDL id), with the joined and attached models
@@ -135,6 +137,7 @@ namespace MphRecomp.Import.Hd
                 result.Parts.Add(new Part { Model = g, Mats = g.Materials.Select(Mat.From).ToArray(), P = ToTrophy(g.Positions, s, at), N = ToTrophy(g.Normals, 1.0, null), Tag = $"att{k}_mat", Owner = a.Bone });
                 Say(0.1f, $"attached {a.Cmdl:x8} at {a.Locator} on {a.Bone}: {g.PositionCount} positions, {g.TriangleCount} triangles");
             }
+            if (h.Veins != null) VeinBall.Build(res, h, result, s, Say);
             ct.ThrowIfCancellationRequested();
             return Finish(id => res(checked((uint)id)), result, h, outDir, Say, ct);
         }
@@ -273,6 +276,7 @@ namespace MphRecomp.Import.Hd
                     continue;
                 }
                 h.Recolor?.Apply(t, rgba);
+                if (result.TexFilters.TryGetValue(t, out Action<byte[]>? filter)) filter(rgba);
                 PngOut.Write(Path.Combine(outDir, $"{t:x8}.png"), Txtr.FlipRows(rgba, tw, th), tw, th);
                 result.Textures++;
             }
@@ -319,7 +323,7 @@ namespace MphRecomp.Import.Hd
         };
 
         // Retro (Z up, facing +Y) -> trophy (Y up, facing +Z): (x, y, z) -> (-x, z, y) * s, after an optional offset
-        static double[] ToTrophy(float[] xyz, double s, double[]? offset)
+        internal static double[] ToTrophy(float[] xyz, double s, double[]? offset)
         {
             var r = new double[xyz.Length / 3 * 3];
             for (int i = 0; i + 2 < xyz.Length; i += 3)

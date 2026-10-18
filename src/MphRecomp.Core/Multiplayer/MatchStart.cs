@@ -65,8 +65,10 @@ namespace MphRecomp.Campaign
                 player.HostShockCoilGrace = settings.ShockCoilGrace ?? true;
                 player.HostVanillaZoom = settings.VanillaZoom ?? true;
                 player.HostHoverWalk = Characters.IsDarkSamus(seat) && (settings.HoverWalk ?? true);
-                bool hyperBall = Characters.IsDarkSamus(seat) && (settings.HyperBall ?? true); // her ball hop + Hyper Ball
-                player.HostBallJump = hyperBall;
+                // her ball hop + Hyper Ball; null = on in a dev build, off in a public one (owner 2026-10-18: "I never wanted it
+                // public I'm not done with it": she has her bombs there, as in 0.2.1)
+                bool hyperBall = Characters.IsDarkSamus(seat) && (settings.HyperBall ?? !MphRecomp.Config.RecompSettings.PublicBuild);
+                player.HostBallJump = hyperBall && settings.NoBallJump == false; // hop removed (owner 10-18); old replays keep it
                 player.HostHyperBall = hyperBall;
                 player.HostHyperBallCorruption = hyperBall && (settings.HyperBallCorruption ?? true);
                 player.HostSoloUa = settings.Solo; // the dev solo run: full UA for her Hyper Ball (no pickups to grab first)

@@ -49,6 +49,7 @@ internal sealed class CampaignSuit
         public readonly string?[] Png = new string?[8];
         public readonly bool[] Intensity = new bool[8];
         public readonly int[] Tex = new int[8];
+        public bool Cull;                // front faces only (a vein ball's vents: HdBall.IsVent)
     }
 
     readonly List<float> _build = new();
@@ -67,6 +68,10 @@ internal sealed class CampaignSuit
     // the torso fires (TrophyRigs.OffHandStaysDown), null for everyone else
     Hunter _hunter = Hunter.Samus;
     bool[]? _offArm;
+    // a body converted from its own Retro model with its sheets as the disc has them (the final form Dark Samus, owner
+    // 10-18: "when she jumps she's way brighter"): its additive parts once, its blended ones culled as the disc says --
+    // CampaignRetroBody's look. The trophies keep the doubled sheets (DrawPass)
+    bool _oneSheet;
     Model _dsModel = null!;
     DsSkeleton _skel = null!;
     TrophyRig _rig = null!;
@@ -87,7 +92,9 @@ internal sealed class CampaignSuit
     }
     readonly Dictionary<PlayerEntity, Roll> _rolls = new();
     Roll RollOf(PlayerEntity p) => _rolls.TryGetValue(p, out Roll? r) ? r : _rolls[p] = new Roll();
-    readonly float[] _ballPal = new float[16];
+    readonly float[] _ballPal = new float[32];   // bone 0: the ball; bone 1: its beating heart (HdBall.Beat), else the same
+    bool _ballBeat;                               // the ball has a heart (a vein ball's <stem>_heart0)
+    bool _cullOn;
     // GxShader's uTint for this draw (the interpreter only): w = 1 recolours it (MphRead's red damage flash)
     Vector4 _tint;
     static readonly Vector4 DamageTint = new(1f, 0.28f, 0.22f, 1f);
@@ -322,6 +329,8 @@ internal sealed class CampaignSuit
             Log.Info(Tag, $"suit {Id}: {partTris} triangles of {rm.Name}'s own parts attached (held)");
         }
         if (_body.Count == 0) return $"none (no part of {Path.GetFileName(daePath)} has a GX program: no .brres or .gx.json?)";
+        _oneSheet = Id.Equals("MP2DarkSamusFinal", StringComparison.OrdinalIgnoreCase);
+        if (_oneSheet) foreach (Batch b in _body) b.Cull = b.Pass != 0 && (b.Gx.CullMode & 3) == 2;
         _dsModel = rm;
         _skel = sk;
         _rig = rig;
@@ -422,13 +431,17 @@ internal sealed class CampaignSuit
                 continue;
             }
             int start = _build.Count / Floats;
+            bool heart = HdBall.IsHeart(part.Material);
+            _ballBeat |= heart;
             for (int i = 0; i < part.Positions.Count; i++)
             {
                 System.Numerics.Vector3 q = part.Positions[i];
                 Corner(new Vector3(q.X, q.Y, q.Z), Normal(part, i), part, i);
-                Rigid(0);
+                Rigid(heart ? 1 : 0);
             }
-            _ball.Add(MakeBatch(start, part.Positions.Count, m, info.Folder, formats));
+            Batch nb = MakeBatch(start, part.Positions.Count, m, info.Folder, formats);
+            nb.Cull = HdBall.IsVent(part.Material);
+            _ball.Add(nb);
             tris += part.Positions.Count / 3;
         }
         if (_ball.Count == 0) return $"none (no part of {info.Id} has a GX program)";
@@ -714,7 +727,7 @@ internal sealed class CampaignSuit
             }
             for (int p = 0; p < 3; p++)
             {
-                for (int k = 0; k < (p == 2 ? 2 : 1); k++) // DrawPass's doubled additive sheets
+                for (int k = 0; k < (p == 2 && !_oneSheet ? 2 : 1); k++) // DrawPass's doubled additive sheets
                 {
                     foreach (Batch b in _body)
                     {
@@ -922,13 +935,15 @@ internal sealed class CampaignSuit
         {
             Flash(flash && !rebuild, !rebuild);
             Roll r = RollOf(player);
-            HunterRig.ToArray(HdBall.Placement(_ballCenter, _ballWidth, r.Spin, r.Heading), _ballPal);
+            Matrix4 place = HdBall.Placement(_ballCenter, _ballWidth, r.Spin, r.Heading);
+            HunterRig.ToArray(place, _ballPal);
+            HunterRig.ToArray(_ballBeat ? HdBall.BeatAbout(_ballCenter, Environment.TickCount64 / 1000.0) * place : place, _ballPal, 16);
             float half = HdBall.GameDiameter / 2f;
             Vector3 centre = player.Position;
             centre.Y += Fixed.ToFloat(player.Values.AltColYPos);
             Matrix4 model = Matrix4.CreateTranslation(0, -half, 0) * Matrix4.CreateScale(BallRadius(player) / half)
                 * Matrix4.CreateTranslation(centre);
-            Begin(view, proj, model, _ballPal, 1);
+            Begin(view, proj, model, _ballPal, 2);
             double s = Environment.TickCount64 / 1000.0;
             if (rebuild && _depthProg != 0)
             {
@@ -1005,7 +1020,8 @@ internal sealed class CampaignSuit
         {
             _interpOnly = true;
             HunterRig.ToArray(Matrix4.Identity, _ballPal);
-            Begin(view, proj, Matrix4.Identity, _ballPal, 1);
+            HunterRig.ToArray(Matrix4.Identity, _ballPal, 16);
+            Begin(view, proj, Matrix4.Identity, _ballPal, 2);
             for (int p = 0; p < 3; p++)
             {
                 for (int k = 0; k < (p == 2 ? 2 : 1); k++) // DrawPass's doubled additive sheets
@@ -1053,7 +1069,7 @@ internal sealed class CampaignSuit
     {
         // the additive parts twice: the DAE export collapsed the trophies' two coincident sheets (front + back) into one,
         // and the glow is the stack of both (RenderActivity's finding, 2026-08-12)
-        int times = pass == 2 ? 2 : 1;
+        int times = pass == 2 && !(_oneSheet && batches == _body) ? 2 : 1;
         for (int k = 0; k < times; k++)
         {
             foreach (Batch b in batches)
@@ -1130,6 +1146,16 @@ internal sealed class CampaignSuit
         }
         int func = DepthFunc(P.DepthFunc);
         GLES30.GlDepthFunc(lequal && func == GLES30.GlLess ? GLES30.GlLequal : func);
+        if (b.Cull != _cullOn)
+        {
+            _cullOn = b.Cull;
+            if (_cullOn)
+            {
+                GLES30.GlEnable(0x0B44);   // GL_CULL_FACE, the back (GL_BACK; counter-clockwise faces the camera)
+                GLES30.GlCullFace(0x0405);
+            }
+            else GLES30.GlDisable(0x0B44);
+        }
         GLES30.GlDrawArrays(GLES30.GlTriangles, b.Start, b.Count);
     }
 
@@ -1152,6 +1178,7 @@ internal sealed class CampaignSuit
             GLES30.GlBindSampler(t, 0); // MPH's sampler objects would override the layers' wrap modes
         }
         GLES30.GlDisable(0x0B44); // GL_CULL_FACE: RenderActivity draws the trophies unculled
+        _cullOn = false;
         GLES30.GlBindVertexArray(_vao);
     }
 
@@ -1184,6 +1211,7 @@ internal sealed class CampaignSuit
 
     void End()
     {
+        if (_cullOn) { GLES30.GlDisable(0x0B44); _cullOn = false; } // a culled batch (the vein ball's vents) never outlives the draw
         GLES30.GlActiveTexture(GLES30.GlTexture0);
         GLES30.GlBindVertexArray(0);
     }

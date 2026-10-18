@@ -23,12 +23,14 @@ namespace MphRead
     // FIND GAME (Social track O6; Core Frontend/OnlineMenus.Find.cs, server SecondHunt.Server/HubFind.cs), on the PC:
     //   -findgamemenu            FIND GAME (idle, searching with a party) and the vote (voting, decided) with sample data (no
     //                            server) -> extract_out/online_menus/build/find_<page>.png
-    //   -findgametest [time=20] [server=]
+    //   -findgametest [time=20] [server=] [served=1]
     //                            four devices on a local server (spawned with --find-fast unless server= names one): devices 1
     //                            and 2 are friends and a party (1 leads), 3 and 4 alone; all search BATTLE, NEARBY; three vote
     //                            the first arena offered, one the second. PASS = one match of four, the first arena, device 3
     //                            (the lowest ping, not the party's leader) hosts, the others join through the server, everyone
-    //                            plays it and ends with the same scoreboard
+    //                            plays it and ends with the same scoreboard. served=1: the local server runs Find Game matches
+    //                            itself (--matchhost, docs/DEDICATED_SERVERS.md D3): nobody hosts, all four join the game the
+    //                            server opened, its match host starts the match once they're in, device 3 is named the host
     //   -findgamemenutest [server=]
     //                            the menus (a FrontendSession) and a PC searcher on a local --find-fast server: QUICK MATCH opens
     //                            FIND GAME, SEARCH, the vote page, a tap votes; the menus host (the PC's ping is worse), the PC
@@ -109,13 +111,17 @@ namespace MphRead
             if (!ToolPaths.UseDesktopExtraction()) return;
             Dictionary<string, string> a = Args(args);
             float time = Single.Parse(a.GetValueOrDefault("time", "20"), CultureInfo.InvariantCulture);
+            bool served = a.GetValueOrDefault("served") == "1";
             var server = new TestServer();
             string? fail = null;
             var devices = new List<(Process P, List<string> Out)>();
             try
             {
-                Uri uri = a.TryGetValue("server", out string? given) ? new Uri(given) : server.Start();
-                Console.WriteLine($"findgametest: {uri}");
+                Uri uri = a.TryGetValue("server", out string? given) ? new Uri(given)
+                    : server.Start(served ? $" --matchhost \"{OnlineMatchTool.MatchHostExe()}\" --matchhost-data \"{OnlineMatchTool.MatchHostData()}\""
+                        + $" --matchhost-args \"--time {time.ToString(CultureInfo.InvariantCulture)}\"" : "");
+                OnlineMatchTool.UseImports();
+                Console.WriteLine($"findgametest: {uri}" + (served ? " (served)" : ""));
                 OnlineIdentity[] ids = Enumerable.Range(0, 4).Select(_ => OnlineIdentity.Create()).ToArray();
                 string[] names = { "FINDA1", "FINDB2", "FINDC3", "FINDD4" };
                 // devices 1 and 2: friends (both send ADD FRIEND), so 1 may invite 2 into a party
@@ -147,7 +153,8 @@ namespace MphRead
                     if (!p.WaitForExit((int)(time * 1000) + 90000)) p.Kill();
                     p.WaitForExit();
                 }
-                fail = Verdict(devices.Select(d => Lines(d.Out)).ToList(), ids[2].FriendCode);
+                fail = Verdict(devices.Select(d => Lines(d.Out)).ToList(), ids[2].FriendCode, served);
+                if (fail == null && served && !a.ContainsKey("server") && !server.Said("Find Game Battle")) fail = "the server didn't serve the match";
             }
             catch (Exception ex) when (ex is OnlineException or IOException or HttpRequestException or InvalidOperationException
                 or System.Net.WebSockets.WebSocketException)
@@ -160,12 +167,14 @@ namespace MphRead
                 server.Stop(fail != null);
                 Console.WriteLine(fail == null
                     ? "PASS findgametest: a party of 2 and 2 singles searched, one match of 4 formed, the vote picked the first arena, the best "
-                        + "connection (device 3) hosted, everyone joined through the server and all four scoreboards agree"
+                        + (served ? "connection (device 3) was named the host, the server ran the match, all four joined it"
+                            : "connection (device 3) hosted, everyone joined through the server")
+                        + " and all four scoreboards agree"
                     : "FAIL findgametest: " + fail);
             }
         }
 
-        private static string? Verdict(List<List<string>> devices, string hostCode)
+        private static string? Verdict(List<List<string>> devices, string hostCode, bool served)
         {
             var problems = new List<string>();
             for (int i = 0; i < devices.Count; i++)
@@ -187,7 +196,10 @@ namespace MphRead
                 else if (arena != first) problems.Add($"the arena is {arena}, the vote was for {first} (3 to 1)");
             }
             int hosts = devices.Count(d => d.Any(l => l.StartsWith("HOSTING ")));
-            if (hosts != 1 || !devices[2].Any(l => l.StartsWith("HOSTING "))) problems.Add($"{hosts} device(s) hosted, expected only device 3");
+            if (served ? hosts != 0 : hosts != 1 || !devices[2].Any(l => l.StartsWith("HOSTING ")))
+            {
+                problems.Add($"{hosts} device(s) hosted, expected " + (served ? "none (the server's match)" : "only device 3"));
+            }
             List<string?> scores = devices.Select(d => d.FirstOrDefault(l => l.StartsWith("SCORES "))).ToList();
             if (scores.Any(s => s == null)) problems.Add("not every device played: " + string.Join(", ", scores.Select((s, i) => $"{i + 1}:{s != null}")));
             else if (scores.Distinct().Count() != 1) problems.Add("the scoreboards differ: " + string.Join(" / ", scores));
@@ -200,6 +212,7 @@ namespace MphRead
         {
             if (!ToolPaths.UseDesktopExtraction()) return;
             Dictionary<string, string> a = Args(args);
+            OnlineMatchTool.UseImports();
             var uri = new Uri(a["server"]);
             string name = a["name"];
             int index = Int32.Parse(a["index"]), ping = Int32.Parse(a["ping"]), voteFor = Int32.Parse(a.GetValueOrDefault("vote", "0"));
@@ -230,7 +243,7 @@ namespace MphRead
                     Console.WriteLine("searching");
                 }
                 var clock = Stopwatch.StartNew();
-                bool voted = false;
+                bool voted = false, found = false;
                 while (match == null && clock.Elapsed.TotalSeconds < 60)
                 {
                     if (!client.Events.TryDequeue(out OnlineMsg? ev))
@@ -271,9 +284,11 @@ namespace MphRead
                         break;
                     }
                     case FindState.Join:
+                        found = true;
                         Console.WriteLine($"FOUND {f.FindId} {f.Players.Count} {f.HostCard?.Code} {f.Arena}");
                         break;
                     case FindState.Game:
+                        if (!found) Console.WriteLine($"FOUND {f.FindId} {f.Players.Count} {f.HostCard?.Code} {f.Arena}");
                         match = Wait(OnlineMatch.JoinAsync(client, uri, RomKey, f.GameId));
                         if (!match.Net.Join(hunter, name, 3, timeoutMs: 15000))
                         {
@@ -593,7 +608,7 @@ namespace MphRead
             private readonly List<string> _out = new();
             private string? _db;
 
-            public Uri Start()
+            public Uri Start(string extra = "")
             {
                 string dll = Path.GetFullPath(Path.Combine(typeof(FindGameTool).Assembly.Location, "..", "..", "..", "..", "..",
                     "SecondHunt.Server", "bin", "Debug", "net9.0", "SecondHuntServer.dll"));
@@ -606,7 +621,7 @@ namespace MphRead
                 using (var u = new UdpClient(new IPEndPoint(IPAddress.Any, 0))) relay = ((IPEndPoint)u.Client.LocalEndPoint!).Port;
                 _db = Path.Combine(Path.GetTempPath(), "secondhunt-findtest-" + Guid.NewGuid().ToString("N")[..8]);
                 Directory.CreateDirectory(_db);
-                _p = Spawn($"\"{dll}\" --urls http://127.0.0.1:{http} --db \"{Path.Combine(_db, "test.db")}\" --relay-port {relay} --words none.txt --find-fast", _out);
+                _p = Spawn($"\"{dll}\" --urls http://127.0.0.1:{http} --db \"{Path.Combine(_db, "test.db")}\" --relay-port {relay} --words none.txt --find-fast{extra}", _out);
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
                 var clock = Stopwatch.StartNew();
                 while (clock.ElapsedMilliseconds < 15000)
@@ -621,6 +636,11 @@ namespace MphRead
                     Thread.Sleep(100);
                 }
                 throw new InvalidOperationException("the server didn't start");
+            }
+
+            public bool Said(string text)
+            {
+                lock (_out) return _out.Any(l => l.Contains(text, StringComparison.Ordinal));
             }
 
             public void Stop(bool dump)

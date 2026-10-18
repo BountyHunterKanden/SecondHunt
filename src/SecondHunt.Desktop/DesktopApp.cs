@@ -43,6 +43,12 @@ internal sealed class DesktopApp : IDisposable
     readonly Stopwatch _clock = Stopwatch.StartNew();
     bool _minimized, _audioPausedForMinimize;
     int _frames;
+    // SETTINGS frame rate (RecompSettings.FpsLimit): re-read when the settings file changes (the menus and the pause menu
+    // save it), unless --fpscap set it for this run. 0 = vsync, -1 = unlimited, else a cap (FrameLimiter).
+    readonly FrameLimiter _limiter = new();
+    int _fpsLimit = int.MinValue;
+    DateTime _settingsStamp;
+    double _settingsCheckAt;
 
     public DesktopApp(AppOptions options)
     {
@@ -89,6 +95,39 @@ internal sealed class DesktopApp : IDisposable
         }
     }
 
+    // the frame rate setting, from --fpscap or the settings file (checked twice a second)
+    void CheckFrameRate()
+    {
+        int limit = _fpsLimit;
+        if (_options.FpsCap is int cap)
+        {
+            limit = cap;
+        }
+        else
+        {
+            double now = _clock.Elapsed.TotalSeconds;
+            if (now < _settingsCheckAt && _fpsLimit != int.MinValue) return;
+            _settingsCheckAt = now + 0.5;
+            try
+            {
+                DateTime stamp = File.Exists(DesktopPaths.Settings) ? File.GetLastWriteTimeUtc(DesktopPaths.Settings) : default;
+                if (stamp == _settingsStamp && _fpsLimit != int.MinValue) return;
+                _settingsStamp = stamp;
+                limit = MphRecomp.Config.RecompSettings.Load(DesktopPaths.Settings).FpsLimit;
+            }
+            catch (IOException)
+            {
+                return; // being saved: next time
+            }
+        }
+        if (BuildFlags.Public) limit = 0; // the display's rate (vsync): not in the next release (owner 2026-10-18)
+        if (limit == _fpsLimit) return;
+        _fpsLimit = limit;
+        _gl.SetVsync(limit == 0);
+        _limiter.Reset();
+        Log.Info("MPHDesktop", "frame rate: " + (limit == 0 ? "display (vsync)" : limit < 0 ? "unlimited" : $"{limit} cap, no vsync"));
+    }
+
     Entry? Top => _stack.Count > 0 ? _stack[^1] : null;
     public IGlScreen? TopScreen => Top?.Screen;
     public FrontendRenderer? Front => Top?.Screen == _front ? _front : null;
@@ -106,6 +145,8 @@ internal sealed class DesktopApp : IDisposable
         long lastSwap = Stopwatch.GetTimestamp();
         while (!w.IsExiting)
         {
+            CheckFrameRate();
+            if (_fpsLimit > 0) _limiter.Wait(_fpsLimit); // before the input, so a frame draws what was pressed just now
             w.NewInputFrame();
             NativeWindow.ProcessWindowEvents(false);
             if (w.IsExiting) break;
@@ -125,6 +166,7 @@ internal sealed class DesktopApp : IDisposable
                     PauseTopAudio();
                 }
                 Thread.Sleep(30);
+                _limiter.Reset();
                 continue;
             }
             if (_audioPausedForMinimize)
@@ -134,9 +176,10 @@ internal sealed class DesktopApp : IDisposable
             }
             DrawFrame();
             _gl.Swap();
-            // no vsync from the driver: don't run the GPU flat out (about 250 frames a second at most)
+            // vsync asked for but the driver doesn't wait (forced off in its control panel): don't run the GPU flat out
+            // (about 250 frames a second at most). A cap or UNLIMITED: no floor
             double ms = Stopwatch.GetElapsedTime(lastSwap).TotalMilliseconds;
-            if (ms < 4) Thread.Sleep(1);
+            if (_fpsLimit == 0 && ms < 4) Thread.Sleep(1);
             lastSwap = Stopwatch.GetTimestamp();
             _frames++;
             if (_frames % 600 == 0) Log.Info("MPHAudio", "sound device: " + DesktopPlatform.AudioStats());
@@ -169,6 +212,10 @@ internal sealed class DesktopApp : IDisposable
             top.Screen.OnSurfaceChanged(width, height);
         }
         top.Screen.OnDrawFrame();
+        // --drawrepeat N (measurements): the frame drawn N times before the swap, the extra ones with no game step behind
+        // them, as a screen N times faster would; the pace log's frames a second then say what this PC could reach
+        // even where the driver forces vsync
+        for (int i = 1; i < _options.DrawRepeat; i++) top.Screen.OnDrawFrame();
         // this host's text over the game: the status line (top left) and the centred panel (game over, match results);
         // the menus' own status (a load failure) the same way
         float s = Math.Max(0.6f, Math.Min(width / 1280f, height / 720f));
@@ -411,6 +458,7 @@ internal sealed class DesktopApp : IDisposable
         while (_stack.Count > 0) Pop();
         WindowPrefs.Save(_gl.Window);
         _gl.Dispose();
+        _limiter.Dispose();
     }
 }
 
@@ -429,6 +477,8 @@ internal sealed class AppOptions
     public string? ShotPath;
     public List<int> ShotFrames = new() { 300 };
     public int QuitAfterFrames;
+    public int? FpsCap; // --fpscap display|unlimited|N: the frame rate setting for this run (measurements)
+    public int DrawRepeat = 1; // --drawrepeat N: each frame drawn N times (measurements)
 
     public static AppOptions Parse(string[] args)
     {
@@ -446,6 +496,8 @@ internal sealed class AppOptions
             case "shot": o.ShotPath = Path.GetFullPath(value); break;
             case "shot-frame": o.ShotFrames = value.Split(',').Select(v => int.TryParse(v, out int n) ? n : 0).ToList(); break;
             case "quit-after": int.TryParse(value, out o.QuitAfterFrames); break;
+            case "drawrepeat": int.TryParse(value, out o.DrawRepeat); break;
+            case "fpscap": o.FpsCap = value switch { "display" => 0, "unlimited" => -1, _ => int.TryParse(value, out int f) ? f : null }; break;
             default: launch[key] = value; break;
             }
         }

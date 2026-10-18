@@ -23,6 +23,7 @@ namespace MphRecomp.App;
 //   armcannonpush <world units, left/up/forward>   (dev) its framing, about the muzzle, for pictures
 //   --es armcannonviews <dir>   (dev) once it's in place: the cut alone from six sides, <dir>/<body>_<side>.png
 //   --es armcannonlight <x>   (dev) the cannon's light (BodyArmCannon.Light: Echoes Dark Samus 1.6, the rest 1)
+//   --es armcannonalpha <x>   (dev) the blended parts' alpha of a cannon that has one (BodyArmCannon.Alpha: the final form 0.55)
 //   --es armcannonblast <x,y,z>   (dev) where MPH's charge glow / muzzle flash / smoke go, cannon space at its
 //   first-person size (BodyArmCannon.Blast: the Trooper's under the spike, by the hand); "off" = on the muzzle
 // Third person (part B, owner OK 2026-10-09): MPH's charge glow / muzzle flash on each native body's own cannon tip (every
@@ -101,6 +102,7 @@ internal sealed partial class CampaignRenderer
             System.Globalization.CultureInfo.InvariantCulture, out float v) ? v : 0;
         if (F("armcannonsize") > 0) _cannonSize = F("armcannonsize");
         _cannonLightDev = F("armcannonlight");
+        CampaignRetroBody.CannonAlphaDev = F("armcannonalpha");
         _cannonFrame = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(F("armcannonroll")))
             * Matrix4.CreateRotationX(MathHelper.DegreesToRadians(F("armcannonpitch")))
             * Matrix4.CreateRotationY(MathHelper.DegreesToRadians(F("armcannonyaw")))
@@ -261,7 +263,7 @@ internal sealed partial class CampaignRenderer
     {
         if (!_cannonActive || _cannonBody == null || _host == null || scene != _host.Scene) return;
         _cannonBody.SeatTint2 = _cannonTint2;
-        _cannonBody.DrawCannon(_cannonModel, scene.ViewMatrix, GunProjection(scene), pass, _cannonAlpha, _cannonLightDev, _cannonTint);
+        _cannonBody.DrawCannon(_cannonModel, GunView(scene), GunProjection(scene), pass, _cannonAlpha, _cannonLightDev, _cannonTint);
         _cannonBody.SeatTint2 = Vector4.Zero;
         if (pass == SuitPass.Additive && _cannonViewsDir != null && --_cannonViewsWait <= 0)
         {

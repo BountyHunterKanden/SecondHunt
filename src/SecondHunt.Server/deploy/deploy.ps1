@@ -4,12 +4,16 @@
 #   .\deploy.ps1 -Server root@203.0.113.5 -GameData <folder> [-GameKey AMHE1]  also the game files served matches read
 #       (docs/DEDICATED_SERVERS.md section 3: the owner's own extracted files, gamedata.ps1 picks them; they go to
 #       /var/lib/secondhunt/gamedata, owned by the service user, mode 0700, never served)
+#   .\deploy.ps1 -Server root@203.0.113.5 -Imports <folder>   also the imported arenas served matches can run (Echoes: the
+#       in-app importer's output, Tools -importcheck arenas all --out <folder> --mp2 <retail disc>): its arenas/ and
+#       import/mp2.json, without textures or sounds (a match host draws nothing), go to /var/lib/secondhunt/gamedata/imports
 param(
     [Parameter(Mandatory = $true)][string]$Server,
     [switch]$Setup,
     [string]$Domain = "",
     [string]$GameData = "",
     [string]$GameKey = "AMHE1",
+    [string]$Imports = "",
     [string]$Key = "$HOME\.ssh\secondhunt_deploy"
 )
 $ErrorActionPreference = 'Stop'
@@ -52,8 +56,27 @@ if ($GameData) {
     if ($LASTEXITCODE -ne 0) { throw 'copying the game files failed' }
     Remove-Item $tar
     $g = '/var/lib/secondhunt/gamedata'
-    ssh @ssh $Server "set -e; rm -rf $g.new; install -d -o secondhunt -g secondhunt -m 700 $g.new $g.new/$GameKey; tar -xzf /root/secondhunt-gamedata.tar.gz -C $g.new/$GameKey; rm -f /root/secondhunt-gamedata.tar.gz; printf '0.35.0.0\n${GameKey}=$g/$GameKey\nExport=$g/export\n' > $g.new/paths.txt; chown -R secondhunt:secondhunt $g.new; chmod -R go-rwx $g.new; rm -rf $g; mv $g.new $g; du -sh $g"
+    ssh @ssh $Server "set -e; rm -rf $g.new; install -d -o secondhunt -g secondhunt -m 700 $g.new $g.new/$GameKey; tar -xzf /root/secondhunt-gamedata.tar.gz -C $g.new/$GameKey; rm -f /root/secondhunt-gamedata.tar.gz; if [ -d $g/imports ]; then mv $g/imports $g.new/imports; fi; printf '0.35.0.0\n${GameKey}=$g/$GameKey\nExport=$g/export\n' > $g.new/paths.txt; chown -R secondhunt:secondhunt $g.new; chmod -R go-rwx $g.new; rm -rf $g; mv $g.new $g; du -sh $g"
     if ($LASTEXITCODE -ne 0) { throw 'unpacking the game files failed' }
+}
+if ($Imports) {
+    # a pruned copy (no textures or sounds), packed, unpacked into a fresh folder that then replaces the old one
+    $copy = Join-Path $env:TEMP 'secondhunt-imports'
+    if (Test-Path $copy) { Remove-Item -Recurse -Force $copy }
+    New-Item -ItemType Directory -Force "$copy\import" | Out-Null
+    Copy-Item -Recurse (Join-Path $Imports 'arenas') "$copy\arenas"
+    Copy-Item (Join-Path $Imports 'import\mp2.json') "$copy\import\mp2.json"
+    Get-ChildItem -Recurse -File $copy -Include *.png, *.wav | Remove-Item
+    $tar = Join-Path $env:TEMP 'secondhunt-imports.tar.gz'
+    tar -czf $tar -C $copy .
+    if ($LASTEXITCODE -ne 0) { throw 'packing the imports failed' }
+    Remove-Item -Recurse -Force $copy
+    scp @ssh $tar "${Server}:/root/secondhunt-imports.tar.gz"
+    if ($LASTEXITCODE -ne 0) { throw 'copying the imports failed' }
+    Remove-Item $tar
+    $i = '/var/lib/secondhunt/gamedata/imports'
+    ssh @ssh $Server "set -e; rm -rf $i.new; install -d -o secondhunt -g secondhunt -m 700 $i.new; tar -xzf /root/secondhunt-imports.tar.gz -C $i.new; rm -f /root/secondhunt-imports.tar.gz; chown -R secondhunt:secondhunt $i.new; chmod -R go-rwx $i.new; rm -rf $i; mv $i.new $i; du -sh $i"
+    if ($LASTEXITCODE -ne 0) { throw 'unpacking the imports failed' }
 }
 # the word filter (0.5.0): the LDNOOBW list as words.txt every deploy (the owner's own words live in words_owner.txt, which stays), and the admin tool
 scp @ssh "$here\..\wordlists\ldnoobw_en.txt" "${Server}:/opt/secondhunt/words.txt"

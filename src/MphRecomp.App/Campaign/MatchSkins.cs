@@ -379,8 +379,8 @@ internal sealed partial class CampaignRenderer
                 if (p.HostScoutDrone && hasBody && p.Flags2.TestFlag(PlayerFlags2.Halfturret) && p.Halfturret is HalfturretEntity t
                     && t.Health > 0 && t.HostBodyModel is ModelInstance body)
                 {
-                    if (nb != null) nb.DrawStanding(t, p.Hunter, scene.ViewMatrix, scene.PerspectiveMatrix, pass, t.HostDamageFlash);
-                    else s!.DrawStanding(body.AnimInfo, t.HostBodyPosition, t.FacingVector, scene.ViewMatrix, scene.PerspectiveMatrix, pass,
+                    if (nb != null) nb.DrawStanding(t, p.Hunter, SmoothView(t, scene), scene.PerspectiveMatrix, pass, t.HostDamageFlash);
+                    else s!.DrawStanding(body.AnimInfo, t.HostBodyPosition, t.FacingVector, SmoothView(t, scene), scene.PerspectiveMatrix, pass,
                         t.HostDamageFlash);
                     drew = true;
                 }
@@ -392,7 +392,7 @@ internal sealed partial class CampaignRenderer
                 if (p.IsAltForm)
                 {
                     if (s == null || !s.HasBall || !p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson)) continue;
-                    s.DrawBall(p, scene.ViewMatrix, scene.PerspectiveMatrix, pass, p.HostDamageFlash);
+                    s.DrawBall(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostDamageFlash);
                     drew = true;
                 }
                 // (and a replay watching this seat from its eyes, PlayerEntity.HostFirstPersonSeat: T9)
@@ -401,9 +401,9 @@ internal sealed partial class CampaignRenderer
                 {
                     if (nb != null && !(s != null && s.HasBody && nb.Clips.SuitLegs.Contains((PlayerAnimation)p.HostBipedModel1.AnimInfo.Index[0])))
                     {
-                        nb.DrawBody(p, scene.ViewMatrix, scene.PerspectiveMatrix, pass, p.HostBipedAlpha, p.HostDamageFlash);
+                        nb.DrawBody(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostBipedAlpha, p.HostDamageFlash);
                     }
-                    else s!.DrawBody(p, scene.ViewMatrix, scene.PerspectiveMatrix, pass, p.HostBipedAlpha, p.HostDamageFlash, SuitLift(p, nb));
+                    else s!.DrawBody(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostBipedAlpha, p.HostDamageFlash, SuitLift(p, nb));
                     drew = true;
                 }
             }

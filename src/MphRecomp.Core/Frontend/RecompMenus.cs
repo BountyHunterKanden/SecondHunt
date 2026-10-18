@@ -270,7 +270,7 @@ namespace MphRecomp.Frontend
             ["Phazonsuit"] = "PHZ", ["MP1BetaPhazonSuit"] = "BPZ", ["MP2VariaSuit"] = "VAR", ["MP2DarkSuit"] = "DRK", ["MP2LightSuit"] = "LGT",
             ["MP3VariaSuit"] = "VAR", ["MP3PEDSuit"] = "PED", ["MP4DefaultSuit"] = "DEF", ["MP4PsychicSuit"] = "PSY",
             ["MP4PsychicGlove"] = "GLV", ["MP4ViolaSuit"] = "VLA", ["MP4ViolaSuitIC"] = "VIC", ["MP4LegacySuit"] = "LEG",
-            ["MP2DarkSamus"] = "DSA", ["MP3DarkSamus"] = "DSA", ["MP3ZeroSuit"] = "ZER",
+            ["MP2DarkSamus"] = "DSA", ["MP3DarkSamus"] = "DSA", ["MP2DarkSamusFinal"] = "DSO", ["MP3ZeroSuit"] = "ZER",
         };
 
         // left out of the suit row: HD models on Samus's rig the owner dropped (2026-10-01: "ditch mp3 zero suit for now"),
@@ -519,6 +519,23 @@ namespace MphRecomp.Frontend
                     Description = "smooth redraws the hud's line art as clean lines and shapes, traced from your rom. pixel keeps the ds pixels.",
                     Value = () => _settings.RedrawArt ? "SMOOTH" : "PIXEL",
                     Step = _ => _settings.RedrawArt = !_settings.RedrawArt
+                },
+                // DISPLAY (owner 2026-10-18, high frame rate): the PC's frame rate, and smooth frames on every device
+                new()
+                {
+                    Label = "frame\nrate",
+                    Description = "display: as fast as your screen refreshes (vsync). a number caps it there, unlimited draws "
+                        + "as fast as it can. the game itself always runs at 60.",
+                    Value = () => _settings.FpsLimit switch { 0 => "DISPLAY", < 0 => "UNLIMITED", int n => n.ToString() },
+                    Step = s => _settings.FpsLimit = Next(RecompSettings.FpsLimits, _settings.FpsLimit, s)
+                },
+                new()
+                {
+                    Label = "smooth\nframes",
+                    Description = "on: frames drawn between the game's 60 steps a second show motion (aim, view, what moves). "
+                        + "off: each step's picture is shown until the next.",
+                    Value = () => _settings.SmoothFrames ? "ON" : "OFF",
+                    Step = _ => _settings.SmoothFrames = !_settings.SmoothFrames
                 },
                 // OPTIONS > AUDIO's volumes here too (owner 2026-10-17: "we should also get all the sound settings from the
                 // audio menu in here as well. the sfx volume, music volume, and quality"), steps 0-9 as that page's, heard
@@ -779,6 +796,7 @@ namespace MphRecomp.Frontend
                 rows.RemoveAll(r => r.Label == "extras");
             }
             if (RecompSettings.DesktopHost) rows.RemoveAll(r => HiddenOnDesktop.Contains(r.Label));
+            if (!RecompSettings.DesktopHost) rows.RemoveAll(r => r.Label == "frame\nrate"); // Android: the display picks
             if (!_settings.DeveloperMode) rows.RemoveAll(r => r.Label == "dev\ntools" || r.Label == "status\ntext");
             // (in categories, each its own page: RecompMenus.SettingsPages.cs)
             return rows;
@@ -792,6 +810,9 @@ namespace MphRecomp.Frontend
             // the campaign's Prime radar + mini map (owner 2026-10-17: map work, not in the next release; a
             // multiplayer match's radar comes with the SHOW HUNTERS ON RADAR rule instead, every build)
             "hud",
+            // high frame rate (owner 2026-10-18: "leave high frame rate out for now"): the PC's frame rate and smooth
+            // frames stay at the display's rate and off (CampaignRenderer, DesktopApp)
+            "frame\nrate", "smooth\nframes",
         };
 
         // a PC has no gyroscope, and its mouse is the pointer (no on-screen controls)

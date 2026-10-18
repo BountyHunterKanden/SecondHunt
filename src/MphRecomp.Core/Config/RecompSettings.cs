@@ -31,6 +31,14 @@ namespace MphRecomp.Config
         public static bool DesktopHost { get; set; }
 
         public int FrameRate { get; set; } = 60;
+        // the Windows host's frame rate (owner 2026-10-18, PC 240+): 0 = the display's (vsync), -1 = unlimited (no vsync,
+        // no wait), else a cap in frames a second (no vsync, a precise wait). The game itself steps 60 times a second
+        // whatever this is; only the pictures are more or fewer.
+        public static readonly int[] FpsLimits = { 0, 30, 60, 120, 144, 165, 240, 360, -1 };
+        public int FpsLimit { get; set; }
+        // frames drawn between the game's 60 Hz steps show motion (App Campaign/SmoothFrames.cs): the aim turns, the view
+        // and what moves carry on by their last step's motion. Drawing only: what the game does is the same either way.
+        public bool SmoothFrames { get; set; } = true;
         public int RenderScale { get; set; } = 100;
         public string Music { get; set; } = "original";
         public string MenuLayout { get; set; } = "combined";

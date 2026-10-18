@@ -28,6 +28,8 @@ namespace MphRecomp.Import.Hd
     //   matset   the model's material set          scale    a fixed scale (a ball keeps its suit's size)
     //   add      [{"cmdl", "matset"}]              other models joined to a static one where they stand (a shell + core)
     //   core     [r, g, b] (0..255)                a ball's core glow (the game draws it as a particle; the app lights it)
+        //   veins    {"ancs", "char", "pose", "shell", "red", "blue", "vent", "middle"}  a static ball rebuilt see-through with a
+        //            character's own vessels inside (VeinBall: Echoes' final-form Dark Samus)
     //   rigidHeadBand  points Retro blends only between the helmet and the neck / collar right under it ride the
     //                  helmet solidly in the rig layout (Fusion's tubes bent at every head turn when blended)
     //   hold     [{"bone", "cut", "anchor": [Retro bones], "scale"}]  a piece of the MPH hunter's own model held in the
@@ -72,6 +74,7 @@ namespace MphRecomp.Import.Hd
         public Hold[] Holds = Array.Empty<Hold>();
         public Borrow[] Borrows = Array.Empty<Borrow>();
         public int[]? Core;
+        public VeinBall.Spec? Veins;
         // "recolor": textures recoloured as they are written (HdRecolor; the beta Phazon Suit's ball)
         public HdRecolor? Recolor;
         // Prime 4 ("mp4")
@@ -171,6 +174,13 @@ namespace MphRecomp.Import.Hd
             }
             if (root.TryGetProperty("core", out _)) h.Core = r.Ints("core");
             if (root.TryGetProperty("recolor", out JsonElement rc)) h.Recolor = HdRecolor.Parse(rc);
+            if (root.TryGetProperty("veins", out JsonElement ve))
+            {
+                if (!h.Static) throw new InvalidDataException($"{r.Id}: \"veins\" rebuilds a static ball");
+                int[] Ints(string k) => ve.GetProperty(k).EnumerateArray().Select(x => x.GetInt32()).ToArray();
+                h.Veins = new VeinBall.Spec(Hex(ve.GetProperty("ancs").GetString()!), ve.GetProperty("char").GetString()!, ve.GetProperty("pose").GetString()!,
+                    ve.GetProperty("shell").GetInt32(), ve.GetProperty("red").GetInt32(), Ints("blue"), ve.GetProperty("vent").GetInt32(), Ints("middle"));
+            }
             if (root.TryGetProperty("hold", out JsonElement ho))
             {
                 var l = new List<Hold>();

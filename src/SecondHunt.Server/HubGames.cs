@@ -37,6 +37,9 @@ namespace SecondHunt.Server
             // a served game's match host on relay slot 0 (HubServed.cs; Host is then the lobby's owner, a joiner); null = the
             // host is a player
             public MatchHostProcess? MatchHost { get; set; }
+            // a Find Game match the server opened itself (HubServedFind.cs): Host is only who will own the lobby once the first
+            // match starts (its match host starts that one); until then nobody owns it
+            public bool FindAuto { get; set; }
 
             public Game(string id, string host, GameInfo info, Relay.Room room)
             {
@@ -55,7 +58,7 @@ namespace SecondHunt.Server
         {
             Mode = Cut(info.Mode) ?? "",
             Arena = Cut(info.Arena) ?? "",
-            MaxPlayers = Math.Clamp(info.MaxPlayers, Math.Max(2, players), RelayWire.MaxSlots),
+            MaxPlayers = Math.Clamp(info.MaxPlayers, Math.Max(2, players), RelayWire.MaxPlayers),
             Friends = info.Friends,
             Rivals = info.Rivals,
             Public = info.Public,
@@ -198,10 +201,6 @@ namespace SecondHunt.Server
                 LeaveGame(me);
                 // served (0.8.0, HubServed.cs): the match host on slot 0, this player the lobby's owner on slot 1
                 info.Served = info.Served && found == null && CanServe(info);
-                if (info.Served)
-                {
-                    info.MaxPlayers = Math.Min(info.MaxPlayers, RelayWire.MaxSlots - 1);
-                }
                 string id = NewId(_games.ContainsKey);
                 Relay.Room room = _relay.OpenRoom(id);
                 _relay.Keep(room, true);
@@ -236,10 +235,6 @@ namespace SecondHunt.Server
                 Game g = HostedBy(me);
                 info = Clean(info, g.Slots.Count);
                 info.Served = g.Info.Served; // (decided when it opened)
-                if (info.Served)
-                {
-                    info.MaxPlayers = Math.Min(info.MaxPlayers, RelayWire.MaxSlots - 1);
-                }
                 CheckMods(info);
                 if (info.Mods != g.Info.Mods && g.Slots.Count > 1)
                 {
@@ -382,7 +377,14 @@ namespace SecondHunt.Server
                     {
                         (int ownerSlot, owner) = g.Slots.First();
                         g.Host = owner;
-                        TellOwner(g.MatchHost, ownerSlot);
+                        if (g.FindAuto)
+                        {
+                            owner = null; // (nobody owns it yet: HubServedFind.cs)
+                        }
+                        else
+                        {
+                            TellOwner(g.MatchHost, ownerSlot);
+                        }
                     }
                 }
                 Store.Player leaver = _store.Get(me)!;

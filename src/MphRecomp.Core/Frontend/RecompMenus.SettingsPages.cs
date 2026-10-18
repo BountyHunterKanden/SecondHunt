@@ -29,6 +29,7 @@ namespace MphRecomp.Frontend
         {
             ("MENUS", new[] { "menu\nscreens", "menu\nart", "smooth\nmenus" }),
             ("HUD", new[] { "hud", "line\nart" }),
+            ("DISPLAY", new[] { "frame\nrate", "smooth\nframes" }),
         };
         // (owner 2026-10-17: "look and sound should be split. look should be menus/hud and sound should be its own tab")
         private static readonly (string Header, string[] Labels)[] SoundSections =

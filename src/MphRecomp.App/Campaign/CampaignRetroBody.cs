@@ -35,7 +35,7 @@ internal sealed partial class CampaignRetroBody
         public int Material, Start, Count, Pass; // pass: 0 opaque, 1 blended, 2 additive
         public int Spec = -1, Prog;
         // a Brawl body's own pixel-engine state (her layered hair: back faces culled, blended shells still writing
-        // depth); the Retro bodies draw unculled, blended parts without depth, as before
+        // depth); the Retro bodies draw their opaque parts unculled, blended parts culled as their material says, without depth
         public int Cull;            // GX cull mode: 0 none, 1 front, 2 back, 3 all
         public bool BlendDepth;
         public bool DepthFirst => Pass == 0 && P.AlphaTest[3] != 1;
@@ -143,7 +143,9 @@ internal sealed partial class CampaignRetroBody
             {
                 Material = m, Start = at / HdGun.FloatsPerVertex, Count = mat.VertexCount, Gx = gx, P = GxShader.Pack(gx),
                 Pass = gx.Additive ? 2 : gx.BlendEnable ? 1 : 0,
-                Cull = brawl ? gx.CullMode & 3 : 0, BlendDepth = brawl && gx.DepthWrite,
+                // a Retro body's blended parts cull as the disc says (owner 10-18: Dark Samus's shoulder glow shimmered:
+                // unculled, unsorted, without depth, their far faces drew over the near ones in triangle order)
+                Cull = brawl || gx.Additive || gx.BlendEnable ? gx.CullMode & 3 : 0, BlendDepth = brawl && gx.DepthWrite,
             };
             GameRegister1(id, batch.P);
             at += mat.Vertices.Length;

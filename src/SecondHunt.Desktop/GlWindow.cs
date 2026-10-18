@@ -24,7 +24,12 @@ internal sealed unsafe class GlWindow : IDisposable
     readonly int _major, _minor;
     readonly delegate* unmanaged<IntPtr, IntPtr, int*, IntPtr> _createContextAttribs;
     readonly delegate* unmanaged<int, int> _swapInterval;
+    readonly delegate* unmanaged<int> _getSwapInterval;
     IntPtr _current;
+    // the swap interval each context should have (1 = vsync, 0 = none: SETTINGS frame rate, DesktopApp), and what each
+    // context was last given (wglSwapIntervalEXT applies to the current context only)
+    int _interval = 1;
+    readonly Dictionary<IntPtr, int> _applied = new();
     public string Renderer { get; } = "";
 
     public GlWindow(string title, WindowIcon? icon)
@@ -69,6 +74,7 @@ internal sealed unsafe class GlWindow : IDisposable
         _current = _bootContext;
         _createContextAttribs = (delegate* unmanaged<IntPtr, IntPtr, int*, IntPtr>)wglGetProcAddress("wglCreateContextAttribsARB");
         _swapInterval = (delegate* unmanaged<int, int>)wglGetProcAddress("wglSwapIntervalEXT");
+        _getSwapInterval = (delegate* unmanaged<int>)wglGetProcAddress("wglGetSwapIntervalEXT");
         if (_createContextAttribs == null)
         {
             throw new InvalidOperationException("The graphics driver doesn't offer wglCreateContextAttribsARB.");
@@ -104,7 +110,7 @@ internal sealed unsafe class GlWindow : IDisposable
             throw new InvalidOperationException($"wglCreateContextAttribsARB failed (error {Marshal.GetLastWin32Error()})");
         }
         MakeCurrent(context);
-        if (_swapInterval != null) _swapInterval(1); // vsync, per context
+        ApplyInterval(); // vsync, per context (SetVsync)
         // ES 3 behaviour a desktop context has off by default: shader-set point sizes, seamless cube maps
         GLES30.GlEnable(0x8642); // GL_PROGRAM_POINT_SIZE
         GLES30.GlEnable(0x884F); // GL_TEXTURE_CUBE_MAP_SEAMLESS
@@ -124,6 +130,21 @@ internal sealed unsafe class GlWindow : IDisposable
             throw new InvalidOperationException($"wglMakeCurrent failed (error {Marshal.GetLastWin32Error()})");
         }
         _current = context;
+        if (context != _bootContext && _applied.TryGetValue(context, out int had) && had != _interval) ApplyInterval();
+    }
+
+    // vsync on or off for every screen's context (each gets it as it's next made current)
+    public void SetVsync(bool on)
+    {
+        _interval = on ? 1 : 0;
+        if (_current != _bootContext && _applied.ContainsKey(_current)) ApplyInterval();
+    }
+
+    void ApplyInterval()
+    {
+        if (_swapInterval != null) _swapInterval(_interval);
+        _applied[_current] = _interval;
+        if (_getSwapInterval != null) Log.Info("MPHGl", $"swap interval {_interval} asked, {_getSwapInterval()} in effect");
     }
 
     // frees everything the screen made in it
@@ -131,6 +152,7 @@ internal sealed unsafe class GlWindow : IDisposable
     {
         if (context == IntPtr.Zero) return;
         if (_current == context) MakeCurrent(_bootContext);
+        _applied.Remove(context);
         wglDeleteContext(context);
     }
 

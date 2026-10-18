@@ -33,6 +33,8 @@ namespace MphRecomp.Campaign
         public readonly Vector3? Blast;
         // the cannon's light, times the body's (owner 2026-10-08 23:11: Echoes Dark Samus's a little lighter)
         public readonly float Light;
+        // the blended parts' alpha, times the body's (the final form's shell: up close in first person its rim reads solid)
+        public readonly float Alpha;
         readonly Spec _spec;
         readonly HdGun.Anim? _poseClip, _handClip;
         readonly bool[]? _hand;
@@ -40,7 +42,11 @@ namespace MphRecomp.Campaign
         // a body's cannon: the pose it's cut in (clip at t) and its muzzle locator; Hand/HandClip: the bones from Hand down
         // play HandClip (looped) over the cut pose -- the Trooper's claw as it moves when he stands ready
         sealed record Spec(string? Clip, float T, string Tip, float Size, Vector3? Blast = null, float Light = 1, string? Hand = null,
-            string? HandClip = null, Action<NativeBody>? Poser = null);
+            string? HandClip = null, Action<NativeBody>? Poser = null, float Alpha = 1, Hide? Drop = null);
+
+        // the cut leaves out this material's triangles that touch texture point Uv (a spot of the body's texture the cannon
+        // shouldn't show)
+        sealed record Hide(int Material, Vector2 Uv);
 
         BodyArmCannon(NativeBody body, int elbow, int tip, int[][] cut, Matrix4 toCannon, float length, Spec spec)
         {
@@ -53,6 +59,7 @@ namespace MphRecomp.Campaign
             Size = spec.Size;
             Blast = spec.Blast;
             Light = spec.Light;
+            Alpha = spec.Alpha;
             _spec = spec;
             _poseClip = spec.Clip != null ? body.Clip(spec.Clip) : null;
             _handClip = spec.HandClip != null ? body.Clip(spec.HandClip) : null;
@@ -100,7 +107,19 @@ namespace MphRecomp.Campaign
                     Blast: TrooperBlast); // owner 10-08: no idle claw (was Hand: "R_wrist", HandClip: "B_ready_pirate")
             }
             if (body.Clip("A_MissileBarrage_dark_samus") != null)
-                return new Spec("A_MissileBarrage_dark_samus", 0, DarkSamusBody.TipOf(body), 0.7f, Light: EchoesLight);
+            {
+                // the final form (bodies/MP2DarkSamusFinal, on the same rig) is see-through and glows: her own light
+                // (owner 10-18: "the first person arm cannon is too bright"); her shell at 0.55 of its alpha, as see-through
+                // as her body in third person (owner 10-18 17:34: "it feels very opaque I'd like some transparency like third
+                // person model"); without the white cone at her forearm's tip (her glow map 76c58b0b's bright cone, apex
+                // u 0.489 v 0.764: 12 triangles of material 5; owner: "a little white bit on the arm cannon ... a little
+                // triangle type shape")
+                bool final = System.IO.Path.GetFileName(body.Dir.TrimEnd('/', '\\')).EndsWith("Final", StringComparison.OrdinalIgnoreCase);
+                return final
+                    ? new Spec("A_MissileBarrage_dark_samus", 0, DarkSamusBody.TipOf(body), 0.7f, Light: 1, Alpha: FinalAlpha,
+                        Drop: new Hide(5, new Vector2(0.489f, 0.764f)))
+                    : new Spec("A_MissileBarrage_dark_samus", 0, DarkSamusBody.TipOf(body), 0.7f, Light: EchoesLight);
+            }
             if (body.Clip("a_mega_blaster_c_steady_dark_samus") != null)
                 return new Spec("a_mega_blaster_c_steady_dark_samus", 0, DarkSamusBody.TipOf(body), 0.75f);
             return null;
@@ -109,6 +128,7 @@ namespace MphRecomp.Campaign
         // by eye on the desktop, 2026-10-08
         static readonly Vector3 TrooperBlast = new(-0.015f, -0.055f, -0.045f);
         const float EchoesLight = 1.6f;
+        const float FinalAlpha = 0.55f;
 
         // null for a body with no known arm cannon. Poses the shared body: call before any seat animates it (at load)
         public static BodyArmCannon? For(NativeBody body)
@@ -116,7 +136,7 @@ namespace MphRecomp.Campaign
             if (SpecOf(body) is not Spec spec) return null;
             int elbow = body.Bone("R_elbow"), tip = body.Bone(spec.Tip);
             if (elbow < 0 || tip < 0) return null;
-            int[][] cut = CutBelow(body, elbow);
+            int[][] cut = CutBelow(body, elbow, spec.Drop);
             var c = new BodyArmCannon(body, elbow, tip, cut, Matrix4.Identity, 0, spec);
             c.Pose();
             // the barrel: elbow -> muzzle; its top: the model's up, square to the barrel
@@ -140,8 +160,8 @@ namespace MphRecomp.Campaign
             return Finish(body, elbow, tip, cut, spec, muzzle, barrel.Normalized(), top);
         }
 
-        // every whole triangle whose vertices all lean on `elbow` or a bone under it, per material
-        static int[][] CutBelow(NativeBody body, int elbow)
+        // every whole triangle whose vertices all lean on `elbow` or a bone under it, per material (less `drop`'s)
+        static int[][] CutBelow(NativeBody body, int elbow, Hide? drop = null)
         {
             HdGun g = body.Data;
             var sub = new bool[g.BoneCount];
@@ -160,9 +180,15 @@ namespace MphRecomp.Campaign
                     }
                     return false;
                 }
+                bool Dropped(int v)
+                {
+                    if (drop == null || drop.Material != m) return false;
+                    int o = v * HdGun.FloatsPerVertex;
+                    return MathF.Abs(mat.Vertices[o + 6] - drop.Uv.X) < 0.002f && MathF.Abs(mat.Vertices[o + 7] - drop.Uv.Y) < 0.002f;
+                }
                 for (int v = 0; v + 2 < mat.VertexCount; v += 3)
                 {
-                    if (On(v) && On(v + 1) && On(v + 2))
+                    if (On(v) && On(v + 1) && On(v + 2) && !Dropped(v) && !Dropped(v + 1) && !Dropped(v + 2))
                     {
                         keep.Add(v);
                         keep.Add(v + 1);

@@ -57,7 +57,7 @@ internal sealed partial class CampaignRenderer
     bool DrawDrone(PlayerEntity p, Scene scene, SuitPass pass)
     {
         if (DroneOf(p) is not CampaignRetroBody d) return false;
-        d.DrawDrone(p, scene.ViewMatrix, scene.PerspectiveMatrix, pass, DroneAlpha(scene, p), p.HostDamageFlash);
+        d.DrawDrone(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, DroneAlpha(scene, p), p.HostDamageFlash);
         return true;
     }
 

@@ -1,6 +1,8 @@
 # The extracted game files a served match reads (SecondHuntMatchHost, docs/DEDICATED_SERVERS.md section 3): names only,
 # relative to the extract's root (files/AMHE1). From a traced -matchsweep mode=all (SECONDHUNT_FILE_TRACE), minus the cart's
 # code (_bin: Extract.NoCodeFiles) and the Echoes arenas (served games refuse extra arenas). gamedata.ps1 copies them.
+# 2026-10-18 (server 0.8.2): + the Scout Drone's PsychoBit model files (the Trooper's drone), from a traced served match in
+# every mode + an Echoes arena with all the extra characters (Trooper, Dark Samus, Zero Suit, Sylux) and bots.
 _archives/Gorea_b2/Gorea_b2_collision.bin
 _archives/Gorea_b2/gorea_b2_Anim.bin
 _archives/Gorea_b2/gorea_b2_Model.bin
@@ -474,6 +476,13 @@ models/Nox_pal_Team02_Model.bin
 models/Nox_pal_Team02_Tex.bin
 models/Octolith_Anim.bin
 models/Octolith_Model.bin
+models/PsychoBit_Anim.bin
+models/PsychoBit_img_00_Model.bin
+models/PsychoBit_img_01_Model.bin
+models/PsychoBit_img_02_Model.bin
+models/PsychoBit_img_03_Model.bin
+models/PsychoBit_img_04_Model.bin
+models/PsychoBit_mdl_Model.bin
 models/SamusGun_img_01_Model.bin
 models/SamusGun_img_01_Tex.bin
 models/SamusGun_img_02_Model.bin

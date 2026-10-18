@@ -464,7 +464,8 @@ public class MainActivity : Activity
     static readonly int[] SoloTargetCounts = { 0, 3, 5, 7 };
     static readonly (string Label, string Hunter, string? Skin)[] SoloCharacters =
     {
-        ("Dark Samus (Echoes)", "Samus", "MP2DarkSamus"), ("Dark Samus (Corruption)", "Samus", "MP3DarkSamus"),
+        ("Dark Samus (Echoes)", "Samus", "MP2DarkSamus"), ("Overcharged Dark Samus (Echoes)", "Samus", "MP2DarkSamusFinal"),
+        ("Dark Samus (Corruption)", "Samus", "MP3DarkSamus"),
         ("Wave Trooper", "Weavel", "MP1WaveTrooper"), ("Power Trooper", "Weavel", "MP1PowerTrooper"),
         ("Ice Trooper", "Weavel", "MP1IceTrooper"), ("Plasma Trooper", "Weavel", "MP1PlasmaTrooper"),
         ("Trooper (Weavel's DS model)", "Weavel", "trooper"),

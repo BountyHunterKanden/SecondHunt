@@ -908,7 +908,10 @@ namespace MphRecomp.Frontend
                 if (tex >= 0) Quad(tris, layer, tex, cx - r, cy + r, cx + r, cy - r, 1, 1, 1, 1);
             }
             string label = ch.Skins[ch.Focus] == ShuffleChoice ? "SHUFFLE" : Characters.Label(ch.Skins[ch.Focus]);
-            Text(menu, tris, layer, label, (x0 + x1) / 2, y1 + (ch.Hint ? 14.6f : 4.6f), 0.84f, 255, 247, 156);
+            // a long name ("CORRUPTION DARK SAMUS") shrinks to stay inside the box (owner 2026-10-18: it ran past both sides)
+            float room = x1 - x0 - 2 * border - 4, wide = menu.Font.Measure(label);
+            float scale = wide > 0 ? Math.Min(0.84f, room / wide) : 0.84f;
+            Text(menu, tris, layer, label, (x0 + x1) / 2, y1 + (ch.Hint ? 14.6f : 4.6f), scale, 255, 247, 156);
             if (ch.Hint) Text(menu, tris, layer, "tap outside to close", (x0 + x1) / 2, y1 + 6.2f, 0.58f, 150, 150, 150);
         }
 

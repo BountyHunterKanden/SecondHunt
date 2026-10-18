@@ -19,15 +19,30 @@ namespace MphRead
     // the same scoreboard, the server says the game was served and took the match host's result.
     internal static partial class OnlineMatchTool
     {
-        private static string MatchHostExe() => Environment.GetEnvironmentVariable("SECONDHUNT_MATCHHOST") is { Length: > 0 } exe
+        internal static string MatchHostExe() => Environment.GetEnvironmentVariable("SECONDHUNT_MATCHHOST") is { Length: > 0 } exe
             ? Path.GetFullPath(exe)
             : Path.GetFullPath(Path.Combine(typeof(OnlineMatchTool).Assembly.Location, "..", "..", "..", "..", "..",
                 "SecondHunt.MatchHost", "bin", "Served", "net9.0", OperatingSystem.IsWindows() ? "SecondHuntMatchHost.exe" : "SecondHuntMatchHost"));
 
         // the match host's game files: this folder's paths.txt, or SECONDHUNT_MATCHHOST_DATA (a folder with its own paths.txt,
         // e.g. the pruned copy deploy.ps1 -GameData uploads)
-        private static string MatchHostData() => Environment.GetEnvironmentVariable("SECONDHUNT_MATCHHOST_DATA") is { Length: > 0 } dir
+        internal static string MatchHostData() => Environment.GetEnvironmentVariable("SECONDHUNT_MATCHHOST_DATA") is { Length: > 0 } dir
             ? Path.GetFullPath(dir) : Directory.GetCurrentDirectory();
+
+        // SECONDHUNT_IMPORTS=<dir> (an in-app import's folder: arenas/<Key>/ + import/mp2.json, e.g. -importcheck arenas all
+        // --out <dir>): this test, its joiners and the local server's match host all play the imported Echoes arenas from it,
+        // as devices and the live server do, instead of the PC's staged copies
+        private static string? Imports() => Environment.GetEnvironmentVariable("SECONDHUNT_IMPORTS") is { Length: > 0 } dir ? Path.GetFullPath(dir) : null;
+
+        internal static void UseImports()
+        {
+            if (Imports() is string dir)
+            {
+                MphRecomp.Arenas.EchoesArena.ImportRoot = dir;
+            }
+        }
+
+        internal static string ImportsArg() => Imports() is string dir ? $" --matchhost-args \"--imports {dir}\"" : "";
 
         private static void RunServedHub(Options o, Uri uri, List<(Process, List<string>)> joiners)
         {
@@ -37,7 +52,12 @@ namespace MphRead
                 + (i == 1 ? $" owner={o.Players} bots={o.Bots} level={o.Level} mode=\"{o.Mode}\" arena=\"{o.Arena}\"" : $" game={game}")
                 + (o.Loss > 0 ? $" loss={(o.Loss * 100).ToString(CultureInfo.InvariantCulture)}" : "")
                 + (o.Jitter > 0 ? $" jitter={o.Jitter}" : "")
-                + (o.Matches > 1 ? $" matches={o.Matches}" + (o.OwnerLeave ? " ownerleave=1" : "") : "");
+                + (o.Matches > 1 ? $" matches={o.Matches}" + (o.OwnerLeave ? " ownerleave=1" : "") : "")
+                // chars=1: joiners 2-5 play the extra characters (Trooper, Dark Samus, Zero Suit, Sylux) on the server's match host
+                + (o.Chars && i >= 2 && i <= Characters.All.Count ? $" hunter={Characters.All[i - 1].Base} character={Characters.All[i - 1].Id}" : "")
+                // rejoin=: the last joiner vanishes mid-match and comes back as a restarted app (a held seat on the server)
+                + (o.Rejoin > 0 && i == o.Players ? $" rejoin={o.Rejoin.ToString(CultureInfo.InvariantCulture)} rejoinwait="
+                    + o.RejoinWait.ToString(CultureInfo.InvariantCulture) : "");
             var ownerOut = new List<string>();
             joiners.Add((Start(Environment.ProcessPath!, Args(1, ""), ownerOut), ownerOut));
             string? game = null;
@@ -189,16 +209,17 @@ namespace MphRead
             {
                 server = serverOut.ToList();
             }
-            if (!server.Any(l => l.Contains("served games: on", StringComparison.Ordinal)))
+            // (server=: the live server; its side is in its journal, so only the devices are checked here)
+            if (o.Server == null && !server.Any(l => l.Contains("served games: on", StringComparison.Ordinal)))
             {
                 lines.Add("FAIL served games are off on the server: " + (server.FirstOrDefault(l => l.Contains("served games")) ?? "?"));
             }
-            if (!server.Any(l => l.Contains(": match host ready", StringComparison.Ordinal)))
+            if (o.Server == null && !server.Any(l => l.Contains(": match host ready", StringComparison.Ordinal)))
             {
                 lines.Add("FAIL no match host came up");
             }
             int results = server.Count(l => l.Contains(": result for", StringComparison.Ordinal));
-            if (o.Leave == 0 && results != o.Matches)
+            if (o.Server == null && o.Leave == 0 && results != o.Matches)
             {
                 lines.Add($"FAIL the server took {results} result(s) from the match host, {o.Matches} match(es) played");
             }

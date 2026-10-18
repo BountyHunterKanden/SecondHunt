@@ -90,8 +90,12 @@ namespace MphRecomp.Multiplayer
         public bool? HoverWalk { get; set; }
         // Dark Samus's morph ball: the jump button hops it as high as a bomb jump and the bomb button held is Corruption's
         // Hyper Ball, paid from UA, instead of bombs (PlayerEntity.HostBallJump / HostHyperBall, docs/DARK_SAMUS_HYPER.md):
-        // null = on; replays recorded before it (format < 32) read as off, so they play exactly
+        // null = on (off in a public build: MatchStart); replays recorded before it (format < 32) read as off, 32-44 as on,
+        // and from format 45 the file says (ReplayFile), so they play exactly
         public bool? HyperBall { get; set; }
+        // ...without the ball hop (owner 2026-10-18: "remove morph ball jump entirely for dark Samus"): null = on (no hop);
+        // replays recorded before it (format < 44) read as off, so their hops still play exactly
+        public bool? NoBallJump { get; set; }
         // Zero Suit Samus's kit (owner 2026-10-12, docs/ZERO_SUIT_SAMUS.md section 7): her affinity weapon is the Paralyzer
         // (its charged shot stuns, MphRead PlayerParalyzer.cs) and she has 90 health (PlayerEntity.HostHealthPercent):
         // null = on; replays recorded before it (format < 33) read as off, so they play exactly

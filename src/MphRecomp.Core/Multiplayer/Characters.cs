@@ -60,7 +60,7 @@ namespace MphRecomp.Multiplayer
         public static readonly Character DarkSamus = new()
         {
             Id = "darksamus", Name = "DARK SAMUS", Base = Hunter.Samus, HasOriginal = false,
-            Known = new[] { "MP2DarkSamus", "MP3DarkSamus" },
+            Known = new[] { "MP2DarkSamus", "MP3DarkSamus", "MP2DarkSamusFinal" },
             Claims = id => id.Contains("DarkSamus", StringComparison.OrdinalIgnoreCase) && !id.EndsWith("Ball", StringComparison.OrdinalIgnoreCase)
                 && !id.EndsWith("Rest", StringComparison.OrdinalIgnoreCase) && !id.EndsWith("Tpose", StringComparison.OrdinalIgnoreCase),
         };
@@ -246,7 +246,7 @@ namespace MphRecomp.Multiplayer
             ["MP4ViolaSuit"] = "VI-O-LA SUIT", ["MP4ViolaSuitIC"] = "VI-O-LA SUIT IC", ["MP4LegacySuit"] = "LEGACY SUIT",
             ["MP1PowerTrooper"] = "POWER TROOPER", ["MP1IceTrooper"] = "ICE TROOPER", ["MP1WaveTrooper"] = "WAVE TROOPER",
             ["MP1PlasmaTrooper"] = "PLASMA TROOPER",
-            ["MP2DarkSamus"] = "ECHOES DARK SAMUS", ["MP3DarkSamus"] = "CORRUPTION DARK SAMUS",
+            ["MP2DarkSamus"] = "ECHOES DARK SAMUS", ["MP3DarkSamus"] = "CORRUPTION DARK SAMUS", ["MP2DarkSamusFinal"] = "OVERCHARGED DARK SAMUS",
             ["MP3ZeroSuit"] = "CORRUPTION ZERO SUIT",
             ["MP4Sylux"] = "BEYOND SYLUX",
         };

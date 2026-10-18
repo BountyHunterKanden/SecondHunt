@@ -26,9 +26,15 @@ namespace SecondHunt.MatchHost
     //       [--matches <n>] [--stats <s>]
     //   SecondHuntMatchHost --control --relay-port <port> --token <relay token> [--relay-host 127.0.0.1] [--owner <slot>]
     //       [--seats <n>] [--data <dir>] [--mode ...] [--arena ...] [--time <s>] [--stats <s>]
+    //       [--find --expect <n> [--no-extra-pickups] [--no-extra-characters]]
     //   SecondHuntMatchHost --version [--data <dir>]
+    //   SecondHuntMatchHost --arenas [--data <dir>]   the arenas this host can run, one a line (the server serves Find Game
+    //       matches, and games in an imported arena, only in these)
+    //   any of them: [--imports <dir>]
     //
-    // Needs paths.txt (the extracted game files, as the Tools use them) in --data's folder or the working directory.
+    // Needs paths.txt (the extracted game files, as the Tools use them) in --data's folder or the working directory. The
+    // imported arenas (Echoes: the in-app importer's arenas/<Key>/ + import/mp2.json, as IMPORT GAMES writes them on a
+    // device, from Tools -importcheck arenas all --out <dir>) come from --imports, or an imports folder next to paths.txt.
     internal static class Program
     {
         internal sealed class Options
@@ -40,6 +46,7 @@ namespace SecondHunt.MatchHost
             public string Mode = "Battle";
             public string Arena = "Combat Hall";
             public float Time = 300;
+            public bool TimeSet; // (--time given: a Find Game match plays it instead of the mode's own, tests)
             public int Players = 4;
             public int Bots;
             public int Level = 1;
@@ -54,6 +61,14 @@ namespace SecondHunt.MatchHost
             public string Token = "";
             public int Owner = -1;
             public int Seats = 4;
+            // a Find Game match (the server opened it, HubServedFind.cs): Find's own rules, started by this host once the
+            // Expect matched players are in (ControlMode.cs), the searches' ONLINE SETTINGS filters
+            public bool Find;
+            public int Expect;
+            public bool NoExtraPickups;
+            public bool NoExtraCharacters;
+            public bool Arenas;
+            public string? Imports;
         }
 
         private static int Main(string[] args)
@@ -84,10 +99,19 @@ namespace SecondHunt.MatchHost
             Paths.UpdatePaths();
             Paths.ChooseMphPath();
             Extract.NoCodeFiles = true; // (the server keeps no cart code files: no sound tables or font, never needed here)
+            MphRecomp.Arenas.EchoesArena.ImportRoot = o.Imports ?? (Directory.Exists("imports") ? Path.GetFullPath("imports") : null);
             string romKey = LanSession.RomKeyFor(Paths.MphKey);
             if (o.Version)
             {
                 Console.WriteLine(OnlineMatch.VersionKey(romKey));
+                return 0;
+            }
+            if (o.Arenas)
+            {
+                foreach (string arena in MatchArenas.All.Select(r => r.Name).Where(n => !ExtraArenas.IsExtra(n) || ExtraArenas.Owned().Contains(n)).Distinct())
+                {
+                    Console.WriteLine(arena);
+                }
                 return 0;
             }
             if (o.Control)
@@ -122,6 +146,18 @@ namespace SecondHunt.MatchHost
         // the match a game starts with: its mode, arena and time, with no human seat (every human joins) and o.Bots bots
         internal static MatchSettings Template(Options o)
         {
+            if (o.Find)
+            {
+                // Find Game: the rules a player host's device made (BuildFindMatch: the mode's defaults in the voted arena)
+                MatchSettings found = MphRecomp.Frontend.MultiplayerMenu.BuildFindMatch(o.Mode, o.Arena);
+                found.Players.RemoveAll(p => !p.Bot);
+                found.ServedHost = true;
+                if (o.NoExtraPickups) found.PirateBlaster = false;
+                if (o.NoExtraCharacters) found.ExtraCharacters = false;
+                if (o.TimeSet) found.TimeLimitSeconds = o.Time;
+                Characters.ApplyExtraRules(found);
+                return found;
+            }
             GameMode mode = Enum.Parse<GameMode>(o.Mode.Replace(" ", ""), ignoreCase: true);
             RoomMetadata arena = MatchArenas.Find(o.Arena) ?? throw new ArgumentException($"no arena {o.Arena}");
             MatchSettings template = MatchSettings.Quick(mode, arena.Name, Hunter.Samus, o.Bots, o.Level);
@@ -215,7 +251,10 @@ namespace SecondHunt.MatchHost
         internal static void Play(NetMatchSession net, float statsEvery, CancellationToken stop, Action<bool>? over = null)
         {
             MatchSettings settings = net.Settings!;
-            Log("seats " + string.Join(", ", settings.Players.Select((p, i) => $"{i}:{p.Hunter}{(p.Bot ? " bot" : $" {p.Nickname}")}")));
+            // no Hyper Ball for Dark Samus in served matches (owner 2026-10-18: not public yet); this host isn't a public build,
+            // so MatchStart would turn it on (settings.HyperBall ?? !PublicBuild) while the players' public apps have bombs
+            settings.HyperBall = false;
+            Log("seats " + string.Join(", ", settings.Players.Select((p, i) => $"{i}:{p.Hunter}{(p.Character != null ? "/" + p.Character : "")}{(p.Bot ? " bot" : $" {p.Nickname}")}")));
             var load = Stopwatch.StartNew();
             CampaignHost host = CampaignHost.StartMatch(settings);
             var driver = new MatchNetDriver(net, host);
@@ -299,7 +338,7 @@ namespace SecondHunt.MatchHost
                 case "--data": o.Data = Next(); break;
                 case "--mode": o.Mode = Next(); break;
                 case "--arena": o.Arena = Next(); break;
-                case "--time": o.Time = Single.Parse(Next(), CultureInfo.InvariantCulture); break;
+                case "--time": o.Time = Single.Parse(Next(), CultureInfo.InvariantCulture); o.TimeSet = true; break;
                 case "--players": o.Players = Int32.Parse(Next()); break;
                 case "--bots": o.Bots = Int32.Parse(Next()); break;
                 case "--level": o.Level = Int32.Parse(Next()); break;
@@ -314,6 +353,12 @@ namespace SecondHunt.MatchHost
                 case "--token": o.Token = Next(); break;
                 case "--owner": o.Owner = Int32.Parse(Next()); break;
                 case "--seats": o.Seats = Int32.Parse(Next()); break;
+                case "--find": o.Find = true; break;
+                case "--expect": o.Expect = Int32.Parse(Next()); break;
+                case "--no-extra-pickups": o.NoExtraPickups = true; break;
+                case "--no-extra-characters": o.NoExtraCharacters = true; break;
+                case "--arenas": o.Arenas = true; break;
+                case "--imports": o.Imports = Path.GetFullPath(Next()); break;
                 default: throw new ArgumentException($"unknown option {key}");
                 }
             }

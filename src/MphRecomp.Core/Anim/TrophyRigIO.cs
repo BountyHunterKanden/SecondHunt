@@ -21,7 +21,7 @@ namespace MphRecomp.Anim
             ["MP1PowerSuit"] = Hunter.Samus, ["MP1GravitySuit"] = Hunter.Samus, ["MP1VariaSuit"] = Hunter.Samus, ["MP1FusionSuit"] = Hunter.Samus,
             // the beta Phazon Suit: an unused suit model on the Prime 1 disc, on the final Phazon Suit's skin (HdRecipe "model")
             ["MP1BetaPhazonSuit"] = Hunter.Samus,
-            ["MP2VariaSuit"] = Hunter.Samus, ["MP2DarkSuit"] = Hunter.Samus, ["MP2LightSuit"] = Hunter.Samus, ["MP2DarkSamus"] = Hunter.Samus, ["MP1FusionTubes"] = Hunter.Samus,
+            ["MP2VariaSuit"] = Hunter.Samus, ["MP2DarkSuit"] = Hunter.Samus, ["MP2LightSuit"] = Hunter.Samus, ["MP2DarkSamus"] = Hunter.Samus, ["MP2DarkSamusFinal"] = Hunter.Samus, ["MP1FusionTubes"] = Hunter.Samus,
             ["MP3VariaSuit"] = Hunter.Samus, ["MP3DarkSamus"] = Hunter.Samus, ["MP3PEDSuit"] = Hunter.Samus,
             // Metroid Prime 4: Beyond (the owner's own dump, Prime 4 Model Dumper glTF -> mp4_to_trophy.py): bind pose, Retro's skin
             ["MP4Sylux"] = Hunter.Sylux,

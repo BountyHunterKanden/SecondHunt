@@ -336,6 +336,10 @@ namespace SecondHunt.Server
         private void ResolveVote(FindMatch m)
         {
             m.Arena = FindRules.Tally(m.Options, m.Votes, _findRandom);
+            if (TryServeFind(m))
+            {
+                return; // (the server runs it: HubServedFind.cs)
+            }
             m.Host = FindRules.PickHost(m.Players, Ping);
             m.HostEnds = Now.AddSeconds(_find.HostSeconds);
             PlayerCard HostCard(string viewer) => Card(_store.Get(m.Host)!, viewer);
