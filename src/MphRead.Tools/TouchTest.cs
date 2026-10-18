@@ -16,8 +16,9 @@ namespace MphRead
     //   touch roll: a slow drag up rolls the ball forward, a drag right rolls it right, and it rolls on after the lift;
     //     no boost from it
     //   touch boost: a flick (> 90 px over 8 frames) boosts once; holding on and flicking again doesn't; after a lift it does
-    //   stylus aim (TOUCH AIM: STYLUS, Core Input/StylusAim.cs): nothing until the hold passes 10 frames; then a pixel of
-    //     drag turns 4 x 2211/4096 x sensitivity degrees of yaw (1138/4096 of pitch) in all, measured on Samus in the arena
+    //   stylus aim (TOUCH AIM: STYLUS, Core Input/StylusAim.cs): direct (default) turns a quick sweep's whole angle at once;
+    //     Vanilla: nothing until the hold passes 10 frames; then a pixel of drag turns 4 x 2211/4096 x sensitivity degrees
+    //     of yaw (1138/4096 of pitch) in all, measured on Samus in the arena
     internal static class TouchTest
     {
         private static int _fails;
@@ -200,7 +201,17 @@ namespace MphRead
             Check($"sensitivity level 7 = 1.2 (got {sens:0.000}), 1 = 0.6, 15 = 2.0",
                 MathF.Abs(sens - 1.2f) < 1e-5f && MathF.Abs(MphRecomp.Input.StylusAim.Sensitivity(1) - 0.6f) < 1e-5f
                 && MathF.Abs(MphRecomp.Input.StylusAim.Sensitivity(15) - 2.0f) < 1e-5f);
-            var aim = new MphRecomp.Input.StylusAim();
+            // direct (the default): a quick sweep turns at once, by the DS's angle per pixel, with no hold
+            var direct = new MphRecomp.Input.StylusAim();
+            float first = direct.Step(true, new System.Numerics.Vector2(5, 0), sens, false).X;
+            float sweep = first;
+            for (int f = 0; f < 3; f++) sweep += direct.Step(true, new System.Numerics.Vector2(5, 0), sens, false).X;
+            sweep += direct.Step(false, new System.Numerics.Vector2(5, 0), sens, false).X; // the lift's last drag counts
+            float sweepWant = 25 * 4 * MphRecomp.Input.StylusAim.YawFactor * sens * 4; // mouse units, 4 a degree
+            Console.WriteLine($"    direct: first frame {first:0.00}, 25 px sweep over 5 frames {sweep:0.00} (want {sweepWant:0.00})");
+            Check("direct stylus aim: the press frame's drag turns at once", first > 0);
+            Check("direct stylus aim: a 5-frame sweep turns its whole angle", MathF.Abs(sweep - sweepWant) < 1e-3f * sweepWant);
+            var aim = new MphRecomp.Input.StylusAim { Vanilla = true };
             float early = 0;
             for (int f = 0; f < 10; f++) early += MathF.Abs(aim.Step(true, new System.Numerics.Vector2(5, 5), sens, false).X);
             Check($"no aim for the first 10 frames of a hold (got {early})", early == 0);

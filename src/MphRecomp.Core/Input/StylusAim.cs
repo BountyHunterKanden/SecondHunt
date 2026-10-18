@@ -16,6 +16,11 @@ using System.Numerics;
 // At 60 Hz the 4 ticks are 8 frames (each frame's sum counts half) and the hold has to pass 10 frames. The stylus here is
 // the finger's drag in DS touch-screen pixels by physical size (MatchTouchOverlay.DsPerPixel), kept unrounded: the same
 // rule, finer steps than the DS's whole pixels.
+// Direct (the default since 2026-10-18, from a player's report: "a pretty notable input delay with touch screen stylus
+// aim ... feels like I'm back to playing melonDS" and "quick sweeps ... won't register. Gotta hold down on the touch
+// screen for a moment"): both are the DS's rule, the 10-frame hold and the 8-frame sum. Direct turns each frame's drag
+// at once by the same angle per pixel in all, with no hold, and keeps the drag of a lift between steps. Vanilla = true
+// is the DS's rule as above.
 namespace MphRecomp.Input
 {
     public sealed class StylusAim
@@ -29,6 +34,9 @@ namespace MphRecomp.Input
         private int _index;
         private int _holdFrames;
 
+        // the DS's rule (hold + 4-tick sum) instead of the direct turn
+        public bool Vanilla { get; set; }
+
         // the OPTIONS slider's sensitivity for our level 1-15 (RecompSettings.GameSensitivity; the DS's index + 1)
         public static float Sensitivity(int level) => 0.6f + 0.1f * (Math.Clamp(level, 1, 15) - 1);
 
@@ -36,6 +44,17 @@ namespace MphRecomp.Input
         // the aim in CampaignInput.AimDelta's units (MphRead's mouse units: 4 a degree; +x turns right, +y looks down).
         public Vector2 Step(bool down, Vector2 moved, float sensitivity, bool invertY)
         {
+            if (!Vanilla)
+            {
+                // the whole angle a pixel earns (4 ticks in the sum) on the frame it's dragged; 4 mouse units a degree
+                if (!down)
+                {
+                    Reset();
+                }
+                float dx = moved.X * 4 * YawFactor * sensitivity * 4;
+                float dy = moved.Y * 4 * PitchFactor * sensitivity * 4;
+                return new Vector2(dx, invertY ? -dy : dy);
+            }
             if (!down)
             {
                 Reset();
