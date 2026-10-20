@@ -12,8 +12,8 @@ Second Hunt aims to modernize and add new features and content to the original H
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data from any Metroid game and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 3 (0.3.0-beta, Android and Windows).** Sylux from _Metroid Prime 4: Beyond_, a heavy turret in Shooting
-> Gallery, online games hosted on our server, rebuilt controls and settings, and a lot of fixes. Playable start to finish,
+> **Beta 3.6 (0.3.6-beta, Android and Windows).** Smoother online matches on the Second Hunt server, replay sharing,
+> ping on the scoreboard, Overcharged Dark Samus, and Sylux from _Metroid Prime 4: Beyond_. Playable start to finish,
 > with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
 > <a href="https://discord.gg/yBTbkBN"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FyBTbkBN%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&logo=discord&logoColor=white&color=5865F2" alt="Discord: players online"></a>
@@ -44,13 +44,14 @@ Android. On Windows the keyboard and mouse use MphRead's own PC controls.
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
 sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
-## What's in Beta 3
+## What's in Beta 3.6
 
 **Campaign**
 - The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
   Oubliette
 - The game's own title screen, attract movie, file select (three files, with copy and delete), options and credits,
-  rebuilt from the menus in your ROM
+  rebuilt from the menus in your ROM. You can tap or click the title screen's options, and on Windows QUIT TO DESKTOP
+  sits in its lower left corner (and in the pause menu).
 - The gunship: cockpit, ship menus, star map, planet select, and the landing and take-off movies
 - Every cutscene, the HUD for every hunter, and the scan visor
 - A pause map on Select, showing either the game's own map or a Prime-style map of the rooms you've explored
@@ -68,9 +69,10 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - A weapon ring: hold L2 and point with the right stick. It works while you move.
 - Hold Select for the live scoreboard, like the original (online, it also shows each player's ping)
 - The radar shows the other hunters (SHOW HUNTERS ON RADAR), with anyone out of range sitting on its edge
-- REPLAYS: your last ten matches are saved (favorites are kept). Watch them at any speed, skip back and forward,
-  follow any player, or fly a free camera. Send a replay to a friend (SEND TO FRIEND), find the ones sent to you
-  under SHARED WITH ME, or export one to a file.
+- REPLAYS: your last ten matches are saved (favorites are kept), online games on the server included. Watch them at
+  any speed, skip back and forward, follow any player, or fly a free camera, and HIDE clears the screen for clean shots.
+  SEND TO FRIEND sends a replay to up to 8 friends, the ones sent to you are under SHARED WITH ME, and EXPORT saves one
+  as a file.
 - EXTRA rules under ADVANCED: EXTRA PICKUPS (the Pirate Blaster), EXTRA CHARACTERS and EXTRA ARENAS, each of which
   can be turned off to play like the original
 
@@ -87,9 +89,10 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   to type
 - Tap any player's name for their license, your record against them, and MUTE, BLOCK or REPORT
 - Online games run on the Second Hunt server, so nobody's device is the host: FIND GAME, games you create, _Echoes_
-  arenas and 8-player games. Only a game made while the server is full is hosted by a player, and if that host
-  leaves, another player takes over.
-  If your connection drops, you rejoin where you were.
+  arenas and 8-player games. Movement and hits sync 60 times a second, so other players move smoothly and your shots
+  land where you aimed. Only a game made while the server is full is hosted by a player, and if that host leaves,
+  another player takes over. If your connection drops, you rejoin where you were.
+- Everyone in an online or LAN game needs the same version. Older versions are told to update.
 - The host can change the mode and rules after creating a game (EDIT RULES in the lobby)
 - Online matches are always in first person (LAN matches can use third person)
 - Online play is for ages 13 and up. The rules and what the server keeps are in
@@ -102,11 +105,13 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   nothing from it is ever uploaded. Each import can be deleted again.
 - HD Samus suits and morph balls from each game you import, picked under SECOND HUNT SETTINGS > SAMUS SUIT (third
   person and morph ball), plus an HD Samus behind the menus
-- TROOPER (from _Metroid Prime_): a Space Pirate trooper with four skins, a wall cling and a Scout Drone alt form.
+- TROOPER (from _Metroid Prime_): a Space Pirate trooper with four skins, a wall cling (hold Jump against a wall) and
+  a Scout Drone alt form.
   A full Pirate Blaster burst marks a target for 4 seconds (Squad Mark), showing them through walls and on the radar
   to him, or to his whole team in team games.
 - DARK SAMUS (from _Echoes_, or from _Corruption_ on either its own disc or the _Metroid Prime Trilogy_ disc). The
-  _Echoes_ import also adds her overcharged final form as a skin.
+  _Echoes_ or _Trilogy_ import also adds OVERCHARGED DARK SAMUS, her final form from _Echoes_, as a skin with its own
+  morph ball.
 - Six _Echoes_ multiplayer arenas with their music: Sidehopper Station, Spires, Crossfire Chaos, Pipeline, Spider
   Complex and Shooting Gallery, with _Echoes_ movement (double jump, Gravity Boost). Shooting Gallery has its heavy
   turret.
@@ -123,7 +128,8 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - Sensitivity and look invert for the controller, and on Windows a separate sensitivity for the mouse
 - Imperialist zoom: the original zoom, or zoom in steps (ZOOM STEP), with its own sensitivity and a RETICLE INDICATOR
 - TRY CONTROLS: a practice room to test your setup
-- Stylus aim (TOUCH AIM: STYLUS) like the DS
+- Stylus aim (TOUCH AIM: STYLUS) like the DS, minus the DS's delay before it starts turning
+- SWAP DRONE DIALS swaps the Trooper's beam and laser indicators
 
 **Audio** (OPTIONS > AUDIO, wired up like the original)
 - Sound effect and music volume
@@ -146,7 +152,8 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - Menus with both DS screens merged into one or side by side, crisp or smoothed pixel art, and the HUD's line art
   redrawn as clean lines or kept as DS pixels
 - Pause map look and mode
-- Credits, licenses, and a button to share crash reports (on Windows it opens their folder)
+- Credits, licenses, and buttons to share the crash report or the game's log at any time (on Windows they open the
+  folder; on Android the share sheet can also save to Downloads/Second Hunt)
 - Updates: when the game starts it asks GitHub in the background for a newer Second Hunt, and if there is one, the main
   menu asks whether to install it (UPDATE ALERTS turns that off). CHECK asks right away. Either way the game downloads
   and installs the update itself, only installs a release signed with the project's update key, and only from the main
@@ -245,7 +252,7 @@ In the menus, the arrow keys or W A S D move, Enter or Space choose, Esc or Back
 the mouse clicks anything the DS touch screen would. A controller works on Windows too, with the buttons above.
 
 **Touch:** the overlay has a move stick on the left half of the screen and an aim stick on the right, with buttons for
-fire, jump, morph, missile, weapon (hold it and drag toward a weapon, like the DS stylus) and pause, plus visor, scan
+fire, jump, morph, missile, weapon (hold it and drag toward a weapon like the DS stylus, or tap one on the ring) and pause, plus visor, scan
 and map in the campaign, and TALK and CHAT online. The right half also works like the DS touch screen: double tap to
 jump, and in morph ball drag to roll and flick to boost. When missiles are selected, the missile button says POWER BEAM and switches you back. In
 dialogs, JUMP is OK/YES and FIRE is NO. The touch buttons keep these jobs whatever the controller's buttons are changed
@@ -306,7 +313,8 @@ Reports from other phones and handhelds are very welcome.
 
 **If it crashes:** go to SECOND HUNT SETTINGS > crash log > SHARE to send the latest crash report (it doesn't contain any
 personal data). On Windows the same row says OPEN and shows the report's folder. Please attach it to a bug report on the [Issues](../../issues) page, with your device and what you were
-doing.
+doing. For a bad online match or anything else that isn't a crash, SECOND HUNT SETTINGS > SHARE LOG sends the game's
+log the same way.
 
 ## What's planned
 
@@ -324,7 +332,6 @@ doing.
 **Later**
 - Rumble on controllers and phones that support it
 - Gyro aim on Windows, for controllers with a gyro
-- Dedicated servers for online matches (players host them for now)
 - The original's SURROUND and HEADPHONES speaker modes, and HQ music that keeps more of the DS's treble
 - Unlocking the sound test the original way (after the true ending's results screen). For now it's always open.
 - An optional Prime-style HUD with a mini map and weapon indicators and a radar
