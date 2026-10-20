@@ -17,10 +17,12 @@ This repository is a fork of **MphRead** by **NoneGiven**
 
 ## This fork's additions
 
-New files added by this fork (this document, `ARCHITECTURE.md`, files under
-`docs/`, and the Second Hunt app and tools code) are contributed under the **same MIT
-License** for continuity, unless a file's own header states otherwise. The MIT
-copyright notice above continues to cover the upstream-derived code.
+Second Hunt's own code was published here under the MIT License up to October 20, 2026. Copies of that code
+keep that license. From October 20, 2026 on, Second Hunt is closed source: its source is no longer published,
+and new Second Hunt code, art and documents are Copyright (c) 2026 BountyHunterKanden, all rights reserved.
+The released builds can be downloaded and played, but not decompiled, copied or redistributed in modified form,
+except for the upstream MphRead code and third-party libraries, which stay under their own licenses (`LICENSE`,
+`THIRD_PARTY_NOTICES.md`).
 
 ## Legal posture (project rule)
 
@@ -33,5 +35,5 @@ branding. "mph-recomp" / `com.mphrecomp.app` is the internal development name.
 The music player inherited from upstream (NcsfPlay, see `THIRD_PARTY_NOTICES.md`)
 used to contain sequencer logic adapted from a community decompilation of the DS
 SDK's sound driver. That sequencer is now a clean-room implementation, verified
-sample for sample against the old one on every song (`docs/cleanroom/README.md`). MphRead's VX movie
+sample for sample against the old one on every song. MphRead's VX movie
 decoder and its transparency rendering were replaced the same way, each checked to give the same result.

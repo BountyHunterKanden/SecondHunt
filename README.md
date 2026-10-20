@@ -344,8 +344,7 @@ log the same way.
 
 MphRead marks every unfinished or uncertain spot in its code with a `todo` comment, and there are 1,457 of them. As of
 October 2026, 27 are fixed and 5 more are partly fixed. They're being worked through area by area, and the ones that
-change how the game plays are fixed after being compared against the original game. The full list, with the fixed ones
-crossed off, is in [MPHREAD_TODO.md](docs/MPHREAD_TODO.md).
+change how the game plays are fixed after being compared against the original game.
 
 | Area | TODOs | Fixed | What they're about |
 |---|---|---|---|
@@ -434,39 +433,11 @@ Gameplay values are the original's. What's different is how the game looks, soun
 - A fix for a version 1.1 bug: on 1.1 ROMs the file-select sounds (including the start-game sound) never play, because
   that version misaligned a sound table. Second Hunt plays them like version 1.0 does.
 
-## Building from source
+## Source code
 
-**Android.** You need the .NET 9 SDK with the Android workload (`dotnet workload install android`), JDK 17 and the
-Android SDK.
-
-```
-dotnet build src/MphRead.Android/MphRead.Android.csproj -c Release -p:JavaSdkDirectory=<jdk17> -p:AndroidSdkDirectory=<android-sdk>
-```
-
-That gives you a development build (`com.mphrecomp.app`, signed with your machine's debug key), which installs next to
-the release app and has the developer tools. Release builds use `-p:MphReleaseSign=true` and the project's signing key,
-and come out as `com.secondhunt.app`.
-
-**Windows.** You need the .NET 9 SDK.
-
-```
-dotnet build src/SecondHunt.Desktop/SecondHunt.Desktop.csproj -c Release
-```
-
-That gives you a development build (it keeps its data in `%LOCALAPPDATA%\MPH Recomp`). The release zip comes from
-`src/SecondHunt.Desktop/Publish-Windows.ps1`, which builds a self-contained public build (`-p:MphPublic=true`) and packs
-it with its README and notices.
-
-| Folder | What's in it |
-|---|---|
-| `src/MphRead` | MphRead's game logic, formats and renderer (upstream, with small hooks for Second Hunt) |
-| `src/MphRecomp.Core` | Second Hunt's shared code: menus, settings, input, multiplayer, mods |
-| `src/MphRecomp.App` | The app itself, shared by both platforms: front end, campaign, ship, map, cutscenes, matches, music and sound, drawn through one GLES 3 binding |
-| `src/MphRead.Android` | The Android shell: activities, AudioTrack output, gyro, touch overlay, lobby, ROM setup |
-| `src/SecondHunt.Desktop` | The Windows shell: window and GL contexts, keyboard, mouse and controllers, sound device, ROM setup, lobby, credits |
-| `src/MphRead.Tools` | MphRead's desktop viewer, plus Second Hunt's PC-side test harnesses |
-| `src/NcsfPlay` | The DS music player |
-| `src/SecondHunt.Server` | The online server: names, friends, lobbies, matchmaking and the match relay |
+Second Hunt is closed source as of October 20, 2026. Only the Android and Windows builds are released now, on the
+[Releases](../../releases) page. Code that was published here before that date keeps the MIT license it came out
+under. Anything made after it isn't licensed for copying or redistribution. See `NOTICE-fork.md`.
 
 ## Credits
 
@@ -490,14 +461,14 @@ A significant portion of this project's code was based on the file format inform
 - **[CyberBotX's NCSF](https://github.com/CyberBotX/NCSF)** - Source code for the NCSF converter and player for Nintendo DS sequenced music.
 
 (Note from Second Hunt: MphRead's VX movie decoder, and the sequencer in the NCSF-based music player, have since been
-replaced with clean-room code that gives the same pictures and sound. See [docs/cleanroom](docs/cleanroom).)
+replaced with clean-room code that gives the same pictures and sound.)
 
 ### Special Thanks
 
 This project's reverse engineering effort was developed parallel to **[hackyourlife's mph-viewer](https://github.com/hackyourlife/mph-viewer)**, a model viewer implementation in C. Major features such as the transparency rendering implementation were derived from its source code.
 
 (Note from Second Hunt: that transparency rendering code has since been replaced with a clean-room version that draws
-the same result. See [docs/cleanroom](docs/cleanroom).)
+the same result.)
 
 ### Notice
 > **AI tools were used in the making of this project.** 
