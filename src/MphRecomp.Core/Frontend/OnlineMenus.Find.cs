@@ -235,6 +235,10 @@ namespace MphRecomp.Frontend
             case PartyGameEvent pg:
                 Post(() => PartyGame(pg));
                 return true;
+            case ReplayOfferEvent ro: // (a friend shared a replay: REPLAYS' SHARED section, MphRecomp Replay/SharedReplays.cs)
+                MphRecomp.Replay.SharedReplays.OnOffer(ro);
+                if (!MphRecomp.Replay.SharedReplays.Blocked(ProfileDir)) Post(() => ReplayOffered(ro.Offer));
+                return true;
             }
             return false;
         }

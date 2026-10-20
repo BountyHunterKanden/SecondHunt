@@ -17,7 +17,7 @@ namespace MphRecomp.App;
 //     2026-10-04), WEAPON (= L2 held, Y until 2026-10-09: the weapon ring -- drag from the button towards a weapon and let go, like the DS
 //     stylus; owner 2026-10-04: "the touch overlay needs a weapon switcher"), PAUSE (Start); after the match a tap
 //     anywhere continues. While the player flies the Trooper's Scout Drone (owner 2026-10-08 / 2026-10-11) the buttons turn
-//     into the drone's (the drone functions' default buttons): FIRE reads BURST, JUMP RISE, MORPH RECALL, LASER (= L2)
+//     into the drone's (the drone functions' default buttons; MORPH stays morph): FIRE reads BURST, JUMP RISE, MORPH RECALL, LASER (= L2)
 //     shows, and the hunter-only ones (MISSILE, WEAPON, OMEGA, VISOR, SCAN) hide until it comes back
 //   campaign (owner 2026-10-04: "touch overlay should be available for campaign"): the match's six plus
 //     VISOR (= D-pad right: scan visor on/off), SCAN (= Y, L2 until 2026-10-09: hold to scan in the scan visor, zoom outside it),

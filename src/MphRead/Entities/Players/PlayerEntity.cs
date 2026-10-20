@@ -843,7 +843,9 @@ namespace MphRead.Entities
             }
             else
             {
-                if (IsMainPlayer && GameState.Multiplayer && CameraSequence.Current?.IsIntro == true)
+                // recomp: a served host has no local seat, so seat 0's spawn ends the intro there as it does on that
+                // player's device (left running, it kept writing seat 0's camera, which its aim point is built from)
+                if ((IsMainPlayer || HostNoLocalSeat && this == Main) && GameState.Multiplayer && CameraSequence.Current?.IsIntro == true)
                 {
                     CameraSequence.Current.End();
                 }
@@ -1223,6 +1225,10 @@ namespace MphRead.Entities
             else
             {
                 between = Volume.SpherePosition - bomb.Position;
+                if (HostLagFix && bomb.Owner != this)
+                {
+                    between += NetLagShift(bomb.Owner, this); // recomp: where the bomber saw this player (online host)
+                }
             }
             float distSqr = between.LengthSquared;
             float hitRadiusSqr = Fixed.ToFloat(Values.BombSelfRadiusSquared);
@@ -2525,23 +2531,10 @@ namespace MphRead.Entities
                 {
                     if (!IsAltForm)
                     {
-                        if (!flags.TestFlag(DamageFlags.Halfturret))
+                        if (!flags.TestFlag(DamageFlags.Halfturret) && !NetHandPush(direction.Value)) // recomp: (PlayerNetPosition.cs)
                         {
-                            // todo: FPS stuff?
-                            Vector3 speed = Speed + direction.Value.WithY(0);
-                            if (direction.Value.Y <= 0)
-                            {
-                                speed.Y += direction.Value.Y;
-                            }
-                            else if (speed.Y < 0.25f)
-                            {
-                                speed.Y += direction.Value.Y;
-                                if (speed.Y > 0.25f)
-                                {
-                                    speed.Y = 0.25f;
-                                }
-                            }
-                            Speed = speed;
+                            ApplyPush(direction.Value);
+                            NetHostMoved(NetHostMove.Push); // recomp: the host pushed a remote seat (PlayerNetPosition.cs)
                         }
                         if (direction.Value != Vector3.Zero)
                         {
@@ -2554,7 +2547,13 @@ namespace MphRead.Entities
                     }
                     else if (!flags.TestFlag(DamageFlags.Halfturret))
                     {
-                        Speed += (direction.Value * 0.4f).WithY(0); // todo: FPS stuff?
+                        // recomp: as handed to a device that pushes its own player, the flat push ApplyPush adds the same way
+                        Vector3 push = (direction.Value * 0.4f).WithY(0); // todo: FPS stuff?
+                        if (!NetHandPush(push))
+                        {
+                            Speed += push;
+                            NetHostMoved(NetHostMove.Push); // recomp: (PlayerNetPosition.cs)
+                        }
                     }
                 }
                 else if (attacker != null)

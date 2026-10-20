@@ -44,9 +44,9 @@ internal sealed partial class CampaignRenderer
     bool DrawLockjaw(PlayerEntity p, Scene scene, SuitPass pass)
     {
         if (LockjawOf(p) is not CampaignRetroBody b) return false;
-        if (b.DrawLockjaw(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostDamageFlash) is Vector3 core)
+        if (b.DrawLockjaw(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostDamageFlash, p.CurAlpha) is Vector3 core)
         {
-            _lockjawOrbs.Add((core, p.HostSyluxBombColor ?? LockjawOrbColour));
+            _lockjawOrbs.Add((Vector3.TransformPosition(core, SmoothCarry(p, scene)), p.HostSyluxBombColor ?? LockjawOrbColour)); // carried as the body (smooth frames)
         }
         return true;
     }

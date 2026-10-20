@@ -29,6 +29,19 @@ namespace MphRecomp.Campaign
             Cheats.FreeWeaponSelect = false;
             // same float results on every device (replays and LAN play across devices; MphRead/Utility/DetMath.cs)
             DetMathF.HostDeterministic = true;
+            PlayerEntity.HostClaimOneHit = settings.ClaimOneHit ?? true;
+            BeamProjectileEntity.HostBodySplashOnce = settings.BodySplashOnce ?? true;
+            PlayerEntity.HostBotDropOff = settings.BotDropOff ?? false; // (bots over a drop-down node: PlayerAiDropOff.cs; off for now, 2026-10-20: kept out of the release)
+            PlayerEntity.HostHitClaims = settings.HitClaims ?? true; // (only a host's remote seats keep shots: Net/HitClaims.cs)
+            bool lighterBlaster = settings.LighterBlaster ?? true; // (the blaster's bolt damage: PirateBlaster.cs)
+            bool lighterBlaster2 = settings.LighterBlaster2 ?? true; // (9 / 13 instead of 10 / 14, 2026-10-20)
+            PirateBlaster.HostBoltDamage = !lighterBlaster ? 0 : lighterBlaster2 ? PirateBlaster.LighterBolt2 : PirateBlaster.LighterBolt;
+            PirateBlaster.HostBoltHeadshot = !lighterBlaster ? 0
+                : lighterBlaster2 ? PirateBlaster.LighterHeadshot2 : PirateBlaster.LighterHeadshot;
+            PirateBlaster.HostBoltCost = settings.BlasterBoltCost ?? true; // (each bolt pays a shot of UA: PirateBlaster.cs)
+            PlayerEntity.HostDroneLaserNoPush = settings.DroneLaserNoPush ?? true; // (no push from the drone's laser: MatchSettings)
+            PlayerEntity.HostLagFix = settings.LagCompFix ?? true; // (an online host's lag compensation, 2026-10-19: MatchSettings)
+            PlayerEntity.ResetSeatPings(); // (a network match's driver fills them: Net/SeatPings.cs; none in a local match or replay)
             // the game's 4 seats, or 8 for a match of 5-8 (P8, MphRead PlayerSlots.cs): set before the scene makes the players
             PlayerEntity.MaxPlayers = PlayerEntity.MaxPlayersFor(settings.Players.Count);
             CampaignHost? host = null;
@@ -59,8 +72,14 @@ namespace MphRecomp.Campaign
                 player.HostShieldWall = abilities && Characters.HasShieldWall(seat);
                 player.HostWallCling = abilities && Characters.HasWallCling(seat);
                 player.HostWallClingJumpRule = settings.WallClingJumpRule ?? true;
+                player.HostWallClingOnce = settings.WallClingOnce ?? true;
+                player.HostWallClingHold = settings.WallClingHold ?? true;
                 player.HostDronePadArc = settings.DronePadArc ?? true;
+                player.HostDroneSwitchRule = settings.DroneSwitchRule ?? true;
+                player.HostDroneWaitsOnFoot = settings.DroneWaitsOnFoot ?? true;
+                player.ResetHitClaims(); // (its shots numbered from 1: Net/HitClaims.cs)
                 player.HostDroneBodyHeadshots = settings.DroneBodyHeadshots ?? true;
+                player.HostDroneBodySplash = settings.DroneBodySplash ?? true;
                 player.HostContinuousHeadshots = settings.ContinuousHeadshots ?? true;
                 player.HostShockCoilGrace = settings.ShockCoilGrace ?? true;
                 player.HostVanillaZoom = settings.VanillaZoom ?? true;

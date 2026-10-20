@@ -26,11 +26,17 @@ namespace MphRecomp.Campaign
             }
             // N4: a view older than the cap counts as the cap's (before the tap, so a replay rewinds the same at any cap)
             NetInput applied = input;
+            CountLag(seat, input, p.NetAimEpoch); // (for the match host's log only: MatchRemote.LagStats.cs)
             if (applied.ViewTick != 0 && Frame - applied.ViewTick > LagCompensation.MaxRewind)
             {
                 applied.ViewTick = (uint)(Frame - LagCompensation.MaxRewind);
             }
             RemoteInputTap?.Invoke(seat, applied);
+            if (seat >= 0 && seat < RemoteSeq.Length)
+            {
+                RemoteSeq[seat] = input.Seq; // (the shot check: Net/ShotCheck.cs)
+                RemoteView[seat] = input.ViewTick; // (the hit claims' check: Net/HitClaims.cs; as sent, before the cap)
+            }
             SetControls(p.Controls, input.MoveX, input.MoveY, input.Buttons, input.SelectWeapon);
             p.HostZoomButtons((input.Buttons & CampaignButtons.ZoomStep) != 0, (input.Buttons & CampaignButtons.ZoomIn) != 0,
                 (input.Buttons & CampaignButtons.ZoomOut) != 0); // ZOOM STEP (CampaignHost.CampaignButtons)
@@ -46,6 +52,11 @@ namespace MphRecomp.Campaign
             // rewinds the same)
             p.HostLagRewind = LagCompensation.RewindFor(Frame, applied.ViewTick);
         }
+
+        // each remote seat's last applied input's sequence number
+        public readonly ushort[] RemoteSeq = new ushort[16];
+        // and its view tick (0 = none)
+        public readonly uint[] RemoteView = new uint[16];
 
         // N4 lag compensation (Net/LagCompensation): on by default for a match host; the PC tests turn it off to compare
         public bool LagCompOn { get; set; } = true;

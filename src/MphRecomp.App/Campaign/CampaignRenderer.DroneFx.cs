@@ -49,6 +49,7 @@ internal sealed partial class CampaignRenderer
     const float DroneLaserMinHalf = 0.0008f; // half width per unit of distance from the camera
     // the sim's unfold / fold lengths (PlayerScoutDrone): the clips (and their events) stretch to them
     static readonly int[] DroneFxStateFrames = { 0, 32, 0, 24 };
+    const uint DroneSpawnSound = 632; // Prime's drone alert: macro 255 loops its beep four times
     const float DroneSfxVolume = 1f;  // Prime's macro volumes are in the sounds already
     const int DroneSfxRange = 1;      // MPH's sound range for another player (PlayerEntity: rangeIndex 1)
     static readonly Dictionary<uint, (short[] Pcm, int Rate)> NoSounds = new();
@@ -98,6 +99,7 @@ internal sealed partial class CampaignRenderer
         foreach (PlayerEntity p in PlayerEntity.Players)
         {
             if (p == null || !p.HostScoutDrone) continue;
+            TickDroneSpawnSound(p);
             CampaignRetroBody? d = p.IsAltForm ? DroneOf(p) : null;
             if (d?.Fx is not (RetroParticles lib, BodyFx.Config cfg))
             {
@@ -328,6 +330,21 @@ internal sealed partial class CampaignRenderer
 
     readonly HashSet<uint> _droneSfxLogged = new();
 
+    readonly Dictionary<PlayerEntity, (int Splits, SoundSource At)> _droneSplit = new();
+
+    // Prime's drone alert (four beeps, SFXdrn_b_alert_00) where the drone deploys, in place of the hunter's spawn sound.
+    // Runs for the seat in or out of its alt form: the split happens on the step it enters it, before any seat exists
+    void TickDroneSpawnSound(PlayerEntity p)
+    {
+        CampaignRetroBody? d = DroneOf(p);
+        IReadOnlyDictionary<uint, (short[] Pcm, int Rate)> snd = _sfx != null && d?.Fx != null ? d.FxSounds : NoSounds;
+        p.HostOwnDroneSpawnSfx = snd.ContainsKey(DroneSpawnSound);
+        if (!_droneSplit.TryGetValue(p, out var st)) st = (p.DroneSplits, new SoundSource());
+        st.At.Update(p.DroneDrawCenter, DroneSfxRange);
+        if (p.DroneSplits != st.Splits) PlayDroneSound(snd, DroneSpawnSound, st.At);
+        _droneSplit[p] = (p.DroneSplits, st.At);
+    }
+
     void PlayDroneSound(IReadOnlyDictionary<uint, (short[] Pcm, int Rate)> snd, uint id, SoundSource at)
     {
         if (_sfx == null || !snd.TryGetValue(id, out (short[] Pcm, int Rate) s)) return;
@@ -419,9 +436,17 @@ internal sealed partial class CampaignRenderer
             // fades as the camera gets inside it (Prime's glows are metres wide: in the alt form's close camera one
             // would fill the screen)
             float alpha = (fx.P != null ? DroneAlpha(scene, fx.P) : 1) * fx.Fade;
+            // smooth frames: carried with the seat, as its drone and body are (SmoothView)
+            Matrix4 carry = SmoothCarry(fx.P, scene);
+            bool carried = carry != Matrix4.Identity;
             for (int k = from; k < _fxBoards.Count; k++)
             {
                 RetroBillboard bb = _fxBoards[k];
+                if (carried)
+                {
+                    bb.Position = Vector3.TransformPosition(bb.Position, carry);
+                    bb.Fore = Vector3.TransformVector(bb.Fore, carry);
+                }
                 float near = bb.Size > 1e-4f ? ((bb.Position - cam).Length / bb.Size - FxNearGone) / (FxNearWhole - FxNearGone) : 1;
                 bb.Color.W *= alpha * Math.Clamp(near, 0, 1);
                 _fxBoards[k] = bb;
@@ -498,7 +523,7 @@ internal sealed partial class CampaignRenderer
                     foreach (BeamProjectileEntity b in beams)
                     {
                         if (!b.HostOwnLook || b.Lifespan <= 0 || b.Flags.TestFlag(BeamFlags.Collided)) continue;
-                        Vector3 head = b.Position;
+                        Vector3 head = Vector3.TransformPosition(b.Position, SmoothCarry(b, scene));
                         Vector3 dir = b.Direction.LengthSquared > 1e-6f ? b.Direction.Normalized() : Vector3.UnitZ;
                         float len = MathF.Min(StreakLength, (head - b.SpawnPosition).Length);
                         if (layer == 2)
@@ -531,7 +556,8 @@ internal sealed partial class CampaignRenderer
                 foreach (PlayerEntity p in _fxSeats.Keys)
                 {
                     if (!p.HostOwnDroneLaser || !p.DroneLaserOn) continue;
-                    Vector3 from = p.DroneLaserOrigin, to = p.DroneLaserEnd;
+                    // the laser's start carried with the seat (smooth frames), its end stays on what it hits
+                    Vector3 from = Vector3.TransformPosition(p.DroneLaserOrigin, SmoothCarry(p, scene)), to = p.DroneLaserEnd;
                     Vector3 dir = to - from;
                     if (dir.LengthSquared < 1e-6f) continue;
                     dir.Normalize();

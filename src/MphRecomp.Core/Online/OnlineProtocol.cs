@@ -15,7 +15,9 @@ namespace MphRecomp.Online
     // id are the server's pushes (events). The game and SecondHunt.Server compile these same files.
     public static class OnlineProtocol
     {
-        public const int Version = 1;
+        // 2 (2026-10-19): the 0.3.6 match netcode (the host's pace byte, hit claims and their verdicts, the new match rules):
+        // an older app gets "update the game" at login instead of a match it can't follow
+        public const int Version = 2;
         public const int MaxMessage = 64 * 1024;
         public const int MaxLicense = 8 * 1024;
 
@@ -252,6 +254,16 @@ namespace MphRecomp.Online
     [JsonDerivedType(typeof(PartyGameEvent), "ev_party_game")]
     [JsonDerivedType(typeof(FindEvent), "ev_find")]
     [JsonDerivedType(typeof(ChatEvent), "ev_chat")]
+    // shared replays (server 0.9.0: ReplayMail.cs)
+    [JsonDerivedType(typeof(ReplaySendReq), "replay_send")]
+    [JsonDerivedType(typeof(ReplaySendMsg), "replay_upload")]
+    [JsonDerivedType(typeof(ReplaysReq), "get_replays")]
+    [JsonDerivedType(typeof(ReplaysMsg), "replays")]
+    [JsonDerivedType(typeof(ReplayFetchReq), "replay_fetch")]
+    [JsonDerivedType(typeof(ReplayTicketMsg), "replay_ticket")]
+    [JsonDerivedType(typeof(ReplayDropReq), "replay_drop")]
+    [JsonDerivedType(typeof(ReplayBlockReq), "set_replay_block")]
+    [JsonDerivedType(typeof(ReplayOfferEvent), "ev_replay")]
     public abstract class OnlineMsg
     {
         public int? Id { get; set; }

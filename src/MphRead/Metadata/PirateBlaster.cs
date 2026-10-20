@@ -11,6 +11,20 @@ namespace MphRead
     // Info() is the lookup for any beam that can be it.
     public static class PirateBlaster
     {
+        // 2026-10-19, a little lighter:
+        // a bolt's damage and its headshot's while MatchSettings.LighterBlaster is on (set per match by MatchStart; 0 = the
+        // rows' 12 / 16, as replays from before it): 10 / 14, about 45 a second held instead of 54
+        public const int LighterBolt = 10, LighterHeadshot = 14;
+        // 2026-10-20, a little lighter again: with MatchSettings.LighterBlaster2
+        // on too, 9 / 13 (8 / 12 was tried and dropped), about 40 a second held (replays before format 56: 10 / 14)
+        public const int LighterBolt2 = 9, LighterHeadshot2 = 13;
+        public static int HostBoltDamage { get; set; }
+        public static int HostBoltHeadshot { get; set; }
+        // 2026-10-20, each bolt takes a shot of ammo: with this on (MatchSettings.BlasterBoltCost,
+        // set per match by MatchStart; off = replays from before it) the burst's second and third bolts pay 5 UA each too, and a
+        // burst that runs dry stops there
+        public static bool HostBoltCost { get; set; }
+
         public const int BurstBolts = 3;
         public const int BurstGap = 3; // DS frames between bolts (x2 at 60 fps, like every cooldown)
 

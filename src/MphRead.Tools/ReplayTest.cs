@@ -709,6 +709,7 @@ namespace MphRead
                     CampaignInput input = file.Steps[player.Position].Input;
                     player.BeforeStep(); // (a LAN / online host's recording: its remote seats' inputs and drops)
                     BeforeStep(view, host);
+                    _beforeStep?.Invoke(host); // (-replaynettest served=1: the watched seat's HUD, ReplayTest.Net.cs)
                     host.Step(input);
                     if (_dump != null && run.Parts.Count >= _dumpFrom && run.Parts.Count <= _dumpTo)
                     {
@@ -751,6 +752,7 @@ namespace MphRead
         }
 
         private static bool _drawFreeRecord = true, _drawFreeReplay = true;
+        private static Action<CampaignHost>? _beforeStep;
         private static bool _detMath = true;
 
         private static CampaignHost StartFor(View view, Func<CampaignHost> start)

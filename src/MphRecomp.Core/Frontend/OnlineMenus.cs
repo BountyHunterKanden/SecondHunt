@@ -531,7 +531,7 @@ namespace MphRecomp.Frontend
             {
                 // (FIND A HUNTER's name keyboard keeps it too)
                 bool typing = (_typingName || _chatTyping) && page == MultiplayerMenu.NamePage;
-                if (_client != null && !_joining && page != MultiplayerMenu.LoadingPage && !setup && !typing) CloseOnline();
+                if (_client != null && !_joining && page != MultiplayerMenu.LoadingPage && !setup && !typing && !IsReplaysPageIndex(page)) CloseOnline();
                 return;
             }
             _onlineMenu = menu;
@@ -719,6 +719,7 @@ namespace MphRecomp.Frontend
             bool changed = false;
             while (m.Client.Events.TryDequeue(out OnlineMsg? ev))
             {
+                if (ev is ReplayOfferEvent) { FindPush(ev); continue; } // (a shared replay: not the lobby's)
                 if (ev is not MemberEvent member || member.GameId != m.Game.Id) continue;
                 m.Members.RemoveAll(c => c.Code == member.Player.Code);
                 if (member.Joined) m.Members.Add(member.Player);
@@ -790,6 +791,7 @@ namespace MphRecomp.Frontend
                         if (back != null) Console.WriteLine("online: the match's connection is the hub's again");
                         _ = UploadLicense(c, license);
                         _ = FlushResults(c, dir); // (head-to-head reports still waiting: LAN matches, a lost connection)
+                        _ = MphRecomp.Replay.SharedReplays.SyncAsync(c, dir); // (friends' shared replays waiting + the block setting)
                         Post(() =>
                         {
                             _connecting = false;
@@ -916,6 +918,7 @@ namespace MphRecomp.Frontend
         // the items for what's known now (after any network result)
         private void Redraw()
         {
+            RedrawReplays(); // (REPLAYS' share pages: the roster and offers)
             MenuEngine? menu = _onlineMenu;
             int page = menu?.Page?.Index ?? -1;
             if (menu == null) return;

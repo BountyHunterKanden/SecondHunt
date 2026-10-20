@@ -55,6 +55,7 @@ namespace SecondHunt.Server
             AddColumn("reports", "handled", "INTEGER NOT NULL DEFAULT 0");
             AddColumn("reports", "note", "TEXT");
             AddColumn("reports", "handled_at", "INTEGER NOT NULL DEFAULT 0");
+            CreateReplayTables(); // (0.9.0: shared replays, StoreReplays.cs)
             int merged = SeparateFriendsAndRivals();
             if (merged > 0)
             {

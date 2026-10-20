@@ -117,7 +117,7 @@ public static class CrashLog
         if (latest != null) File.WriteAllText(Path.Combine(_dir!, "seen.txt"), Path.GetFileName(latest));
     }
 
-    // a share sheet carrying the newest report as plain text, or null if there is none
+    // a share carrying the newest report as plain text (GameActivity's sheet), or null if there is none
     public static Intent? ShareIntent()
     {
         string? latest = LatestPath();
@@ -126,8 +126,53 @@ public static class CrashLog
         send.SetType("text/plain");
         send.PutExtra(Intent.ExtraSubject, "MPH Recomp crash report " + Path.GetFileNameWithoutExtension(latest));
         send.PutExtra(Intent.ExtraText, File.ReadAllText(latest));
-        return Intent.CreateChooser(send, "Share crash report");
+        return send;
     }
+
+    // RECOMP SETTINGS > SHARE LOG (2026-10-19, a device can share its log without a crash): this run's report
+    // now -- the build, the device and this process's last log lines (the match's network and prediction lines with them) --
+    // kept beside the crash reports as log-<time>.txt and shared as plain text, as a crash report is
+    public static Intent? ShareLogIntent()
+    {
+        try
+        {
+            string text = LogReport();
+            var send = new Intent(Intent.ActionSend);
+            send.SetType("text/plain");
+            send.PutExtra(Intent.ExtraSubject, $"MPH Recomp log {DateTime.Now:yyyy-MM-dd HH:mm}");
+            send.PutExtra(Intent.ExtraText, text);
+            return send;
+        }
+        catch (Exception e)
+        {
+            Android.Util.Log.Warn(Tag, "log report failed: " + e.Message);
+            return null;
+        }
+    }
+
+    // this run's report now (SHARE LOG's text; SAVE LOG writes it to Downloads: GameActivity.SaveLog), also kept beside the
+    // crash reports as log-<time>.txt
+    public static string LogReport()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"MPH Recomp log, {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz} (shared by the player, no crash)");
+        sb.Append(_header);
+        sb.AppendLine().AppendLine("--- last log lines (this process only) ---").AppendLine(LastLogLines(LogLines));
+        string text = sb.ToString();
+        if (_dir != null)
+        {
+            System.IO.Directory.CreateDirectory(_dir);
+            File.WriteAllText(Path.Combine(_dir, $"log-{DateTime.Now:yyyyMMdd-HHmmss}.txt"), text);
+            foreach (string old in System.IO.Directory.GetFiles(_dir, "log-*.txt").OrderByDescending(f => f, StringComparer.Ordinal).Skip(Keep))
+            {
+                try { File.Delete(old); } catch { }
+            }
+        }
+        return text;
+    }
+
+    // (a whole match's network lines; under the share sheet's text limit, a few hundred KB)
+    const int LogLines = 3000;
 
     static void Write(Exception? ex, string kind)
     {

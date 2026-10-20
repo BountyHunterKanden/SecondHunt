@@ -29,6 +29,22 @@ namespace SecondHunt.Server
         public List<string> Prefix { get; set; } = new();
         // arguments after the server's own for every served game's match host (--matchhost-args "--time 20": tests)
         public List<string> Extra { get; set; } = new();
+        // the 0.3.6 netcode switches each served match's host gets (SecondHunt.MatchHost Program.Netcode.cs), null = not passed
+        // (the match host's own default: 60 Hz, client positions on, limit 4): --served-snapshot-hz 60|30|20,
+        // --served-client-position on|off, --served-position-limit <units>. A deploy with --served-snapshot-hz 30 puts served
+        // matches back on 30 Hz snapshots; --served-client-position off turns the guests' own positions off. Each match's host
+        // takes the values when it starts, so a change reaches the matches started after the server restarts.
+        public int? SnapshotHz { get; set; }
+        public bool? ClientPosition { get; set; }
+        public float? PositionLimit { get; set; }
+        // Fruity Prime's player sync (2026-10-19): --served-fruity-pin on|off, --served-fruity-hold on|off,
+        // --served-latest-input on|off, --served-catchup-cap <0..60 steps> (match host defaults: all off since 10-20, a phone test showed split positions)
+        public bool? FruityPin { get; set; }
+        public bool? FruityHold { get; set; }
+        public bool? LatestInput { get; set; }
+        public int? CatchUpCap { get; set; }
+        // --served-fruity-p1 on|off: Fruity Prime's movement sync for the whole match (docs/FRUITY_PORT.md P1); match host default off
+        public bool? FruityP1 { get; set; }
 
         public static ServedConfig FromArgs(string[] args, Func<string[], string, string?> arg) => new()
         {
@@ -36,7 +52,59 @@ namespace SecondHunt.Server
             Data = arg(args, "--matchhost-data") ?? "",
             MaxMatches = Int32.TryParse(arg(args, "--max-matches"), out int max) ? Math.Max(0, max) : 4,
             Extra = (arg(args, "--matchhost-args") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList(),
+            SnapshotHz = ParseHz(arg(args, "--served-snapshot-hz")),
+            ClientPosition = ParseOnOff(arg(args, "--served-client-position")),
+            PositionLimit = ParseLimit(arg(args, "--served-position-limit")),
+            FruityPin = ParseOnOff(arg(args, "--served-fruity-pin")),
+            FruityHold = ParseOnOff(arg(args, "--served-fruity-hold")),
+            LatestInput = ParseOnOff(arg(args, "--served-latest-input")),
+            CatchUpCap = ParseCap(arg(args, "--served-catchup-cap")),
+            FruityP1 = ParseOnOff(arg(args, "--served-fruity-p1")),
         };
+
+        private static int? ParseHz(string? text)
+        {
+            if (text == null) return null;
+            int hz = Int32.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+            return hz is 60 or 30 or 20 ? hz : throw new ArgumentException("--served-snapshot-hz is 60, 30 or 20");
+        }
+
+        private static bool? ParseOnOff(string? text) => text switch
+        {
+            null => null,
+            "on" => true,
+            "off" => false,
+            _ => throw new ArgumentException("--served-client-position is on or off"),
+        };
+
+        private static int? ParseCap(string? text)
+        {
+            if (text == null) return null;
+            int cap = Int32.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+            return cap is >= 0 and <= 60 ? cap : throw new ArgumentException("--served-catchup-cap is 0 (off) to 60 steps");
+        }
+
+        private static float? ParseLimit(string? text)
+        {
+            if (text == null) return null;
+            float limit = Single.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+            return limit > 0 && limit <= 50 ? limit : throw new ArgumentException("--served-position-limit is above 0, at most 50 units");
+        }
+
+        // the match host's netcode arguments for this config (only the ones set: an older match host knows none of them)
+        public List<string> NetcodeArgs()
+        {
+            var list = new List<string>();
+            if (SnapshotHz is int hz) list.AddRange(new[] { "--snapshot-hz", hz.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            if (ClientPosition is bool on) list.AddRange(new[] { "--client-position", on ? "on" : "off" });
+            if (PositionLimit is float l) list.AddRange(new[] { "--position-limit", l.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            if (FruityPin is bool pin) list.AddRange(new[] { "--fruity-pin", pin ? "on" : "off" });
+            if (FruityHold is bool hold) list.AddRange(new[] { "--fruity-hold", hold ? "on" : "off" });
+            if (LatestInput is bool latest) list.AddRange(new[] { "--latest-input", latest ? "on" : "off" });
+            if (CatchUpCap is int cap) list.AddRange(new[] { "--catchup-cap", cap.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            if (FruityP1 is bool p1) list.AddRange(new[] { "--fruity-p1", p1 ? "on" : "off" });
+            return list;
+        }
     }
 
     public sealed partial class Hub
@@ -135,7 +203,7 @@ namespace SecondHunt.Server
             {
                 psi.ArgumentList.Add(a);
             }
-            foreach (string a in (extra ?? []).Concat(Served.Extra))
+            foreach (string a in (extra ?? []).Concat(Served.NetcodeArgs()).Concat(Served.Extra))
             {
                 psi.ArgumentList.Add(a);
             }

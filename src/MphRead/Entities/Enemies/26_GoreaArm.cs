@@ -102,6 +102,7 @@ namespace MphRead.Entities.Enemies
             if (_damageEffect != null)
             {
                 _damageEffect.Transform(FacingVector, UpVector, Position);
+                _damageEffect.SetHostOwner(this); // recomp: carried with it (smooth frames)
             }
             if (_shotEffect != null)
             {
@@ -110,6 +111,7 @@ namespace MphRead.Entities.Enemies
                 facing = facing.Normalized();
                 position += up * Fixed.ToFloat(8343);
                 _shotEffect.Transform(facing, up, position);
+                _shotEffect.SetHostOwner(this); // recomp: carried with it (smooth frames)
             }
             if (Damage <= 60)
             {

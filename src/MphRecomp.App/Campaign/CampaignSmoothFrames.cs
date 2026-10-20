@@ -21,7 +21,7 @@ namespace MphRecomp.App;
 // game reads changes. Off, every picture is the step's, as before.
 // Hooks: SmoothRecordStep (after each step, OnDrawFrame), SmoothBegin / SmoothEnd (around Render), SmoothItemView
 // (DrawItem: an item's view by its entity, MphRead RenderItem.HostOwner), SmoothView (the HD suits, skins and bodies),
-// GunView (DrawPrimeGun, the arm cannon, the Zero Suit gun tip).
+// GunView (DrawPrimeGun, the arm cannon, the Zero Suit gun tip), SmoothCarry (the custom hunters' fx batches).
 internal sealed partial class CampaignRenderer
 {
     // longer than this in a step is a cut or a jump (a door, a respawn, a teleport, a cutscene cut), not motion
@@ -67,6 +67,17 @@ internal sealed partial class CampaignRenderer
         }
         RecordOwners(scene.OpaqueItems); // the translucent list repeats these
         RecordOwners(scene.DecalItems);
+        // shots the app draws its own way (the Pirate Blaster's bolts, the Paralyzer's, the Scout Drone's streaks) have no MphRead items
+        foreach (BeamProjectileEntity b in _blasterBolts.Keys) _sfCurAt.TryAdd(b, b.Position);
+        foreach (BeamProjectileEntity b in _paraShots.Keys) _sfCurAt.TryAdd(b, b.Position);
+        foreach (PlayerEntity p in _fxSeats.Keys)
+        {
+            if (p.DroneBeams is not BeamProjectileEntity[] beams) continue;
+            foreach (BeamProjectileEntity b in beams)
+            {
+                if (b.HostOwnLook && b.Lifespan > 0) _sfCurAt.TryAdd(b, b.Position);
+            }
+        }
         _sfMove.Clear();
         foreach (KeyValuePair<EntityBase, Vector3> at in _sfCurAt)
         {
@@ -155,6 +166,15 @@ internal sealed partial class CampaignRenderer
         if (!_sfOn || scene != _sfScene) return scene.ViewMatrix;
         if (RidesCamera(e, scene)) return _sfStep.View;
         return _sfMove.TryGetValue(e, out Vector3 move) ? Matrix4.CreateTranslation(move * _sfPhase) * scene.ViewMatrix : scene.ViewMatrix;
+    }
+
+    // the same carry as a world-to-world move, for effects drawn in one batch with the scene's view (the custom hunters'
+    // particles, streaks and swooshes): a point of e's moved by it lands where SmoothView(e) draws it. Identity when off.
+    Matrix4 SmoothCarry(EntityBase? e, Scene scene)
+    {
+        if (e == null || !_sfOn || scene != _sfScene) return Matrix4.Identity;
+        if (RidesCamera(e, scene)) return _sfStep.View * scene.ViewMatrix.Inverted();
+        return _sfMove.TryGetValue(e, out Vector3 move) ? Matrix4.CreateTranslation(move * _sfPhase) : Matrix4.Identity;
     }
 
     // the Prime gun, the arm cannon, the Zero Suit gun tip: placed from the step's camera, so drawn with its view

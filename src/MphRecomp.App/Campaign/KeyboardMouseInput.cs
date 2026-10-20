@@ -226,7 +226,7 @@ public sealed class KeyboardMouseInput
             if (Held(ControlBinds.DroneFire, up, down)) b |= CampaignButtons.Shoot | CampaignButtons.AltAttack;
             if (Held(ControlBinds.DroneLaser, up, down)) b |= CampaignButtons.Zoom;
             if (Held(ControlBinds.DroneRise, up, down)) b |= CampaignButtons.Jump | CampaignButtons.Boost;
-            if (Held(ControlBinds.DroneDeploy, up, down)) b |= CampaignButtons.Morph;
+            if (Held(ControlBinds.Morph, up, down)) b |= CampaignButtons.Morph; // recall: the hunter's morph key (2026-10-19)
             _wheel = System.Numerics.Vector2.Zero;
             aim += pointer;
             input.Buttons |= b;
@@ -238,8 +238,8 @@ public sealed class KeyboardMouseInput
         if (Held(ControlBinds.Scan, up, down)) b |= CampaignButtons.Scan;
         if (HeldUnless(ControlBinds.Zoom, player.ScanVisor ? ControlBinds.Scan : null, up, down)) b |= CampaignButtons.Zoom;
         if (Held(ControlBinds.Jump, up, down)) b |= CampaignButtons.Jump | CampaignButtons.Boost; // MphRead: both Space
-        // (the Trooper's morph is his drone: its deploy key)
-        if (Held(player.HostScoutDrone ? ControlBinds.DroneDeploy : ControlBinds.Morph, up, down)) b |= CampaignButtons.Morph;
+        // (the Trooper's morph is his drone: the morph key deploys it)
+        if (Held(ControlBinds.Morph, up, down)) b |= CampaignButtons.Morph;
         if (Held(ControlBinds.Bombs, up, down)) b |= CampaignButtons.AltAttack; // (MphRead: Q, which scans too)
         if (Held(ControlBinds.ScanVisor, up, down)) b |= CampaignButtons.ScanVisor;
         if (Held(ControlBinds.ZoomIn, up, down)) b |= CampaignButtons.ZoomIn; // ZOOM STEP (the game reads them only zoomed)

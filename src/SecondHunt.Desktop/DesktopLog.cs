@@ -119,6 +119,47 @@ internal static class DesktopCrashLog
         ? Directory.GetFiles(DesktopPaths.Crash, "crash-*.txt").OrderByDescending(f => f, StringComparer.Ordinal).FirstOrDefault()
         : null;
 
+    // RECOMP SETTINGS > SAVE LOG (2026-10-19): this run's report now, crash or not, beside the crash reports
+    public static string? WriteLog()
+    {
+        try
+        {
+            Directory.CreateDirectory(DesktopPaths.Crash);
+            var sb = new StringBuilder();
+            sb.AppendLine($"{BuildFlags.AppName} log, {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz} (saved by the player, no crash)");
+            sb.AppendLine($"app: {BuildFlags.AppName} {BuildFlags.Version} (Windows)");
+            sb.AppendLine($"system: {Environment.OSVersion}, {Environment.ProcessorCount} CPUs, .NET {Environment.Version}");
+            sb.AppendLine($"gpu: {Gpu}");
+            sb.AppendLine().AppendLine("--- last log lines ---").AppendLine(DesktopLog.Recent());
+            string path = Path.Combine(DesktopPaths.Crash, $"log-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+            File.WriteAllText(path, sb.ToString());
+            foreach (string old in Directory.GetFiles(DesktopPaths.Crash, "log-*.txt").OrderByDescending(f => f, StringComparer.Ordinal).Skip(Keep))
+            {
+                try { File.Delete(old); } catch { }
+            }
+            return path;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("MPHCrash", "log report failed: " + ex.Message);
+            return null;
+        }
+    }
+
+    // Explorer with a file selected (a saved log, a replay to send on)
+    public static void Show(string? path)
+    {
+        if (path == null || !File.Exists(path)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("MPHCrash", "couldn't show " + path + ": " + ex.Message);
+        }
+    }
+
     // Explorer on the crash folder, the newest report selected (or the empty folder)
     public static void Open()
     {

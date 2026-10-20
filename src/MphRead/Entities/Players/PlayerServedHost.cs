@@ -7,5 +7,14 @@ namespace MphRead.Entities
     public partial class PlayerEntity
     {
         public static bool HostNoLocalSeat { get; set; }
+
+        // recomp host hook (a replay of a served match, MatchReplay.cs; drawing only): the match plays seatless as it was
+        // recorded, and the HUD shown is HostHudSeat's, Main (seat 0) included, set up and updated by Renderer like a replay's
+        // other seat (HostUpdateSeatHud); the match never reads it. Default off (a served host itself draws no HUD).
+        public static bool HostSeatlessHud { get; set; }
+
+        // a HUD to draw: always with a local seat; seatless, only a replay's watched seat once its HUD is set up
+        public static bool HostHudShown => !HostNoLocalSeat || HostSeatlessHud && HostHudSeat is PlayerEntity p
+            && p._hostHudReady && p.LoadFlags.TestFlag(LoadFlags.Active);
     }
 }

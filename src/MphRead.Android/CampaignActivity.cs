@@ -61,6 +61,8 @@ public class CampaignActivity : Activity
         // RECOMP SETTINGS > CREDITS / CRASH LOG from the pause menu: the front end's screens, over the paused game
         pause.Credits += () => RunOnUiThread(() => StartActivity(new Intent(this, typeof(CreditsActivity))));
         pause.ShareCrashLog += () => RunOnUiThread(() => GameActivity.ShareCrashLog(this));
+        pause.ShareLog += () => RunOnUiThread(() => GameActivity.ShareLog(this));
+        pause.SaveLog += () => RunOnUiThread(() => GameActivity.SaveLog(this));
         // gyro aim on top of the right stick (CampaignGyro.cs; RECOMP SETTINGS gyro rows, --es gyro on|zoom)
         CampaignGyro.Attach(this, _renderer, settingsPath, Intent);
         // the centred text panel (game over, match results) and leaving the game
@@ -68,7 +70,8 @@ public class CampaignActivity : Activity
         // a LAN or online match: however the match screen closes (Select, Back, quit), the other devices hear BYE at once
         if (_renderer.NetSession is IDisposable session)
         {
-            Application!.RegisterActivityLifecycleCallbacks(new CloseSessionOnDestroy(this, session));
+            Application!.RegisterActivityLifecycleCallbacks(new CloseSessionOnDestroy(this, () => _renderer.NetSession ?? session));
+            MatchWifiLock.Attach(this); // (Wi-Fi power save off while the match is in front: MatchWifiLock.cs)
         }
         // on-screen touch controls, on top of everything (MatchTouchOverlay.cs): RECOMP SETTINGS "touch controls"
         // auto|on|off (a match's --es touch overrides it), re-read whenever the pause menu resumes

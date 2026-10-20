@@ -27,7 +27,7 @@ namespace MphRecomp.Frontend
     {
         // our callback ids (the game's are below 1000)
         private const int OpenMods = 1000, OpenSettings = 1001;
-        private const int PauseResume = 1010, PauseSettings = 1011, PauseModSettings = 1012, PauseQuit = 1013, PauseChatCall = 1014;
+        private const int PauseResume = 1010, PauseSettings = 1011, PauseModSettings = 1012, PauseQuit = 1013, PauseChatCall = 1014, PauseQuitDesktop = 1015;
         private const int DeleteAllCall = 1020; // a rows page's DELETE ALL button (RowsPage.DeleteAll)
         // RowNext / RowPrev: A / Start and the touch arrows; RowRight / RowLeft: the D-pad (a value row steps, an
         // action row ignores it); RowTap: a tap on the value box (an action row runs; a value row ignores it); RowDelete:
@@ -764,6 +764,27 @@ namespace MphRecomp.Frontend
                     Step = _ => Requested?.Invoke(FrontendRequestKind.ShareCrashLog),
                     Action = true
                 },
+                // (2026-10-19: a device can share its log without a crash) this run's log, made now
+                new()
+                {
+                    Label = "share\nlog",
+                    Description = RecompSettings.DesktopHost
+                        ? "saves this run's log (the game's own lines: no personal data) and opens its folder, to send to the developer after a bad match."
+                        : "shares this run's log (the game's own lines: no personal data) with the developer, e.g. right after a bad online match.",
+                    Value = () => RecompSettings.DesktopHost ? "SAVE" : "SHARE",
+                    Step = _ => Requested?.Invoke(FrontendRequestKind.ShareLog),
+                    Action = true
+                },
+                // (a SAVE LOG row was here, 2026-10-19: Android's share sheets carry SAVE TO DOWNLOADS themselves now:
+                // DeviceSave.Chooser)
+                // (2026-10-19: replays sent to you can be blocked) friends' replays sent through the server
+                new()
+                {
+                    Label = "friend\nreplays",
+                    Description = "on: friends can send you replays through the online server; they wait in replays' shared section until you download or delete them. off: nobody can send you one.",
+                    Value = () => MphRecomp.Replay.SharedReplays.Blocked(ReplayDir) ? "OFF" : "ON",
+                    Step = step => { _ = MphRecomp.Replay.SharedReplays.SetBlockAsync(ReplayDir, !MphRecomp.Replay.SharedReplays.Blocked(ReplayDir), Conn); }
+                },
                 // owner 2026-10-11: also checked once at launch in the background (ON by default), asking on the main menu
                 // only when an update is out (FrontendSession.TickLaunchCheck); OFF = only when CHECK is pressed
                 new()
@@ -1178,6 +1199,16 @@ namespace MphRecomp.Frontend
             return result;
         }
 
+        // QUIT TO DESKTOP (Windows): the same ask as QUIT TO MAIN MENU's, from the pause list and the title's corner button
+        public void AskQuitToDesktop()
+        {
+            if (Import.Popup == null) Requested?.Invoke(FrontendRequestKind.QuitToDesktop);
+            else Import.Popup.Ask("quit to the desktop?", yes =>
+            {
+                if (yes) Requested?.Invoke(FrontendRequestKind.QuitToDesktop);
+            });
+        }
+
         // PAUSED: the Controls page's four control-type boxes, centred, as a list of four choices. chat: an online match's,
         // CHAT under RESUME (the lobby's CHAT page: OnlineMenus.Chat.cs), five boxes at the same spacing, centred on the old four
         private int BuildPausePage(MenuPage controls, MenuPage options, bool chat)
@@ -1200,13 +1231,14 @@ namespace MphRecomp.Frontend
             // sit on the first row (higher is the top screen's strip), and an online match runs on under this menu anyway)
             int n = _p.ChoiceBoxes.Length;
             float step = n >= 2 ? _p.ChoiceBoxes[n - 1].Y - _p.ChoiceBoxes[n - 2].Y : 0; // (one box to the next)
-            float up = chat ? -step : 0;
+            bool desktop = OperatingSystem.IsWindows(); // QUIT TO DESKTOP: Windows only, under QUIT TO MAIN MENU
+            float up = -step * ((chat ? 1 : 0) + (desktop ? 1 : 0));
             foreach (MenuItem it in _p.Frame.Where(it => HasWidget(it, "blackdrop") || HasWidget(it, "topdrop"))) // backdrop, top band
             {
                 bool panel = HasWidget(it, "blackdrop");
                 page.AddItem(i => Clone(it, i, 0, panel ? up : 0, stretchDown: panel ? MathF.Abs(up) : 0));
             }
-            if (!chat)
+            if (!chat && !desktop)
             {
                 int title = _strings.Add("PAUSED");
                 page.AddItem(i => Clone(_p.OptHeader, i, 0, 0, stringId: title));
@@ -1216,6 +1248,7 @@ namespace MphRecomp.Frontend
                 ("resume", PauseResume), ("second hunt\nsettings", PauseSettings), ("mod\nsettings", PauseModSettings), ("quit to\nmain menu", PauseQuit)
             };
             if (chat) choices.Insert(1, ("chat", PauseChatCall));
+            if (desktop) choices.Add(("quit to\ndesktop", PauseQuitDesktop));
             const float dx = 66; // the boxes span x 8..116 on the Controls page; centred on the touch screen
             float shift = up;
             for (int k = 0; k < choices.Count; k++)
@@ -1689,6 +1722,9 @@ namespace MphRecomp.Frontend
                 {
                     if (yes) Requested?.Invoke(FrontendRequestKind.QuitToMenu);
                 });
+                return true;
+            case PauseQuitDesktop:
+                AskQuitToDesktop();
                 return true;
             case DeleteAllCall:
                 // its ask box; the page updates on Import.Changed

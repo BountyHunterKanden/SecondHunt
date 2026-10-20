@@ -43,6 +43,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-wallclingtest") { WallClingTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-wallclingprobe") { WallClingProbe.Run(args); return; } // T5 N10
             if (args.Length >= 1 && args[0] == "-trooperfixtest") { TrooperFixesTest.Run(args); return; } // T5
+            if (args.Length >= 1 && args[0] == "-trooperspamreplay") { TrooperSpamReplay.Run(args); return; } // format 48 MORPH spam replay
             if (args.Length >= 1 && args[0] == "-touchtest") { TouchTest.Run(args); return; } // T11
             if (args.Length >= 1 && args[0] == "-dronetest") { DroneTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-dronekilltest") { DroneTest.RunKillMessage(); return; }
@@ -68,6 +69,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-darksamustest") { DarkSamusTest.Run(args); return; }   // Dark Samus's native bodies (D14 hold)
             if (args.Length >= 1 && args[0] == "-armcannontest") { ArmCannonTest.Run(args); return; }   // first-person arm cannons cut from the native bodies
             if (args.Length >= 1 && args[0] == "-dronefxtest") { DroneFxTest.Run(args); return; }   // the Scout Drone's Prime 1 shot effects (BodyFx + RetroParticles)
+            if (args.Length >= 1 && args[0] == "-dronesoundlist") { DroneSoundList.Run(args); return; }   // Prime drone sounds, all rendered for auditioning
             if (args.Length >= 2 && args[0] == "-movieframes") { HdMovieFrames.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-hdrepose") { HdRepose.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-riglook") { RigLook.Run(args); return; }

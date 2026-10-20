@@ -10,6 +10,7 @@ using MphRecomp.Campaign;
 using MphRecomp.Multiplayer;
 using MphRecomp.Multiplayer.Net;
 using MphRecomp.Online;
+using MphRecomp.Replay;
 
 namespace SecondHunt.MatchHost
 {
@@ -31,11 +32,12 @@ namespace SecondHunt.MatchHost
     //   SecondHuntMatchHost --arenas [--data <dir>]   the arenas this host can run, one a line (the server serves Find Game
     //       matches, and games in an imported arena, only in these)
     //   any of them: [--imports <dir>]
+    //   --control and standalone: [--snapshot-hz 60|30|20] [--client-position on|off] [--position-limit <units>] (Program.Netcode.cs)
     //
     // Needs paths.txt (the extracted game files, as the Tools use them) in --data's folder or the working directory. The
     // imported arenas (Echoes: the in-app importer's arenas/<Key>/ + import/mp2.json, as IMPORT GAMES writes them on a
     // device, from Tools -importcheck arenas all --out <dir>) come from --imports, or an imports folder next to paths.txt.
-    internal static class Program
+    internal static partial class Program
     {
         internal sealed class Options
         {
@@ -119,6 +121,7 @@ namespace SecondHunt.MatchHost
                 return ControlMode.Run(o, romKey);
             }
             Log($"game files {Paths.MphKey} ({romKey}), version {OnlineMatch.VersionKey(romKey)}, server {o.Server}");
+            ReplayBuild = $"match host {OnlineMatch.VersionKey(romKey)}";
 
             OnlineIdentity identity = LoadIdentity(o.Identity);
             OnlineClient client = Wait(OnlineClient.ConnectAsync(o.Server, identity, o.Name, "matchhost"));
@@ -152,6 +155,7 @@ namespace SecondHunt.MatchHost
                 MatchSettings found = MphRecomp.Frontend.MultiplayerMenu.BuildFindMatch(o.Mode, o.Arena);
                 found.Players.RemoveAll(p => !p.Bot);
                 found.ServedHost = true;
+                found.FruitySync = _fruityP1;
                 if (o.NoExtraPickups) found.PirateBlaster = false;
                 if (o.NoExtraCharacters) found.ExtraCharacters = false;
                 if (o.TimeSet) found.TimeLimitSeconds = o.Time;
@@ -163,6 +167,7 @@ namespace SecondHunt.MatchHost
             MatchSettings template = MatchSettings.Quick(mode, arena.Name, Hunter.Samus, o.Bots, o.Level);
             template.Players.RemoveAll(p => !p.Bot);
             template.ServedHost = true;
+            template.FruitySync = _fruityP1;
             template.TimeLimitSeconds = o.Time;
             return template;
         }
@@ -183,6 +188,7 @@ namespace SecondHunt.MatchHost
             }));
             using RelayTransport relay = RelayTransport.For(game.Relay, o.Server);
             using NetMatchSession net = NetMatchSession.Host(relay, template, romKey, o.Players + o.Bots);
+            Netcode(net); // (the snapshot rate the server set: Program.Netcode.cs)
             Log($"game {game.Game.Id}: {template.Mode} in {template.Arena}, {o.Time:0} s, up to {o.Players} players (relay {relay.Relay})");
             try
             {
@@ -197,6 +203,7 @@ namespace SecondHunt.MatchHost
             }
             finally
             {
+                CloseReplayLink(6000); // (the recording to the players first: leaving closes the game)
                 try
                 {
                     Wait(client.RequestAsync<OkMsg>(new LeaveGameReq()));
@@ -254,10 +261,14 @@ namespace SecondHunt.MatchHost
             // no Hyper Ball for Dark Samus in served matches (owner 2026-10-18: not public yet); this host isn't a public build,
             // so MatchStart would turn it on (settings.HyperBall ?? !PublicBuild) while the players' public apps have bombs
             settings.HyperBall = false;
+            Netcode(settings); // (client-reported positions on or off, as the server set it: Program.Netcode.cs)
             Log("seats " + string.Join(", ", settings.Players.Select((p, i) => $"{i}:{p.Hunter}{(p.Character != null ? "/" + p.Character : "")}{(p.Bot ? " bot" : $" {p.Nickname}")}")));
             var load = Stopwatch.StartNew();
+            ReplayRecorder? recorder = StartReplay(net, settings); // (the match's replay for its players: Program.Replay.cs)
             CampaignHost host = CampaignHost.StartMatch(settings);
+            ReplayStarted(ref recorder, host, net);
             var driver = new MatchNetDriver(net, host);
+            using GapTrace? gap = GapTrace.Open("host"); // (PC gap test only: GAPTRACE set)
             Log($"match loaded in {load.ElapsedMilliseconds} ms, {Memory()}");
 
             var clock = Stopwatch.StartNew();
@@ -271,10 +282,34 @@ namespace SecondHunt.MatchHost
             while (!host.Ended && clock.Elapsed.TotalSeconds < limit && !stop.IsCancellationRequested)
             {
                 long due = (long)(clock.Elapsed.TotalSeconds * 60);
-                while (frames < due && !host.Ended)
+                // Fruity Prime's loop (2026-10-19; --catchup-cap, 0 = off): at most CatchUpCap steps to catch up in a pass, and a
+                // gap of over 0.25 s (a stall) isn't caught up at all: the clock starts over from now
+                long cap = long.MaxValue;
+                if (_fruityP1)
+                {
+                    // (theirs: over 15 steps behind = no step, the clock starts over; at most 5 steps, whole steps left over dropped)
+                    cap = FruityCatchUp;
+                    if (due - frames > 15)
+                    {
+                        Log($"loop: {due - frames} steps behind (a {(due - frames) / 60.0:0.00} s gap): reset");
+                        frames = due;
+                    }
+                }
+                else if (_catchUpCap > 0)
+                {
+                    cap = _catchUpCap;
+                    if (due - frames > 15)
+                    {
+                        Log($"loop: {due - frames} steps behind (a {(due - frames) / 60.0:0.00} s gap): not caught up");
+                        frames = due - 1;
+                    }
+                }
+                while (frames < due && cap-- > 0 && !host.Ended)
                 {
                     step.Restart();
                     driver.Step(idle);
+                    gap?.Step(host.Frame, -1);
+                    RecordStep(ref recorder, idle, host);
                     double ms = step.Elapsed.TotalMilliseconds;
                     frames++;
                     statFrames++;
@@ -282,14 +317,23 @@ namespace SecondHunt.MatchHost
                     allMs += ms;
                     statMax = Math.Max(statMax, ms);
                 }
+                if (_fruityP1 && frames < due) frames = due;
                 if (clock.Elapsed.TotalSeconds >= nextStats)
                 {
                     nextStats += statsEvery;
                     Log($"frame {host.Frame}: step mean {statMs / Math.Max(statFrames, 1):0.000} ms, max {statMax:0.00} ms, "
                         + $"players {net.Joined}, {Memory()}");
+                    // (each player's link and how far back its views were: which hits can't land where they were aimed)
+                    Log("link " + net.NetStats());
+                    Log("lag " + host.LagStatsLine(reset: true));
+                    Log("shots " + ShotReport.HostLine(settings.Players.Count));
+                    Log("shotcheck " + ShotCheck.HostLine());
+                    Log("claims " + HitClaims.HostLine());
+                    Log("positions " + ClientPosition.HostLine());
                     statFrames = 0;
                     statMs = statMax = 0;
                 }
+                AnswerReplayRequests(recorder); // (a guest leaving mid-match: its recording so far, Program.Replay.cs)
                 if (net.Joined == 0 && GameState.MatchState == MatchState.InProgress)
                 {
                     Log("everyone left: the match ends");
@@ -297,9 +341,14 @@ namespace SecondHunt.MatchHost
                 }
                 Thread.Sleep(1);
             }
+            Log("shots " + ShotReport.HostLine(settings.Players.Count)); // (the whole match's)
+            Log("shotcheck " + ShotCheck.HostLine());
+            Log("claims " + HitClaims.HostLine());
+            Log($"positions ({host.PositionsApplied} taken, client-run pushes: {host.PushSpeedsTaken} speeds taken, {host.PushHeldFrames} held frames kept) " + ClientPosition.HostLine());
             Log($"match over: {frames} frames, step mean {allMs / Math.Max(frames, 1):0.000} ms, {Memory()}, {driver.StatusLine()}");
             Log("scores " + string.Join(", ", Enumerable.Range(0, settings.Players.Count).Select(i =>
                 $"{settings.Players[i].Nickname ?? settings.Players[i].Hunter.ToString()} {GameState.Points[i]}")));
+            EndReplay(recorder, host, net);
             over?.Invoke(host.Ended);
             net.EndMatch();
         }
@@ -359,7 +408,9 @@ namespace SecondHunt.MatchHost
                 case "--no-extra-characters": o.NoExtraCharacters = true; break;
                 case "--arenas": o.Arenas = true; break;
                 case "--imports": o.Imports = Path.GetFullPath(Next()); break;
-                default: throw new ArgumentException($"unknown option {key}");
+                default:
+                    if (!ParseNetcode(key, Next)) throw new ArgumentException($"unknown option {key}"); // (Program.Netcode.cs)
+                    break;
                 }
             }
             if (o.Players < 1 || o.Players + o.Bots > MatchSettings.MaxSeats || o.Min < 1)

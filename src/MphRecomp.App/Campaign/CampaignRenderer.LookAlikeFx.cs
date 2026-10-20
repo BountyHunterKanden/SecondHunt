@@ -63,9 +63,10 @@ internal sealed partial class CampaignRenderer
             float a = p.HostBipedAlpha;
             if (p.Health <= 0 || p.IsAltForm || a <= 0.01f) continue;
             float t = (float)(_host.Scene.FrameCount % 100000) + p.SlotIndex * 37;
+            Matrix4 carry = SmoothCarry(p, scene); // smooth frames: carried as her body is
             for (int side = 0; side < PhazonNodes.Length; side++)
             {
-                Vector3 pad = p.HostTrackedPoints[side];
+                Vector3 pad = Vector3.TransformPosition(p.HostTrackedPoints[side], carry);
                 Vector3 toCam = cam - pad;
                 // out in front of the pad, toward the camera (owner 10-09: the pad mustn't poke through the glow)
                 Vector3 at = pad + (toCam.LengthSquared > 1e-6f ? toCam.Normalized() * PhazonAhead : Vector3.Zero);

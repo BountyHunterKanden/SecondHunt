@@ -24,6 +24,8 @@ namespace MphRecomp.Multiplayer.Net
         // it took this snapshot (-1 = none yet), and the frames it has stepped since on that input held (it hadn't come yet)
         public int InputAck = -1;
         public int InputHeld;
+        // online: the host's pace byte for this device (NetMatchSession.PaceByte: serial + frames to skip or double); -1 none
+        public int InputPace = -1;
         // online only: afflictions, power-ups, turrets and detail stats (SeatExtras; sent by SnapshotDelta beside the bytes
         // Write writes, so the LAN wire is unchanged)
         public SeatExtras? Extras;

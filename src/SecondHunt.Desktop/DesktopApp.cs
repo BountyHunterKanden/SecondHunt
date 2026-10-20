@@ -367,6 +367,9 @@ internal sealed class DesktopApp : IDisposable
             Log.Info("MPHFrontend", "PlayReplay " + request.Arg);
             StartGame(new Dictionary<string, string> { ["replay"] = request.Arg! });
             break;
+        case FrontendRequestKind.QuitToDesktop: // (the title's corner button)
+            Defer(() => _gl.Window.Close());
+            break;
         case FrontendRequestKind.Credits:
             PushOver(new CreditsScreen(() => Defer(PopBack)));
             break;
@@ -376,9 +379,52 @@ internal sealed class DesktopApp : IDisposable
         case FrontendRequestKind.ShareCrashLog:
             ShareCrashLog();
             break;
+        case FrontendRequestKind.ShareLog:
+            ShareLog();
+            break;
+        case FrontendRequestKind.ShareReplay: // a replay's EXPORT: a copy in the player's Downloads, shown in Explorer
+            ExportReplay(request.Arg);
+            break;
+        case FrontendRequestKind.SaveLog: // (the desktop's SAVE LOG is SHARE LOG's save)
+            ShareLog();
+            break;
         case FrontendRequestKind.OpenDeveloperMenu:
             Note("The developer tools are in the Android build only.");
             break;
+        }
+    }
+
+    // RECOMP SETTINGS > SAVE LOG: this run's log as a report beside the crash reports, shown in Explorer
+    void ShareLog()
+    {
+        if (DesktopCrashLog.WriteLog() is not string path)
+        {
+            Note("The log couldn't be saved.");
+            return;
+        }
+        DesktopCrashLog.Show(path);
+    }
+
+    // a replay's EXPORT: a copy in Downloads (not the app's own folder, so moving it on loses nothing), shown in Explorer
+    void ExportReplay(string? path)
+    {
+        if (path == null || !File.Exists(path))
+        {
+            Note("That replay is gone.");
+            return;
+        }
+        try
+        {
+            string downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            Directory.CreateDirectory(downloads);
+            string to = Path.Combine(downloads, Path.GetFileName(path));
+            for (int i = 2; File.Exists(to); i++) to = Path.Combine(downloads, $"{Path.GetFileNameWithoutExtension(path)} ({i}){Path.GetExtension(path)}");
+            File.Copy(path, to);
+            DesktopCrashLog.Show(to);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Note("The replay couldn't be saved: " + ex.Message);
         }
     }
 
@@ -405,12 +451,15 @@ internal sealed class DesktopApp : IDisposable
         game.KeyboardMouse = _input.KeyboardMouse;
         game.DetailsKey = "F3";
         PauseOverlay pause = game.PauseMenu!;
+        pause.QuitToDesktop += () => Defer(() => _gl.Window.Close());
         pause.Credits += () => Defer(() =>
         {
             game.PauseAudio();
             Push(new CreditsScreen(() => Defer(PopBack)));
         });
         pause.ShareCrashLog += () => Defer(ShareCrashLog);
+        pause.ShareLog += () => Defer(ShareLog);
+        pause.SaveLog += () => Defer(ShareLog);
         pause.DevTools += () => Defer(() => Note("The developer tools are in the Android build only."));
         _game = game;
         _status.Set("loading " + (args.TryGetValue("room", out string? room) ? room : "") + "...");

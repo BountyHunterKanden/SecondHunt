@@ -30,6 +30,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostAnyShieldWall = false;
             PlayerEntity.HostSevenWeaponSlots = false;
             PlayerEntity.HostBotTickPace = true;
+            PlayerEntity.HostBotDropOff = false;
             // nothing of the extra arenas' (a match before may have left them on)
             MphRecomp.Arenas.EchoesCrates.Enabled = false;
             MphRecomp.Arenas.EchoesBreakables.Enabled = false;
@@ -87,6 +88,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostAnyShieldWall = false;
             PlayerEntity.HostSevenWeaponSlots = false;
             PlayerEntity.HostBotTickPace = true;
+            PlayerEntity.HostBotDropOff = false;
             MphRecomp.Arenas.EchoesCrates.Enabled = false;
             MphRecomp.Arenas.EchoesBreakables.Enabled = false;
             MphRecomp.Arenas.EchoesMovement.Enabled = false;

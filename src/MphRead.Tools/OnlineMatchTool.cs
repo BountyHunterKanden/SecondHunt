@@ -46,6 +46,11 @@ namespace MphRead
     // the seat is dropped there; PASS needs the seat to play again all the same (the host hears it, it hears the host)
     // turn=local (O5, decision 18): a TURN server on this PC (TurnTestServer, delay= on its hops too) and every device on a
     // HybridTransport (TURN first, the relay as fallback); PASS also needs most match packets on every device to go over TURN
+    // claims=0: the host takes no hit claims (Net/HitClaims.cs); the host's "claims" line says what it did with each joiner's claims
+    // pos=0 (0.3.6): the host takes no client-reported positions (MatchSettings.ClientPosition, Net/ClientPosition.cs);
+    // poslimit=<units> its limit (4); the host's "positions" line says how many of each joiner's reports it took and why it
+    // refused the rest. hz=30|20 (0.3.6): the host's snapshot rate (NetMatchSession.SnapshotIntervalNormal; 60 by default).
+    // With served=hub both go to the server as --served-client-position / --served-position-limit / --served-snapshot-hz.
     // lagcomp=0 / maxrewind= / strafe=1 (N4): the host's player strafes left and right (a moving target for the joiners);
     // the host prints how many of each joiner's beam hits counted there against the hits that joiner saw on its screen
     // loss= / jitter= (O5): every device's own sends are dropped that often and wait 0..jitter ms more (SimulatedLink), on
@@ -72,6 +77,7 @@ namespace MphRead
             public int Delay;
             public float Loss; // 0..1
             public int Jitter;
+            public int Burst, BurstSeat = -1; // (burst=<ms>, burstdevice=<index>: only that device's link is bursty)
             public int Lag; // lag=<ms>: a round trip added on this device's link (half each way)
             public bool External; // external=1: the joiners are outside devices (phones), not processes started here
             public bool Served; // served=1 (docs/DEDICATED_SERVERS.md D1): the host has no seat; players= joiners play every human seat
@@ -86,6 +92,10 @@ namespace MphRead
             public string? Server;
             public bool Looks;
             public bool LagComp = true; // lagcomp=0: the host doesn't rewind (N4), to compare the joiners' hits
+            public bool Claims = true; // claims=0: the host takes no hit claims (MatchSettings.HitClaims, Net/HitClaims.cs), to compare
+            public bool Positions = true; // pos=0: the host takes no client-reported positions (Net/ClientPosition.cs), to compare
+            public float? PosLimit; // poslimit=<units>: ClientPosition.Limit (4)
+            public int Hz = 60; // hz=30|20: the host's snapshot rate (60)
             public bool Strafe;
             public float Rejoin; // rejoin=<s>: the last joiner vanishes then (no BYE) and comes back as a restarted app
             public float RejoinWait = 2;
@@ -104,6 +114,18 @@ namespace MphRead
             public Hunter Hunter = Hunter.Sylux;
             public string? Character, Skin;
             public bool Chars; // served=hub chars=1: a Trooper and a Dark Samus seat (OnlineServedTest.cs)
+            public bool Duel; // duel=1 (2026-10-19, point-blank hits not landing): joiner 1 strafes in place, the others close to
+                              // 4 units and shoot it; the host's shot check and HITS vs each joiner's SAWHITS say what landed
+            public string? DuelRole; // -onlinejoin duel=runner|shooter
+            public bool Push; // duel=1 push=1 (2026-10-19, knockback shake online): the runner stands still, the shooter fires
+                              // missiles (they push); both joiners log the runner's motion for 2 s after each hit (PushWatch)
+            public string Fwd = ""; // client switches passed on to each joiner process (smoothfp=, ...)
+            public bool SmoothOff; // smooth=0: guests snap the other players to each snapshot as before (Net/RemoteSmoothing.cs)
+            public bool AltFixOff; // altfix=0: guests correct a ball's height as before (ClientPrediction.AltHeightFix)
+            public bool Ball; // ball=1 (2026-10-19, alt form bouncing online): the joiners play in alt form (morph, then roll at their target)
+            public bool? Replays; // served=hub replays=0|1 (default on): each joiner gets the match host's recording, played back exact (OnlineServedReplay.cs)
+            public bool Gap; // served=hub gap=1 (docs/FRUITY_PORT.md Step 2a): the path-gap check (OnlineGapTest.cs)
+            public bool FruityP1; // served=hub fruity=1 (docs/FRUITY_PORT.md P1): the match host runs Fruity Prime's movement sync
             public string? Seek; // seek=<ItemType> (0.2.0 pickups bake): joiner 1 walks to that item and logs its weapons + UA
         }
 
@@ -126,6 +148,10 @@ namespace MphRead
                 case "delay": o.Delay = Int32.Parse(value); break;
                 case "loss": o.Loss = Single.Parse(value, CultureInfo.InvariantCulture) / 100f; break;
                 case "jitter": o.Jitter = Int32.Parse(value); break;
+                case "burst": o.Burst = Int32.Parse(value); break; // (sends let go in bunches up to this many ms apart: SimulatedLink)
+                case "burstdevice": o.BurstSeat = Int32.Parse(value); break;
+                case "p2": HitClaims.OutboxOff = value == "0"; break; // 0 = the old repeat-4 claims (A/B; fruity=1)
+                case "burstbuf": NetMatchSession.BurstBuffer = value != "0"; break; // 0 = a bursty link's spare trimmed as a steady one's (A/B; served=1)
                 case "lag": o.Lag = Int32.Parse(value); break;
                 case "external": o.External = value != "0"; break;
                 case "served": o.Served = value != "0"; o.ServedHub = value == "hub"; break;
@@ -142,7 +168,30 @@ namespace MphRead
                 case "hunter": o.Hunter = Enum.Parse<Hunter>(value, ignoreCase: true); break;
                 case "looks": o.Looks = value != "0"; break;
                 case "chars": o.Chars = value != "0"; break;
+                case "replays": o.Replays = value != "0"; break;
+                case "ball": o.Ball = value != "0"; break;
+                case "duel": if (value is "runner" or "shooter") o.DuelRole = value; else o.Duel = value != "0"; break;
+                case "push": o.Push = value != "0"; break;
+                case "gap": o.Gap = value != "0"; break;
+                case "smooth": RemoteSmoothing.Enabled = value != "0"; o.SmoothOff = value == "0"; break;
+                case "fruitypin": ClientPosition.Pin = value != "0"; break; // 0 = no pin (A/B)
+                case "fruityhold": ClientPosition.Hold = value != "0"; break;
+                case "fruitypinafter": ClientPosition.PinAfterMode = Int32.Parse(value, CultureInfo.InvariantCulture); break;
+                case "fruity": o.FruityP1 = value != "0"; break; // Fruity Prime's P1 movement sync, served=hub only (Net/FruitySync.cs)
+                case "fruitylatest": NetMatchSession.LatestInputOnly = value != "0"; break;
+                case "fruitycorrect": ClientPrediction.FruityCorrect = value != "0"; o.Fwd += " fruitycorrect=" + value; break;
+                case "smoothfp": RemoteSmoothing.FruityRead = value != "0"; o.Fwd += " smoothfp=" + value; break; // 0 = the arrival-clock read point (A/B)
+                case "steady": RemoteSmoothing.SteadyOn = value != "0"; o.Fwd += " steady=" + value; break; // 0 = no steady walk on the drawn others (A/B)
+                case "altfix": ClientPrediction.AltHeightFix = value != "0"; o.AltFixOff = value == "0"; break;
+                case "speedfix": ClientPrediction.SpeedFix = value != "0"; break; // 0 = the earlier speed correction (A/B)
+                case "clientpush": ClientPrediction.ClientPushes = value != "0"; break; // 0 = the host pushes its copy (the hold fix, A/B)
+                case "pace": NetMatchSession.PaceInputs = value != "0"; break; // 0 = the cloud's fold past the jitter buffer, no pace asks (E A/B; reaches an in-process host only: served=1)
+                case "snapfix": ClientPrediction.SnapFix = value != "0"; break; // 0 = the earlier raw-pose snap (A/B)
                 case "lagcomp": o.LagComp = value != "0"; break;
+                case "claims": o.Claims = value != "0"; break;
+                case "pos": o.Positions = value != "0"; break;
+                case "poslimit": o.PosLimit = Single.Parse(value, CultureInfo.InvariantCulture); ClientPosition.Limit = o.PosLimit.Value; break;
+                case "hz": o.Hz = Int32.Parse(value); if (o.Hz is not (60 or 30 or 20)) throw new ArgumentException("hz= is 60, 30 or 20"); break;
                 case "strafe": o.Strafe = value != "0"; break;
                 case "rejoin": o.Rejoin = Single.Parse(value, CultureInfo.InvariantCulture); break;
                 case "rejoinwait": o.RejoinWait = Single.Parse(value, CultureInfo.InvariantCulture); break;
@@ -184,6 +233,11 @@ namespace MphRead
                 return;
             }
             UseImports();
+            if (o.Gap)
+            {
+                // (the server, its match host and the joiners all inherit it)
+                Environment.SetEnvironmentVariable("GAPTRACE", Path.Combine(Path.GetTempPath(), "secondhunt-gap-" + Guid.NewGuid().ToString("N")[..8]));
+            }
             Process? server = null;
             var serverOut = new List<string>();
             string? dbDir = null;
@@ -231,6 +285,11 @@ namespace MphRead
                 server = Start(Environment.ProcessPath!, $"\"{dll}\" --urls http://127.0.0.1:{http} --db \"{Path.Combine(dbDir, "test.db")}\" "
                     + $"--relay-port {relayPort} --relay-delay {o.Delay} --words none.txt"
                     + (o.ServedHub ? $" --matchhost \"{MatchHostExe()}\" --matchhost-data \"{MatchHostData()}\"" + ImportsArg() : "")
+                    + (o.ServedHub && !o.Positions ? " --served-client-position off" : "")
+                    + (o.ServedHub && o.PosLimit is float pl ? $" --served-position-limit {pl.ToString(CultureInfo.InvariantCulture)}" : "")
+                    + (o.ServedHub && o.Hz != 60 ? $" --served-snapshot-hz {o.Hz}" : "")
+                    + (o.ServedHub ? $" --served-fruity-pin {OnOff(ClientPosition.Pin)} --served-fruity-hold {OnOff(ClientPosition.Hold)}"
+                        + $" --served-latest-input {OnOff(NetMatchSession.LatestInputOnly)} --served-fruity-p1 {OnOff(o.FruityP1)}" : "")
                     + (turnServer != null ? $" --turn-static \"{turnServer.Url}|{TurnTestServer.User}|{TurnTestServer.Password}\"" : ""),
                     serverOut);
                 uri = new Uri($"ws://127.0.0.1:{http}/v1/ws");
@@ -308,6 +367,11 @@ namespace MphRead
             if (o.ServedHub)
             {
                 ServedVerdict(o, serverOut, joiners.Select(j => j.Out).ToList());
+                if (o.Gap)
+                {
+                    Console.WriteLine($"gap traces: {GapTrace.Folder}");
+                    GapCheck(GapTrace.Folder!);
+                }
                 return;
             }
             Verdict(o, hostLines, joiners.Select(j => j.Out).ToList());
@@ -347,6 +411,7 @@ namespace MphRead
             }));
             using RelayTransport relay = RelayTransport.For(game.Relay, uri);
             using NetMatchSession net = NetMatchSession.Host(Link(o, relay, 0, online), template, RomKey, o.Players);
+            net.SnapshotIntervalNormal = 60 / o.Hz; // (0.3.6: 60 Hz unless hz=)
             Console.WriteLine($"host: {online.Me} hosts game {game.Game.Id}, relay {relay.Relay} slot {relay.LocalSlot}");
 
             string dll = typeof(OnlineMatchTool).Assembly.Location;
@@ -366,9 +431,12 @@ namespace MphRead
                         : $"hunter={JoinerHunters[(i - 1) % JoinerHunters.Length]} ")
                     + $"time={o.Time.ToString(CultureInfo.InvariantCulture)} leave={leave.ToString(CultureInfo.InvariantCulture)}"
                     + (o.Looks ? " looks=1" : "")
+                    + (o.Ball ? " ball=1" : "") + (o.AltFixOff ? " altfix=0" : "") + (o.SmoothOff ? " smooth=0" : "") + o.Fwd
+                    + (o.Duel ? (i == 1 ? " duel=runner" : " duel=shooter") + (o.Push ? " push=1" : "") : "")
                     + (o.Seek != null && i == 1 ? $" seek={o.Seek}" : "")
                     + (o.Loss > 0 ? $" loss={(o.Loss * 100).ToString(CultureInfo.InvariantCulture)}" : "")
                     + (o.Jitter > 0 ? $" jitter={o.Jitter}" : "")
+                    + (HitClaims.OutboxOff ? " p2=0" : "")
                     + (o.Turn != null ? $" turn={o.Turn}" : "")
                     + (rejoin > 0 ? $" rejoin={rejoin.ToString(CultureInfo.InvariantCulture)} rejoinwait="
                         + o.RejoinWait.ToString(CultureInfo.InvariantCulture) : "")
@@ -399,6 +467,8 @@ namespace MphRead
             net.SendStart();
             Wait(online.RequestAsync<OkMsg>(new StartGameReq { Started = true }));
             MatchSettings settings = net.Settings!;
+            settings.HitClaims = o.Claims ? null : false;
+            settings.ClientPosition = o.Positions ? null : false;
             Console.WriteLine("host: seats " + string.Join(", ", settings.Players.Select((p, i) =>
                 $"{i}:{p.Hunter}{(p.Recolor > 0 ? $"/{p.Recolor}" : "")}{(p.Bot ? " bot" : p.Remote ? $" {p.Nickname}" : " local")}")));
             CampaignHost host = CampaignHost.StartMatch(settings);
@@ -509,6 +579,12 @@ namespace MphRead
             Console.WriteLine($"host: lag comp {(o.LagComp ? "on" : "off")}, " + string.Join(", ", net.RemoteSeats.Select(s =>
                 $"seat {s} hits {PlayerEntity.NetBeamHits[s]} rewind {PlayerEntity.Players[s].HostLagRewind}"))
                 + $", shifted tests {host.Lag?.Shifted ?? 0}");
+            Console.WriteLine("host: shots " + ShotReport.HostLine(settings.Players.Count));
+            Console.WriteLine("host: shotcheck " + ShotCheck.HostLine());
+            Console.WriteLine($"host: claims ({(o.Claims ? "on" : "off")}, {host.ClaimsApplied} applied) " + HitClaims.HostLine());
+            Console.WriteLine($"host: positions ({(o.Positions ? "on" : "off")}, {o.Hz} Hz, {host.PositionsApplied} taken, client-run pushes: {host.PushSpeedsTaken} speeds taken, {host.PushHeldFrames} held frames kept) " + ClientPosition.HostLine());
+            lines.Add($"POSITIONS {host.PositionsApplied}");
+            Console.WriteLine("host: lag " + host.LagStatsLine(reset: false));
             lines.Add("HITS " + string.Join(",", net.RemoteSeats.Select(s => $"{s}:{PlayerEntity.NetBeamHits[s]}")));
             Console.WriteLine("host: inputs " + string.Join(", ", net.RemoteSeats.Select(s => $"seat {s} {net.InputsFrom(s)}"))
                 + (driver.SeatsGone > 0 ? $", {driver.SeatsGone} seat(s) dropped" : ""));
@@ -805,6 +881,9 @@ namespace MphRead
             UseImports();
             var uri = new Uri(o.Server!);
             string name = $"PC {o.Index}";
+            _ballBrain = o.Ball;
+            _duelRole = o.DuelRole;
+            _pushDuel = o.Push;
             OnlineIdentity me = (o.Code != null ? OnlineIdentity.FromBackupCode(o.Code) : null) ?? OnlineIdentity.Create();
             OnlineClient online = Wait(OnlineClient.ConnectAsync(uri, me, name, "onlinetest"));
             if (!o.Again && o.Owner == 0)
@@ -878,12 +957,17 @@ namespace MphRead
                 int seat = net.Settings!.LocalSeat;
                 Console.WriteLine($"joiner {o.Index}: {net.Status}");
                 CampaignHost host = CampaignHost.StartMatch(net.Settings);
+                // replays=1: the app guest's side of the replay link (OnlineServedReplay.cs; not a rejoin; the leaver asks for
+                // the recording so far as it leaves, as the app does)
+                using JoinerReplay? replay = o.Replays == true && o.Rejoin == 0 && o.Wifi == 0 && !o.Again
+                    ? JoinerReplay.Begin(net, o.Index, seat, me, name) : null;
                 if (o.Looks)
                 {
                     Console.WriteLine(SeatLooksTest.Looks(net.Settings));
                     Console.WriteLine(SeatLooksTest.Abilities(net.Settings.Players.Count));
                 }
                 var driver = new MatchNetDriver(net, host);
+                using GapTrace? gap = o.Again ? null : GapTrace.Open("j" + o.Index); // (gap test: GAPTRACE set)
                 bool wifiOff = false;
                 long wifiOnFrame = -1;
                 using Timer? wifiOffTimer = o.Wifi > 0 ? new Timer(_ =>
@@ -930,6 +1014,8 @@ namespace MphRead
                 RealTime(host, () =>
                 {
                     driver.Step(o.Seek != null ? SeekBrain(host, o.Seek) : Brain(host));
+                    gap?.Step(host.Frame, seat);
+                    if (_pushDuel) PushWatch(host, o.Index);
                     SampleExtras(net.Settings.Players.Count);
                     if (o.Seek != null) SeekLog($"joiner {o.Index}", host, host.Player);
                     int health = host.Player.Health;
@@ -951,6 +1037,10 @@ namespace MphRead
                     }
                     lastHealth = health;
                 }, o.Leave > 0 ? o.Leave : o.Rejoin > 0 && !o.Again ? o.Rejoin : o.Time + 25);
+                if (o.Leave > 0)
+                {
+                    replay?.AskCutShort(host.Frame);
+                }
                 if (o.Wifi > 0)
                 {
                     Console.WriteLine($"REJOINRESET {rejoinReset ?? "none"} spawned={rejoinSpawned}");
@@ -1010,6 +1100,8 @@ namespace MphRead
                 Console.WriteLine($"joiner {o.Index}: {host.Frame} frames as seat {seat}, {driver.StatusLine()}, own player pulled "
                     + $"back {host.LocalCorrections} times, ended {host.Ended}, relay ping {relay.PingMs} ms");
                 Console.WriteLine($"joiner {o.Index}: link {net.NetStats()}; {driver.Prediction?.Summary()}");
+                if (driver.Smoothing != null) Console.WriteLine($"joiner {o.Index}: {driver.Smoothing.Summary()}");
+                Console.WriteLine($"joiner {o.Index}: paced: skipped {driver.PaceSkipped}, ran twice {driver.PaceDoubled}");
                 if (_hybrid != null)
                 {
                     Console.WriteLine($"joiner {o.Index}: {_hybrid.Summary()}");
@@ -1017,7 +1109,12 @@ namespace MphRead
                 }
                 Console.WriteLine($"joiner {o.Index}: own beam hits seen here {PlayerEntity.NetBeamHits[seat]}");
                 Console.WriteLine($"SAWHITS {seat}:{PlayerEntity.NetBeamHits[seat]}");
+                Console.WriteLine($"joiner {o.Index}: " + HitClaims.GuestLine());
+                Console.WriteLine($"CLAIMSUNHEARD {seat}:{HitClaims.Unheard}");
                 Console.WriteLine(Scores(net.Settings.Players.Count, host.Scene));
+                // (the order from the points as they stand, as the next frame's board and MatchResults.Capture have it: the
+                // last snapshot can land after this device's last UpdateState, two tied seats then left in their old order)
+                GameState.UpdateState(voices: false);
                 Console.WriteLine(Board());
                 Console.WriteLine(Results(net.Settings.Players.Count));
                 Console.WriteLine(ObjectiveEvents());
@@ -1025,6 +1122,7 @@ namespace MphRead
                 Console.WriteLine($"joiner {o.Index}: {Afflictions()}");
                 Console.WriteLine($"joiner {o.Index} scoreboard:\n" + MatchStatus.Scoreboard());
                 host.Dispose();
+                replay?.Finish();
                 for (int match = 2; match <= o.Matches && o.Leave == 0 && !(o.OwnerLeave && o.Owner > 0); match++)
                 {
                     if (!PlayAgain(o, net, match))
@@ -1074,7 +1172,8 @@ namespace MphRead
                     }
                 });
             }
-            return o.Loss > 0 || o.Jitter > 0 || o.Lag > 0 ? new SimulatedLink(link, o.Loss, o.Jitter, seed: 1000 + index, o.Lag) : link;
+            return o.Loss > 0 || o.Jitter > 0 || o.Lag > 0 || (o.Burst > 0 && (o.BurstSeat < 0 || o.BurstSeat == index))
+                ? new SimulatedLink(link, o.Loss, o.Jitter, seed: 1000 + index, o.Lag, o.BurstSeat < 0 || o.BurstSeat == index ? o.Burst : 0) : link;
         }
 
         // (with the mode's state: prime hunter + mode stats, NetObjective)
@@ -1241,6 +1340,8 @@ namespace MphRead
             : OctolithFlagEntity.NetEventsRecorded)} nodes {NodeDefenseEntity.NetCompletes}";
 
         // SECONDHUNT_SERVER_DLL picks another server build (e.g. a session's own bin/Net output) over the shared Debug one.
+        private static string OnOff(bool on) => on ? "on" : "off";
+
         private static string ServerDll() => Environment.GetEnvironmentVariable("SECONDHUNT_SERVER_DLL") is { Length: > 0 } dll
             ? Path.GetFullPath(dll)
             : Path.GetFullPath(Path.Combine(typeof(OnlineMatchTool).Assembly.Location, "..", "..",
@@ -1394,6 +1495,88 @@ namespace MphRead
             if (++_seekLines <= 200) Console.WriteLine($"SEEK {who} frame {host.Frame}: {state}");
         }
 
+        // ball=1: the joiner morphs once it's up and stays in alt form (the prediction summary then measures a rolling ball)
+        private static bool _ballBrain;
+        // duel=: the runner strafes left and right where it stands, never shooting; a shooter closes to 4 units of the
+        // nearest player, stops and taps fire whenever its aim is on them
+        private static string? _duelRole;
+
+        private static bool _pushDuel;
+        private static readonly bool _pushTrace = Environment.GetEnvironmentVariable("PUSHTRACE") == "1"; // the first hit, frame by frame
+        private sealed class PushWindow
+        {
+            public int Hits, Frames, Reversals, TotalReversals, Windows;
+            public float Path, YPath, TotalPath, TotalNet;
+            public Vector3 Start, Last, LastDelta;
+            public int Health = -1;
+            public long HitFrame = -1;
+        }
+        private static readonly PushWindow _pushWatch = new();
+
+        // push=1: the runner's motion for 120 frames after each hit -- its own (joiner 1, predicted) or as the shooter sees
+        // it (the puppet): the XZ path walked against the net move, and how often the XZ motion turned back (a shake turns
+        // back again and again; one knockback slides one way and stops)
+        private static void PushWatch(CampaignHost host, int index)
+        {
+            PlayerEntity? victim = null;
+            if (_duelRole == "runner")
+            {
+                victim = host.Player;
+            }
+            else
+            {
+                for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
+                {
+                    PlayerEntity p = PlayerEntity.Players[i];
+                    if (p != host.Player && p.LoadFlags.TestFlag(LoadFlags.Active)) victim = p;
+                }
+            }
+            if (victim == null) return;
+            PushWindow w = _pushWatch;
+            string who = _duelRole == "runner" ? "self" : "seen";
+            void Close()
+            {
+                if (w.HitFrame < 0) return;
+                float net = new Vector3(w.Last.X - w.Start.X, 0, w.Last.Z - w.Start.Z).Length;
+                w.Windows++;
+                w.TotalPath += w.Path;
+                w.TotalNet += net;
+                w.TotalReversals += w.Reversals;
+                Console.WriteLine($"PUSH {who} hit at {w.HitFrame}: {w.Frames} frames, path {w.Path:0.00} net {net:0.00} "
+                    + $"turns {w.Reversals} ypath {w.YPath:0.00} | total {w.Windows} hits: path {w.TotalPath:0.00} net {w.TotalNet:0.00} "
+                    + $"turns {w.TotalReversals}");
+                w.HitFrame = -1;
+            }
+            int health = victim.Health;
+            bool hit = w.Health > 0 && health > 0 && health < w.Health;
+            if (health == 0 || !victim.LoadFlags.TestFlag(LoadFlags.Spawned))
+            {
+                w.HitFrame = -1; // (a death: no window)
+            }
+            else if (hit)
+            {
+                Close();
+                w.HitFrame = host.Frame;
+                w.Frames = w.Reversals = 0;
+                w.Path = w.YPath = 0;
+                w.Start = w.Last = victim.Position;
+                w.LastDelta = Vector3.Zero;
+            }
+            else if (w.HitFrame >= 0)
+            {
+                Vector3 d = victim.Position - w.Last;
+                var xz = new Vector3(d.X, 0, d.Z);
+                w.Path += xz.Length;
+                w.YPath += MathF.Abs(d.Y);
+                if (xz.Length > 0.005f && w.LastDelta.Length > 0.005f && Vector3.Dot(xz, w.LastDelta) < 0) w.Reversals++;
+                if (xz.Length > 0.005f) w.LastDelta = xz;
+                if (_pushTrace && w.Windows == 0) Console.WriteLine($"PTRACE {who} {host.Frame - w.HitFrame} d {d.X:0.000} {d.Y:0.000} {d.Z:0.000}");
+                w.Last = victim.Position;
+                if (++w.Frames >= 120) Close();
+            }
+            w.Health = health;
+        }
+
         private static CampaignInput Brain(CampaignHost host)
         {
             var input = new CampaignInput { SelectWeapon = BeamType.None };
@@ -1401,6 +1584,20 @@ namespace MphRead
             if (me.Health == 0)
             {
                 input.Buttons = CampaignButtons.Shoot; // press FIRE to (re)spawn
+                return input;
+            }
+            if (_ballBrain && !me.IsAltForm && !me.IsMorphing && host.Frame % 60 == 0)
+            {
+                input.Buttons = CampaignButtons.Morph;
+                return input;
+            }
+            if (_duelRole == "runner" && _pushDuel)
+            {
+                return input; // stands still: any motion is the knockback (and its corrections)
+            }
+            if (_duelRole == "runner")
+            {
+                input.Move = new System.Numerics.Vector2(host.Frame / 45 % 2 == 0 ? 1 : -1, 0);
                 return input;
             }
             PlayerEntity? target = null;
@@ -1429,7 +1626,12 @@ namespace MphRead
                 float dpitch = pitch - me.NetPitch;
                 input.AimDelta = new System.Numerics.Vector2(-4 * Math.Clamp(dyaw, -12, 12), -4 * Math.Clamp(dpitch, -6, 6));
                 input.Move = new System.Numerics.Vector2(0, 1);
-                if (MathF.Abs(dyaw) < 10 && host.Frame % 20 < 12)
+                if (_duelRole == "shooter")
+                {
+                    if (_pushDuel) input.SelectWeapon = BeamType.Missile;
+                    if (to.Length < 4) input.Move = System.Numerics.Vector2.Zero;
+                    input.Buttons = MathF.Abs(dyaw) < 4 && host.Frame % (_pushDuel ? 120 : 20) < 10 ? CampaignButtons.Shoot : CampaignButtons.None;                }
+                else if (MathF.Abs(dyaw) < 10 && host.Frame % 20 < 12)
                 {
                     input.Buttons = CampaignButtons.Shoot;
                 }

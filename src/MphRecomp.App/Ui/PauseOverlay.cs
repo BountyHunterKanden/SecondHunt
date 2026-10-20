@@ -30,9 +30,9 @@ internal sealed class PauseOverlay
     public bool NetMatch { get; set; }
     // an online match (MatchSession.ConfigureMatch): the pause gets CHAT, the lobby's CHAT page on this match's connection
     public MphRecomp.Multiplayer.Net.OnlineMatch? OnlineChat { get; set; }
-    public event Action? Resumed, QuitToMenu, DevTools;
+    public event Action? Resumed, QuitToMenu, QuitToDesktop, DevTools;
     // RECOMP SETTINGS > CREDITS / CRASH LOG: the host opens the same screens as the front end does (GameActivity)
-    public event Action? Credits, ShareCrashLog;
+    public event Action? Credits, ShareCrashLog, ShareLog, SaveLog;
     // the control customizer opened on its own (OpenControls, the ship's OPTIONS) was closed: the host reloads the buttons
     public event Action? ControlsClosed;
 
@@ -116,6 +116,10 @@ internal sealed class PauseOverlay
             Close();
             QuitToMenu?.Invoke();
             break;
+        case FrontendRequestKind.QuitToDesktop: // (Windows)
+            Close();
+            QuitToDesktop?.Invoke();
+            break;
         case FrontendRequestKind.OpenDeveloperMenu:
             DevTools?.Invoke();
             break;
@@ -124,6 +128,12 @@ internal sealed class PauseOverlay
             break;
         case FrontendRequestKind.ShareCrashLog:
             ShareCrashLog?.Invoke();
+            break;
+        case FrontendRequestKind.ShareLog:
+            ShareLog?.Invoke();
+            break;
+        case FrontendRequestKind.SaveLog: // (2026-10-19: the log as a file on the device)
+            SaveLog?.Invoke();
             break;
         case FrontendRequestKind.ControlsDone:
             Close();

@@ -27,7 +27,8 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
-                if (Flags2.TestFlag(PlayerFlags2.Halfturret))
+                // (recomp: the Trooper's drone doesn't stand on his own standing body: HostDroneSwitchRule, PlayerScoutDrone.cs)
+                if (Flags2.TestFlag(PlayerFlags2.Halfturret) && !(other == this && DroneIgnoresOwnBody))
                 {
                     Vector3 toTurret = other.Volume.SpherePosition - _halfturret.Position;
                     float radius = other.Volume.SphereRadius + 0.45f + 0.1f;
@@ -46,6 +47,7 @@ namespace MphRead.Entities
                         toTurret += _halfturret.Position;
                         turretRes.Plane.W = Vector3.Dot(toTurret, turretRes.Plane.Xyz);
                         other.HandleCollision(turretRes);
+                        other.NetHostMoved(NetHostMove.Body); // recomp: the standing body pushed it (PlayerNetPosition.cs)
                         if (other != this)
                         {
                             if (other.Flags1.TestFlag(PlayerFlags1.Boosting))
@@ -88,11 +90,13 @@ namespace MphRead.Entities
                     {
                         other.Acceleration = new Vector3(between.X * -kbAccel, 0, between.Z * -kbAccel);
                         other._accelerationTimer = (ushort)(Values.AltAttackKnockbackTime * 2); // todo: FPS stuff
+                        other.NetHostMoved(NetHostMove.Push); // recomp: (PlayerNetPosition.cs)
                     }
                     if (other.Hunter == Hunter.Noxus && other.IsAltForm)
                     {
                         Acceleration = new Vector3(between.X * kbAccel, 0, between.Z * kbAccel);
                         _accelerationTimer = (ushort)(Values.AltAttackKnockbackTime * 2); // todo: FPS stuff
+                        NetHostMoved(NetHostMove.Push); // recomp: (PlayerNetPosition.cs)
                     }
                     if (Flags1.TestFlag(PlayerFlags1.Boosting))
                     {
@@ -201,6 +205,7 @@ namespace MphRead.Entities
                         var dir = new Vector3(between.X / factor, 0, between.Z / factor);
                         target.Acceleration = dir;
                         target._accelerationTimer = 8 * 2; // todo: FPS stuff
+                        target.NetHostMoved(NetHostMove.Push); // recomp: (PlayerNetPosition.cs)
                         ushort damage = attacker.Values.AltAttackDamage;
                         if (attacker.IsBot && GameState.SinglePlayer)
                         {
@@ -258,6 +263,7 @@ namespace MphRead.Entities
                 float kbAccel = Fixed.ToFloat(attacker.Values.AltAttackKnockbackAccel);
                 target.Acceleration = new Vector3(dir.X * kbAccel, -0.1f, dir.Z * kbAccel);
                 target._accelerationTimer = (ushort)(attacker.Values.AltAttackKnockbackTime * 2); // todo: FPS stuff
+                target.NetHostMoved(NetHostMove.Push); // recomp: (PlayerNetPosition.cs)
             }
             ushort damage = attacker.Values.AltAttackDamage;
             if (attacker.IsBot && GameState.SinglePlayer)

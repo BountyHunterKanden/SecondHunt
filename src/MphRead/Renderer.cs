@@ -223,7 +223,8 @@ namespace MphRead
         {
             _hudItemCount = 0;
             HudMaskBindingId = -1;
-            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
+            // (recomp: seatless, only a served match replay's watched seat has a HUD: PlayerServedHost.cs)
+            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player && PlayerEntity.HostHudShown)
             {
                 if (PlayerEntity.HostFirstHunt && FirstHuntHud.Loaded) // recomp: First Hunt's own HUD
                 {
@@ -1518,6 +1519,11 @@ namespace MphRead
                     hudSeat.HostUpdateSeatHud(); // recomp: a replay watching another seat (PlayerHud.cs)
                 }
             }
+            else if (ProcessFrame && PlayerEntity.HostSeatlessHud && PlayerEntity.HostHudSeat is PlayerEntity seenSeat
+                && seenSeat.LoadFlags.TestFlag(LoadFlags.Active) && !GameState.DialogPause)
+            {
+                seenSeat.HostUpdateSeatHud(); // recomp: a served match's replay, the watched seat's HUD (PlayerServedHost.cs)
+            }
             if (Headless)
             {
                 // fades normally advance in OnRenderFrame -> UpdateUniforms; their end actions load rooms/movies
@@ -1728,7 +1734,7 @@ namespace MphRead
             _layeredDraw.DrawFrame(_nonDecalItems, _decalItems, _translucentItems);
             GL.PolygonMode(TriangleFace.FrontAndBack, OpenTK.Graphics.OpenGL.PolygonMode.Fill);
 
-            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
+            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player && PlayerEntity.HostHudShown)
             {
                 SetHudLayerUniforms();
                 PlayerEntity.HudOwner.DrawHudModels(); // recomp: HudOwner (PlayerHud.cs)
@@ -1784,7 +1790,7 @@ namespace MphRead
             }
             GL.Disable(EnableCap.CullFace);
             GL.Uniform4(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, 0);
-            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
+            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player && PlayerEntity.HostHudShown)
             {
                 DrawHudLayer(Layer4Info); // ice layer
                 DrawHudLayer(Layer3Info); // helmet back
@@ -2160,7 +2166,7 @@ namespace MphRead
             _inactiveBombs.Enqueue(entry);
         }
 
-        public void AddSingleParticle(SingleType type, Vector3 position, Vector3 color, float alpha, float scale)
+        public void AddSingleParticle(SingleType type, Vector3 position, Vector3 color, float alpha, float scale, EntityBase? hostOwner = null)
         {
             // note: skipping the room size limit check; singles get cleared every frame anyway
             if (_singleParticleCount < _singleParticleMax)
@@ -2171,6 +2177,7 @@ namespace MphRead
                 entry.Color = color;
                 entry.Alpha = alpha;
                 entry.Scale = scale;
+                entry.HostOwner = hostOwner; // recomp: RenderItem.HostOwner (a shot's head: carried with it)
                 if (!_texPalMap.ContainsKey(entry.ParticleDefinition.Model.Id))
                 {
                     InitTextures(entry.ParticleDefinition.Model);
@@ -2278,6 +2285,7 @@ namespace MphRead
             entry.Expired = false;
             entry.ChildEffectId = (int)element.ChildEffectId;
             entry.HostHidden = HostSpawnHidden;
+            entry.HostOwner = null; // recomp: EffectEntry.SetHostOwner
             entry.Acceleration = element.Acceleration;
             entry.ParticleDefinitions.AddRange(element.Particles);
             entry.Parity = (int)(_frameCount % 2);
@@ -3189,6 +3197,7 @@ namespace MphRead
                 {
                     _hostItemOwner = player; // recomp: RenderItem.HostOwner
                     player.Draw();
+                    player.HostTagFx(); // recomp: PlayerSmoothFx.cs
                     // skdebug
                     player.GetDisplayVolumes();
                 }
@@ -3201,7 +3210,8 @@ namespace MphRead
                 }
                 if (entity.ShouldDraw)
                 {
-                    _hostItemOwner = entity; // recomp: RenderItem.HostOwner
+                    // recomp: RenderItem.HostOwner (the Shock Coil's arc runs from its owner's gun: carried with the owner)
+                    _hostItemOwner = entity is BeamProjectileEntity { DrawFuncId: 9, Owner: EntityBase beamOwner } ? beamOwner : entity;
                     entity.GetDrawInfo();
                 }
                 if (_showVolumes != VolumeDisplay.None)
@@ -3221,6 +3231,7 @@ namespace MphRead
                 EffectElementEntry element = _activeElements[i];
                 if (element.Flags.TestFlag(EffElemFlags.DrawEnabled))
                 {
+                    _hostItemOwner = element.HostOwner; // recomp: RenderItem.HostOwner (null unless EffectEntry.SetHostOwner)
                     for (int j = 0; j < element.Particles.Count; j++)
                     {
                         EffectParticle particle = element.Particles[j];
@@ -3238,6 +3249,7 @@ namespace MphRead
                     }
                 }
             }
+            _hostItemOwner = null;
             for (int i = 0; i < _singleParticleCount; i++)
             {
                 SingleParticle single = _singleParticles[i];
@@ -3248,9 +3260,11 @@ namespace MphRead
                 SingleParticle single = _singleParticles[i];
                 if (single.ShouldDraw)
                 {
+                    _hostItemOwner = single.HostOwner; // recomp: RenderItem.HostOwner
                     single.AddRenderItem(this);
                 }
             }
+            _hostItemOwner = null;
         }
 
         private void UpdateUniforms()

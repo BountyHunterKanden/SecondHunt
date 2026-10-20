@@ -22,6 +22,9 @@
     ],
     "crsc": "c59e2b05",
     "laser": "5cf355af",
+    "sounds": [
+      632
+    ],
     "sfx": {
       "lookup": "b7c1b3a7",
       "group": "98b283bf"

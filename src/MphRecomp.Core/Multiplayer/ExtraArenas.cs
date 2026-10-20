@@ -11,7 +11,7 @@ namespace MphRecomp.Multiplayer
     // JOIN for an arena the joiner doesn't have, START waits until every seated player has the arena, RANDOM picks only from the
     // arenas every seated player has, FIND GAME votes only arenas everyone in the group has, and the online list hides games on
     // an arena this device lacks. The ADVANCED box's EXTRA ARENAS rule (ExtraRules.Arenas) puts them in the arena list at all.
-    public static class ExtraArenas
+    public static partial class ExtraArenas
     {
         // an arena only some devices have (by room name; an Echoes room counts even where it isn't imported)
         public static bool IsExtra(string? arena)

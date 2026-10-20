@@ -13,7 +13,8 @@ namespace MphRead.Entities
     //   - in use (unfolding, firing, folding / the laser on): a hollow grey ring
     //   - waiting: the grey dial refilling clockwise from the top, the whole seconds left in the middle
     // Draw only: reads the sim's waits, so replays, another seat's view and online joiners (NetDrone carries both waits)
-    // show the same. The textures are made here (MphRead's HUD colour from the text palette), one per state, and go
+    // show the same. SWAP DRONE DIALS (OPTIONS > CONTROLS, SCOUT DRONE; 2026-10-19) puts BURST on the left and LASER on
+    // the right: the dials only, the buttons stay as they are. The textures are made here (MphRead's HUD colour from the text palette), one per state, and go
     // through DrawHudObject like any HUD piece.
     public partial class PlayerEntity
     {
@@ -31,6 +32,9 @@ namespace MphRead.Entities
             public bool WasWaiting;
             public int Pop;
         }
+
+        // the host's own pick (CampaignRenderer.ReloadAimFromSettings, RecompSettings.DroneDialsSwapped)
+        public static bool HostDroneDialsSwapped { get; set; }
 
         private DroneDial? _droneBurstDial;
         private DroneDial? _droneLaserDial;
@@ -58,10 +62,12 @@ namespace MphRead.Entities
             }
             float posY = _boostBombsYOffset + 4;
             bool burstBusy = _droneFireState != 0;
-            DrawDroneDial(_droneBurstDial, laser: false, 227, posY, burstBusy, burstBusy ? 0 : _droneCooldown,
+            float burstX = HostDroneDialsSwapped ? 29 : 227;
+            float laserX = HostDroneDialsSwapped ? 227 : 29;
+            DrawDroneDial(_droneBurstDial, laser: false, burstX, posY, burstBusy, burstBusy ? 0 : _droneCooldown,
                 _droneBurstWaitFrames, "BURST");
             bool laserBusy = _droneLaserFrame >= 0;
-            DrawDroneDial(_droneLaserDial!, laser: true, 29, posY, laserBusy, laserBusy ? 0 : _droneLaserWait,
+            DrawDroneDial(_droneLaserDial!, laser: true, laserX, posY, laserBusy, laserBusy ? 0 : _droneLaserWait,
                 _droneLaserWaitFrames, "LASER");
         }
 

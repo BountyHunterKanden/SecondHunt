@@ -62,6 +62,8 @@ namespace MphRecomp.Replay
             host.RemoteInputTap = RemoteInput;
             host.SeatDropTap = SeatDropped;
             host.SeatRejoinTap = SeatRejoined;
+            host.ClaimedHitTap = ClaimedHit;
+            host.ClientPositionTap = ClientPositionTaken;
         }
 
         // (CampaignHost's taps, before the step they belong to: Steps.Count is that step's index)
@@ -76,6 +78,14 @@ namespace MphRecomp.Replay
 
         public void SeatRejoined(int seat) => File.NetEvents.Add(new ReplayNetEvent(File.Steps.Count, (byte)seat, ReplayNetKind.Rejoin, null));
 
+        // (applied at the start of the step: Steps.Count is that step's index, as for the taps above)
+        public void ClaimedHit(int shooter, byte[] record) => File.NetEvents.Add(new ReplayNetEvent(File.Steps.Count, (byte)shooter,
+            ReplayNetKind.Hit, record));
+
+        // (the same: a guest's own position the host took, format 54)
+        public void ClientPositionTaken(int seat, byte[] record) => File.NetEvents.Add(new ReplayNetEvent(File.Steps.Count, (byte)seat,
+            ReplayNetKind.Position, record));
+
         public void Step(in CampaignInput input, Scene scene)
         {
             File.Steps.Add(new ReplayStep { Input = input, Checksum = ReplayState.Capture(scene).Checksum });
@@ -85,6 +95,27 @@ namespace MphRecomp.Replay
         public void End(bool complete)
         {
             File.Complete = complete;
+        }
+
+        // the recording so far as a cut-short file, with these seats' identities (a guest leaving mid-match gets its copy:
+        // ReplayLink.RequestReplay); the recording itself carries on as it was
+        public byte[] Partial(IEnumerable<ReplaySeatIdentity> identities)
+        {
+            bool complete = File.Complete;
+            int had = File.Identities.Count;
+            try
+            {
+                File.Complete = false;
+                File.Identities.AddRange(identities);
+                var ms = new System.IO.MemoryStream();
+                File.Write(ms);
+                return ms.ToArray();
+            }
+            finally
+            {
+                File.Identities.RemoveRange(had, File.Identities.Count - had);
+                File.Complete = complete;
+            }
         }
 
         // Features that only change what's drawn or logged (opacities, HUD target info, audio logging): changing them
@@ -247,6 +278,8 @@ namespace MphRecomp.Replay
                 if (e.Kind == ReplayNetKind.Input) _host.SetRemoteInput(e.Seat, NetInput.ReadRecord(e.Input!));
                 else if (e.Kind == ReplayNetKind.Drop) _host.DisconnectSeat(e.Seat);
                 else if (e.Kind == ReplayNetKind.Rejoin) _host.ReconnectSeat(e.Seat);
+                else if (e.Kind == ReplayNetKind.Hit) _host.ClaimHit(CampaignHost.ReadClaimRecord(e.Seat, e.Input!));
+                else if (e.Kind == ReplayNetKind.Position) _host.TakeClientPosition(e.Seat, e.Input!);
             }
         }
 

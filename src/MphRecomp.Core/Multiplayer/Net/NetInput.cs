@@ -26,6 +26,17 @@ namespace MphRecomp.Multiplayer.Net
         // vanilla's touch roll, flick boost and double-tap jump), DS pixels moved since the last frame; 0 / false for a pad
         public bool Touching;
         public sbyte TouchDx, TouchDy;
+        // online (0.3.6, client-reported position, Net/ClientPosition.cs): where this device had its own player at the start
+        // of this input's step (Report), in alt form or not, and the newest host snapshot its prediction had taken in by then
+        // (ReportBasis; 0 = no report). Not in Write / WriteRecord: it rides after the inputs of an online input packet
+        // (NetMatchSession.SendInput); the host's replay records what it took as its own event (ReplayNetKind.Position)
+        public uint ReportBasis;
+        public OpenTK.Mathematics.Vector3 Report;
+        public bool ReportAlt;
+        // (knockback, 0.3.6): this device runs the host's pushes on its own player itself (the snapshot's push section,
+        // SeatExtras.Pushes) and its speed at the start of the step, which the host takes for a while after a push
+        public bool ReportPushes;
+        public OpenTK.Mathematics.Vector3 ReportSpeed;
 
         // the LAN wire form (Write/Read, LanSession) is unchanged; the online match and the host's replay record carry
         // every field (WriteRecord/ReadRecord)

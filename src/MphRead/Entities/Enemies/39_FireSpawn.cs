@@ -228,6 +228,7 @@ namespace MphRead.Entities.Enemies
                     if (_effectEntry != null)
                     {
                         _effectEntry.Transform(_wristPos[_wristId], Transform.ClearScale());
+                        _effectEntry.SetHostOwner(this); // recomp: carried with it (smooth frames)
                     }
                 }
                 _animFrameCount--;

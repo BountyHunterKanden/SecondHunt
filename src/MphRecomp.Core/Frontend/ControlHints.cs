@@ -27,6 +27,8 @@ namespace MphRecomp.Frontend
                 + "key. zooms back out to first step when target is lost.",
             ["zoomicon.on"] = "while zoomed, the reticle is faint, and turns solid when the target zoom is ready.",
             ["zoomicon.off"] = "the reticle stays solid. the target zoom still works when a target is in sight.",
+            ["dronedials.on"] = "the drone's burst wait shows on the left and its laser wait on the right. the buttons don't change.",
+            ["dronedials.off"] = "the drone's laser wait shows on the left and its burst wait on the right. the buttons don't change.",
             ["trycontrols"] = "pick a hunter and play in alinos gateway's sniping perch with practice bots, every weapon and "
                 + "endless ammo. press start to come back here.",
             ["practicebots.idle"] = "the bots stand still and never die.",

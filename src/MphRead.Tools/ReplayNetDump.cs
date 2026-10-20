@@ -14,6 +14,9 @@ namespace MphRead
     // the seats, each remote seat's drops and rejoins, how many inputs came from it in each window, and every seat's state
     // (active / spawned / health / drawn / kills / deaths) from the first drop on; at the end the RESULTS rows and the table
     // the page fills. For an owner's report (a rejoined seat invisible, a row missing from RESULTS) from the replay alone.
+    // A format 47 host recording also carries the host's shot check (ReplayFile.ShotChecks): a summary per seat always, and
+    // with shots=1 every shot and claimed hit (step, kind, gun position / aim off, victim and how far off), then it stops
+    // (no playback needed). For "my hit didn't register" from a shared replay alone.
     internal static class ReplayNetDump
     {
         public static void Run(string[] args)
@@ -24,6 +27,7 @@ namespace MphRead
                 return;
             }
             int every = 60;
+            bool shotsOnly = false; // shots=1: the shot check's every entry, no playback
             int fromArg = -1; // from=<step>: print from there (default: 4 windows before the first drop)
             bool raw = false; // raw=1: each remote input record that lands on a printed step
             foreach (string a in args.Skip(2))
@@ -31,9 +35,11 @@ namespace MphRead
                 if (a.StartsWith("every=")) every = Int32.Parse(a[6..]);
                 if (a == "raw=1") raw = true;
                 if (a.StartsWith("from=")) fromArg = Int32.Parse(a[5..]);
+                if (a == "shots=1") shotsOnly = true;
             }
             Trace.Listeners.Clear();
-            if (!ToolPaths.UseDesktopExtraction())
+            // (shots=1 reads only the file: no game files needed)
+            if (!shotsOnly && !ToolPaths.UseDesktopExtraction())
             {
                 return;
             }
@@ -45,10 +51,45 @@ namespace MphRead
                 MatchPlayer p = file.Settings.Players[i];
                 Console.WriteLine($"  seat {i}: {p.Hunter} team {p.Team} {(p.Bot ? "bot" : p.Remote ? "remote" : "local")} '{p.Nickname}'");
             }
+            if (file.ShotChecks.Count > 0)
+            {
+                Console.WriteLine("shot check (the host's view of each guest's reported shots and hits):");
+                foreach (IGrouping<byte, ReplayShotCheck> seat in file.ShotChecks.GroupBy(c => c.Seat).OrderBy(g => g.Key))
+                {
+                    var shots = seat.Where(c => c.Kind is ReplayShotKind.ShotMatched or ReplayShotKind.ShotLost).ToList();
+                    var matched = shots.Where(c => c.Kind == ReplayShotKind.ShotMatched).ToList();
+                    var claims = seat.Where(c => c.Kind >= ReplayShotKind.ClaimAgrees).ToList();
+                    Console.WriteLine($"  seat {seat.Key}: shots {shots.Count}, lost {shots.Count - matched.Count}, gun off avg "
+                        + $"{(matched.Count > 0 ? matched.Average(c => c.OriginOff) : 0):0.00} max {(matched.Count > 0 ? matched.Max(c => c.OriginOff) : 0):0.00}, "
+                        + $"aim off avg {(matched.Count > 0 ? matched.Average(c => c.AimOff) : 0):0.0} deg; hits claimed {claims.Count}, agree "
+                        + $"{claims.Count(c => c.Kind == ReplayShotKind.ClaimAgrees)}, disagree {claims.Count(c => c.Kind == ReplayShotKind.ClaimDisagrees)}, "
+                        + $"unknown {claims.Count(c => c.Kind == ReplayShotKind.ClaimUnknown)}");
+                }
+                if (shotsOnly)
+                {
+                    foreach (ReplayShotCheck c in file.ShotChecks)
+                    {
+                        Console.WriteLine($"    step {c.Step} ({c.Step / 60 / 60}:{c.Step / 60 % 60:00}) seat {c.Seat} {c.Kind}"
+                            + (c.Kind == ReplayShotKind.ShotMatched ? $" gun off {c.OriginOff:0.00} aim off {c.AimOff:0.0} deg" : "")
+                            + (c.Victim >= 0 ? $" victim seat {c.Victim}" + (c.Kind != ReplayShotKind.ClaimUnknown ? $" off {c.VictimOff:0.00}" : "") : ""));
+                    }
+                    return;
+                }
+            }
+            else if (shotsOnly)
+            {
+                Console.WriteLine("no shot check in this file (a host recording from format 47 on, with guests on the new app)");
+                return;
+            }
             List<ReplayNetEvent> events = file.NetEvents;
-            foreach (ReplayNetEvent e in events.Where(e => e.Kind != ReplayNetKind.Input))
+            foreach (ReplayNetEvent e in events.Where(e => e.Kind is not ReplayNetKind.Input and not ReplayNetKind.Position))
             {
                 Console.WriteLine($"  step {e.Step}: seat {e.Seat} {e.Kind}");
+            }
+            // (0.3.6: the guests' own positions the host took, one most steps: counted per seat, not listed)
+            foreach (IGrouping<byte, ReplayNetEvent> g in events.Where(e => e.Kind == ReplayNetKind.Position).GroupBy(e => e.Seat))
+            {
+                Console.WriteLine($"  seat {g.Key}: {g.Count()} positions taken");
             }
             int firstDrop = events.Where(e => e.Kind == ReplayNetKind.Drop).Select(e => e.Step).DefaultIfEmpty(-1).First();
             if (ReplayPlayer.CheckBeforeStart(file) is string why)

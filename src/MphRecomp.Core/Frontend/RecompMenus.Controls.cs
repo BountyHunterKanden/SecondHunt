@@ -346,6 +346,14 @@ namespace MphRecomp.Frontend
             }
             Header("SCOUT DRONE");
             Binds(all.Where(f => f.Group == ControlBinds.Drone));
+            // (2026-10-19: the laser and burst waits' dials trade sides on screen, the buttons stay put)
+            Setting(new RowModel
+            {
+                Label = "swap\ndrone dials",
+                Describe = () => ControlHints.For(_settings.DroneDialsSwapped ? "dronedials.on" : "dronedials.off"),
+                Value = () => _settings.DroneDialsSwapped ? "ON" : "OFF",
+                Step = _ => _settings.DroneDialsSwapped = !_settings.DroneDialsSwapped
+            });
 
             Setting(new RowModel
             {

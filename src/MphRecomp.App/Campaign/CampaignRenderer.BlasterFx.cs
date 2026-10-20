@@ -434,9 +434,11 @@ internal sealed partial class CampaignRenderer
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(false);
         GLES30.GlDisable(CullFaceCap);
-        void Draw(BlasterBolt bolt)
+        void Draw(BlasterBolt bolt, BeamProjectileEntity? beam)
         {
-            Matrix4 at = BoltFrame(bolt.Dir, bolt.Pos, BoltScale(bolt));
+            // smooth frames: a live bolt carried with its shot (SmoothCarry), as MphRead's own shots are
+            Vector3 pos = beam != null ? Vector3.TransformPosition(bolt.Pos, SmoothCarry(beam, scene)) : bolt.Pos;
+            Matrix4 at = BoltFrame(bolt.Dir, pos, BoltScale(bolt));
             foreach (RetroSwoosh w in bolt.Swooshes)
             {
                 _blasterVerts.Clear();
@@ -448,8 +450,8 @@ internal sealed partial class CampaignRenderer
                 DrawRun(w.Texture, w.Additive, n, white: w.Texture == 0);
             }
         }
-        foreach (BlasterBolt bolt in _blasterBolts.Values) Draw(bolt);
-        foreach (BlasterBolt bolt in _blasterDying) Draw(bolt);
+        foreach (KeyValuePair<BeamProjectileEntity, BlasterBolt> live in _blasterBolts) Draw(live.Value, live.Key);
+        foreach (BlasterBolt bolt in _blasterDying) Draw(bolt, null);
         // MphRead's own drawing state back, as DrawSuit leaves it
         GLES30.GlDepthMask(true);
         GLES30.GlUseProgram(_program);

@@ -49,6 +49,7 @@ namespace MphRead.Entities.Enemies
                     Vector3 position = Position + _gorea1A.FacingVector * Fixed.ToFloat(2949);
                     position += _gorea1A.UpVector * Fixed.ToFloat(-939);
                     _flashEffect.Transform(_gorea1A.FacingVector, _gorea1A.UpVector, position);
+                    _flashEffect.SetHostOwner(_gorea1A); // recomp: carried with it (smooth frames)
                 }
             }
         }

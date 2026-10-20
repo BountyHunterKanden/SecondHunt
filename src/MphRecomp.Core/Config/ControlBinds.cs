@@ -17,7 +17,9 @@ using System.Linq;
 // is), and the customizer says what else it does (SharedWith). CLEAR blanks both slots.
 // Groups (owner 2026-10-11): the hunter's functions, the Trooper's Scout Drone's (read instead of the hunter's while the
 // drone is out, so the two lists can share buttons) and the common ones (both: push to talk, the map, the scoreboard, chat;
-// on a PC the movement keys). The drone's deploy / recall replaces the morph ball for the Trooper, so it shares only that.
+// on a PC the movement keys). The Trooper deploys and recalls the drone with the hunter's MORPH (2026-10-19: no deploy
+// function of its own, it clashed with morph), so MORPH is read with the drone's too and can't share a button with them; an
+// old "dronedeploy" entry in the saved lists is dropped by Tidy like any id no longer listed.
 // Fixed, never offered: the sticks, Start (pause), L3 (the status text; L3 + R3 the gun-adjust pause), the menus' and
 // dialogs' own buttons; on a PC Esc (pause), M (map), the arrow keys (the controller's D-pad) and F1-F12. (R3 = push to
 // talk and Select = the map and the live scoreboard are functions since owner 2026-10-11; Tab is a PC's scoreboard, owner
@@ -32,7 +34,7 @@ namespace MphRecomp.Config
         // Touch: the touch controls' buttons that count for it besides its single-button defaults (PadBindings: the touch
         // SCAN, PadButton Y, still zooms outside the scan visor)
         public sealed record Function(string Id, string Label, string Description, string[] Defaults, string Group = Hunter,
-            string? Replaces = null, string[]? Touch = null);
+            string[]? Touch = null);
 
         // (ZoomStep: zoom in / zoom out, read only while zoomed with ZOOM STEP on, when they take their buttons from the
         // hunter's functions; so, like the drone's, they can share a button with those)
@@ -46,7 +48,7 @@ namespace MphRecomp.Config
             Zoom = "zoom", ScanVisor = "scanvisor", Missiles = "missiles", PrevWeapon = "prevweapon", NextWeapon = "nextweapon",
             MissileToggle = "missiletoggle", Forward = "forward", Back = "back", Left = "left", Right = "right",
             Bombs = "bombs", Talk = "talk", Chat = "chat", Map = "map", Scoreboard = "scoreboard",
-            DroneDeploy = "dronedeploy", DroneFire = "dronefire", DroneLaser = "dronelaser", DroneRise = "dronerise",
+            DroneFire = "dronefire", DroneLaser = "dronelaser", DroneRise = "dronerise",
             PowerBeam = "powerbeam", VoltDriver = "voltdriver", Battlehammer = "battlehammer", Imperialist = "imperialist",
             Judicator = "judicator", Magmaul = "magmaul", ShockCoil = "shockcoil", OmegaCannon = "omegacannon",
             PirateBlaster = "pirateblaster", ZoomIn = "zoomin", ZoomOut = "zoomout";
@@ -90,8 +92,8 @@ namespace MphRecomp.Config
             new(Talk, "push to\ntalk", "online voice chat: hold to talk.", new[] { "ThumbR" }, Common),
             new(Map, "map", "in the campaign, opens the map.", new[] { "Select" }, Common),
             new(Scoreboard, "scoreboard", "in a match, hold for the live scoreboard.", new[] { "Select" }, Common),
-            // the Trooper's Scout Drone (owner 2026-10-11: its own buttons, read while the drone is out)
-            new(DroneDeploy, "deploy /\nrecall", "the trooper sends out the scout drone, and calls it back.", new[] { "X" }, Drone, Morph),
+            // the Trooper's Scout Drone (2026-10-11: its own buttons, read while the drone is out; deploy / recall is MORPH,
+            // 2026-10-19)
             new(DroneFire, "drone\nblasters", "hold to unfold the drone's blasters and fire.", new[] { "R2", "B" }, Drone),
             new(DroneLaser, "cutting\nlaser", "fire the drone's sweeping laser.", new[] { "L2" }, Drone),
             new(DroneRise, "rise", "hold to fly the drone up, let go to sink.", new[] { "A", "L1" }, Drone),
@@ -131,7 +133,6 @@ namespace MphRecomp.Config
             new(Talk, "push to\ntalk", "online voice chat: hold to talk.", new[] { "V" }, Common),
             // (owner 2026-10-11: Tab, the usual PC scoreboard key; Esc pauses, M is the map)
             new(Scoreboard, "scoreboard", "in a match, hold for the live scoreboard.", new[] { "Tab" }, Common),
-            new(DroneDeploy, "deploy /\nrecall", "the trooper sends out the scout drone, and calls it back.", new[] { "C" }, Drone, Morph),
             new(DroneFire, "drone\nblasters", "hold to unfold the drone's blasters and fire.", new[] { "Mouse.Left" }, Drone),
             new(DroneLaser, "cutting\nlaser", "fire the drone's sweeping laser.", new[] { "Mouse.Right" }, Drone),
             new(DroneRise, "rise", "hold to fly the drone up, let go to sink.", new[] { "Space" }, Drone),
@@ -149,9 +150,8 @@ namespace MphRecomp.Config
         public static bool Clash(Function a, Function b)
         {
             if (a.Group == Common || b.Group == Common || a.Group == b.Group) return true;
-            if (a.Replaces != null && b.Group == Hunter) return b.Id != a.Replaces;
-            if (b.Replaces != null && a.Group == Hunter) return a.Id != b.Replaces;
-            return false;
+            // (MORPH deploys and recalls the Trooper's drone: read while it's out too)
+            return a.Id == Morph && b.Group == Drone || b.Id == Morph && a.Group == Drone;
         }
 
         // functions made to share a button (their defaults do; BuildInput / KeyboardMouseInput sort a press out between

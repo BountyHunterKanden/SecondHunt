@@ -30,13 +30,14 @@ namespace MphRecomp.Import
     //   arenas     9  2026-10-17: Sidehopper Station's grates break the same way (a turret.json of no pieces: grate Fx + sound
     //                 only); the turret's animation events' real durations (ball glow on while raised + ballglowdown, muzzle 2,
     //                 smoke 10 frames)
+    //   bodies     2  2026-10-19: the Scout Drone bodies' Prime deploy alert (fx/sfx_632.wav; MusyX Loop renders its four beeps)
     public static class ImporterVersions
     {
         static readonly Dictionary<string, int> Kinds = new(StringComparer.Ordinal)
         {
             ["guns"] = 1,
             ["hd"] = 1,
-            ["bodies"] = 1,
+            ["bodies"] = 2,
             ["arenas"] = 9,
             ["music"] = 1,
         };

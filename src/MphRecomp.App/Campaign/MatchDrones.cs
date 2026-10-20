@@ -62,13 +62,14 @@ internal sealed partial class CampaignRenderer
     }
 
     // the local player's own drone fades out as the alt form's close camera reaches it (backing up flies its spike and
-    // open blaster arms into the lens): gone at DroneFadeNear world units from its centre, whole from DroneFadeFar
+    // open blaster arms into the lens): gone at DroneFadeNear world units from its centre, whole from DroneFadeFar.
+    // Times MphRead's own alt alpha (CurAlpha: it fades out on a death in alt form, and with the cloak)
     const float DroneFadeNear = 0.55f, DroneFadeFar = 1.1f;
 
     static float DroneAlpha(Scene scene, PlayerEntity p)
     {
-        if (!p.IsMainPlayer || CameraSequence.Current != null) return 1;
+        if (!p.IsMainPlayer || CameraSequence.Current != null) return p.CurAlpha;
         float dist = (scene.CameraPosition - p.DroneDrawCenter).Length;
-        return System.Math.Clamp((dist - DroneFadeNear) / (DroneFadeFar - DroneFadeNear), 0, 1);
+        return p.CurAlpha * System.Math.Clamp((dist - DroneFadeNear) / (DroneFadeFar - DroneFadeNear), 0, 1);
     }
 }

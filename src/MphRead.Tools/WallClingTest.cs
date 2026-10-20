@@ -98,6 +98,8 @@ namespace MphRead
             float fallFromY = 0;
             int jumpCheck = -1; // frames left before checking a wall jump took him off the wall
             float jumpTop = 0;
+            bool jumpCeiling = false; // that wall jump's rise was stopped by a ceiling on its first tick
+            int ceilingJumps = 0;
             int timeouts = 0, wallJumps = 0, shotsWhile = 0, bumped = 0;
             Vector3 clingStart = Vector3.Zero;
             float driftMax = 0; // the most he drifted from where a cling started (other players' pushes left out)
@@ -207,9 +209,9 @@ namespace MphRead
                     }
                     chain++;
                     maxChain = Math.Max(maxChain, chain);
-                    if (chain > PlayerEntity.WallClingChain)
+                    if (chain > me.WallClingChainLimit)
                     {
-                        Fail($"cling {clingIndex}: {chain} clings without landing (limit {PlayerEntity.WallClingChain})");
+                        Fail($"cling {clingIndex}: {chain} clings without landing (limit {me.WallClingChainLimit})");
                     }
                     float ny = me.WallClingNormalY;
                     minNy = MathF.Min(minNy, ny);
@@ -258,7 +260,14 @@ namespace MphRead
                         wallJumps = me.WallJumps;
                         jumpCheck = 12;
                         jumpTop = me.Position.Y;
-                        if (me.Speed.Y <= 0)
+                        // gravity is held on the wall jump's first tick, so a rise gone at once is a ceiling over the wall (the hold
+                        // rule's later clings can land him under a ledge): the push off is still checked, the rise isn't
+                        jumpCeiling = MathF.Abs(me.Speed.Y) < 0.01f;
+                        if (jumpCeiling)
+                        {
+                            ceilingJumps++;
+                        }
+                        else if (me.Speed.Y <= 0)
                         {
                             Fail($"cling {clingIndex}: wall jump without upward speed ({me.Speed.Y:0.000})");
                         }
@@ -299,7 +308,7 @@ namespace MphRead
                     // (another Trooper's standing body (Weavel's turret sphere) next to the wall blocks the jump: not the cling's fault)
                     bool bodyInTheWay = PlayerEntity.Players.Any(p => p != me && p.IsAltForm && p.Halfturret is HalfturretEntity t
                         && Vector3.Distance(t.Position, clingPos) < 1.5f);
-                    if ((off < 0.2f || up < 0.2f) && !bodyInTheWay)
+                    if ((off < 0.2f || up < 0.2f && !jumpCeiling) && !bodyInTheWay)
                     {
                         Fail($"cling {clingIndex}: 12 frames after the wall jump he's {off:0.00} off the wall, at most {up:0.00} up");
                     }
@@ -331,6 +340,7 @@ namespace MphRead
                 + $"deaths {GameState.Deaths[0]}; frames pushed by another player while clinging {bumped}, most drift on a wall {driftMax * 1000:0.0} mm ({driftWhere})");
             Console.WriteLine($"cling steps: {string.Join(" ", clingSteps.Take(24))}");
             Console.WriteLine($"clings refused for a wall shorter than him: {p0.WallClingTooShort}");
+            Console.WriteLine($"wall jumps whose rise a ceiling stopped at once: {ceilingJumps}");
             Console.WriteLine($"most clings in one airtime {maxChain} (limit {PlayerEntity.WallClingChain}); wall normal.Y {minNy:0.0000} .. {maxNy:0.0000}"
                 + $" ({MathF.Asin(Math.Clamp(minNy, -1, 1)) * 180 / MathF.PI:0.0} .. {MathF.Asin(Math.Clamp(maxNy, -1, 1)) * 180 / MathF.PI:0.0} degrees)");
             for (int i = 1; i < settings.Players.Count; i++)

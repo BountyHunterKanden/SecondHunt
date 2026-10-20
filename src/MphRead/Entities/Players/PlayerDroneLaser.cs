@@ -34,6 +34,7 @@ namespace MphRead.Entities
         public bool HostOwnDroneLaser { get; set; }
         public bool HostOwnDroneLaserSfx { get; set; }
         public bool HostOwnDroneShotSfx { get; set; }
+        public bool HostOwnDroneSpawnSfx { get; set; }
 
         // set while the laser deals its damage (TakeDamage's source is the drone's player, as any direct hit)
         private static bool _droneLaserApplying;
@@ -45,6 +46,8 @@ namespace MphRead.Entities
         private const int _droneLaserTickEvery = 4;
         private const int _droneLaserTicks = 15; // frames 57, 61 ... 113
         private const int _droneLaserTickDamage = 10; // each tick on a body: 150 if all 15 land
+        // recomp host hook (MatchSettings.DroneLaserNoPush, set per match by MatchStart; older replays: off): the ticks push nothing
+        public static bool HostDroneLaserNoPush { get; set; }
         private const int _droneLaserCooldownFrames = 600; // 10 s, its own (the burst has its 2 s)
         private const float _droneLaserUnit = 0.5f; // MPH units per Prime unit (the sweep's size)
         private const float _droneLaserTargetMin = 4f;
@@ -224,7 +227,10 @@ namespace MphRead.Entities
                         _droneLaserApplying = true; // its kill message: (SENTRY DRONE) (PlayerScoutDrone.DroneHit)
                         try
                         {
-                            hit.TakeDamage((uint)damage, flags, dir, this);
+                            // (recomp, HostDroneLaserNoPush, 2026-10-19: it rarely sent a target flying): no push,
+                            // as the Shock Coil (a continuous beam: dmgDirType 3, magnitude 0); the hit still flinches them away
+                            // from him. The laser's unit direction went into the target's speed on every tick, 15 a laser.
+                            hit.TakeDamage((uint)damage, flags, HostDroneLaserNoPush ? null : dir, this);
                         }
                         finally
                         {
@@ -267,7 +273,9 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
-                if (DroneLaserHitsPlayer(player, from, to, radius, out float res) && res < at)
+                // recomp (HostLagFix): an online host tests the sweep against where this Trooper saw the player (his aim steers it)
+                Vector3 lag = HostLagFix ? NetLagShift(this, player) : Vector3.Zero;
+                if (DroneLaserHitsPlayer(player, from - lag, to - lag, radius, out float res) && res < at)
                 {
                     at = res;
                     hit = player;

@@ -630,6 +630,7 @@ namespace MphRead.Entities.Enemies
             if (_chargeEffect != null)
             {
                 _chargeEffect.Transform(FacingVector, UpVector, effectPos);
+                _chargeEffect.SetHostOwner(this); // recomp: carried with it (smooth frames)
             }
             Matrix4 transform = GetNodeTransform(this, _headNode);
             effectPos = transform.Row3.Xyz;
@@ -640,6 +641,7 @@ namespace MphRead.Entities.Enemies
             if (_flashEffect != null)
             {
                 _flashEffect.Transform(FacingVector, UpVector, effectPos);
+                _flashEffect.SetHostOwner(this); // recomp: carried with it (smooth frames)
             }
             if (CallSubroutine(Metadata.Enemy31Subroutines, this))
             {

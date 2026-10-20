@@ -66,10 +66,11 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   or all at once with SECOND HUNT SETTINGS > UNLOCKS.
 - SELECT HUNTER has two new characters next to the seven hunters, TROOPER and DARK SAMUS (see Imports below)
 - A weapon ring: hold L2 and point with the right stick. It works while you move.
-- Hold Select for the live scoreboard, like the original
+- Hold Select for the live scoreboard, like the original (online, it also shows each player's ping)
 - The radar shows the other hunters (SHOW HUNTERS ON RADAR), with anyone out of range sitting on its edge
 - REPLAYS: your last ten matches are saved (favorites are kept). Watch them at any speed, skip back and forward,
-  follow any player, or fly a free camera.
+  follow any player, or fly a free camera. Send a replay to a friend (SEND TO FRIEND), find the ones sent to you
+  under SHARED WITH ME, or export one to a file.
 - EXTRA rules under ADVANCED: EXTRA PICKUPS (the Pirate Blaster), EXTRA CHARACTERS and EXTRA ARENAS, each of which
   can be turned off to play like the original
 

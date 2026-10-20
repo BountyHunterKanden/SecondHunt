@@ -17,6 +17,10 @@ namespace MphRead
     // through CampaignHost's taps -> the file replays exact in this process and in a fresh one, a changed remote input is
     // caught, and a file with another network input size is refused. Part 2: ReplayLink over a lossy, reordering stand-in link:
     // a guest's identity reaches the host, and the host's recording reaches the guest byte for byte.
+    // served=1 (docs/DEDICATED_SERVERS.md section 4): the match as SecondHuntMatchHost records it: no local seat (ServedHost), every
+    // human remote, seat 0 too, the host stepping an idle input; the file must read back as served (ReplayFile.ReadSettings: not
+    // written), play exact, and play exact drawn with the watched seat's HUD on (PlayerEntity.HostSeatlessHud, each seat in turn,
+    // seat 0 included: drawing only, as the app shows a served match's replay).
     internal static partial class ReplayTest
     {
         public static void NetTest(string[] args)
@@ -24,9 +28,11 @@ namespace MphRead
             var o = new Options { Bots = 1, Time = 45 };
             int guests = 2;
             double loss = 0.2;
+            bool served = false;
             o = Parse(args.Skip(1).Where(a =>
             {
                 if (a.StartsWith("guests=")) { guests = int.Parse(a[7..]); return false; }
+                if (a.StartsWith("served=")) { served = a[7..] != "0"; return false; }
                 if (a.StartsWith("loss=")) { loss = double.Parse(a[5..], System.Globalization.CultureInfo.InvariantCulture); return false; }
                 return true;
             }), o);
@@ -38,6 +44,13 @@ namespace MphRead
             GameMode mode = ParseMode(o.Mode);
             RoomMetadata arena = MatchArenas.Find(o.Arena ?? "Combat Hall") ?? throw new ArgumentException($"no arena {o.Arena}");
             MatchSettings settings = MatchSettings.Quick(mode, arena.Name, o.Hunter, 0, o.Level);
+            if (served)
+            {
+                // (as Program.Template in SecondHunt.MatchHost: no human of its own; NetMatchSession puts the first joiner on seat 0)
+                settings.Players.Clear();
+                settings.ServedHost = true;
+                guests = Math.Max(guests, 2);
+            }
             Hunter[] hunters = { Hunter.Kanden, Hunter.Sylux, Hunter.Trace, Hunter.Weavel, Hunter.Noxus, Hunter.Spire };
             for (int g = 0; g < guests; g++)
             {
@@ -49,11 +62,13 @@ namespace MphRead
             }
             settings.TimeLimitSeconds = o.Time;
             settings.Validate();
-            Console.WriteLine($"{mode} in {arena.InGameName}: host + {guests} remote guest(s) + {o.Bots} bot(s), {o.Time} s, seed {o.Seed}");
+            Console.WriteLine($"{mode} in {arena.InGameName}: {(served ? "a served host (no seat)" : "host")} + {guests} remote guest(s) + {o.Bots} bot(s), {o.Time} s, seed {o.Seed}");
+            // the seat that goes silent and comes back: guest 2 (served: the last guest)
+            int dropSeat = guests > 1 ? (served ? guests - 1 : 2) : -1;
 
             // ---- part 1: record a host match, replay it ----
             ReplayFile file;
-            var net = new ScriptedGuests(settings, o.Seed, dropSeat: guests > 1 ? 2 : -1, dropAtStep: (int)(o.Time * 60 * 0.6f));
+            var net = new ScriptedGuests(settings, o.Seed, dropSeat: dropSeat, dropAtStep: (int)(o.Time * 60 * 0.6f));
             long rejoinAt = (long)(o.Time * 60 * 0.6f) + 600;
             {
                 var rec = new ReplayRecorder(settings, "tools");
@@ -66,11 +81,12 @@ namespace MphRead
                     long max = (long)(o.Time * 60) + 600;
                     while (!host.Ended && host.Frame < max)
                     {
-                        CampaignInput input = script.Next(host);
+                        // (a served host has no player: it steps an idle input, as SecondHuntMatchHost's Play)
+                        CampaignInput input = served ? new CampaignInput { SelectWeapon = BeamType.None } : script.Next(host);
                         net.Step = (int)host.Frame;
                         // the dropped seat back 10 s later, as MatchNetDriver takes back an online seat that joined again
                         // (ReconnectSeat; the scripted seat stays silent after, so the driver sends it nothing more)
-                        if (guests > 1 && host.Frame == rejoinAt) host.ReconnectSeat(2);
+                        if (dropSeat >= 0 && host.Frame == rejoinAt) host.ReconnectSeat(dropSeat);
                         driver.Step(input);
                         rec.Step(input, host.Scene);
                     }
@@ -85,10 +101,11 @@ namespace MphRead
             int inputs = file.NetEvents.Count(e => e.Kind == ReplayNetKind.Input);
             int drops = file.NetEvents.Count(e => e.Kind == ReplayNetKind.Drop);
             int rejoins = file.NetEvents.Count(e => e.Kind == ReplayNetKind.Rejoin);
+            int positions = file.NetEvents.Count(e => e.Kind == ReplayNetKind.Position); // (0.3.6: online guests' own positions taken)
             string path = Path.Combine(OutDir(), "replaynettest.mphreplay");
             file.Save(path);
             Console.WriteLine($"recorded: {file.Steps.Count} steps, {inputs} remote inputs applied ({net.Skipped} steps with none), "
-                + $"{drops} seat drop(s), {rejoins} rejoin(s), {new FileInfo(path).Length / 1024} KB -> {path}");
+                + $"{drops} seat drop(s), {rejoins} rejoin(s), {positions} position(s) taken, {new FileInfo(path).Length / 1024} KB -> {path}");
             if (drops != (guests > 1 ? 1 : 0) || rejoins != (guests > 1 ? 1 : 0) || inputs == 0)
             {
                 Console.WriteLine("  FAIL: the taps didn't see what the driver did");
@@ -108,6 +125,10 @@ namespace MphRead
                 string last = output.Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Trim() ?? "";
                 Console.WriteLine($"replay in a fresh process:   {(code == 0 ? "" : $"[exit {code}] ")}{last}");
                 failures += code == 0 ? 0 : 1;
+            }
+            if (served)
+            {
+                failures += ServedChecks(path);
             }
             {
                 // without the remote seats' inputs the match can't play the same: the checks must say so early
@@ -159,6 +180,37 @@ namespace MphRead
             Console.WriteLine(failures == 0 ? "PASS: network-match replays exact, changes caught, the link delivers both ways"
                 : $"FAIL: {failures} check(s) failed");
             Environment.ExitCode = failures == 0 ? 0 : 1;
+        }
+
+        // served=1: the file reads back as a served match's, and plays exact drawn with each seat's HUD in turn (the app's view)
+        private static int ServedChecks(string path)
+        {
+            int failures = 0;
+            ReplayFile loaded = ReplayFile.Load(path);
+            bool seatless = loaded.Settings.ServedHost && loaded.Settings.Players[loaded.Settings.LocalSeat].Remote;
+            Console.WriteLine($"served match, read back: {(seatless ? "served (no local seat)" : "NOT SERVED: it would play with a local seat")}");
+            failures += seatless ? 0 : 1;
+            int seats = loaded.Settings.Players.Count;
+            _beforeStep = host =>
+            {
+                // the watched seat's HUD, the next seat every 5 s (seat 0, Main, too), as MatchReplay.PlaceReplayView sets it
+                PlayerEntity.HostSeatlessHud = true;
+                PlayerEntity.HostHudSeat = PlayerEntity.Players[(int)(host.Frame / 300 % seats)];
+            };
+            Run r;
+            try
+            {
+                r = Replay(loaded, View.Draw, types: false, reference: null);
+            }
+            finally
+            {
+                _beforeStep = null;
+                PlayerEntity.HostSeatlessHud = false;
+                PlayerEntity.HostHudSeat = null;
+            }
+            Console.WriteLine($"served match, drawn with each seat's HUD: {r.Verdict()}");
+            failures += r.Exact ? 0 : 1;
+            return failures;
         }
 
         private static int LinkTest(byte[] replay, double loss, int seed)

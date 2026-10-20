@@ -21,6 +21,14 @@ namespace MphRead
     //                                     (MatchClient.ForSeat): on the host and on the joiner the
     //                                     Trooper seat must get the Wall Cling + Scout Drone (it played vanilla Weavel
     //                                     on both before: BuildMatch left Abilities unset).
+    //   -trooperfixtest spam [arena=all]  2026-10-19: morphing over and over let the Trooper fly at his height. Put 5
+    //                                     units over his spawn, he presses MORPH every 2 / 4 / 8 frames for 4 s, with
+    //                                     HostDroneSwitchRule off (MphRead's: his drone stands on his own standing body) and
+    //                                     on. Checks: with the rule on he comes down at least 80% as far as with nothing
+    //                                     pressed, and he still splits.
+    //   -trooperfixtest waits             2026-10-19: the drone's burst and laser waits froze while he was on foot.
+    //                                     Both waits set full on foot, 5 s standing, rule (HostDroneWaitsOnFoot) off and on:
+    //                                     off they don't move; on they lose 300 frames (the burst's 120 is done).
     internal static class TrooperFixesTest
     {
         public static void Run(string[] args)
@@ -51,6 +59,16 @@ namespace MphRead
             if (verb == "lanmenu")
             {
                 LanMenu();
+                return;
+            }
+            if (verb == "spam")
+            {
+                Spam(arenaName);
+                return;
+            }
+            if (verb == "waits")
+            {
+                Waits((MatchArenas.Find(arenaName == "all" ? "Combat Hall" : arenaName) ?? throw new ArgumentException($"no arena {arenaName}")).Name);
                 return;
             }
             if (verb == "dronebot")
@@ -163,6 +181,82 @@ namespace MphRead
                 PlayerEntity bot = PlayerEntity.Players[1];
                 Console.WriteLine($"rules {(rules ? "on " : "off")}: bot Trooper drone {bot.HostScoutDrone} splits {bot.DroneSplits} shots {bot.DroneShots}");
             }
+        }
+
+        private static void Spam(string arenaName)
+        {
+            List<string> arenas = arenaName == "all"
+                ? MatchArenas.All.Where(a => MatchArenas.Supports(a, GameMode.Battle)).Select(a => a.Name).Distinct().ToList()
+                : new List<string> { (MatchArenas.Find(arenaName) ?? throw new ArgumentException($"no arena {arenaName}")).Name };
+            int runs = 0, fails = 0;
+            foreach (string arena in arenas)
+            {
+                // how far he comes down in 4 s: nothing pressed, then MORPH every `period` frames
+                (float Drop, int Splits) Run(int period, bool rule)
+                {
+                    using CampaignHost host = Start(arena);
+                    PlayerEntity me = PlayerEntity.Main;
+                    me.HostDroneSwitchRule = rule;
+                    host.PlacePlayer(me.Position + new Vector3(0, 5, 0), Vector3.UnitZ);
+                    float top = me.Position.Y;
+                    int splits = me.DroneSplits;
+                    for (int f = 0; f < 240; f++)
+                    {
+                        host.Step(new CampaignInput { Buttons = period > 0 && f % period == 0 ? CampaignButtons.Morph : 0 });
+                    }
+                    return (top - me.Position.Y, me.DroneSplits - splits);
+                }
+                (float fall, _) = Run(0, true);
+                if (fall < 1)
+                {
+                    Console.WriteLine($"{arena}: skipped (he only comes down {fall:0.00} from 5 over his spawn)");
+                    continue;
+                }
+                Console.WriteLine($"{arena}: nothing pressed: down {fall:0.00}");
+                foreach (int period in new[] { 2, 4, 8 })
+                {
+                    (float offDrop, int offSplits) = Run(period, false);
+                    (float onDrop, int onSplits) = Run(period, true);
+                    Console.WriteLine($"   MORPH every {period}f: rule off down {offDrop,5:0.00} ({offSplits} splits), rule on down {onDrop,5:0.00} ({onSplits} splits)");
+                    runs++;
+                    if (onDrop < fall * 0.8f)
+                    {
+                        Console.WriteLine($"   FAIL: with the rule on he still holds his height");
+                        fails++;
+                    }
+                    if (onSplits == 0)
+                    {
+                        Console.WriteLine($"   FAIL: with the rule on he never splits");
+                        fails++;
+                    }
+                }
+            }
+            Console.WriteLine(runs == 0 ? "FAIL: nothing run" : fails == 0 ? $"PASS ({runs} runs)" : $"FAIL ({fails})");
+        }
+
+        private static void Waits(string arena)
+        {
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            System.Reflection.FieldInfo burst = typeof(PlayerEntity).GetField("_droneCooldown", flags)!;
+            System.Reflection.FieldInfo laser = typeof(PlayerEntity).GetField("_droneLaserWait", flags)!;
+            int fails = 0;
+            foreach (bool rule in new[] { false, true })
+            {
+                using CampaignHost host = Start(arena);
+                PlayerEntity me = PlayerEntity.Main;
+                me.HostDroneWaitsOnFoot = rule;
+                burst.SetValue(me, 120);
+                laser.SetValue(me, 600);
+                for (int f = 0; f < 300; f++) host.Step(default);
+                Console.WriteLine($"rule {(rule ? "on " : "off")}: alt form {me.IsAltForm}, after 300 frames on foot: burst wait {me.DroneCooldown}, laser wait {me.DroneLaserCooldown}");
+                (int wantBurst, int wantLaser) = rule ? (0, 300) : (120, 600);
+                if (me.IsAltForm || me.DroneCooldown != wantBurst || me.DroneLaserCooldown != wantLaser)
+                {
+                    Console.WriteLine($"   FAIL: want burst {wantBurst}, laser {wantLaser} (on foot)");
+                    fails++;
+                }
+            }
+            Console.WriteLine(fails == 0 ? "PASS trooperfixtest waits" : $"FAIL trooperfixtest waits ({fails})");
         }
 
         private static CampaignHost Start(string arena)

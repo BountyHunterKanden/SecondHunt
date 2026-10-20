@@ -16,13 +16,16 @@ namespace MphRecomp.Replay
     //   keeps replays; the host puts every seat's identity in its recording.
     //   the host, as the match ends: its recording -- the only exact one: it ran the whole match -- to each guest that keeps
     //   replays, which saves it as its own copy (ReplayFile.OwnSeat = its seat).
+    //   a guest leaving a match that's still going (0.3.6, 2026-10-19: they get the partial replay):
+    //   a request for the recording so far; the host sends it cut short (Complete = false) while the match goes on, and the
+    //   guest's screen hold waits for it as for a whole one. An older host ignores the request (the guest gives up waiting).
     // Everything goes in pieces of up to ChunkBytes, each acked and sent again until it is (the relay or a LAN loses some),
     // pumped by its own timer, so a transfer goes on while the screens change. Sending gives up after GiveUpMs.
     public sealed class ReplayLink : IDisposable
     {
         public const int ChunkBytes = 1100;
         private const byte TypeChunk = 1, TypeAck = 2;
-        private const byte KindIdentity = 1, KindReplay = 2;
+        private const byte KindIdentity = 1, KindReplay = 2, KindRequest = 3;
         private const int Window = 48, ResendMs = 250, PumpMs = 40, GiveUpMs = 20000, MaxChunks = 8192;
 
         private readonly IMatchNet _net;
@@ -37,6 +40,9 @@ namespace MphRecomp.Replay
 
         // host: a guest's identity came in (its seat = the side channel's, whatever it says)
         public event Action<ReplaySeatIdentity>? IdentityReceived;
+        // host: a guest leaving mid-match asked for the recording so far (the receive thread: the recording is the game
+        // thread's, so the host notes it and answers from there)
+        public event Action<int>? ReplayRequested;
         // guest: the host's recording came in (the file's bytes, not yet checked)
         public event Action<byte[]>? ReplayReceived;
 
@@ -71,6 +77,12 @@ namespace MphRecomp.Replay
             get { lock (_lock) return _out.Count > 0; }
         }
 
+        // pieces of incoming recordings received so far ("have/count" each), for the log when a wait gives up
+        public string Progress
+        {
+            get { lock (_lock) return _in.Count == 0 ? "nothing" : string.Join(", ", _in.Values.Select(i => $"{i.Have}/{i.Parts.Length}{(i.Done ? " done" : "")}")); }
+        }
+
         // guest: this player's identity (and whether to send the recording back) to the host
         public void SendIdentity(ReplaySeatIdentity id, bool wantReplay)
         {
@@ -83,6 +95,9 @@ namespace MphRecomp.Replay
             }
             Queue(0, KindIdentity, ms.ToArray());
         }
+
+        // guest, leaving a match that's still going: the recording so far, please
+        public void RequestReplay() => Queue(0, KindRequest, new byte[] { 1 });
 
         // host: the recording to a guest's seat
         public void SendReplay(int seat, byte[] file) => Queue(seat, KindReplay, file);
@@ -183,7 +198,7 @@ namespace MphRecomp.Replay
                 int at = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(6));
                 int count = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(8));
                 // what each side may receive: the host identities, a guest the host's recording
-                bool expected = _net.IsHost ? kind == KindIdentity : kind == KindReplay && fromSeat == 0;
+                bool expected = _net.IsHost ? kind is KindIdentity or KindRequest : kind == KindReplay && fromSeat == 0;
                 if (!expected || count == 0 || count > MaxChunks || at >= count || data.Length - 10 > ChunkBytes) return;
                 byte[] ack = new byte[7];
                 ack[0] = TypeAck;
@@ -223,6 +238,14 @@ namespace MphRecomp.Replay
                         if (want) _wantReplay.Add(fromSeat);
                     }
                     IdentityReceived?.Invoke(id);
+                }
+                else if (kind == KindRequest)
+                {
+                    lock (_lock)
+                    {
+                        _wantReplay.Add(fromSeat);
+                    }
+                    ReplayRequested?.Invoke(fromSeat);
                 }
                 else
                 {

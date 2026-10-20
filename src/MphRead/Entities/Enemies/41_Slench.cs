@@ -423,6 +423,7 @@ namespace MphRead.Entities.Enemies
                 }
             }
             _damageEffect?.Transform(Position, Transform);
+            _damageEffect?.SetHostOwner(this); // recomp: carried with it (smooth frames)
             if (AreAllSynapsesDead())
             {
                 if (_shieldEffect1 != null)
@@ -531,6 +532,7 @@ namespace MphRead.Entities.Enemies
                 if (_shotEffect != null)
                 {
                     _shotEffect.Transform(up, facing, Position); // swap facing and up
+                    _shotEffect.SetHostOwner(this); // recomp: carried with it (smooth frames)
                     if (_shotEffect.IsFinished)
                     {
                         _scene.DetachEffectEntry(_shotEffect, setExpired: false);
@@ -547,6 +549,7 @@ namespace MphRead.Entities.Enemies
                 if (_shieldEffect2 != null)
                 {
                     _shieldEffect2.Transform(Position, Transform);
+                    _shieldEffect2.SetHostOwner(this); // recomp: carried with it (smooth frames)
                     if (_shieldEffect2.IsFinished)
                     {
                         _scene.DetachEffectEntry(_shieldEffect2, setExpired: false);

@@ -82,8 +82,10 @@ internal sealed partial class CampaignRenderer
             _matchSettings = file.Settings;
             _hunter = file.Settings.Players[file.Settings.LocalSeat].Hunter;
             // a guest's copy of the host's recording: the camera starts on the guest's own seat (the host's view is the
-            // recording's own first-person one)
-            if (file.OwnSeat >= 0 && file.OwnSeat != file.Settings.LocalSeat) _replaySeat = file.OwnSeat;
+            // recording's own first-person one); a served match's (nobody's own view: ReplaySeatless) on the player's
+            // seat, else seat 1
+            if (file.Settings.ServedHost) _replaySeat = file.OwnSeat >= 0 && file.OwnSeat < file.Settings.Players.Count ? file.OwnSeat : 0;
+            else if (file.OwnSeat >= 0 && file.OwnSeat != file.Settings.LocalSeat) _replaySeat = file.OwnSeat;
             Log.Info("MPHReplay", $"playing {Path.GetFileName(path)}: {file.Settings.Mode} in {file.Settings.Arena}, "
                 + $"{file.Steps.Count} steps{(file.Complete ? "" : " (incomplete)")}, recorded on {file.Platform} ({file.Build})");
         }
@@ -133,6 +135,9 @@ internal sealed partial class CampaignRenderer
         {
             if (_netSession != null) recorder.Started(host, _netSession.Kind);
             else recorder.Started(host.Scene);
+            // an online host's shot check of its guests' shots and claimed hits, in the file (format 47)
+            ReplayFile recording = recorder.File;
+            MphRecomp.Multiplayer.Net.ShotCheck.Settled = _netSession != null ? check => recording.ShotChecks.Add(check) : null;
             // room for the whole match up front (no list growth mid-match): its time limit, else 10 minutes
             float seconds = Math.Min(settings.TimeLimitSeconds ?? 600, 3600);
             recorder.File.Steps.Capacity = (int)(seconds * 60) + 600;
@@ -215,8 +220,38 @@ internal sealed partial class CampaignRenderer
     {
         PlayerEntity.HostNoRespawnPrompt = false;
         ResetReplayViewHooks();
-        // a guest waits for the host's recording only after a match that ran to its end with the host still there
-        if (!complete || _netDriver?.PeerGone == true) _replayWanted = false;
+        // a guest waits for the host's recording after a match that ran to its end with the host still there, and (0.3.6,
+        // 2026-10-19) after leaving one still going, having asked for the
+        // recording so far (a host before 0.3.6 ignores the ask: the hold then gives up after its limit)
+        if (_netDriver?.PeerGone == true)
+        {
+            if (_replayWanted && _replayLink is { IsHost: false }) Log.Info("MPHReplay", "no recording asked for: the host is gone");
+            _replayWanted = false;
+        }
+        else if (!complete && _replayWanted && _matchResults == null && _replayLink is { IsHost: false } asking
+            && (_host?.Frame ?? 0) >= MinIncompleteSteps)
+        {
+            try
+            {
+                asking.RequestReplay();
+                Log.Info("MPHReplay", $"left the match at frame {_host?.Frame}: asked the host for the recording so far");
+            }
+            catch (Exception ex)
+            {
+                _replayWanted = false;
+                Log.Warn("MPHReplay", "no recording asked for: " + ex.Message);
+            }
+        }
+        else if (!complete && _matchResults == null)
+        {
+            // (why a guest leaving early got no recording: match BF87SN, the Odin left no line at all)
+            if (_replayLink is { IsHost: false })
+            {
+                Log.Info("MPHReplay", "no recording asked for: " + (!_replayWanted ? "RECORD REPLAYS is off"
+                    : $"left at frame {_host?.Frame ?? 0}, under {MinIncompleteSteps}"));
+            }
+            _replayWanted = false;
+        }
         if (_replayPlayer != null)
         {
             if (complete && !_replayDone)
@@ -229,6 +264,7 @@ internal sealed partial class CampaignRenderer
         }
         ReplayRecorder? recorder = _replayRecorder;
         _replayRecorder = null;
+        MphRecomp.Multiplayer.Net.ShotCheck.Settled = null;
         if (recorder == null || ReplayDataDir is not string dir)
         {
             return;
@@ -276,11 +312,12 @@ internal sealed partial class CampaignRenderer
             if (_replayLink != null && complete)
             {
                 byte[] bytes = File.ReadAllBytes(path);
-                foreach (int seat in _replayLink.SeatsWantingReplay)
+                List<int> seats = _replayLink.SeatsWantingReplay.Where(s => !_replayGiven.Contains(s)).ToList();
+                foreach (int seat in seats)
                 {
                     _replayLink.SendReplay(seat, bytes);
                 }
-                Log.Info("MPHReplay", $"sending the recording to {_replayLink.SeatsWantingReplay.Count} guest(s)");
+                Log.Info("MPHReplay", $"sending the recording to {seats.Count} guest(s)");
             }
         }
         catch (Exception ex)
@@ -315,6 +352,9 @@ internal sealed partial class CampaignRenderer
         {
             link.IdentityReceived += id => Log.Info("MPHReplay", $"seat {id.Seat}: {id.Name}#{id.Tag:0000} "
                 + $"({(id.FriendCode != null ? "friend code" : "no friend code")}{(id.LicenseJson != null ? ", license" : "")})");
+            _replayAsked.Clear();
+            _replayGiven.Clear();
+            link.ReplayRequested += seat => _replayAsked.Enqueue(seat); // (answered between steps, RecordNetStep)
         }
         else
         {
@@ -346,8 +386,9 @@ internal sealed partial class CampaignRenderer
             }
         }
         // (a guest whose match changed host mid-way (O5b) waits for nothing: nobody recorded the whole match)
+        // (the guest waits as long as the sender keeps trying (ReplayLink GiveUpMs): on mobile data 8 s lost a replay, 2026-10-20)
         _netOwner = new ReplayLinkHold(_netOwner, link, () => link.IsHost ? link.Sending : _replayWanted && !_replayArrived
-            && (_netSession as MphRecomp.Multiplayer.Net.NetMatchSession)?.Migrations is not > 0, link.IsHost ? 6000 : 8000);
+            && (_netSession as MphRecomp.Multiplayer.Net.NetMatchSession)?.Migrations is not > 0, link.IsHost ? 6000 : 20000);
     }
 
     // NetStep (MatchSession.cs), after a network match's step: its host records the step (its own input; the remote seats'
@@ -355,6 +396,41 @@ internal sealed partial class CampaignRenderer
     void RecordNetStep(CampaignInput input)
     {
         if (_replayRecorder != null && _host != null) _replayRecorder.Step(input, _host.Scene);
+        AnswerReplayRequests();
+    }
+
+    // a network match's host: a guest leaving mid-match asked for the recording so far (0.3.6); it goes at once, cut short
+    readonly ConcurrentQueue<int> _replayAsked = new();
+    readonly HashSet<int> _replayGiven = new(); // (had theirs as they left: not sent again at the end)
+
+    void AnswerReplayRequests()
+    {
+        while (_replayAsked.TryDequeue(out int seat))
+        {
+            ReplayRecorder? recorder = _replayRecorder;
+            ReplayLink? link = _replayLink;
+            if (recorder == null || link == null || ReplayDataDir is not string dir
+                || recorder.File.Steps.Count < MinIncompleteSteps)
+            {
+                Log.Info("MPHReplay", $"seat {seat} left and asked for the recording: none to send");
+                continue;
+            }
+            try
+            {
+                int local = recorder.File.Settings.LocalSeat;
+                var ids = new List<ReplaySeatIdentity> { ReplayLink.OwnIdentity(dir, local, OnlineMe) };
+                ids.AddRange(link.Identities.Where(i => i.Seat != local));
+                byte[] bytes = recorder.Partial(ids);
+                link.SendReplay(seat, bytes);
+                _replayGiven.Add(seat);
+                Log.Info("MPHReplay", $"seat {seat} left: sent it the recording so far ({recorder.File.Steps.Count} steps, "
+                    + $"{bytes.Length / 1024} KB)");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("MPHReplay", $"seat {seat} left: recording not sent: " + ex.Message);
+            }
+        }
     }
 
     // The match screen's hold on a network match's session: disposing it waits (off the caller's thread) while the replay link
@@ -385,7 +461,7 @@ internal sealed partial class CampaignRenderer
             {
                 var sw = Stopwatch.StartNew();
                 while (_busy() && sw.ElapsedMilliseconds < _maxMs) await System.Threading.Tasks.Task.Delay(50);
-                Log.Info("MPHReplay", $"replay link done after {sw.ElapsedMilliseconds} ms{(_busy() ? " (gave up)" : "")}");
+                Log.Info("MPHReplay", $"replay link done after {sw.ElapsedMilliseconds} ms{(_busy() ? " (gave up, received " + _link.Progress + ")" : "")}");
                 Close();
             });
         }
@@ -418,13 +494,16 @@ internal sealed partial class CampaignRenderer
     double _replayLastFrame;
 
     // the bar's buttons, in D-pad order
-    enum HudButton { Camera, Back, Play, Forward, Slower, Faster, PrevSeat, NextSeat, Count }
+    enum HudButton { Camera, Back, Play, Forward, Slower, Faster, PrevSeat, NextSeat, Hide, Count }
     int _hudFocus = (int)HudButton.Play;
     readonly (float X0, float Y0, float X1, float Y1)[] _hudRects = new (float, float, float, float)[(int)HudButton.Count];
     (float X0, float Y0, float X1, float Y1) _scrubRect;
     bool _scrubbing;
     float _scrubFrac;
-    readonly bool[] _replayPrev = new bool[12];
+    readonly bool[] _replayPrev = new bool[13];
+    // HIDE (B / H): no bar and no game HUD, only the picture (the fades stay); A or a tap brings them back
+    bool _replayUiHidden;
+    bool ReplayUiHidden => _replayPlayer != null && _replayUiHidden;
 
     // paused by the viewer (OnDrawFrame pauses the audio with it)
     public bool ReplayHeld => _replayPlayer != null && _replayHeld && !_replayDone && _seekTarget < 0;
@@ -458,11 +537,14 @@ internal sealed partial class CampaignRenderer
         bool l1 = Edge(6, pad[PadButton.L1]), r1 = Edge(7, pad[PadButton.R1]);
         bool l2 = Edge(8, pad[PadButton.L2] || pad.L2 >= 0.5f), r2 = Edge(9, pad[PadButton.R2] || pad.R2 >= 0.5f);
         bool cam = Edge(10, pad[PadButton.ThumbR]) | Edge(11, pad[PadButton.Y]);
+        bool b = Edge(12, pad[PadButton.B]);
         if (!MatchOver)
         {
-            if (left) _hudFocus = Math.Max(0, _hudFocus - 1);
-            if (right) _hudFocus = Math.Min((int)HudButton.Count - 1, _hudFocus + 1);
-            if (a) HudPress((HudButton)_hudFocus);
+            if (left && !_replayUiHidden) _hudFocus = Math.Max(0, _hudFocus - 1);
+            if (right && !_replayUiHidden) _hudFocus = Math.Min((int)HudButton.Count - 1, _hudFocus + 1);
+            if (a && _replayUiHidden) _replayUiHidden = false;
+            else if (a) HudPress((HudButton)_hudFocus);
+            if (b) HudPress(HudButton.Hide);
             if (x) HudPress(HudButton.Play);
             if (l1) HudPress(HudButton.Back);
             if (r1) HudPress(HudButton.Forward);
@@ -476,6 +558,7 @@ internal sealed partial class CampaignRenderer
         else
         {
             while (_replayTouches.TryDequeue(out _)) { }
+            _replayUiHidden = false; // the end's scoreboard
         }
         if (_replayCam == ReplayCamKind.Free && _host != null)
         {
@@ -542,6 +625,10 @@ internal sealed partial class CampaignRenderer
             _replayCam = (ReplayCamKind)(((int)_replayCam + 1) % 3); // first person -> third person -> free cam
             _freeCamInit = false;
             break;
+        case HudButton.Hide:
+            _replayUiHidden = !_replayUiHidden;
+            if (!_replayUiHidden) _hudFocus = (int)HudButton.Play;
+            break;
         }
         _statusCountdown = 0;
         Log.Info("MPHReplay", $"{button}: {(_replayHeld ? "paused" : "playing")} at {ReplaySpeedText}, {ReplayCamText}");
@@ -550,6 +637,11 @@ internal sealed partial class CampaignRenderer
     void HudTouch(float x, float y, int phase)
     {
         if (_replayPlayer == null) return;
+        if (_replayUiHidden)
+        {
+            if (phase == 0) HudPress(HudButton.Hide); // hidden, a tap anywhere only brings the bar back
+            return;
+        }
         var s = _scrubRect;
         float frac = s.X1 > s.X0 ? Math.Clamp((x - s.X0) / (s.X1 - s.X0), 0, 1) : 0;
         if (phase == 0)
@@ -683,8 +775,12 @@ internal sealed partial class CampaignRenderer
     float _freeCamYaw, _freeCamPitch;
     bool _freeCamInit;
 
-    int WatchedSeat => _replaySeat >= 0 ? _replaySeat : _replayPlayer?.File.Settings.LocalSeat ?? 0;
-    bool WatchingOwnView => _replayCam == ReplayCamKind.FirstPerson && WatchedSeat == (_replayPlayer?.File.Settings.LocalSeat ?? 0);
+    // a served match's recording (docs/DEDICATED_SERVERS.md): it plays with no local seat as it was recorded (MatchStart:
+    // HostNoLocalSeat), so there's no "own view": every seat is watched like another seat, its HUD too (HostSeatlessHud)
+    bool ReplaySeatless => _replayPlayer?.File.Settings.ServedHost == true;
+    int WatchedSeat => _replaySeat >= 0 ? _replaySeat : ReplaySeatless ? 0 : _replayPlayer?.File.Settings.LocalSeat ?? 0;
+    bool WatchingOwnView => _replayCam == ReplayCamKind.FirstPerson && !ReplaySeatless
+        && WatchedSeat == (_replayPlayer?.File.Settings.LocalSeat ?? 0);
 
     string ReplayCamText => _replayCam == ReplayCamKind.Free ? "FREE CAM"
         : WatchingOwnView ? "" : $"watching {ReplaySeatName(WatchedSeat)}";
@@ -721,6 +817,7 @@ internal sealed partial class CampaignRenderer
         PlayerEntity.HostFirstPersonSeat = seatEyes ? seat : -1;
         PlayerEntity.HostMainSpectated = !own;
         PlayerEntity.HostHudSeat = _replayCam != ReplayCamKind.Free && !own ? p : null;
+        PlayerEntity.HostSeatlessHud = ReplaySeatless; // (seat 1, Main, gets its HUD like any watched seat: Renderer)
         if (!seatEyes) PlayerEntity.HostFirstPersonTurn = Quaternion.Identity;
         if (_replayCam == ReplayCamKind.Free && _freeCamInit)
         {
@@ -809,6 +906,7 @@ internal sealed partial class CampaignRenderer
         PlayerEntity.HostFirstPersonTurn = Quaternion.Identity;
         PlayerEntity.HostMainSpectated = false;
         PlayerEntity.HostHudSeat = null;
+        PlayerEntity.HostSeatlessHud = false;
     }
 
     // the next / previous seat NetCapture reports Active, wrapping
@@ -877,7 +975,7 @@ internal sealed partial class CampaignRenderer
 
     void ReplayHudDraw(int width, int height)
     {
-        if (_replayPlayer == null || MatchOver) return;
+        if (_replayPlayer == null || MatchOver || _replayUiHidden) return;
         try
         {
             _replayHudFont ??= new MenuFont(_replayHudTextures);
@@ -908,7 +1006,8 @@ internal sealed partial class CampaignRenderer
         float speedW = btn * 2 + speedTextW;
         float whoTextW = Math.Max(font.MeasureCanvas("PLAYER 4", text), font.MeasureCanvas(who, text)) + 6 * u;
         float whoW = btn * 2 + whoTextW;
-        float rowW = camW + transportW + speedW + whoW + 3 * gap;
+        float hideW = font.MeasureCanvas("HIDE", text) + 12 * u;
+        float rowW = camW + transportW + speedW + whoW + hideW + 4 * gap;
         float clusterW = Math.Max(rowW, width * 0.55f);
         float left = (width - clusterW) / 2;
 
@@ -1027,6 +1126,13 @@ internal sealed partial class CampaignRenderer
         c = x + whoW - btn / 2;
         Tri(list, c - ah * 0.6f, mid - ah, c - ah * 0.6f, mid + ah, c + ah * 0.8f, mid, HudWhite, 1);
         Hint(font, list, K("DOWN", "DOWN"), c, hintTop, hintH, small, u);
+        x += whoW + gap;
+
+        // hide the bar and the HUD
+        Pill(list, x, pillTop, x + hideW, pillTop + pillH, u, false);
+        Button(list, HudButton.Hide, x, pillTop, x + hideW, pillTop + pillH, u);
+        Label(font, list, "HIDE", x + hideW / 2, pillTop, pillH, text, HudOrange, 1);
+        Hint(font, list, K("B", "H"), x + hideW / 2, hintTop, hintH, small, u);
 
         _replayHudDrawer.Draw(list, width, height, smooth: false); // crisp: the font atlas bleeds its neighbours when filtered
     }

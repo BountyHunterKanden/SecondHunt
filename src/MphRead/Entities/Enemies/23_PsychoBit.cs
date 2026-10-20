@@ -204,6 +204,7 @@ namespace MphRead.Entities.Enemies
             _eyePos = Position - facing;
             _effect = _scene.SpawnEffectGetEntry(240, Vector3.UnitX, Vector3.UnitY, _eyePos); // psychoCharge
             _effect?.SetElementExtension(true);
+            _effect?.SetHostOwner(this); // recomp: carried with it (smooth frames)
         }
 
         private void UpdateMoveTarget(Vector3 targetPoint)

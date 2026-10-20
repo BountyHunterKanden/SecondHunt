@@ -43,10 +43,17 @@ namespace MphRecomp.Multiplayer.Net
 
     // The host owns the items. It numbers every item in its arena and sends the list; a client (which never spawns
     // or drops items, and whose puppets never pick up -- PlayerEntity.NetClient) creates and removes items to match.
-    // The client's own player still picks up at once for feel; the host's health/ammo confirm it, and an item this
-    // device just took isn't put back while the host catches up.
+    // The client's own player picks up only what the host took for it (2026-10-19: taken here first, a pickup the
+    // host's copy of the player missed hid the item and took the gain back): an item gone on the host with this device's
+    // player the nearest to it is handed to the player's own pickup (PlayerEntity.NetConfirmedPickups) for its sound,
+    // message and weapon, and gone by the next snapshot either way; the host's health and ammo already have it.
     public sealed class ItemSync
     {
+        public ItemSync()
+        {
+            PlayerEntity.NetConfirmedPickups.Clear(); // (a new match: none from the last one's scene)
+        }
+
         // host
         private readonly Dictionary<ItemInstanceEntity, ushort> _ids = new(ReferenceEqualityComparer.Instance);
         private ushort _next = 1;
@@ -55,6 +62,9 @@ namespace MphRecomp.Multiplayer.Net
         private readonly Dictionary<ushort, ItemInstanceEntity> _local = new();
         private readonly Dictionary<ushort, long> _takenHere = new();
         private const long TakenHereFrames = 90; // 1.5 s: the host has long seen the pickup by then
+        private readonly List<ItemInstanceEntity> _confirming = new();
+        // (how near the local player must be to an item the host took to have taken it: the pickup reach plus the lag)
+        private const float ConfirmReach = 3;
 
         public NetItem[] Capture(Scene scene, out bool changed)
         {
@@ -108,6 +118,13 @@ namespace MphRecomp.Multiplayer.Net
 
         public void Apply(Scene scene, NetItem[] items, long frame)
         {
+            // the last snapshot's confirmed pickups had a step to be taken; one still lying there (refused here) goes now
+            foreach (ItemInstanceEntity item in _confirming)
+            {
+                PlayerEntity.NetConfirmedPickups.Remove(item);
+                if (item.DespawnTimer != 0) item.DespawnTimer = 0;
+            }
+            _confirming.Clear();
             var present = new HashSet<ItemInstanceEntity>(ReferenceEqualityComparer.Instance);
             foreach (ItemInstanceEntity item in scene.GetItemInstanceEntities())
             {
@@ -131,7 +148,16 @@ namespace MphRecomp.Multiplayer.Net
                 }
                 else if (!hostIds.Contains(id))
                 {
-                    item.DespawnTimer = 0; // gone on the host: someone took it, or it expired
+                    // gone on the host: someone took it, or it expired; this device's player, if it was the one there
+                    if (TakenByLocal(item))
+                    {
+                        PlayerEntity.NetConfirmedPickups.Add(item);
+                        _confirming.Add(item);
+                    }
+                    else
+                    {
+                        item.DespawnTimer = 0;
+                    }
                     drop.Add(id);
                 }
             }
@@ -183,6 +209,22 @@ namespace MphRecomp.Multiplayer.Net
                     _takenHere.Remove(id);
                 }
             }
+        }
+
+        // the local player is alive, in reach and the nearest active player to it (the host's poses: the puppets')
+        private static bool TakenByLocal(ItemInstanceEntity item)
+        {
+            PlayerEntity me = PlayerEntity.Main;
+            if (me.Health == 0 || !me.LoadFlags.TestFlag(LoadFlags.Active)) return false;
+            float mine = (me.Position - item.Position).LengthSquared;
+            if (mine > ConfirmReach * ConfirmReach) return false;
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
+            {
+                PlayerEntity p = PlayerEntity.Players[i];
+                if (p == me || p.Health == 0 || !p.LoadFlags.TestFlag(LoadFlags.Active)) continue;
+                if ((p.Position - item.Position).LengthSquared < mine) return false;
+            }
+            return true;
         }
 
         // for tests: the items this client shows, keyed like the host's

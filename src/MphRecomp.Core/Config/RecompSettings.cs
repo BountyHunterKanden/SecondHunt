@@ -123,6 +123,9 @@ namespace MphRecomp.Config
         // (MphRead PlayerEntity.HostZoomButtons). ZoomReadyIcon: the reticle faint in the first zoom, solid once the target zoom is ready
         public bool ZoomStep { get; set; }
         public bool ZoomReadyIcon { get; set; } = true;
+        // SWAP DRONE DIALS (2026-10-19): the Scout Drone's two wait dials trade sides on screen (BURST left, LASER
+        // right); the buttons don't change (MphRead PlayerDroneHud.cs HostDroneDialsSwapped)
+        public bool DroneDialsSwapped { get; set; }
         // TRY CONTROLS' practice bots (owner 2026-10-17): false = idle targets that never die, true = bots that fight back
         public bool TryActiveBots { get; set; }
         // The control customizer (OPTIONS > CONTROLS and the gunship's OPTIONS; Config/ControlBinds.cs): function id ->

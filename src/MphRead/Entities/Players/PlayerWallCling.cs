@@ -19,7 +19,8 @@ namespace MphRead.Entities
     //     short walls"): rays straight into it from his feet, waist and head must all meet the same straight wall face
     //   - another cling needs a different wall (or landing first) and a short wait, so he can't climb one wall
     //   - at most WallClingChain clings before he touches the ground again (owner 2026-10-08: "One initial jump and
-    //     cling, and two more clings can be chained but not more until the trooper touches the ground")
+    //     cling, and two more clings can be chained but not more until the trooper touches the ground"); with
+    //     HostWallClingOnce one (2026-10-19: one cling, no chained wall hops)
     //   - bots don't cling (yet)
     // Speeds and times here are sim code (60 Hz frames); only sqrt, no trig (replays and LAN stay bit-exact).
     public partial class PlayerEntity
@@ -32,6 +33,16 @@ namespace MphRead.Entities
         // slides over busy floors without counting as standing), never after a jump. Off: replays from before it.
         public bool HostWallClingJumpRule { get; set; } = true;
         public const float WallClingMinDrop = 2.0f; // units below the highest point since he stood (taller than he is)
+        // 2026-10-19 (MatchSettings.WallClingOnce, set per seat by MatchStart; older replays: off): one cling per airtime,
+        // no chained wall hops; off: WallClingChain (3)
+        public bool HostWallClingOnce { get; set; }
+        public int WallClingChainLimit => HostWallClingOnce ? 1 : WallClingChain;
+        // 2026-10-20 (clinging by accident was too easy; MatchSettings.WallClingHold, set per seat by MatchStart; older
+        // replays: off): a cling starts only while Jump is held, and not before WallClingHoldDelay frames since his last jump
+        // (or wall jump) or since he left the ground, so a jump press held a moment too long doesn't stick him to a wall he
+        // brushes on the way up. Held against the wall after the wait, he clings as soon as it's up
+        public bool HostWallClingHold { get; set; }
+        public const int WallClingHoldDelay = 18; // frames (60 Hz): 0.3 s
 
         public const int WallClingTime = 150; // frames (60 Hz): 2.5 s
         public const int WallClingChain = 3; // clings between touching the ground
@@ -63,6 +74,7 @@ namespace MphRead.Entities
         private int _clingAirFrames = 0;
         private bool _clingRose = false;
         private float _clingTopY = 0;
+        private int _clingSinceJump = 0; // frames since his last jump or wall jump, or since he stood
 
         public bool WallClinging => _clinging;
         public int WallClingTimer => _clingTimer;
@@ -98,6 +110,7 @@ namespace MphRead.Entities
             _clingAirFrames = 0;
             _clingRose = false;
             _clingTopY = Position.Y;
+            _clingSinceJump = 0;
         }
 
         // HandleCollision, on a wall contact (|normal.Y| < 0.1), before the push-out changes Speed. face: a collision face's
@@ -138,6 +151,7 @@ namespace MphRead.Entities
             _gravityHold = 2;
             _timeSinceGrounded = 8 * 2;
             _clingKickTimer = _clingKickTime;
+            _clingSinceJump = 0; // the hold rule's air time starts again from the wall jump
             WallJumps++;
             PlayHunterSfx(HunterSfx.Jump);
             return true;
@@ -180,6 +194,7 @@ namespace MphRead.Entities
                 _clingAirFrames = 0;
                 _clingRose = false;
                 _clingTopY = Position.Y;
+                _clingSinceJump = 0;
             }
             else
             {
@@ -190,6 +205,11 @@ namespace MphRead.Entities
                 if (_gravityHold == 1)
                 {
                     _clingRose = true; // a jump this frame (PlayerInput's jump / a wall jump: gravity held for its first tick)
+                    _clingSinceJump = 0;
+                }
+                else if (_clingSinceJump < 10000)
+                {
+                    _clingSinceJump++;
                 }
                 _clingTopY = MathF.Max(_clingTopY, Position.Y);
             }
@@ -223,8 +243,9 @@ namespace MphRead.Entities
             else if (_clingTouched && _clingTouchInto > _clingMinInto && _clingWaitTimer == 0 && !IsBot
                 && _health > 0 && !standing && !Flags1.TestFlag(PlayerFlags1.Grounded) && !IsAltForm && !IsMorphing
                 && !IsUnmorphing && _frozenTimer == 0 && !Flags1.TestFlag(PlayerFlags1.UsedJumpPad)
-                && _clingChainCount < WallClingChain
+                && _clingChainCount < WallClingChainLimit
                 && (!HostWallClingJumpRule || _clingRose || _clingTopY - Position.Y >= WallClingMinDrop)
+                && (!HostWallClingHold || Controls.Jump.IsDown && _clingSinceJump >= WallClingHoldDelay)
                 && Vector3.Dot(_clingTouchNormal, _clingLastNormal) < _clingSameWall
                 && WallClingTallEnough(_clingTouchNormal))
             {
@@ -307,7 +328,7 @@ namespace MphRead.Entities
                 }
                 return;
             }
-            if (!pose && ++_netClingMismatch <= 10)
+            if (!pose && (_netClingMismatch += NetApplyTicks) <= 10 * NetApplyScale) // (30 Hz snapshots' worth: PlayerNetPosition.cs)
             {
                 return;
             }

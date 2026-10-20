@@ -10,7 +10,7 @@ using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
-    public class BeamProjectileEntity : EntityBase
+    public partial class BeamProjectileEntity : EntityBase // (recomp: partial, BeamHitClaims.cs)
     {
         public BeamFlags Flags { get; set; }
         public BeamType Beam { get; set; }
@@ -409,7 +409,10 @@ namespace MphRead.Entities
                 // recomp: an online match host tests a remote shooter's beam against where that player saw the target (lag
                 // compensation: the beam moves by the target's offset since then, so the hit lands on the target as it
                 // stands now); zero everywhere else, the same test as before
-                Vector3 lagShift = PlayerEntity.NetLagShift(Owner, player);
+                // (recomp, HostLagFix: a homing beam on this player is already where it stands now: the Shock Coil sits on its
+                // target, a homing missile steers at it; shifted too, it was tested a target's movement away and missed)
+                Vector3 lagShift = PlayerEntity.HostLagFix && Flags.TestFlag(BeamFlags.Homing) && Target == player
+                    ? Vector3.Zero : PlayerEntity.NetLagShift(Owner, player);
                 Vector3 back = BackPosition - lagShift;
                 Vector3 front = Position - lagShift;
                 if (player.IsAltForm)
@@ -600,6 +603,7 @@ namespace MphRead.Entities
                                 }
                             }
                             wholeDamage = (uint)Math.Clamp(damage, 0, Int32.MaxValue);
+                            PlayerEntity.HitClaimBeamHit(this, player, anyRes.Position, isHeadshot, hitHalfturret, wholeDamage); // recomp: hit claims, instant hit feedback (PlayerHitClaims.cs)
                             if (wholeDamage != 0)
                             {
                                 player.TakeDamage(wholeDamage, damageFlags, damageDir, this);
@@ -972,6 +976,7 @@ namespace MphRead.Entities
 
         private void CheckSplashDamage(EntityBase? colWith)
         {
+            _splashHitMask = 0; // recomp (BeamBodySplash.cs)
             foreach (PlayerEntity player in _scene.GetPlayerEntities())
             {
                 if (player == colWith)
@@ -1009,6 +1014,7 @@ namespace MphRead.Entities
                             float ratio = MathF.Min(dist / SplashRadius, 1); // recomp: (bounds reached past the centre's radius)
                             int damage = (int)GetInterpolatedValue(SplashDamageType, SplashDamage, 0, ratio);
                             player.TakeDamage(damage, DamageFlags.NoDmgInvuln, damageDir, this);
+                            _splashHitMask |= 1u << player.SlotIndex; // recomp (BeamBodySplash.cs)
                             HostHitPush?.Invoke(this, player, ratio);
                             if (Owner != null)
                             {
@@ -1023,6 +1029,7 @@ namespace MphRead.Entities
                     OmegaCannonFlash();
                 }
             }
+            HostSplashStandingBodies(colWith); // recomp: the Trooper's standing body takes splash too (BeamBodySplash.cs)
             foreach (EnemyInstanceEntity enemy in _scene.GetEnemyInstanceEntities())
             {
                 // recomp: a host rule's reach to the enemy's bounds, and targets it adds (Echoes' turret shot: crates, grates)
@@ -1220,7 +1227,7 @@ namespace MphRead.Entities
         {
             if (!Flags.TestFlag(BeamFlags.Collided))
             {
-                _scene.AddSingleParticle(SingleType.Fuzzball, Position, Color, alpha: 1, scale: 1 / 4f);
+                _scene.AddSingleParticle(SingleType.Fuzzball, Position, Color, alpha: 1, scale: 1 / 4f, hostOwner: this);
             }
             DrawTrail1(Fixed.ToFloat(122));
         }
@@ -1252,7 +1259,7 @@ namespace MphRead.Entities
         {
             if (!Flags.TestFlag(BeamFlags.Collided))
             {
-                _scene.AddSingleParticle(SingleType.Fuzzball, Position, Vector3.One, alpha: 1, scale: 1 / 4f);
+                _scene.AddSingleParticle(SingleType.Fuzzball, Position, Vector3.One, alpha: 1, scale: 1 / 4f, hostOwner: this);
             }
             DrawTrail3(Fixed.ToFloat(204));
         }
@@ -1262,7 +1269,7 @@ namespace MphRead.Entities
         {
             if (!Flags.TestFlag(BeamFlags.Collided))
             {
-                _scene.AddSingleParticle(SingleType.Fuzzball, Position, Vector3.One, alpha: 1, scale: 1 / 4f);
+                _scene.AddSingleParticle(SingleType.Fuzzball, Position, Vector3.One, alpha: 1, scale: 1 / 4f, hostOwner: this);
             }
             DrawTrail2(Fixed.ToFloat(204), 5);
         }
@@ -1662,6 +1669,11 @@ namespace MphRead.Entities
             float dmgDirMag = GetAmount(weapon.UnchargedDmgDirMag, weapon.MinChargeDmgDirMag, weapon.ChargedDmgDirMag) / 4096f;
             int damage = (int)GetAmount(equip.UnchargedDamage, equip.MinChargeDamage, equip.ChargedDamage);
             int hsDamage = (int)GetAmount(equip.HeadshotDamage, equip.MinChargeHeadshotDamage, equip.ChargedHeadshotDamage);
+            if (weapon.Beam == BeamType.PirateBlaster && PirateBlaster.HostBoltDamage > 0) // recomp: the lighter blaster (PirateBlaster.cs)
+            {
+                damage = PirateBlaster.HostBoltDamage;
+                hsDamage = PirateBlaster.HostBoltHeadshot;
+            }
             int splashDmg = (int)GetAmount(equip.SplashDamage, equip.MinChargeSplashDamage, equip.ChargedSplashDamage);
             float splashRadius = GetAmount(weapon.UnchargedSplashRadius, weapon.MinChargeSplashRadius, weapon.ChargedSplashRadius) / 4096f;
             byte splashDmgType = weapon.SplashDamageTypes[charged ? 1 : 0];
@@ -1910,6 +1922,7 @@ namespace MphRead.Entities
                         beam.Effect = scene.SpawnEffectGetEntry(effectId, transform);
                         scene.HostSpawnHidden = false;
                         beam.Effect?.SetElementExtension(true);
+                        beam.Effect?.SetHostOwner(beam); // recomp: carried with the shot (smooth frames)
                     }
                 }
                 if (spawnFlags.TestFlag(BeamSpawnFlags.DestroyMuzzle))
@@ -1953,6 +1966,7 @@ namespace MphRead.Entities
                 beam.HostDrawFadeAt = 0;
                 beam.HostDrawHide = 0;
                 HostSpawned?.Invoke(beam);
+                PlayerEntity.HitClaimBeamSpawned(beam); // recomp: the shot this beam belongs to, for hit claims (PlayerHitClaims.cs)
                 if (beam.HostDrawShift != null || beam.HostDrawHide > 0)
                 {
                     beam.Effect?.Transform(beam.HostShifted(beam.Position),

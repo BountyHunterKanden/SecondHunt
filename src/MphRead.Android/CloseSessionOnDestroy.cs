@@ -12,13 +12,16 @@ using MphRecomp.Multiplayer.Net;
 
 namespace MphRecomp.App;
 
-// closes a LAN session (or an online match) when the activity playing it is destroyed
+// closes a LAN session (or an online match) when the activity playing it is destroyed. The session is looked up then,
+// not when the activity was made: the match screen wraps it once the match starts (MatchReplay's ReplayLinkHold, which
+// keeps it open while a quitter's replay comes in), and closing the one from before skipped that wait (2026-10-19, match
+// BF87SN: the guest asked for its recording and its link closed at once).
 internal sealed class CloseSessionOnDestroy : Java.Lang.Object, Android.App.Application.IActivityLifecycleCallbacks
 {
     readonly Android.App.Activity _activity;
-    readonly IDisposable _session;
+    readonly Func<IDisposable?> _session;
 
-    public CloseSessionOnDestroy(Android.App.Activity activity, IDisposable session)
+    public CloseSessionOnDestroy(Android.App.Activity activity, Func<IDisposable?> session)
     {
         _activity = activity;
         _session = session;
@@ -28,7 +31,7 @@ internal sealed class CloseSessionOnDestroy : Java.Lang.Object, Android.App.Appl
     {
         if (activity == _activity)
         {
-            _session.Dispose();
+            _session()?.Dispose();
             activity.Application!.UnregisterActivityLifecycleCallbacks(this);
         }
     }

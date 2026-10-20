@@ -79,7 +79,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <!-- after the public group, so a public build's label lands in AndroidManifest.xml's ${appLabel} -->
-    <AndroidManifestPlaceholders>appLabel=$(MphAppLabel)</AndroidManifestPlaceholders>
+    <AndroidManifestPlaceholders>appLabel=$(MphAppLabel);replaysAuthority=$(ApplicationId).replays</AndroidManifestPlaceholders>
   </PropertyGroup>
   <Target Name="MphCheckReleaseSigning" BeforeTargets="BeforeBuild" Condition=" '$(MphReleaseSign)' == 'true' ">
     <Error Condition=" !Exists('$(AndroidSigningKeyStore)') " Text="MphReleaseSign: keystore not found at $(AndroidSigningKeyStore). Create it first (docs/RELEASE.md, step 1) or pass -p:AndroidSigningKeyStore=..." />

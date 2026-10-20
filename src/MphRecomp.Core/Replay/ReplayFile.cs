@@ -35,9 +35,25 @@ namespace MphRecomp.Replay
     // seat's NetInput as it came in over the network (Input = NetInput.WriteRecord's bytes: every field, incl. ViewTick for
     // lag compensation), took the seat out (it left or went silent) or let it back in (a rejoin). Playback does the same
     // before the same step, so a LAN / online host's recording re-runs exactly.
-    public enum ReplayNetKind : byte { Input = 0, Drop = 1, Rejoin = 2 }
+    // Format 50 adds Hit: a hit claim the host checked and took (Input = CampaignHost.ClaimRecord's bytes; Seat = the shooter),
+    // applied at the start of that step (MphRecomp Net/HitClaims.cs).
+    // Format 54 adds Position: a guest's own position the host checked and took (Input = CampaignHost.PositionRecord's bytes),
+    // (format 55: and whether its device runs its own knockback, and the speed the host took with it),
+    // applied at the start of that step (MphRecomp Net/ClientPosition.cs).
+    public enum ReplayNetKind : byte { Input = 0, Drop = 1, Rejoin = 2, Hit = 3, Position = 4 }
 
     public readonly record struct ReplayNetEvent(int Step, byte Seat, ReplayNetKind Kind, byte[]? Input);
+
+    // The host's shot check of one shot or claimed hit (format 47; MphRecomp Net/ShotCheck.cs, 2026-10-19): what the shooter's
+    // device reported against what the host did, at the host step it was settled. Metadata for finding missed-hit bugs: it
+    // never changes how a replay plays. Kind: a shot that also went out here (OriginOff / AimOff = how far the two gun
+    // positions / directions were apart, in units / degrees), a shot the device fired that never went out here, a hit its
+    // screen showed whose victim the host's history had within reach then (VictimOff = how far), one it had elsewhere, or one
+    // the history no longer held.
+    public enum ReplayShotKind : byte { ShotMatched = 0, ShotLost = 1, ClaimAgrees = 2, ClaimDisagrees = 3, ClaimUnknown = 4 }
+
+    public readonly record struct ReplayShotCheck(int Step, byte Seat, ReplayShotKind Kind, float OriginOff, float AimOff,
+        sbyte Victim, float VictimOff);
 
     // A recorded match (docs/REPLAY_MODE.md). A replay re-runs the match from its inputs, so the file holds what the
     // match started from (settings, both RNG streams, every setting that changes play) and each step's input +
@@ -125,9 +141,44 @@ namespace MphRecomp.Replay
     //   files read it as off, so their hops play exactly.
     //   Format 45 adds Settings.HyperBall after PirateBlaster, as the match played it: a public build has no Hyper Ball
     //   (owner 2026-10-18), so null no longer says on; formats 32-44 read it as on (every build had it), so they play exactly.
+    //   Format 47 also: the Trooper's drone laser pushes nothing (Settings.DroneLaserNoPush); older files read it as off, so
+    //   their laser hits play exactly.
+    //   Format 47 adds ShotChecks after the Steps (a host's shot check of each shot and claimed hit its guests reported,
+    //   ReplayShotCheck); metadata only, and after the steps so the REPLAYS list's header reads never touch it. Older files
+    //   have none. (Format 46 was never released: 46 and 47 are both this branch's.)
+    //   Format 48: the Trooper's drone ignores his own standing body, with a 20-frame wait between splits and merges
+    //   (Settings.DroneSwitchRule); older files (47 too: test builds recorded some) read it as off, so they play exactly.
+    //   Format 49: the drone's burst and laser waits count down while the Trooper is on foot too (Settings.DroneWaitsOnFoot);
+    //   older files read it as off, so they play exactly.
+    //   Format 50: an online host's hit claims (Settings.HitClaims; NetEvents of kind Hit: each claim it took, put back at its
+    //   step); older files read the rule as off (no shot is kept for claims), so they play exactly.
+    //   Format 51: the Trooper clings once per airtime (Settings.WallClingOnce) and the Pirate Blaster's bolts deal 10 / 14
+    //   (Settings.LighterBlaster); older files read both as off, so they play exactly.
+    //   Format 52: splash reaches the Trooper's standing body (Settings.DroneBodySplash); older files read it as off, so they
+    //   play exactly.
+    //   Format 53: one hit per blast on the Trooper (Settings.BodySplashOnce) and one player per claimed shot
+    //   (Settings.ClaimOneHit); older files read both as off, so they play exactly.
+    //   Format 54: an online host takes its guests' own positions (Settings.ClientPosition; NetEvents of kind Position: each
+    //   one it took, put back at its step); older files read the rule as off and hold none, so they play exactly.
+    //   Format 55: a Position event may carry a flags byte (13 bytes: the guest runs its own knockback, so the host hands it
+    //   the push instead of pushing its copy, PlayerEntity.NetHandPush) and the speed the host took with it (25 bytes); a
+    //   12-byte event is as before (the host pushes). Older files hold only those, so they play exactly; a format 54 app
+    //   can't open a 55 file.
+    //   Format 56: the Trooper clings only with Jump held after 0.3 s in the air (Settings.WallClingHold) and each Pirate
+    //   Blaster bolt costs a shot of UA (Settings.BlasterBoltCost), its bolts dealing 9 / 13 (Settings.LighterBlaster2);
+    //   older files read all three as off, so they play exactly.
+    //   Format 46: the same layout; an online host's lag compensation no longer shifts a homing beam (the Shock Coil, homing
+    //   missiles) off its own target or Weavel's turret's shots, and shifts bombs, Lockjaw's lines + snare and the drone's laser
+    //   (Settings.LagCompFix, PlayerEntity.HostLagFix);
+    //   older files read it as off, so their remote seats' hits play exactly. (A 0.3.5-beta app reads up to 45: it can't open
+    //   a format 46 file at all.)
+    //   Format 45 also holds a served match's recording (docs/DEDICATED_SERVERS.md section 4: the match host records and sends
+    //   each player a copy) with no new field: Settings.ServedHost isn't written but read back from the seats (ReadSettings:
+    //   a host's recording whose LocalSeat is a remote player). An app from before that reads it as a host's own seat, which
+    //   MatchSettings.Validate refuses at the start, so it saves the file and refuses to play it, never plays it wrong.
     public sealed class ReplayFile
     {
-        public const int FormatVersion = 45;
+        public const int FormatVersion = 56;
         // Bump when a code change alters how a match plays: an old replay then is refused instead of drifting.
         // (R2c: golden replays checked on every build say when.)
         // 2 (R1): matches play with Scene.HostDrawFreeSim (Spire's rocks placed whether or not a frame draws).
@@ -171,6 +222,7 @@ namespace MphRecomp.Replay
         public string Net { get; set; } = "";
         public int OwnSeat { get; set; } = -1;
         public List<ReplayNetEvent> NetEvents { get; } = new();
+        public List<ReplayShotCheck> ShotChecks { get; } = new();
         // a network input of another size than this build's (NetInput.RecordSize), or an event it doesn't know: refused by ReplayPlayer.CheckBeforeStart
         public bool OldNetInput { get; private set; }
 
@@ -239,7 +291,7 @@ namespace MphRecomp.Replay
                     lastStep = e.Step;
                     w.Write(e.Seat);
                     w.Write((byte)e.Kind);
-                    if (e.Kind == ReplayNetKind.Input)
+                    if (e.Kind is ReplayNetKind.Input or ReplayNetKind.Hit or ReplayNetKind.Position)
                     {
                         byte[] input = e.Input ?? Array.Empty<byte>();
                         w.Write((byte)input.Length);
@@ -259,6 +311,17 @@ namespace MphRecomp.Replay
                 {
                     WriteInput(w, step.Input);
                     w.Write(step.Checksum);
+                }
+                w.Write(ShotChecks.Count); // format 47
+                foreach (ReplayShotCheck c in ShotChecks)
+                {
+                    w.Write(c.Step);
+                    w.Write(c.Seat);
+                    w.Write((byte)c.Kind);
+                    w.Write(c.OriginOff);
+                    w.Write(c.AimOff);
+                    w.Write(c.Victim);
+                    w.Write(c.VictimOff);
                 }
             }
             byte[] data = payload.ToArray();
@@ -314,31 +377,44 @@ namespace MphRecomp.Replay
                 {
                     return ReadBody(hr, format, headerOnly: true, out stepCount);
                 }
-                catch (EndOfStreamException)
+                catch (Exception ex) when (ex is EndOfStreamException or ArgumentException or OverflowException or FormatException
+                    or IndexOutOfRangeException)
                 {
                     throw new InvalidDataException("damaged replay file (cut short)");
                 }
             }
-            byte[] data = new byte[length];
+            // (grown as it unpacks, not the header's length up front: a shared file's header is the sender's word)
+            byte[] data;
             using (var deflate = new DeflateStream(stream, CompressionMode.Decompress, leaveOpen: true))
+            using (var unpacked = new MemoryStream())
             {
-                int read = 0;
-                while (read < length)
+                byte[] chunk = new byte[64 << 10];
+                while (unpacked.Length < length)
                 {
-                    int n = deflate.Read(data, read, length - read);
+                    int n = deflate.Read(chunk, 0, (int)Math.Min(chunk.Length, length - unpacked.Length));
                     if (n <= 0)
                     {
                         throw new InvalidDataException("damaged replay file (cut short)");
                     }
-                    read += n;
+                    unpacked.Write(chunk, 0, n);
                 }
+                data = unpacked.ToArray();
             }
             if (Crc32(data) != crc)
             {
                 throw new InvalidDataException("damaged replay file (checksum)");
             }
             using var r = new BinaryReader(new MemoryStream(data), System.Text.Encoding.UTF8);
-            return ReadBody(r, format, headerOnly: false, out stepCount);
+            try
+            {
+                return ReadBody(r, format, headerOnly: false, out stepCount);
+            }
+            catch (Exception ex) when (ex is EndOfStreamException or ArgumentException or OverflowException or FormatException
+                or IndexOutOfRangeException)
+            {
+                // (a file put together by hand, its checksum made to match)
+                throw new InvalidDataException("damaged replay file (contents)");
+            }
         }
 
         private static ReplayFile ReadBody(BinaryReader r, int format, bool headerOnly, out int steps)
@@ -405,6 +481,21 @@ namespace MphRecomp.Replay
             file.Settings.EchoesTurretBots = format >= 41 ? null : false; // not written: on from format 41
             file.Settings.RecolorPerSkin = format >= 43 ? null : false; // not written: on from format 43
             file.Settings.NoBallJump = format >= 44 ? null : false; // not written: on from format 44
+            file.Settings.DroneLaserNoPush = format >= 47 ? null : false; // not written: on from format 47
+            file.Settings.DroneSwitchRule = format >= 48 ? null : false; // not written: on from format 48
+            file.Settings.DroneWaitsOnFoot = format >= 49 ? null : false; // not written: on from format 49
+            file.Settings.HitClaims = format >= 50 ? null : false; // not written: on from format 50
+            file.Settings.WallClingOnce = format >= 51 ? null : false; // not written: on from format 51
+            file.Settings.LighterBlaster = format >= 51 ? null : false; // not written: on from format 51
+            file.Settings.DroneBodySplash = format >= 52 ? null : false; // not written: on from format 52
+            file.Settings.BodySplashOnce = format >= 53 ? null : false; // not written: on from format 53
+            file.Settings.ClaimOneHit = format >= 53 ? null : false; // not written: on from format 53
+            file.Settings.ClientPosition = format >= 54 ? null : false; // not written: on from format 54
+            file.Settings.WallClingHold = format >= 56 ? null : false; // not written: on from format 56
+            file.Settings.BlasterBoltCost = format >= 56 ? null : false; // not written: on from format 56
+            file.Settings.LighterBlaster2 = format >= 56 ? null : false; // not written: on from format 56
+            // (Settings.BotDropOff: not written yet, the bot drop-off fix is off for now; PlayerAiDropOff.cs)
+            file.Settings.LagCompFix = format >= 46 ? null : false; // not written: on from format 46
             file.OldTurretHash = format < 42;
             file.OldEchoesWater = format < 16 && file.Settings.EchoesMoves != false
                 && file.Settings.Arena == MphRecomp.Arenas.EchoesArena.Find("M04_Pipeline")?.Room;
@@ -441,12 +532,21 @@ namespace MphRecomp.Replay
                     step += r.Read7BitEncodedInt();
                     byte seat = r.ReadByte();
                     var kind = (ReplayNetKind)r.ReadByte();
-                    byte[]? input = kind == ReplayNetKind.Input ? r.ReadBytes(r.ReadByte()) : null;
+                    byte[]? input = kind == ReplayNetKind.Input || kind == ReplayNetKind.Hit && format >= 50
+                        || kind == ReplayNetKind.Position && format >= 54 ? r.ReadBytes(r.ReadByte()) : null;
                     if (format < 26 && input != null && input.Length == MphRecomp.Multiplayer.Net.NetInput.OldRecordSize)
                     {
                         input = MphRecomp.Multiplayer.Net.NetInput.UpgradeOldRecord(input); // (no touch bytes: the stylus up)
                     }
-                    if (input != null && input.Length != MphRecomp.Multiplayer.Net.NetInput.RecordSize || kind > ReplayNetKind.Rejoin)
+                    if (kind == ReplayNetKind.Hit && format >= 50)
+                    {
+                        if (input!.Length != MphRecomp.Campaign.CampaignHost.ClaimRecordSize) file.OldNetInput = true;
+                    }
+                    else if (kind == ReplayNetKind.Position && format >= 54)
+                    {
+                        if (!MphRecomp.Campaign.CampaignHost.IsPositionRecord(input!)) file.OldNetInput = true;
+                    }
+                    else if (input != null && input.Length != MphRecomp.Multiplayer.Net.NetInput.RecordSize || kind > ReplayNetKind.Rejoin)
                     {
                         file.OldNetInput = true; // (a network input or event this build doesn't have)
                     }
@@ -466,6 +566,11 @@ namespace MphRecomp.Replay
             file.Settings.PirateBlaster = format >= 23 ? (r.ReadBoolean() ? r.ReadBoolean() : null) : false;
             if (format >= 45) file.Settings.HyperBall = r.ReadBoolean();
             steps = r.ReadInt32();
+            // (each step is at least its 4-byte checksum: a count past what's left is a made-up file)
+            if (steps < 0 || r.BaseStream.CanSeek && steps > (r.BaseStream.Length - r.BaseStream.Position) / 4)
+            {
+                throw new InvalidDataException("damaged replay file (steps)");
+            }
             if (headerOnly)
             {
                 return file;
@@ -474,6 +579,15 @@ namespace MphRecomp.Replay
             for (int i = 0; i < steps; i++)
             {
                 file.Steps.Add(new ReplayStep { Input = ReadInput(r, format), Checksum = r.ReadUInt32() });
+            }
+            if (format >= 47)
+            {
+                int checks = r.ReadInt32();
+                for (int i = 0; i < checks; i++)
+                {
+                    file.ShotChecks.Add(new ReplayShotCheck(r.ReadInt32(), r.ReadByte(), (ReplayShotKind)r.ReadByte(), r.ReadSingle(),
+                        r.ReadSingle(), r.ReadSByte(), r.ReadSingle()));
+                }
             }
             return file;
         }
@@ -527,9 +641,25 @@ namespace MphRecomp.Replay
             copy.EchoesTurretBots = s.EchoesTurretBots; // format 41 (not written)
             copy.RecolorPerSkin = s.RecolorPerSkin; // format 43 (not written)
             copy.NoBallJump = s.NoBallJump; // format 44 (not written)
+            copy.LagCompFix = s.LagCompFix; // format 46 (not written)
+            copy.DroneLaserNoPush = s.DroneLaserNoPush; // format 47 (not written)
+            copy.DroneSwitchRule = s.DroneSwitchRule; // format 48 (not written)
+            copy.DroneWaitsOnFoot = s.DroneWaitsOnFoot; // format 49 (not written)
+            copy.HitClaims = s.HitClaims; // format 50 (not written)
+            copy.WallClingOnce = s.WallClingOnce; // format 51 (not written)
+            copy.LighterBlaster = s.LighterBlaster; // format 51 (not written)
+            copy.DroneBodySplash = s.DroneBodySplash; // format 52 (not written)
+            copy.BodySplashOnce = s.BodySplashOnce; // format 53 (not written)
+            copy.ClaimOneHit = s.ClaimOneHit; // format 53 (not written)
+            copy.ClientPosition = s.ClientPosition; // format 54 (not written)
+            copy.WallClingHold = s.WallClingHold; // format 56 (not written)
+            copy.BlasterBoltCost = s.BlasterBoltCost; // format 56 (not written)
+            copy.LighterBlaster2 = s.LighterBlaster2; // format 56 (not written)
+            copy.BotDropOff = s.BotDropOff; // (not written: off for now)
             copy.Abilities = s.Abilities; // after the Skins (format 22)
             copy.PirateBlaster = s.PirateBlaster; // after Abilities (format 23)
             copy.ExtraCharacters = s.ExtraCharacters; // (not recorded: the seats already have them stripped)
+            // (ServedHost: read back from the seats by ReadSettings, as a file's is, so the recording and its playback agree)
             for (int i = 0; i < copy.Players.Count && i < s.Players.Count; i++)
             {
                 copy.Players[i].Character = s.Players[i].Character; // after Breakables (format 6)
@@ -623,6 +753,9 @@ namespace MphRecomp.Replay
                     Nickname = r.ReadBoolean() ? r.ReadString() : null
                 });
             }
+            // a served match host's (not written: a host's recording whose own seat is a remote player can only be one, since
+            // MatchSettings.Validate refuses that seat otherwise; the served host keeps LocalSeat 0 = the first joiner)
+            s.ServedHost = !s.IsClient && s.LocalSeat >= 0 && s.LocalSeat < s.Players.Count && s.Players[s.LocalSeat].Remote;
             return s;
         }
 

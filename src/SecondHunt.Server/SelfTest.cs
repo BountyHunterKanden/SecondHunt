@@ -48,6 +48,12 @@ namespace SecondHunt.Server
                     Console.WriteLine($"{_pass} passed, {_fail} failed");
                     return _fail == 0 ? 0 : 1;
                 }
+                if (Environment.GetEnvironmentVariable("SELFTEST_ONLY") == "replays")
+                {
+                    await Replays(dir);
+                    Console.WriteLine($"{_pass} passed, {_fail} failed");
+                    return _fail == 0 ? 0 : 1;
+                }
                 if (Environment.GetEnvironmentVariable("SELFTEST_ONLY") == "served")
                 {
                     await ServedTests(dir);
@@ -62,11 +68,13 @@ namespace SecondHunt.Server
                 }
                 await Server(Path.Combine(dir, "test.db"));
                 FindRulesTests();
+                NetcodeTests(); // (0.3.6: the served matches' netcode switches, SelfTestNetcode.cs)
                 await FindGame(Path.Combine(dir, "find.db"));
                 await TurnTests(dir);
                 await Safety(dir);
                 await Records(dir); // (T3 0.7.0: friend OR rival, head to head: SelfTestRecords.cs)
                 await ServedTests(dir); // (0.8.0: served games, HubServed.cs: SelfTestServed.cs)
+                await Replays(dir); // (0.9.0: shared replays, HubReplays.cs: SelfTestReplays.cs)
             }
             catch (Exception ex)
             {

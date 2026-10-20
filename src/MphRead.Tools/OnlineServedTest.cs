@@ -52,6 +52,10 @@ namespace MphRead
                 + (i == 1 ? $" owner={o.Players} bots={o.Bots} level={o.Level} mode=\"{o.Mode}\" arena=\"{o.Arena}\"" : $" game={game}")
                 + (o.Loss > 0 ? $" loss={(o.Loss * 100).ToString(CultureInfo.InvariantCulture)}" : "")
                 + (o.Jitter > 0 ? $" jitter={o.Jitter}" : "")
+                + (o.Replays != false ? " replays=1" : "")
+                + (o.Ball ? " ball=1" : "") + (o.AltFixOff ? " altfix=0" : "") + (o.SmoothOff ? " smooth=0" : "") + o.Fwd
+                + (!MphRecomp.Multiplayer.Net.ClientPrediction.ClientPushes ? " clientpush=0" : "")
+                + (o.Duel ? (i == 1 ? " duel=runner" : " duel=shooter") + (o.Push ? " push=1" : "") : "") // (the match host's recording to each joiner, OnlineServedReplay.cs)
                 + (o.Matches > 1 ? $" matches={o.Matches}" + (o.OwnerLeave ? " ownerleave=1" : "") : "")
                 // chars=1: joiners 2-5 play the extra characters (Trooper, Dark Samus, Zero Suit, Sylux) on the server's match host
                 + (o.Chars && i >= 2 && i <= Characters.All.Count ? $" hunter={Characters.All[i - 1].Base} character={Characters.All[i - 1].Id}" : "")
@@ -226,6 +230,28 @@ namespace MphRead
             if (o.OwnerLeave && !outputs.Skip(1).Any(output => { lock (output) { return output.Any(l => l.Contains("owns the lobby now")); } }))
             {
                 lines.Add("FAIL nobody heard they own the lobby after the owner left");
+            }
+            // replays (default on): every joiner but a rejoin got the match host's recording of match 1, exact (the leaver its
+            // cut-short copy, asked for as it left)
+            if (o.Replays != false)
+            {
+                for (int i = 0; i < outputs.Count; i++)
+                {
+                    if (o.Rejoin > 0 && i == outputs.Count - 1) continue;
+                    string? line;
+                    lock (outputs[i])
+                    {
+                        line = outputs[i].FirstOrDefault(l => l.StartsWith("REPLAY joiner ", StringComparison.Ordinal));
+                    }
+                    if (line == null || !line.Contains(": exact,", StringComparison.Ordinal))
+                    {
+                        lines.Add($"FAIL joiner {i + 1}'s replay: {line ?? "no REPLAY line"}");
+                    }
+                    else
+                    {
+                        Console.WriteLine(line);
+                    }
+                }
             }
             Console.WriteLine("server (served lines):");
             foreach (string l in server.Where(l => l.Contains("served") || l.Contains("[match ")).TakeLast(40))

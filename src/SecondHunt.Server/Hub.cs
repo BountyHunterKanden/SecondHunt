@@ -13,7 +13,7 @@ namespace SecondHunt.Server
     // One WebSocket per player: the signed login, then requests and pushes (docs/ONLINE_PLAY.md sections 4-5, 13).
     public sealed partial class Hub
     {
-        public const string ServerVersion = "0.8.2"; // 0.8.2 (DEDICATED_SERVERS.md D3): served games seat 8 players (RelayWire.MaxSlots 9: slots 1-8 + the match host on 0) and run in imported arenas the match host has (its imports folder, --arenas); 0.8.1 (DEDICATED_SERVERS.md D3): Find Game matches served (HubServedFind.cs: the hub opens the game, every matched player gets FindState.Game, the match host starts it, the vote's host owns the lobby after); 0.8.0 (docs/DEDICATED_SERVERS.md D3): served games (GameInfo.Served: the match runs in a SecondHuntMatchHost process here on relay slot 0, Host = the lobby's owner on slot 1; JoinGameReq.Served; MemberEvent.Owner; results from the match host); 0.7.2 (release 0.2.0 F1): a seat dropped for its silence gets its slot back when its device sends again (Relay.Returned, Hub.SeatReturned); 0.7.1 (release 0.2.0 F3): Find Game matches up to 8 (FindConfig.MaxPlayers; a full party of 4 plays alone after the fill wait); 0.2.0: report, delete_profile; 0.3.0: ping, Find Game; 0.4.0: rejoin, TURN; 0.5.0: chat + safety (filter, mutes, bans, report evidence), host migration; 0.6.0: games carry the extra rules (GameInfo.ExtraPickups / ExtraCharacters), Find Game filters them; 0.7.0 (release test fixes): held seats (WelcomeMsg.Held = the hub's REJOIN, FIND releases a held seat, a seat silent 90 s is dropped); T3: friend OR rival (a rival upgrades to a friend, rival links between friends removed), head to head on the server (match_result, PlayerCard.Record), typed-chat lock skipped for friends only; T2: GameInfo.ExtraArena (Find Game's backfill only into games in an imported arena the searchers all have)
+        public const string ServerVersion = "0.9.6"; // 0.9.6 (0.3.6): hit claims wait for their shot's input as long as the rewind window (HitClaims ShotWait 30 -> 51: a stalled mobile uplink refused late hits); 0.9.5 (0.3.6): Fruity P1 match host runs a seat with no input that step on its last input (no stop: bursty uplinks drew as jitter); 0.9.4 (0.3.6): served matches run Fruity Prime's P1 movement sync (MatchSettings.FruitySync, match host --fruity-p1 on by default; docs/FRUITY_PORT.md); 0.9.3 (0.3.6): Fruity Prime player sync in served matches (position pin/hold, loop catch-up cap; latest input only switchable, off; --served-fruity-pin/-hold/-latest-input/-catchup-cap); 0.9.2 (0.3.6): the match host buffers a bursty seat's inputs to its jitter (NetMatchSession Pace: trims only after 4 calm windows); 0.9.1 (0.3.6): the match host runs client-run knockback (hands hits' pushes to the device, takes its speed) and sends a quitter its cut-short replay (ReplayLink KindRequest), an early-ended match a cut-short one to every seat; 0.9.0: shared replays (replay_send / get_replays / replay_fetch / replay_drop / set_replay_block, ev_replay; files over HTTP /v1/replays/{id}: HubReplays.cs, Core Online/ReplayMail.cs); 0.8.2 (DEDICATED_SERVERS.md D3): served games seat 8 players (RelayWire.MaxSlots 9: slots 1-8 + the match host on 0) and run in imported arenas the match host has (its imports folder, --arenas); 0.8.1 (DEDICATED_SERVERS.md D3): Find Game matches served (HubServedFind.cs: the hub opens the game, every matched player gets FindState.Game, the match host starts it, the vote's host owns the lobby after); 0.8.0 (docs/DEDICATED_SERVERS.md D3): served games (GameInfo.Served: the match runs in a SecondHuntMatchHost process here on relay slot 0, Host = the lobby's owner on slot 1; JoinGameReq.Served; MemberEvent.Owner; results from the match host); 0.7.2 (release 0.2.0 F1): a seat dropped for its silence gets its slot back when its device sends again (Relay.Returned, Hub.SeatReturned); 0.7.1 (release 0.2.0 F3): Find Game matches up to 8 (FindConfig.MaxPlayers; a full party of 4 plays alone after the fill wait); 0.2.0: report, delete_profile; 0.3.0: ping, Find Game; 0.4.0: rejoin, TURN; 0.5.0: chat + safety (filter, mutes, bans, report evidence), host migration; 0.6.0: games carry the extra rules (GameInfo.ExtraPickups / ExtraCharacters), Find Game filters them; 0.7.0 (release test fixes): held seats (WelcomeMsg.Held = the hub's REJOIN, FIND releases a held seat, a seat silent 90 s is dropped); T3: friend OR rival (a rival upgrades to a friend, rival links between friends removed), head to head on the server (match_result, PlayerCard.Record), typed-chat lock skipped for friends only; T2: GameInfo.ExtraArena (Find Game's backfill only into games in an imported arena the searchers all have)
         private const int MaxPendingRequests = 100;
 
         private readonly Store _store;
@@ -96,7 +96,14 @@ namespace SecondHunt.Server
                 // the close frame is out: give the player's side a moment to read the event and answer before the socket is dropped
                 // (cancelling at once could reset the connection with the event still in flight)
                 await Task.WhenAny(Ended.Task, Task.Delay(TimeSpan.FromSeconds(2)));
-                Cts.Cancel();
+                try
+                {
+                    Cts.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // (the session's loop ended and disposed its source while the kick waited: nothing left to cancel)
+                }
             }
         }
 
@@ -357,6 +364,7 @@ namespace SecondHunt.Server
                         Unlink(me, other, kind);
                     }
                 }
+                _store.ForgetReplays(me); // (off every shared-replay queue: 0.9.0)
                 _store.DeletePlayer(me);
                 return new OkMsg { Done = true };
             }
@@ -366,6 +374,16 @@ namespace SecondHunt.Server
                 return Chat(me, r);
             case MatchResultReq r:
                 return MatchResult(me, r); // (head to head: HubRecords.cs)
+            case ReplaySendReq r: // (0.9.0: shared replays, HubReplays.cs)
+                return ReplaySend(me, r);
+            case ReplaysReq:
+                return ReplaysWaiting(me);
+            case ReplayFetchReq r:
+                return ReplayFetch(me, r.ReplayId);
+            case ReplayDropReq r:
+                return ReplayDrop(me, r.ReplayId);
+            case ReplayBlockReq r:
+                return ReplayBlock(me, r.Block);
             case ReportReq r:
             {
                 if (!ReportReason.Valid(r.Reason))

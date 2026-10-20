@@ -95,6 +95,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostNoLocalSeat = false; // (only a served match host has none: MatchStart)
             PlayerEntity.HostHoldMainSpawn = holdSpawn;
             PlayerEntity.HostBotTickPace = true; // hunter encounters' bots at vanilla's tick pace (a replay may have turned it off)
+            PlayerEntity.HostBotDropOff = false; // vanilla bot steering at drop-down nodes (a match may have turned it on)
             Scene.CollectDrawItems = collectDrawItems;
             // populates Music's internal seq/room tables; without it, the first room's Music.TryPlayRoomMusic (called
             // during scene setup below) throws on the still-null tables -- desktop callers get this from Renderer.cs,
@@ -147,6 +148,8 @@ namespace MphRecomp.Campaign
             }
             // the desktop window applies pending dialog/menu pauses right before each update frame
             GameState.ApplyPause();
+            ApplyClaimedHits(); // an online host's hit claims it took (Multiplayer/MatchHitClaims.cs)
+            ApplyClientPositions(); // and its guests' own positions it took (Multiplayer/MatchClientPosition.cs)
             LagFrame(); // a match host's N4 lag compensation (Multiplayer/MatchRemote.cs)
             Scene.OnUpdateFrame();
             CarryWeapon();

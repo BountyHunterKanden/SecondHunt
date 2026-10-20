@@ -198,36 +198,36 @@ namespace MphRead
             {
                 errors.Add("a gap inside a burst isn't 6 frames");
             }
-            if (full < 5)
+            if (full < 4)
             {
                 errors.Add($"only {full} full bursts");
             }
-            // only a death cuts a burst short (the empty switch waits for a paid burst: the last 5 UA still fire 3 bolts)
+            // only a death cuts a burst short (each bolt pays 5 UA; the last 15 UA fire a full burst)
             if (short_ > GameState.Deaths[0])
             {
                 errors.Add($"{short_} bursts cut short with {GameState.Deaths[0]} deaths");
             }
-            // 60 UA from the pickup = 12 bursts, then the Power Beam
-            if (gives == 1 && GameState.Deaths[0] == 0 && bursts.Count != 12)
+            // 60 UA from the pickup = 12 bolts at 5 UA each (MatchSettings.BlasterBoltCost) = 4 bursts, then the Power Beam
+            if (gives == 1 && GameState.Deaths[0] == 0 && bursts.Count != 4)
             {
-                errors.Add($"{bursts.Count} bursts from one pickup's 60 UA (12 expected)");
+                errors.Add($"{bursts.Count} bursts from one pickup's 60 UA (4 expected)");
             }
             // held fire: 40 frames burst to burst (longer only across a death and respawn)
             if (!starts.ContainsKey(40) || starts.Keys.Any(s => s < 40))
             {
                 errors.Add("bursts aren't 40 frames apart");
             }
-            if (uaSpent.Keys.Any(u => u != 5))
+            if (uaSpent.Keys.Any(u => u != 15))
             {
-                errors.Add("a burst didn't cost 5 UA (a pickup between bursts can top it up: check the list)");
+                errors.Add("a burst didn't cost 15 UA (a pickup between bursts can top it up: check the list)");
             }
             if (damages.Keys.Any(k => !k.StartsWith("PirateBlaster ")))
             {
                 errors.Add("seat 0 fired something that isn't the blaster");
             }
-            if (!damages.Keys.Any(k => k == "PirateBlaster 12/16"))
+            if (!damages.Keys.Any(k => k == "PirateBlaster 9/13"))
             {
-                errors.Add("no 12/16 blaster shot seen");
+                errors.Add("no 9/13 blaster shot seen (MatchSettings.LighterBlaster2)");
             }
             if (samusGiven != 1)
             {

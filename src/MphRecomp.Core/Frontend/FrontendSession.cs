@@ -17,9 +17,12 @@ namespace MphRecomp.Frontend
     // the menus at FrontendSession.ReturnPage(). PlayReplay: watch a recorded match (Arg = the replay file's path, from
     // MphRecomp.Replay.ReplayLibrary.List; docs/REPLAY_MODE.md R3); the shell plays it the same way, then the menus open
     // at ReturnPage() (the REPLAYS list)
-    public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, Credits, ShareCrashLog, Multiplayer, ControlsDone,
+    public enum FrontendRequestKind { StartAdventure, PlayMovie, OpenDeveloperMenu, Resume, QuitToMenu, QuitToDesktop, Credits, ShareCrashLog, Multiplayer, ControlsDone,
         CheckUpdates, StartMatch, PlayReplay, OnlineRules /* Options' privacy / code of conduct / 13+ line (RecompMenus.OnlineRules.cs) */,
-        FirstHunt /* RECOMP SETTINGS' extras row: the imported First Hunt cart's own game (docs/FIRST_HUNT_PORT.md) */ }
+        FirstHunt /* RECOMP SETTINGS' extras row: the imported First Hunt cart's own game (docs/FIRST_HUNT_PORT.md) */,
+        ShareLog /* RECOMP SETTINGS > HELP: this run's log as a report, crash or not (2026-10-19) */,
+        ShareReplay /* REPLAYS' details page EXPORT (Arg = the replay file's path, 2026-10-19) */,
+        SaveLog /* RECOMP SETTINGS > HELP: this run's log as a file on the device (Android: Downloads/Second Hunt), 2026-10-19 */ }
 
     public readonly record struct FrontendRequest(FrontendRequestKind Kind, int Slot = -1, string? Arg = null);
 
@@ -106,6 +109,7 @@ namespace MphRecomp.Frontend
             recomp.StartOnlineMatch = setup => Request?.Invoke(new FrontendRequest(FrontendRequestKind.StartMatch, Arg: setup));
             recomp.EditText = multiplayer.EditText; // RENAME: the name keyboard (MultiplayerMenu.EditText)
             recomp.PlayReplay = path => Request?.Invoke(new FrontendRequest(FrontendRequestKind.PlayReplay, Arg: path));
+            recomp.ShareReplay = path => Request?.Invoke(new FrontendRequest(FrontendRequestKind.ShareReplay, Arg: path));
             Action? imported = recomp.Import.Changed;
             recomp.Import.Changed = () =>
             {
@@ -450,6 +454,13 @@ namespace MphRecomp.Frontend
                     return;
                 }
             }
+            // the title (TOUCH TO START): the corner's QUIT TO DESKTOP (Windows) asks; any other tap anywhere starts
+            bool title = Menu.Page?.Index == 13;
+            if (title && _quitShown && x >= _quitX0 && x <= _quitX1 && y >= _quitY0 && y <= _quitY1)
+            {
+                Recomp.AskQuitToDesktop();
+                return;
+            }
             // each region the tap falls in, in order: the first with a button of its own there takes it; else the page's
             // own actions in the first, as before (TouchInRegion)
             int first = -1;
@@ -463,7 +474,17 @@ namespace MphRecomp.Frontend
                 if (!TouchRegionCheck) break;
                 if (TouchMenu(mx, my + 192, i, pageActions: false)) return;
             }
-            if (first >= 0) TouchMenu(fx, fy + 192, first, pageActions: true);
+            if (first >= 0 && TouchMenu(fx, fy + 192, first, pageActions: true)) return;
+            if (!title) return;
+            // a tap outside every region, or one the top screen's part of the page didn't answer: the touch screen's centre
+            for (int i = 0; i < _placements.Length; i++)
+            {
+                LayoutRegion r = _layout.Regions[i];
+                if (r.Y1 > MenuLayout.BottomY1) continue; // (a top-screen region)
+                _showFocus = false;
+                TouchMenu((r.X0 + r.X1) / 2, (r.Y0 + r.Y1) / 2 + 192, i, pageActions: true);
+                return;
+            }
         }
 
         // ---- drags, the mouse wheel and the right stick: a section page's list (CONTROLS, SECOND HUNT SETTINGS' tabs;
@@ -1207,6 +1228,8 @@ namespace MphRecomp.Frontend
             (_pageFrom, _pageTo, _drawnWidth, _drawnHeight) = (pageFrom, DrawList.Vertices.Count, width, height);
             // the version, small and faint in the title's lower right (TOUCH TO START, page 13; owner 2026-10-15)
             if (Menu.Page?.Index == 13 && !string.IsNullOrEmpty(UpdateHost.AppVersion)) DrawVersion(width, height);
+            _quitShown = false;
+            if (Menu.Page?.Index == 13 && OperatingSystem.IsWindows() && !PopupOpen) DrawQuitButton(width, height);
             if (PopupOpen) DrawPopup(width, height);
             if (_bootTicks >= 0)
             {
@@ -1269,6 +1292,24 @@ namespace MphRecomp.Frontend
 
         // canvas units as the replay bar's (u = height / 360, the same size on the Odin and a PC): one u a font pixel,
         // half the menus' own text size, white at 30%, 6u in from the corner
+        // Windows: QUIT TO DESKTOP in the title's lower left (a host-drawn button; a tap or click asks, then closes the game)
+        private float _quitX0, _quitY0, _quitX1, _quitY1;
+        private bool _quitShown;
+
+        private void DrawQuitButton(float width, float height)
+        {
+            float u = height / 360f, s = 1.5f * u;
+            const string text = "quit to desktop";
+            float w = Menu.Font.MeasureCanvas(text, s), h = MenuFont.Cell * s, pad = 4 * u;
+            _quitX0 = 6 * u;
+            _quitY1 = height - 6 * u;
+            _quitX1 = _quitX0 + w + 2 * pad;
+            _quitY0 = _quitY1 - h - 2 * pad;
+            DrawList.Quad(-1, _quitX0, _quitY0, _quitX1, _quitY1, 0, 0, 0, 0, 0, 0, 0, 0.45f);
+            Menu.Font.EmitCanvas(text, _quitX0 + pad, _quitY0 + pad, 0, s, 1, 1, 1, 0.75f, DrawList);
+            _quitShown = true;
+        }
+
         private void DrawVersion(float width, float height)
         {
             float u = height / 360f;

@@ -351,12 +351,28 @@ internal sealed partial class CampaignRenderer
         if (pass != SuitPass.Additive || _host == null || scene != _host.Scene || _hyperSeats.Count == 0) return;
         _hyperLines.Clear();
         _hyperBoards.Clear();
-        foreach (HyperSeat seat in _hyperSeats.Values)
+        foreach ((PlayerEntity p, HyperSeat seat) in _hyperSeats)
         {
+            int lines = _hyperLines.Count, boards = _hyperBoards.Count;
             seat.Arcs?.Collect(_hyperLines);
             seat.Reds?.Collect(_hyperLines);
             seat.Glow?.Collect(_hyperBoards);
             seat.Contacts?.Collect(_hyperBoards);
+            // smooth frames: carried with the seat, as its body is (SmoothCarry); Collect makes each line's points fresh
+            Matrix4 carry = SmoothCarry(p, scene);
+            if (carry == Matrix4.Identity) continue;
+            for (int k = lines; k < _hyperLines.Count; k++)
+            {
+                Vector3[] pts = _hyperLines[k].Points;
+                if (k > lines && ReferenceEquals(pts, _hyperLines[k - 1].Points)) continue; // one bolt's three lines share them
+                for (int q = 0; q < pts.Length; q++) pts[q] = Vector3.TransformPosition(pts[q], carry);
+            }
+            for (int k = boards; k < _hyperBoards.Count; k++)
+            {
+                RetroBillboard bb = _hyperBoards[k];
+                bb.Position = Vector3.TransformPosition(bb.Position, carry);
+                _hyperBoards[k] = bb;
+            }
         }
         if (_hyperLines.Count == 0 && _hyperBoards.Count == 0) return;
         if (!FxGl()) return;

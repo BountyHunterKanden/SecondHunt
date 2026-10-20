@@ -181,6 +181,15 @@ public class GameActivity : Activity
         case FrontendRequestKind.ShareCrashLog:
             ShareCrashLog(this);
             break;
+        case FrontendRequestKind.ShareLog:
+            ShareLog(this);
+            break;
+        case FrontendRequestKind.ShareReplay: // REPLAYS' SHARE (ReplaySharing.cs)
+            ReplaySharing.Share(this, request.Arg);
+            break;
+        case FrontendRequestKind.SaveLog: // RECOMP SETTINGS > SAVE LOG: into Downloads/Second Hunt (DeviceSave.cs)
+            SaveLog(this);
+            break;
         case FrontendRequestKind.FirstHunt: // RECOMP SETTINGS' extras row: First Hunt's own menus (FirstHuntActivity)
             StartActivity(new Intent(this, typeof(FirstHuntActivity)));
             break;
@@ -296,7 +305,46 @@ public class GameActivity : Activity
             return;
         }
         CrashLog.MarkSeen();
-        activity.StartActivity(Intent.CreateChooser(share, "Share the crash report"));
+        activity.StartActivity(TextSheet(activity, share, "Share the crash report", $"second-hunt-crash-{DateTime.Now:yyyyMMdd-HHmmss}.txt"));
+    }
+
+    // RECOMP SETTINGS > SHARE LOG: this run's log through the system share sheet (CrashLog.ShareLogIntent)
+    internal static void ShareLog(Activity activity)
+    {
+        Intent? share = CrashLog.ShareLogIntent();
+        if (share == null)
+        {
+            Toast.MakeText(activity, "The log couldn't be read.", ToastLength.Short)!.Show();
+            return;
+        }
+        activity.StartActivity(TextSheet(activity, share, "Share the log", $"second-hunt-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt"));
+    }
+
+    // a text share's sheet, SAVE TO DOWNLOADS among its targets (the text as a .txt: DeviceSave.Chooser)
+    static Intent TextSheet(Activity activity, Intent send, string title, string name)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(send.GetStringExtra(Intent.ExtraText) ?? "");
+        return DeviceSave.Chooser(activity, send, title, name, "text/plain", s => s.Write(bytes));
+    }
+
+    // SAVE LOG: this run's log as a .txt in Downloads/Second Hunt (the share sheet on Android 8-9)
+    internal static void SaveLog(Activity activity)
+    {
+        string text;
+        try
+        {
+            text = CrashLog.LogReport();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Toast.MakeText(activity, "The log couldn't be read.", ToastLength.Short)!.Show();
+            return;
+        }
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(text);
+        if (!DeviceSave.ToDownloads(activity, $"second-hunt-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt", "text/plain", s => s.Write(bytes)))
+        {
+            ShareLog(activity);
+        }
     }
 
     void OpenDeveloperMenu()

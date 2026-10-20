@@ -40,6 +40,9 @@ namespace MphRecomp.Multiplayer
         // a served match host (docs/DEDICATED_SERVERS.md): this device plays no seat, every human is remote (LocalSeat
         // only keeps PlayerEntity.Main set); never sent to the players
         public bool ServedHost { get; set; }
+        // a served match on Fruity Prime's movement sync (docs/FRUITY_PORT.md P1; MatchHost --fruity-p1): sent to the joiners
+        // as a trailing byte on MsgWelcome/MsgStart (Net/FruitySync.cs); phone-hosted and LAN matches never set it
+        public bool FruitySync { get; set; }
 
         public int? PointGoal { get; set; } // kills / octoliths / node points; spare lives in survival
         public float? TimeLimitSeconds { get; set; }
@@ -96,6 +99,56 @@ namespace MphRecomp.Multiplayer
         // ...without the ball hop (owner 2026-10-18: "remove morph ball jump entirely for dark Samus"): null = on (no hop);
         // replays recorded before it (format < 44) read as off, so their hops still play exactly
         public bool? NoBallJump { get; set; }
+        // an online host's lag compensation as fixed 2026-10-19 (PlayerEntity.HostLagFix: a homing beam isn't shifted off its
+        // own target, Weavel's turret's shots aren't shifted, bombs, Lockjaw and the drone laser are): null = on; replays recorded before it (format < 46)
+        // read as off, so their remote seats' hits play exactly
+        public bool? LagCompFix { get; set; }
+        // the Trooper's drone laser pushes nothing (PlayerEntity.HostDroneLaserNoPush, 2026-10-19: it rarely sent a target
+        // flying): null = on; replays recorded before it (format < 47) read as off, so their laser hits play exactly
+        public bool? DroneLaserNoPush { get; set; }
+        // the Trooper's split/merge spam fix (PlayerEntity.HostDroneSwitchRule, 2026-10-19: morphing over and over let him
+        // fly at his height): his drone ignores his own standing body and the next switch waits 20 frames; null = on; replays
+        // recorded before it (format < 48) read as off
+        public bool? DroneSwitchRule { get; set; }
+        // the drone's burst and laser waits count down while the Trooper is on foot too (PlayerEntity.HostDroneWaitsOnFoot,
+        // 2026-10-19: they froze until he split again): null = on; replays recorded before it (format < 49) read as off
+        public bool? DroneWaitsOnFoot { get; set; }
+        // an online host takes its guests' hit claims (PlayerEntity.HostHitClaims, MphRecomp Net/HitClaims.cs,
+        // 2026-10-19): a hit a guest's screen saw that the host's copy of the shot missed is applied once the host checked it
+        // against its own history; null = on; replays recorded before it (format < 50) read as off
+        public bool? HitClaims { get; set; }
+        // the Trooper clings once per airtime, no chained wall hops (PlayerEntity.HostWallClingOnce, 2026-10-19); null = on;
+        // replays recorded before it (format < 51) read as off (3 clings)
+        public bool? WallClingOnce { get; set; }
+        // the Pirate Blaster's bolts deal 10 (14 to the head) instead of 12 (16) (PirateBlaster.HostBoltDamage,
+        // 2026-10-19: a bit too strong); null = on; replays recorded before it (format < 51) read as off
+        public bool? LighterBlaster { get; set; }
+        // splash damage reaches the Trooper's standing body while his drone is out (PlayerEntity.HostDroneBodySplash,
+        // 2026-10-19); null = on; replays recorded before it (format < 52) read as off (it took no splash, as Weavel's turret)
+        public bool? DroneBodySplash { get; set; }
+        // one hit per blast on the Trooper: a blast that hit him leaves his standing body alone
+        // (BeamProjectileEntity.HostBodySplashOnce, 2026-10-19); null = on; replays before format 53 read as off
+        public bool? BodySplashOnce { get; set; }
+        // the Trooper clings only while Jump is held, and not in his first 0.3 s after a jump or leaving the ground
+        // (PlayerEntity.HostWallClingHold, 2026-10-20: clinging by accident was too easy); null = on;
+        // replays before format 56 read as off
+        public bool? WallClingHold { get; set; }
+        // each Pirate Blaster bolt costs a shot of UA (5), not each burst (PirateBlaster.HostBoltCost, 2026-10-20);
+        // null = on; replays before format 56 read as off (5 a burst)
+        public bool? BlasterBoltCost { get; set; }
+        // the Pirate Blaster's bolts a little lighter again, 9 / 13 instead of LighterBlaster's 10 / 14 (2026-10-20);
+        // only counts with LighterBlaster on; null = on; replays before format 56 read as off (10 / 14)
+        public bool? LighterBlaster2 { get; set; }
+        // bots walk off a ledge toward a drop-down node under it instead of shaking over it (PlayerEntity.HostBotDropOff,
+        // 2026-10-20); off for now (null = off, nothing sets it, not in replays): kept out of the release
+        public bool? BotDropOff { get; set; }
+        // a claimed shot hits one player at most (PlayerEntity.HostClaimOneHit, 2026-10-19); null = on; replays
+        // before format 53 read as off
+        public bool? ClaimOneHit { get; set; }
+        // an online host takes each guest's own position from its inputs when it passes the host's checks (MphRecomp
+        // Net/ClientPosition.cs, 0.3.6): null = on; a match host turns it off when the server says so; replays before format 54
+        // read as off (they hold no taken positions)
+        public bool? ClientPosition { get; set; }
         // Zero Suit Samus's kit (owner 2026-10-12, docs/ZERO_SUIT_SAMUS.md section 7): her affinity weapon is the Paralyzer
         // (its charged shot stuns, MphRead PlayerParalyzer.cs) and she has 90 health (PlayerEntity.HostHealthPercent):
         // null = on; replays recorded before it (format < 33) read as off, so they play exactly

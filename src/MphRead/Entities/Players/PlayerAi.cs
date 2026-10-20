@@ -7567,7 +7567,7 @@ namespace MphRead.Entities
                             }
                             else if (!context.Field30 && context.Field2C == 0)
                             {
-                                Func2142AE8(_node40.Position);
+                                Func2142AE8(DropOffTarget(_node40.Position)); // recomp: drop-offs (PlayerAiDropOff.cs)
                             }
                             else if (context.Field30 && context.Field2C == 1)
                             {
@@ -7584,7 +7584,7 @@ namespace MphRead.Entities
                         }
                         else if (context.Field2C != 2 || Field118 != 0)
                         {
-                            Func21418D8(_node40.Position);
+                            Func21418D8(DropOffTarget(_node40.Position)); // recomp: drop-offs (PlayerAiDropOff.cs)
                         }
                         else
                         {
@@ -7614,7 +7614,7 @@ namespace MphRead.Entities
                             }
                             else if (!context.Field30 && (context.Field2C == 0 || context.Field2C == 2 || context.Field20 == 2))
                             {
-                                Func2142AE8(_node40.Position);
+                                Func2142AE8(DropOffTarget(_node40.Position)); // recomp: drop-offs (PlayerAiDropOff.cs)
                             }
                             else if (context.Field30 && context.Field2C == 1)
                             {
@@ -7910,7 +7910,7 @@ namespace MphRead.Entities
             private void Func2142A80()
             {
                 Debug.Assert(_node40 != null);
-                Func2142AE8(_node40.Position);
+                Func2142AE8(DropOffTarget(_node40.Position)); // recomp: drop-offs (PlayerAiDropOff.cs)
                 Func2145C14(_node40.Position);
             }
 

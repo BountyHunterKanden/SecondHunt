@@ -29,8 +29,8 @@ namespace MphRead.Entities
         // seat's HUD is set up the first time and updated after the main player's each frame (Renderer); the match never
         // reads it. Default null = the main player's.
         public static PlayerEntity? HostHudSeat { get; set; }
-        public static PlayerEntity HudOwner => HostHudSeat is PlayerEntity p && p != Main && p._hostHudReady
-            && p.LoadFlags.TestFlag(LoadFlags.Active) ? p : Main;
+        public static PlayerEntity HudOwner => HostHudSeat is PlayerEntity p && (p != Main || HostSeatlessHud) && p._hostHudReady
+            && p.LoadFlags.TestFlag(LoadFlags.Active) ? p : Main; // (recomp: HostSeatlessHud, PlayerServedHost.cs)
         private bool _hostHudReady;
         private BeamType _hostHudWeapon = BeamType.None;
 
@@ -1531,6 +1531,7 @@ namespace MphRead.Entities
                     color = new ColorRgba((byte)(rg * 255), (byte)(rg * 255), 255, 255);
                 }
                 DrawScoreboardPlayer(60, posY, color, _hunterInsts[(int)player.Hunter], slot);
+                DrawScoreboardPing(slot, 252, posY); // recomp: online, bars + ms on the value line (PlayerScoreboardPing.cs)
                 DrawText2D(160, posY, Align.Center, 0, value1, color, fontSpacing: 8);
                 DrawText2D(215, posY, Align.Center, 0, value2, color, fontSpacing: 8);
                 posY += _scorePlayerSpace;
@@ -2524,7 +2525,7 @@ namespace MphRead.Entities
             {
                 var player = (PlayerEntity)target;
                 max = player.HealthMax;
-                current = player.Health;
+                current = player.HostShownHealth; // recomp: less this device's own hits not yet confirmed (PlayerNetPredict.cs)
                 text = player.HostCharacterName ?? _hunterNames[(int)player.Hunter];
                 lowHealth = 25;
             }

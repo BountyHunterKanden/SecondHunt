@@ -1367,6 +1367,7 @@ namespace MphRead.Entities.Enemies
                 Vector3 last = _grappleVecs[^1] * 0.5f;
                 Vector3 prev = _grappleVecs[^2] * 0.5f;
                 _grappleEffect.Transform(UpVector, FacingVector, prev + last); // swap facing and up
+                _grappleEffect.SetHostOwner(this); // recomp: carried with it (smooth frames)
             }
         }
 

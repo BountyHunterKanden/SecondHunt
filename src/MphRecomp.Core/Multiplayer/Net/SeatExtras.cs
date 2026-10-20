@@ -33,7 +33,19 @@ namespace MphRecomp.Multiplayer.Net
             public uint BeamDamageMax;
         }
 
-        public int Size => 2 + Seats.Length * SeatSize + Stats.Length * StatsSize;
+        // knockback (0.3.6): the pushes the host handed each seat's device so far (PlayerEntity.NetHandPush: how many, and
+        // their sum), after the stats as a count byte and PushSize per seat; a device that runs its own pushes runs the
+        // difference from the last it saw (MatchNet). null = a host from before (an older client reads up to the stats)
+        public PushState[]? Pushes;
+        public const int PushSize = 13;
+
+        public struct PushState
+        {
+            public byte Count;
+            public OpenTK.Mathematics.Vector3 Sum;
+        }
+
+        public int Size => 2 + Seats.Length * SeatSize + Stats.Length * StatsSize + (Pushes == null ? 0 : 1 + Pushes.Length * PushSize);
 
         // host: every seat after this frame
         public static SeatExtras Capture(int seats)
@@ -45,6 +57,11 @@ namespace MphRecomp.Multiplayer.Net
                 x.Seats[i] = PlayerEntity.Players[i].NetCaptureExtras();
             }
             x.Stats = CaptureStats(stats);
+            x.Pushes = new PushState[seats];
+            for (int i = 0; i < seats; i++)
+            {
+                x.Pushes[i] = new PushState { Count = PlayerEntity.Players[i].NetPushCount, Sum = PlayerEntity.Players[i].NetPushSum };
+            }
             return x;
         }
 
@@ -82,6 +99,18 @@ namespace MphRecomp.Multiplayer.Net
                 WriteStats(d.AsSpan(o), Stats[i]);
                 o += StatsSize;
             }
+            if (Pushes != null)
+            {
+                d[o++] = (byte)Pushes.Length;
+                for (int i = 0; i < Pushes.Length; i++)
+                {
+                    d[o] = Pushes[i].Count;
+                    BinaryPrimitives.WriteSingleLittleEndian(d.AsSpan(o + 1), Pushes[i].Sum.X);
+                    BinaryPrimitives.WriteSingleLittleEndian(d.AsSpan(o + 5), Pushes[i].Sum.Y);
+                    BinaryPrimitives.WriteSingleLittleEndian(d.AsSpan(o + 9), Pushes[i].Sum.Z);
+                    o += PushSize;
+                }
+            }
             return d;
         }
 
@@ -117,6 +146,20 @@ namespace MphRecomp.Multiplayer.Net
             {
                 x.Stats[i] = ReadStats(d[o..]);
                 o += StatsSize;
+            }
+            if (d.Length > o && d.Length >= o + 1 + d[o] * PushSize)
+            {
+                x.Pushes = new PushState[d[o++]];
+                for (int i = 0; i < x.Pushes.Length; i++)
+                {
+                    x.Pushes[i] = new PushState
+                    {
+                        Count = d[o],
+                        Sum = new OpenTK.Mathematics.Vector3(BinaryPrimitives.ReadSingleLittleEndian(d[(o + 1)..]),
+                            BinaryPrimitives.ReadSingleLittleEndian(d[(o + 5)..]), BinaryPrimitives.ReadSingleLittleEndian(d[(o + 9)..]))
+                    };
+                    o += PushSize;
+                }
             }
             return x;
         }

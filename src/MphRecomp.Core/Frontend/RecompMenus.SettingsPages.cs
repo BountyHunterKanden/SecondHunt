@@ -40,7 +40,7 @@ namespace MphRecomp.Frontend
         private static readonly (string Header, string[] Labels)[] AppSections =
         {
             ("UPDATES", new[] { "update\nalerts", "updates" }),
-            ("HELP", new[] { "crash\nlog", "credits" }),
+            ("HELP", new[] { "crash\nlog", "share\nlog", "credits" }),
         };
         private static readonly (string Header, string[] Labels)[] DevSections =
         {
@@ -60,6 +60,7 @@ namespace MphRecomp.Frontend
             "extras" => "first hunt",
             "credits" => "credits",
             "crash\nlog" => RecompSettings.DesktopHost ? "open crash log" : "share crash log",
+            "share\nlog" => RecompSettings.DesktopHost ? "save log" : "share log",
             "updates" => "check for updates",
             "song\nlist" => "song list",
             "import\ngames" => "import games",

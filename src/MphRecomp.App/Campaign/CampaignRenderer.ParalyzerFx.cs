@@ -282,6 +282,31 @@ internal sealed partial class CampaignRenderer
 
     static N.Vector3 Nv(Vector3 v) => new(v.X, v.Y, v.Z);
 
+    // smooth frames (CampaignSmoothFrames.cs): what one owner's Collect added is carried with it (SmoothCarry)
+    readonly List<int> _paraCarryFrom = new();
+
+    void ParaCarryMark()
+    {
+        _paraCarryFrom.Clear();
+        foreach (BrawlFxDraw d in _paraDraws) _paraCarryFrom.Add(d.Verts.Count);
+    }
+
+    void ParaCarry(Matrix4 carry)
+    {
+        if (carry == Matrix4.Identity) return;
+        for (int k = 0; k < _paraDraws.Count; k++)
+        {
+            List<BrawlFxVertex> verts = _paraDraws[k].Verts;
+            for (int i = k < _paraCarryFrom.Count ? _paraCarryFrom[k] : 0; i < verts.Count; i++)
+            {
+                BrawlFxVertex v = verts[i];
+                Vector3 at = Vector3.TransformPosition(new Vector3(v.Pos.X, v.Pos.Y, v.Pos.Z), carry);
+                v.Pos = Nv(at);
+                verts[i] = v;
+            }
+        }
+    }
+
     // DrawSkins (MatchSkins.cs), additive pass: every Paralyzer effect and bullet
     void DrawParalyzerFx(Scene scene, SuitPass pass)
     {
@@ -291,16 +316,20 @@ internal sealed partial class CampaignRenderer
         N.Vector3 cam = Nv(scene.CameraPosition);
         N.Vector3 right = Nv(new Vector3(view.M11, view.M21, view.M31)), up = Nv(new Vector3(view.M12, view.M22, view.M32));
         // the cannon's effects first, so each draw's first vertices are theirs
-        foreach (ParalyzerSeat seat in _paraSeats.Values)
+        foreach ((PlayerEntity p, ParalyzerSeat seat) in _paraSeats)
         {
+            ParaCarryMark();
             foreach (BrawlFxSystem fx in seat.Muzzle) fx.Collect(_paraDraws, cam, right, up);
+            ParaCarry(SmoothCarry(p, scene));
         }
         _paraMuzzleVerts.Clear();
         foreach (BrawlFxDraw d in _paraDraws) _paraMuzzleVerts[d] = d.Verts.Count;
-        foreach (ParalyzerShot shot in _paraShots.Values)
+        foreach ((BeamProjectileEntity beam, ParalyzerShot shot) in _paraShots)
         {
+            ParaCarryMark();
             shot.Fx.Collect(_paraDraws, cam, right, up);
             if (shot.Model != null) BrawlFxMeshes.Collect(shot.Model, shot.Frame, shot.Fx.Transform, cam, _paraDraws);
+            ParaCarry(SmoothCarry(beam, scene));
         }
         foreach (BrawlFxSystem fx in _paraFx) fx.Collect(_paraDraws, cam, right, up);
         bool any = false;

@@ -169,7 +169,7 @@ namespace MphRecomp.Import.Effects
 
         // MP1 EVNT: loop / user / particle / (version 2) sound point lists; each point: u16, name, u16 type, f32 time,
         // u32 state, u32 index, u8 unique, f32 weight, u32 character, u32 flags
-        static void ReadEvnt(byte[] b, string clip, List<Event> events, List<Sound> sounds)
+        public static void ReadEvnt(byte[] b, string clip, List<Event> events, List<Sound> sounds)
         {
             int o = 0;
             uint U32() { uint v = Be.U32(b, o); o += 4; return v; }

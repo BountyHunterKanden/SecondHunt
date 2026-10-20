@@ -101,6 +101,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         // a PC mouse has its own sensitivity (OPTIONS > CONTROLS, KEYBOARD & MOUSE) on the Source engine's scale, and no invert
         _mouseScale = MphRecomp.Config.MouseScale.UnitsPerCount(s.MouseSens);
         MphRecomp.Input.ZoomAim.Load(s); // the zoom's own sensitivity and its eased look (Core Input/ZoomAim.cs)
+        MphRead.Entities.PlayerEntity.HostDroneDialsSwapped = s.DroneDialsSwapped; // the drone's wait dials' sides
         bool statusText = s.DeveloperMode && s.StatusText;
         if (statusText != _statusText) _statusMode = statusText ? 0 : 2;
         _statusText = statusText;
@@ -406,7 +407,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         PlayerEntity p = _host.Player;
         if (p.IsAltForm)
         {
-            if (_suit!.HasBall && p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson)) _suit.DrawBall(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass);
+            if (_suit!.HasBall && p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson)) _suit.DrawBall(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, alpha: p.CurAlpha);
         }
         else if (_suit!.HasBody && PlayerEntity.HostMainBipedAlpha > 0 && !_bodyCut)
         {
@@ -1138,12 +1139,13 @@ internal sealed partial class CampaignRenderer : IGlScreen
             }
             if (droneForm)
             {
-                // the Scout Drone out: its own functions (owner 2026-10-11, the customizer's SCOUT DRONE list), none of the
-                // hunter's: blasters (fire), cutting laser (Zoom, held), rise (Jump held), recall (Morph)
+                // the Scout Drone out: its own functions (2026-10-11, the customizer's SCOUT DRONE list), none of the
+                // hunter's but MORPH: blasters (fire), cutting laser (Zoom, held), rise (Jump held); recall = the hunter's morph
+                // button (2026-10-19: no deploy / recall function of its own)
                 if (binds.Held(ControlBinds.DroneFire)) buttons |= CampaignButtons.Shoot;
                 if (binds.Held(ControlBinds.DroneLaser)) buttons |= CampaignButtons.Zoom;
                 if (binds.Held(ControlBinds.DroneRise)) buttons |= CampaignButtons.Jump | CampaignButtons.Boost;
-                if (binds.Held(ControlBinds.DroneDeploy)) buttons |= CampaignButtons.Morph;
+                if (binds.Held(ControlBinds.Morph)) buttons |= CampaignButtons.Morph;
             }
             else
             {
@@ -1155,7 +1157,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
                 {
                     buttons |= CampaignButtons.Jump | CampaignButtons.Boost;
                 }
-                if (binds.Held(p.HostScoutDrone ? ControlBinds.DroneDeploy : ControlBinds.Morph)) // (the Trooper's morph = his drone)
+                if (binds.Held(ControlBinds.Morph)) // (the Trooper's morph = his drone)
                 {
                     buttons |= CampaignButtons.Morph;
                 }
@@ -1452,7 +1454,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (viewWarp) EndViewWarp(scene); // the Panini warp onto the screen, under the HUD (CampaignView.cs)
         GpuMark(GpuSegHud);
         if (!ShipOpen) DrawHud(scene); // the cockpit view under the in-ship menu has no HUD (CampaignShip.cs)
-        if (!ShipOpen) DrawTurretHud(scene); // Shooting Gallery's turret seat HUD (CampaignRenderer.TurretHud.cs)
+        if (!ShipOpen && !ReplayUiHidden) DrawTurretHud(scene); // Shooting Gallery's turret seat HUD (CampaignRenderer.TurretHud.cs)
         GLES30.GlBindVertexArray(0);
     }
 
@@ -1471,7 +1473,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlBindSampler(0, _samplers[0]);
         GLES30.GlBindSampler(1, _samplers[0]);
         bool maskBound = false;
-        for (int i = 0; i < scene.HudItemCount; i++)
+        int hudItems = ReplayUiHidden ? 0 : scene.HudItemCount; // a replay's HIDE keeps only the fade (MatchReplay.cs)
+        for (int i = 0; i < hudItems; i++)
         {
             Scene.HostHudItem item = scene.GetHudItem(i);
             if (MapLiftsHelmet(item, scene)) continue; // the PRIME map draws the helmet itself, unblurred (CampaignMap.cs)

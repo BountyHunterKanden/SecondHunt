@@ -1444,7 +1444,8 @@ namespace MphRecomp.Frontend
         {
             string[] choice = { "choicesamus", "choicekanden", "choicespire", "choicetrace", "choicenoxus", "choicesylux", "choiceweavel" };
             int[][] arrows = { new[] { 174, 175 }, new[] { 177, 178 }, new[] { 180, 181 }, new[] { 183, 184 } };
-            int[][] teams = { new[] { 147, 148 }, new[] { 153, 154 }, new[] { 161, 162 }, new[] { 169, 170 } };
+            // team 0 = the orange piece ("team_red"), team 1 = the green one ("team_blue"), as in the match (GameState: 0 = orange)
+            int[][] teams = { new[] { 148, 147 }, new[] { 154, 153 }, new[] { 162, 161 }, new[] { 170, 169 } };
             int[] checks = { -1, 176, 179, 182 };
             int[] removes = { -1, 156, 164, 172 };
             int[] stars = { -1, 150, 158, 166 };

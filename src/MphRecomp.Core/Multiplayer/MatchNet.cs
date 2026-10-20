@@ -71,9 +71,16 @@ namespace MphRecomp.Campaign
 
         // client: how often the local player was pulled onto the host's pose (drifted past the tolerance)
         public int LocalCorrections { get; private set; }
+        public void CountLocalCorrection() => LocalCorrections++;
 
         // client: take the host's frame. The local seat keeps its own (predicted) pose unless it drifted further than
         // localTolerance; everything else is the host's.
+        // online guest (Net/RemoteSmoothing.cs): the other seats' poses come from the blended past, not each snapshot
+        public bool SmoothRemotes { get; set; }
+
+        // client: per puppet, the FIRE held over from its respawn press (ApplySnapshot)
+        private readonly bool[] _puppetShootHeld = new bool[PlayerEntity.MaxPlayers];
+
         public void ApplySnapshot(Snapshot snap, float localTolerance = 0.5f)
         {
             int local = PlayerEntity.MainPlayerIndex;
@@ -94,10 +101,27 @@ namespace MphRecomp.Campaign
                     // online: a seat the host took out (its player left) or brought back (it rejoined) does the same here
                     p.NetFollowSeat((s.Flags & PlayerNetState.Active) != 0);
                 }
-                p.NetApply(s, pose: true);
+                bool wasDead = p.Health == 0;
+                p.NetApply(s, pose: !SmoothRemotes);
                 if (p.HostRemote)
                 {
                     int c = s.Controls;
+                    // the FIRE press that respawns a seat never shoots on the host (the spawn's NoShotsFired: a held
+                    // trigger waits for the next press), but here it reaches the puppet after the spawn and reads as a
+                    // fresh press: a shot from someone the other player never saw fire (match BF87SN). Held off
+                    // until the host's buttons let go, as the host has it.
+                    if (wasDead || s.Health == 0)
+                    {
+                        _puppetShootHeld[i] = (c & NetControls.Shoot) != 0;
+                    }
+                    else if ((c & NetControls.Shoot) == 0)
+                    {
+                        _puppetShootHeld[i] = false;
+                    }
+                    if (_puppetShootHeld[i])
+                    {
+                        c &= ~NetControls.Shoot;
+                    }
                     int moveX = ((c & NetControls.Right) != 0 ? 1 : 0) - ((c & NetControls.Left) != 0 ? 1 : 0);
                     int moveY = ((c & NetControls.Up) != 0 ? 1 : 0) - ((c & NetControls.Down) != 0 ? 1 : 0);
                     var buttons = CampaignButtons.None;
@@ -108,8 +132,11 @@ namespace MphRecomp.Campaign
                     if ((c & NetControls.AltAttack) != 0) buttons |= CampaignButtons.AltAttack;
                     if ((c & NetControls.Zoom) != 0) buttons |= CampaignButtons.Zoom;
                     SetControls(p.Controls, moveX, moveY, buttons, BeamType.None);
-                    p.HostRemoteYaw = s.Yaw;
-                    p.HostRemotePitch = s.Pitch;
+                    if (!SmoothRemotes)
+                    {
+                        p.HostRemoteYaw = s.Yaw;
+                        p.HostRemotePitch = s.Pitch;
+                    }
                     p.HostRemoteAimEpoch = p.NetAimEpoch; // a puppet follows the host's view whatever re-aimed it here
                 }
             }
@@ -223,10 +250,16 @@ namespace MphRecomp.Multiplayer
         private uint _viewTick;
         // online client: N3 prediction + reconciliation of its own player
         private readonly Net.ClientPrediction? _prediction;
+        // the host's handed pushes for this seat as last seen (SeatExtras.Pushes)
+        private bool _pushSeen;
+        private byte _pushCount;
+        private OpenTK.Mathematics.Vector3 _pushSum;
         // online client: the local player is set onto the host's pose outright only past this drift (reconciliation does the rest)
-        private const float OnlineSnapDistance = 6f;
+        private static float OnlineSnapDistance => Net.ClientPrediction.FruityCorrect ? Net.ClientPrediction.DivergeUnits : 6f;
 
         public Net.ClientPrediction? Prediction => _prediction;
+        private Net.RemoteSmoothing? _smoothing;
+        public Net.RemoteSmoothing? Smoothing => _smoothing;
         private readonly System.Collections.Generic.HashSet<int> _goneSeats = new();
         private int _seq; // (sent as 16 bits)
         private byte _epoch;
@@ -234,6 +267,14 @@ namespace MphRecomp.Multiplayer
         private BeamType _wantWeapon = BeamType.None; // a switch made here, asked of the host until it has it
         private int _wantSince;
         private bool _gone;
+        // online client (E, 2026-10-19): the host's pace asks (NetMatchSession.Pace): the last serial acted on, the frames
+        // still to skip (+) or run twice (-), the steps since the last one
+        private int _paceSerial, _paceFrames, _paceGap;
+        // online client (0.3.6, Net/ClientPosition.cs): the newest host snapshot its prediction took in (its own player compared
+        // against it, or set onto it): the basis its position reports name; and the last snapshot's tick (NetApplyTicks)
+        private uint _posBasis, _lastSnapTick;
+        public int PaceSkipped { get; private set; }
+        public int PaceDoubled { get; private set; }
 
         // host: every remote seat left or went silent (their seats were dropped); client: the host did (match ended)
         public bool PeerGone => _gone;
@@ -252,10 +293,37 @@ namespace MphRecomp.Multiplayer
             _net = net;
             _online = net as Net.NetMatchSession;
             _host = host;
+            // a served match on Fruity Prime's movement sync (Net/FruitySync.cs): set before the pieces below read it
+            Net.FruitySync.On = _online != null && host.Match?.FruitySync == true;
             // (LAN guests too since LAN protocol 17: Wi-Fi to a handheld is a round trip of 30-150 ms, past the old 0.5 pull-back
             // that snapped them onto the host's older pose over and over: 0.2.0 owner 2026-10-11, rubber banding)
             _prediction = !net.IsHost ? new Net.ClientPrediction() : null;
+            // online guest: the other players drawn a few frames in the past, blended (Net/RemoteSmoothing.cs)
+            _smoothing = !net.IsHost && _online != null && Net.RemoteSmoothing.Enabled ? new Net.RemoteSmoothing() : null;
+            host.SmoothRemotes = _smoothing != null;
             _migrations = _migrationsBefore = _online?.Migrations ?? 0;
+            // client: the host's form taken over this device's own (PlayerNetConfirm.cs), in the device log
+            PlayerEntity.NetFormGraceFrames = DefaultFormGrace;
+            Net.SeatPings.Start(net); // (each seat's ping on the scoreboard: Net/SeatPings.cs)
+            Net.ShotReport.Start(net); // (each seat's shots and hits, here and on its device: Net/ShotReport.cs)
+            Net.ShotCheck.Start(net); // (each shot and claimed hit checked against the host's, in shadow: Net/ShotCheck.cs)
+            Net.HitClaims.Start(net); // (a guest's hits its host's copy of the shot missed, checked and applied: Net/HitClaims.cs)
+            Net.ClientPosition.Start(net, host); // (an online guest's own position, checked and taken: Net/ClientPosition.cs)
+            // (an online guest's snapshot-counted waits count frames: 60 Hz snapshots wait as long as 30 Hz ones did)
+            PlayerEntity.NetApplyTicks = 1;
+            PlayerEntity.NetApplyScale = !net.IsHost && _online != null ? 2 : 1;
+            PlayerEntity.NetFormForced = (p, alt) => Console.WriteLine($"match: guest {_net.Kind} step {_seq}: own player put "
+                + $"{(alt ? "in alt form" : "on foot")} as the host has it (grace {PlayerEntity.NetFormGraceFrames} frames)");
+        }
+
+        // client: how long this device's own form switch may wait for the host before the host's form wins: a round trip
+        // (the ping, once known) plus the host's input buffer, at least 0.75 s
+        private const int DefaultFormGrace = 45;
+
+        private void UpdateFormGrace()
+        {
+            int ping = _online?.LocalPingMs?.Invoke() ?? -1;
+            PlayerEntity.NetFormGraceFrames = ping > 0 ? Math.Clamp(ping * 60 / 1000 + 30, DefaultFormGrace, 150) : DefaultFormGrace;
         }
 
         public Net.IMatchNet Session => _net;
@@ -302,11 +370,25 @@ namespace MphRecomp.Multiplayer
                     if (_net.TryTakeInput(seat, out Net.NetInput remote))
                     {
                         _host.SetRemoteInput(seat, remote);
+                        if (_online != null) Net.ClientPosition.HostOffer(_host, seat, remote); // (its own position: taken or not)
+                    }
+                    else if (_online != null)
+                    {
+                        // (a held frame: Fruity's hold at the last pinned place, or doesn't slide a seat whose device runs its push)
+                        if (!Net.ClientPosition.HostHold(_host, seat))
+                        {
+                            _host.HoldClientPushed(seat);
+                        }
                     }
                 }
                 _gone = seats.Count > 0 && _goneSeats.Count >= seats.Count;
                 _host.Step(input);
+                if (_online != null) Net.ClientPosition.HostStep(_host); // (the moves the host made by itself this step)
+                if (_online != null) Net.ClientPosition.HostPin(_host); // (pinned seats put at their devices' place: before the snapshot)
                 _net.SendSnapshot(_host.CaptureSnapshot(everyPart: _online != null, lanStats: _online == null));
+                if (_online != null) Net.SeatPings.HostTick(_online);
+                Net.HitClaims.HostStep(_host); // (before ShotCheck drains the shot log)
+                Net.ShotCheck.HostStep(_host);
                 return;
             }
             long allowedHost = _net.SnapshotsReceived > 0 ? 10000 : 20000;
@@ -335,21 +417,106 @@ namespace MphRecomp.Multiplayer
                 _host.Step(input);
                 return;
             }
+            // E: the host asked for a frame skipped (nothing stepped or sent: this device's inputs wait less there) or run
+            // twice (inputs came late there; the second step without this frame's aim and touch moves), one per few steps
+            if (_paceFrames > 0 && ++_paceGap >= Net.NetMatchSession.PaceStepEvery)
+            {
+                _paceGap = 0;
+                _paceFrames--;
+                PaceSkipped++;
+                return;
+            }
+            StepClient(input);
+            if (_paceFrames < 0 && ++_paceGap >= Net.NetMatchSession.PaceStepEvery && !_gone)
+            {
+                _paceGap = 0;
+                _paceFrames++;
+                PaceDoubled++;
+                Campaign.CampaignInput again = input;
+                again.AimDelta = default;
+                again.TouchDx = again.TouchDy = 0;
+                again.DialogButton = null;
+                StepClient(again);
+            }
+        }
+
+        private void StepClient(in Campaign.CampaignInput input)
+        {
             int local = PlayerEntity.MainPlayerIndex;
             if (_net.TryTakeSnapshot(out Net.Snapshot snap) && local < snap.Seats.Length)
             {
+                if (Net.NetMatchSession.ReadPace(snap.InputPace, out int paceSerial, out int paceFrames) && paceSerial != _paceSerial)
+                {
+                    _paceSerial = paceSerial;
+                    _paceFrames = paceFrames;
+                    _paceGap = 0;
+                }
+                if (_online != null)
+                {
+                    PlayerEntity.NetApplyTicks = _lastSnapTick == 0 ? 1 : (int)Math.Clamp((long)snap.Tick - _lastSnapTick, 1, 6);
+                    _lastSnapTick = snap.Tick;
+                }
                 int pulled = _host.LocalCorrections;
-                _host.ApplySnapshot(snap, _prediction != null ? OnlineSnapDistance : 0.5f);
+                // online: the raw pose isn't judged in ApplySnapshot (it is a round trip old: a fast player is far from it all the
+                // time); the prediction's like-for-like error says when the pose is really off
+                _host.ApplySnapshot(snap, _prediction != null && !Net.ClientPrediction.SnapFix ? OnlineSnapDistance
+                    : _prediction != null ? 0f : 0.5f);
+                _smoothing?.Add(snap, local, _seq);
                 if (_prediction != null)
                 {
-                    if (_host.LocalCorrections != pulled)
+                    bool snapNow = _host.LocalCorrections != pulled;
+                    var reconciled = Net.ReconcileResult.NotCompared;
+                    if (!snapNow && Net.ClientPrediction.SnapFix)
+                    {
+                        PlayerEntity me0 = _host.Player;
+                        Net.ReconcileResult result = _prediction.Reconcile(snap, local, me0);
+                        reconciled = result;
+                        // (no like-for-like check possible: the raw distance is all there is to go by, as before)
+                        snapNow = result == Net.ReconcileResult.Snap || (result == Net.ReconcileResult.NotCompared
+                            && (snap.Seats[local].Position - me0.Position).Length > OnlineSnapDistance);
+                        if (snapNow && me0.NetSnapPose(snap.Seats[local]))
+                        {
+                            _host.CountLocalCorrection();
+                        }
+                        else
+                        {
+                            snapNow = false;
+                        }
+                    }
+                    else if (!snapNow)
+                    {
+                        reconciled = _prediction.Reconcile(snap, local, _host.Player);
+                    }
+                    if (snapNow)
                     {
                         _prediction.Restart(_seq); // the pose is the host's now: what came before doesn't compare
                     }
-                    else
+                    // (this device's player took the host's word on it as of this snapshot: any move the host made by itself
+                    // up to here is in its pose now, so its position reports can name this tick: Net/ClientPosition.cs)
+                    if (snapNow || reconciled == Net.ReconcileResult.Compared)
                     {
-                        _prediction.Reconcile(snap, local, _host.Player);
+                        _posBasis = snap.Tick;
                     }
+                }
+                // knockback (0.3.6, as Fruity Prime does it): the pushes the host handed this device since the last snapshot
+                // seen, run here on its own player at once (the host didn't push its copy: it takes this player's reported
+                // position and speed instead, Net/ClientPosition.cs). The first sighting only starts the count
+                if (_online != null && snap.Extras?.Pushes is { } pushes && local < pushes.Length)
+                {
+                    Net.SeatExtras.PushState push = pushes[local];
+                    if (_pushSeen && push.Count != _pushCount)
+                    {
+                        OpenTK.Mathematics.Vector3 run = push.Sum - _pushSum;
+                        if (Single.IsFinite(run.X) && Single.IsFinite(run.Y) && Single.IsFinite(run.Z) && run.Length <= 10
+                            && _host.Player.Health > 0)
+                        {
+                            _host.Player.ApplyPush(run);
+                            _prediction?.GuestPush();
+                        }
+                    }
+                    _pushSeen = true;
+                    _pushCount = push.Count;
+                    _pushSum = push.Sum;
                 }
                 _epoch = snap.Seats[local].AimEpoch;
                 _hostWeapon = snap.Seats[local].Weapon;
@@ -360,7 +527,17 @@ namespace MphRecomp.Multiplayer
                 _viewTick++;
             }
             _prediction?.PreStep(_host.Player);
+            if (_seq % 60 == 0) UpdateFormGrace();
+            if (_online != null) Net.ShotReport.GuestTick(_online, local);
+            _smoothing?.Apply(_seq, local);
             BeamType before = _host.Player.CurrentWeapon;
+            // (0.3.6: where this player starts this step, the correction still to come included, as the prediction keeps it)
+            PlayerEntity self = _host.Player;
+            bool report = _online != null && _posBasis != 0 && self.Health > 0 && self.LoadFlags.TestFlag(LoadFlags.Spawned)
+                && _prediction?.HoldReports != true; // (held while the host pushes this seat: ClientPrediction.PushGap)
+            OpenTK.Mathematics.Vector3 reportAt = self.Position + (_prediction?.Pending ?? OpenTK.Mathematics.Vector3.Zero);
+            bool reportAlt = self.IsAltForm;
+            OpenTK.Mathematics.Vector3 reportSpeed = self.Speed;
             _host.Step(input);
             PlayerEntity me = _host.Player;
             // a switch made on this device (wheel, cycling, a predicted pickup) is asked of the host until the host has it
@@ -390,10 +567,21 @@ namespace MphRecomp.Multiplayer
                 Touching = input.TouchDown,
                 TouchDx = input.TouchDx,
                 TouchDy = input.TouchDy,
-                ViewTick = _online != null ? _viewTick : 0
+                // (the other seats drawn in the past: the frame they show, +1 for the step they just ran)
+                ViewTick = _online == null ? 0 : _smoothing != null && _smoothing.RenderTick(_seq) > 0
+                    ? (uint)(_smoothing.RenderTick(_seq) + 1) : _viewTick,
+                // (its own position at this step's start: the host may take it, Net/ClientPosition.cs)
+                ReportBasis = report ? _posBasis : 0,
+                Report = reportAt,
+                ReportAlt = reportAlt,
+                // (this device runs the pushes the host hands it: the host takes its speed for a while after one)
+                ReportPushes = _online != null && Net.ClientPrediction.ClientPushes,
+                ReportSpeed = reportSpeed
             };
             _prediction?.Record(_seq, me, Net.ClientPrediction.KeyOf(sent));
             _net.SendInput(sent);
+            if (_online != null) Net.HitClaims.GuestStep(_online, local, _seq, sent.ViewTick, _seq); // (before ShotCheck drains it)
+            if (_online != null) Net.ShotCheck.GuestStep(_online, local, _seq, sent.ViewTick, _seq);
             _seq++;
             if (_seq % 600 == 0)
             {
@@ -411,12 +599,19 @@ namespace MphRecomp.Multiplayer
             if (_online.IsHost && !TookOver && _online.Promoted is Net.NetMatchSession.Promotion promo)
             {
                 TookOver = true;
+                _smoothing = null; // (a host runs every seat itself)
+                _host.SmoothRemotes = false;
                 _host.PromoteToHost(promo.OldHostSeats, promo.Bots);
+                Net.ClientPosition.TookOver(_host); // (its guests' positions are checked here now)
+                PlayerEntity.NetApplyTicks = PlayerEntity.NetApplyScale = 1;
                 return;
             }
+            if (_smoothing != null) _smoothing = new Net.RemoteSmoothing(); // (the new host's ticks are its own)
             _prediction?.Restart(_seq);
             _viewTick = 0;
+            _posBasis = _lastSnapTick = 0; // (the new host's ticks are its own: no report until its snapshots are taken in)
             _hostWeapon = -1;
+            _paceSerial = _paceFrames = _paceGap = 0; // (the new host's asks start over)
         }
 
         public string StatusLine()
@@ -462,7 +657,8 @@ namespace MphRecomp.Multiplayer
                 Abilities = host.Abilities,
                 PirateBlaster = host.PirateBlaster,
                 Crates = host.Crates, Breakables = host.Breakables, // (the same crates + breakables as the host's: ids, NetWorld)
-                ExtraCharacters = host.ExtraCharacters // (shown only: the host's seats already have them stripped)
+                ExtraCharacters = host.ExtraCharacters, // (shown only: the host's seats already have them stripped)
+                FruitySync = host.FruitySync
             };
             for (int i = 0; i < host.Players.Count; i++)
             {

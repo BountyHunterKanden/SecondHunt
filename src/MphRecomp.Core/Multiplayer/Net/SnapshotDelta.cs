@@ -19,7 +19,7 @@ namespace MphRecomp.Multiplayer.Net
     // blocks. No base the receiver lacks is ever used: a joiner acks only what it rebuilt and keeps the last History.
     public static class SnapshotDelta
     {
-        public const int History = 64; // ~2 s at 30 Hz: an ack older than this gets a full snapshot
+        public const int History = 128; // ~2 s at 60 Hz (0.3.6; was 64 at 30 Hz): an ack older than this gets a full snapshot
         public const int PacketHeader = 11;
 
         // byte ranges of Snapshot.WriteSeat's layout that change together
@@ -80,7 +80,9 @@ namespace MphRecomp.Multiplayer.Net
         }
 
         // host: the packet body for one joiner (after the message type byte); base null = everything literal
-        public static int Write(Span<byte> dest, Encoded cur, Encoded? baseSnap, int inputAck, int held)
+        // pace: NetMatchSession's pace byte for this joiner (E, 2026-10-19), written after the last block (an app from before
+        // stops reading at the handoff and never sees it; an old host's packet has none: -1 here); -1 = none
+        public static int Write(Span<byte> dest, Encoded cur, Encoded? baseSnap, int inputAck, int held, int pace = -1)
         {
             if (baseSnap != null && baseSnap.SeatCount != cur.SeatCount)
             {
@@ -126,12 +128,16 @@ namespace MphRecomp.Multiplayer.Net
             o += WriteBlock(dest[o..], cur.Objective, baseSnap == null ? null : baseSnap.Objective.ToArray());
             o += WriteBlock(dest[o..], cur.Extras, baseSnap?.Extras);
             o += WriteBlock(dest[o..], cur.Handoff, baseSnap?.Handoff);
+            if (pace >= 0)
+            {
+                dest[o++] = (byte)pace;
+            }
             return o;
         }
 
         // the largest packet body a snapshot of this size can need (all literal)
         public static int MaxSize(Encoded cur) => PacketHeader + 6 + cur.SeatCount * (2 + Snapshot.SeatSize)
-            + 3 * 4 + cur.Bytes.Length + cur.Extras.Length + cur.Handoff.Length;
+            + 3 * 4 + cur.Bytes.Length + cur.Extras.Length + cur.Handoff.Length + 1;
 
         private static int WriteBlock(Span<byte> dest, ReadOnlySpan<byte> cur, byte[]? baseBlock)
         {
@@ -252,6 +258,7 @@ namespace MphRecomp.Multiplayer.Net
                 o += ReadBlock(src[o..], baseSnap == null ? null : baseSnap.Extras, extras);
                 var handoff = new List<byte>();
                 o += ReadBlock(src[o..], baseSnap == null ? null : baseSnap.Handoff, handoff);
+                int pace = o < src.Length ? src[o] : -1;
                 Encoded cur = Encoded.From(bytes.ToArray());
                 cur.Extras = extras.ToArray();
                 cur.Handoff = handoff.ToArray();
@@ -264,6 +271,7 @@ namespace MphRecomp.Multiplayer.Net
                 Snapshot snap = Snapshot.Read(cur.Bytes);
                 snap.InputAck = ack == 0xFFFF ? -1 : ack;
                 snap.InputHeld = held;
+                snap.InputPace = pace;
                 snap.Extras = SeatExtras.FromBytes(cur.Extras);
                 snap.Handoff = HostHandoff.FromBytes(cur.Handoff);
                 return snap;

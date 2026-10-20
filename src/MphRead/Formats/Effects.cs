@@ -30,6 +30,7 @@ namespace MphRead.Effects
     public class SingleParticle
     {
         public Particle ParticleDefinition { get; set; } = null!;
+        public EntityBase? HostOwner { get; set; } // recomp: RenderItem.HostOwner (the entity that added it)
         public Vector3 Position { get; set; }
         public Vector3 Color { get; set; }
         public float Alpha { get; set; }
@@ -635,6 +636,16 @@ namespace MphRead.Effects
             }
         }
 
+        // recomp: the entity its particles' render items belong to (RenderItem.HostOwner, the app's smooth frames carries them
+        // with it). Set each draw by the player for its muzzle flash and charge glow (PlayerSmoothFx.cs); cleared on reuse
+        public void SetHostOwner(EntityBase? owner)
+        {
+            for (int i = 0; i < Elements.Count; i++)
+            {
+                Elements[i].HostOwner = owner;
+            }
+        }
+
         public void SetDrawEnabled(bool set)
         {
             if (set)
@@ -749,6 +760,8 @@ namespace MphRead.Effects
         public int ChildEffectId { get; set; }
         // recomp: runs as always but isn't drawn (Scene.HostSpawnHidden when it was spawned: a host draws its own look)
         public bool HostHidden { get; set; }
+        // recomp: RenderItem.HostOwner for its particles (EffectEntry.SetHostOwner); null = none, as before
+        public EntityBase? HostOwner { get; set; }
         public float RoField1 { get; set; }
         public float RoField2 { get; set; }
         public float RoField3 { get; set; }

@@ -172,8 +172,9 @@ namespace MphRead.Entities
             // (merged here: ExitAltForm took the half back and cleared Halfturret; the unmorph still counts as alt form)
             bool mergedHere = Hunter == Hunter.Weavel && !Flags2.TestFlag(PlayerFlags2.Halfturret)
                 && (!IsAltForm || Flags1.TestFlag(PlayerFlags1.Unmorphing));
-            bool mergedAhead = altNow && mergedHere && s.Health < _health && _netMergeAheadFrames < 30;
-            _netMergeAheadFrames = altNow && mergedHere ? _netMergeAheadFrames + 1 : 0;
+            // (the counts here are 30 Hz snapshots' worth: NetApplyTicks / NetApplyScale, PlayerNetPosition.cs)
+            bool mergedAhead = altNow && mergedHere && s.Health < _health && _netMergeAheadFrames < 30 * NetApplyScale;
+            _netMergeAheadFrames = altNow && mergedHere ? _netMergeAheadFrames + NetApplyTicks : 0;
             if (split || mergedAhead)
             {
             }
@@ -192,10 +193,15 @@ namespace MphRead.Entities
                 _netDamageDrone = s.LastBeam >= 0 && (s.LastBeam & NetDroneBeamBit) != 0;
                 _netDamageTurret = s.LastBeam >= 0 && (s.LastBeam & NetTurretBeamBit) != 0;
                 _netDamageBeam = (BeamType)(s.LastBeam >= 0 ? s.LastBeam & ~(NetDroneBeamBit | NetTurretBeamBit) : s.LastBeam);
+                // recomp: this device's own hits it already showed (PlayerNetPredict.cs): no second flash or HEADSHOT!
+                (bool predicted, bool predictedHead) = NetConfirmPredicted(_health - s.Health);
+                ushort flashBefore = _timeSinceDamage;
+                DamageFlags netFlags = DamageFlags.IgnoreInvuln | (DamageFlags)s.LastFlags;
+                if (predictedHead) netFlags &= ~DamageFlags.Headshot;
                 try
                 {
-                    TakeDamage((uint)(_health - s.Health), DamageFlags.IgnoreInvuln | (DamageFlags)s.LastFlags,
-                        direction: null, source: null);
+                    TakeDamage((uint)(_health - s.Health), netFlags, direction: null, source: null);
+                    if (predicted && _health > 0) _timeSinceDamage = flashBefore;
                 }
                 finally
                 {
@@ -226,7 +232,7 @@ namespace MphRead.Entities
             if (s.Weapon >= 0 && s.Weapon != (sbyte)CurrentWeapon && _health > 0)
             {
                 // recomp: nothing asked of the host from here: its weapon (pickup auto-equip, empty switch) is taken at once
-                if (pose || !NetWeaponPending || ++_netWeaponMismatch > 30)
+                if (pose || !NetWeaponPending || (_netWeaponMismatch += NetApplyTicks) > 30 * NetApplyScale)
                 {
                     TryEquipWeapon((BeamType)s.Weapon, silent: true);
                     _netWeaponMismatch = 0;
@@ -237,17 +243,22 @@ namespace MphRead.Entities
                 _netWeaponMismatch = 0;
             }
             // the relayed Morph press normally switches forms here too; correct only a mismatch that persists
+            // (recomp: the local seat waits for its own switch's round trip first, then a set time: PlayerNetConfirm.cs)
             bool altForm = (s.Flags & PlayerNetState.AltForm) != 0;
             if (altForm != IsAltForm && !IsMorphing && !IsUnmorphing && _health > 0)
             {
-                if (++_netFormMismatch > 10 && TrySwitchForms(force: true))
+                bool localSeat = this == Main && !HostNoLocalSeat;
+                if ((localSeat ? NetFormCorrectionDue() : (_netFormMismatch += NetApplyTicks) > 10 * NetApplyScale) && TrySwitchForms(force: true))
                 {
                     _netFormMismatch = 0;
+                    _netFormMismatchSince = -1;
+                    if (localSeat) NetFormForced?.Invoke(this, altForm);
                 }
             }
             else
             {
                 _netFormMismatch = 0;
+                _netFormMismatchSince = -1;
             }
             // a seat that hasn't spawned on the host yet (or here) has no pose to take
             bool spawned = (s.Flags & PlayerNetState.Spawned) != 0 && LoadFlags.TestFlag(LoadFlags.Spawned);
@@ -269,6 +280,44 @@ namespace MphRead.Entities
 
     public partial class PlayerEntity
     {
+        // recomp (online match client, MphRecomp Net/RemoteSmoothing.cs, 2026-10-19): another seat placed on a pose blended
+        // between two of the host's snapshots (drawn a few frames in the past rather than snapped and run on), as NetApply's
+        // pose; its aim too. A seat not spawned here keeps its own until NetApply spawns it
+        public void NetSetPose(Vector3 position, Vector3 speed, Vector3 facing, Vector3 up, float yaw, float pitch)
+        {
+            if (!LoadFlags.TestFlag(LoadFlags.Spawned) || _health == 0)
+            {
+                return;
+            }
+            Vector3 prev = Position;
+            Position = position;
+            PrevPosition = position;
+            Speed = speed;
+            _facingVector = facing;
+            _upVector = up;
+            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, position);
+            HostRemoteYaw = yaw;
+            HostRemotePitch = pitch;
+        }
+
+        // online match client (2026-10-19): the local seat set onto the host's pose and speed outright, once the caller has
+        // judged it too far off (NetApply's own pose step, without the rest of NetApply). false = nothing to take yet
+        public bool NetSnapPose(in PlayerNetState s)
+        {
+            if ((s.Flags & PlayerNetState.Spawned) == 0 || !LoadFlags.TestFlag(LoadFlags.Spawned))
+            {
+                return false;
+            }
+            Vector3 prev = Position;
+            Position = s.Position;
+            PrevPosition = s.Position;
+            Speed = s.Speed;
+            _facingVector = s.Facing;
+            _upVector = s.Up;
+            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, s.Position);
+            return true;
+        }
+
         // online match client (O5 reconciliation, MphRecomp Net/ClientPrediction): moves the local player by part of the
         // error the host measured against this device's own prediction (and its speed by the speed error); nothing else
         public void NetCorrect(Vector3 delta, Vector3 speedDelta)
@@ -344,6 +393,13 @@ namespace MphRead.Entities
         public int HostLagRewind { get; set; }
         // shooter, target -> where the target stood shooter.HostLagRewind frames ago minus where it stands now; null = off
         public static Func<PlayerEntity, PlayerEntity, Vector3>? HostLagShift { get; set; }
+        // recomp host hook (set per match by MatchStart from MatchSettings.LagCompFix; older replays: off): a homing beam isn't
+        // shifted off its own target (it is placed on the target as it stands now), Weavel's turret's shots aren't shifted
+        // (it aims itself, on the host), and bombs, Sylux's Lockjaw lines and snare and the Trooper's drone laser are tested
+        // against where their player saw the target (contact attacks, the slash, lunge, spin and rocks, stay as they are: the
+        // bodies touch on the host or they don't). Only matters while
+        // HostLagShift is set (an online host's remote seats), so local matches are unchanged either way.
+        public static bool HostLagFix { get; set; }
 
         // a shot by `owner` (a player or Weavel's turret) is tested against `target` this far from where it stands now:
         // where that shooter saw it. Zero unless the host rewinds for that shooter.
@@ -353,7 +409,8 @@ namespace MphRead.Entities
             {
                 return Vector3.Zero;
             }
-            PlayerEntity? shooter = owner as PlayerEntity ?? (owner as HalfturretEntity)?.Owner;
+            // (recomp, HostLagFix: Weavel's turret aims at the targets as they stand on the host: its shots aren't shifted)
+            PlayerEntity? shooter = owner as PlayerEntity ?? (HostLagFix ? null : (owner as HalfturretEntity)?.Owner);
             return shooter != null && shooter.HostRemote && shooter.HostLagRewind > 0 && shooter != target
                 ? HostLagShift(shooter, target) : Vector3.Zero;
         }
@@ -568,6 +625,7 @@ namespace MphRead.Entities
             if (shooter != null && shooter != target && shooter.SlotIndex >= 0 && shooter.SlotIndex < NetBeamHits.Length)
             {
                 NetBeamHits[shooter.SlotIndex]++;
+                NetLogHitSeen(shooter, target); // recomp: the shot check (PlayerNetShots.cs)
             }
         }
     }

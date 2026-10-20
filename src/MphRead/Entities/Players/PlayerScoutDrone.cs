@@ -44,6 +44,24 @@ namespace MphRead.Entities
         // before it (format < 35: the turret's no headshots).
         public bool HostDroneBodyHeadshots { get; set; } = true;
         private bool _dronePadFall = false; // this pad flight's top is past (its sideways speed already cut)
+        // recomp host hook (MatchSettings.DroneSwitchRule, set per match by MatchStart; older replays: off), 2026-10-19:
+        // morphing over and over let the Trooper fly at the height he was at. Each split put his standing body at his feet
+        // and his drone collided with it (CheckPlayerCollision pushes every player out of a Weavel half, him too), so the
+        // drone stood on it, its fall stopped; the split and merge are instant (no Weavel flip), so a new body was under him
+        // every few frames. With the rule: his drone never collides with his own standing body, and after a split or a
+        // merge the next one waits DroneSwitchWait frames (Weavel's flip took longer than that anyway).
+        public bool HostDroneSwitchRule { get; set; }
+        // recomp host hook (MatchSettings.DroneBodySplash, set per match by MatchStart; older replays: off), 2026-10-19:
+        // splash reaches his standing body (BeamBodySplash.cs); off: MphRead's (a Halfturret never takes splash)
+        public bool HostDroneBodySplash { get; set; }
+        private const int DroneSwitchWait = 20;
+        private int _droneSwitchWait = 0;
+        private bool DroneSwitchWaiting => HostScoutDrone && HostDroneSwitchRule && _droneSwitchWait > 0;
+        private bool DroneIgnoresOwnBody => HostScoutDrone && HostDroneSwitchRule;
+        // recomp host hook (MatchSettings.DroneWaitsOnFoot, set per match by MatchStart; older replays: off), 2026-10-19:
+        // the drone's burst and laser waits only ran in ScoutDroneFire, which only runs in alt form, so they froze while he
+        // was on foot. With the rule they also count down on foot (ScoutDroneFootWaits).
+        public bool HostDroneWaitsOnFoot { get; set; }
 
         private const float _droneRiseSpeed = 0.1f; // Speed.Y while Jump is held (3 units/s)
         private const float _droneSinkSpeed = -0.06f; // Speed.Y when let go in the air
@@ -148,9 +166,10 @@ namespace MphRead.Entities
         // EnterAltForm, Weavel's split: the spawn flourish where the drone starts
         private void ScoutDroneSplit()
         {
+            if (HostDroneSwitchRule) _droneSwitchWait = DroneSwitchWait;
             int effectId = GameState.Multiplayer && PlayerCount > 2 && !Features.MaxPlayerDetail ? 33 : 31;
             _scene.SpawnEffect(effectId, Vector3.UnitX, Vector3.UnitY, Position);
-            PlayHunterSfx(HunterSfx.Spawn);
+            if (!HostOwnDroneSpawnSfx) PlayHunterSfx(HunterSfx.Spawn); // the app plays Prime's alert instead when imported
             DroneSplits++;
         }
 
@@ -167,6 +186,7 @@ namespace MphRead.Entities
         private void ScoutDroneMergeAtOnce()
         {
             Flags1 &= ~PlayerFlags1.Unmorphing;
+            if (HostDroneSwitchRule) _droneSwitchWait = DroneSwitchWait;
             if (_droneLaserFrame >= 0)
             {
                 ScoutDroneLaserEnd(); // merged mid-laser: as if it had ended
@@ -274,6 +294,24 @@ namespace MphRead.Entities
             float diff = Math.Clamp(target - Speed.Y, -accel, accel);
             Speed = Speed.AddY(diff);
             return true;
+        }
+
+        // Process, every frame: on foot (and alive), the drone's waits count down as they do in alt form (ScoutDroneFire);
+        // a merge already ended any burst or laser (ScoutDroneMergeAtOnce)
+        private void ScoutDroneFootWaits()
+        {
+            if (!HostScoutDrone || !HostDroneWaitsOnFoot || IsAltForm || _health == 0)
+            {
+                return;
+            }
+            if (_droneCooldown > 0 && _droneFireState == 0)
+            {
+                _droneCooldown--;
+            }
+            if (_droneLaserWait > 0 && _droneLaserFrame < 0)
+            {
+                _droneLaserWait--;
+            }
         }
 
         // ProcessAlt, in place of Weavel's lunge: the blaster burst (unfold, fire while held, fold, wait)

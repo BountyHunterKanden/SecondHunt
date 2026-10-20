@@ -668,7 +668,7 @@ internal sealed class CampaignSuit
             _lastModel = model;
             Begin(view, proj, model, _pal, _skel.Count);
             double s = Environment.TickCount64 / 1000.0;
-            if (moved) DrawFaded(alpha, s);
+            if (moved) DrawFaded(_body, alpha, s);
             if (own && p == 0 && _depthProg != 0)
             {
                 if (!rebuild) GLES30.GlColorMask(false, false, false, false);
@@ -926,11 +926,16 @@ internal sealed class CampaignSuit
     // the morph ball where MphRead's own ball is: its centre at the player's position + AltColYPos, as wide as MPH's
     // (2 x AltColRadius). HdBall.Placement rests the ball on y = 0, so it is dropped by its radius first.
     // (small on screen: no depth prepass; pass 4 is its depth only, as the body's)
-    public void DrawBall(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, bool flash = false)
+    // alpha = MphRead's own for the alt model (PlayerEntity.CurAlpha: the death fade, cloak); while it fades the opaque
+    // parts move to the Translucent pass, as the body's (DrawBodyAt)
+    public void DrawBall(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, bool flash = false, float alpha = 1f)
     {
         bool rebuild = pass == SuitPass.DepthRebuild;
         int p = rebuild ? 0 : (int)pass;
-        if (!HasBall || !Has(_ball, p) || !EnsureGl()) return;
+        bool fade = alpha < 0.999f && _fadeOk;
+        bool own = !(fade && p == 0);
+        bool moved = fade && p == 1;
+        if (!HasBall || alpha <= 0f || !(own && Has(_ball, p)) && !(moved && Has(_ball, 0)) || !EnsureGl()) return;
         try
         {
             Flash(flash && !rebuild, !rebuild);
@@ -945,12 +950,13 @@ internal sealed class CampaignSuit
                 * Matrix4.CreateTranslation(centre);
             Begin(view, proj, model, _ballPal, 2);
             double s = Environment.TickCount64 / 1000.0;
-            if (rebuild && _depthProg != 0)
+            if (moved) DrawFaded(_ball, alpha, s);
+            if (own && rebuild && _depthProg != 0)
             {
                 DrawDepth(_ball);
                 DrawPass(_ball, 0, 1f, s, DepthDone.Skip);
             }
-            else DrawPass(_ball, p, 1f, s);
+            else if (own) DrawPass(_ball, p, fade ? alpha : 1f, s);
         }
         catch (Exception ex)
         {
@@ -1098,18 +1104,18 @@ internal sealed class CampaignSuit
 
     // the opaque parts at alpha: depth only (ZERO, ONE; the depth program where it can), then the colour where that
     // depth is
-    void DrawFaded(float alpha, double seconds)
+    void DrawFaded(List<Batch> batches, float alpha, double seconds)
     {
         if (_depthProg != 0)
         {
             GLES30.GlColorMask(false, false, false, false);
-            DrawDepth(_body);
+            DrawDepth(batches);
             GLES30.GlColorMask(true, true, true, true);
         }
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlBlendFunc(GLES30.GlZero, GLES30.GlOne);
         GLES30.GlDepthMask(true);
-        foreach (Batch b in _body)
+        foreach (Batch b in batches)
         {
             if (b.Pass != 0 || _depthProg != 0 && b.DepthFirst) continue;
             Material(b, 1f, seconds);
@@ -1119,7 +1125,7 @@ internal sealed class CampaignSuit
         GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
         GLES30.GlDepthMask(false);
         GLES30.GlDepthFunc(GLES30.GlLequal);
-        foreach (Batch b in _body)
+        foreach (Batch b in batches)
         {
             if (b.Pass != 0) continue;
             Material(b, alpha, seconds);

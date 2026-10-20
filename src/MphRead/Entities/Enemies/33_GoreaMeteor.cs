@@ -97,6 +97,7 @@ namespace MphRead.Entities.Enemies
             if (_effect != null)
             {
                 _effect.Transform(_effectFacing, _effectUp, Position);
+                _effect.SetHostOwner(this); // recomp: carried with it (smooth frames)
             }
             UpdateRotation();
             CallStateProcess();

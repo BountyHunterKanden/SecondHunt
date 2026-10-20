@@ -388,7 +388,7 @@ namespace MphRead.Entities
                 }
                 else if (!_hostZoomTarget && HostZoomTargetReady)
                 {
-                    _hostZoomTarget = true;
+                    HostZoomTarget(true);
                 }
                 else
                 {
@@ -397,14 +397,21 @@ namespace MphRead.Entities
             }
             else if (EquipInfo.Zoomed && inPressed)
             {
-                if (HostZoomTargetReady) _hostZoomTarget = true;
+                if (HostZoomTargetReady && !_hostZoomTarget) HostZoomTarget(true);
             }
             else if (EquipInfo.Zoomed && outPressed)
             {
-                if (_hostZoomTarget) _hostZoomTarget = false;
+                if (_hostZoomTarget) HostZoomTarget(false);
                 else UpdateZoom(false);
             }
             if (!EquipInfo.Zoomed) _hostZoomTarget = false;
+        }
+
+        // the target zoom on or off, with the zoom's own in / out sound (2026-10-19; sound only, the main player's)
+        private void HostZoomTarget(bool on)
+        {
+            _hostZoomTarget = on;
+            if (IsMainPlayer) _soundSource.PlayFreeSfx(on ? SfxId.SNIPER_ZOOM_IN : SfxId.SNIPER_ZOOM_OUT);
         }
 
         // recomp: zoomed, vanilla would zoom past the first zoom now (a target in its cone, far enough away): ZOOM STEP's target
@@ -1015,7 +1022,7 @@ namespace MphRead.Entities
                                 float target = ZoomTargetHalfFov(zoomFov); // (recomp: the game's target check, moved there)
                                 if (_hostZoomStep && target >= zoomFov)
                                 {
-                                    _hostZoomTarget = false; // recomp: the target left the cone: back to the first zoom
+                                    HostZoomTarget(false); // recomp: the target left the cone: back to the first zoom
                                 }
                                 zoomFov = target;
                             }
@@ -1185,10 +1192,12 @@ namespace MphRead.Entities
                 || !pressed && _timeSinceShot < _autofireCooldown)
                 && (!IsBot || !AiData.Flags2.TestFlag(AiFlags2.Bit20)))
             {
+                NetCountShot(NetShotCooldown, pressed); // recomp: network play's shot report (PlayerNetShots.cs)
                 return false;
             }
             if (GunAnimation == GunAnimation.UpDown)
             {
+                NetCountShot(NetShotGunLowered, pressed);
                 return false;
             }
             Vector3 shotVec = _aimPosition - _muzzlePos;
@@ -1219,13 +1228,17 @@ namespace MphRead.Entities
             {
                 flags |= BeamSpawnFlags.PrimeHunter;
             }
+            _hitClaimFiring = true; // recomp: the beams spawned here are this shot's (PlayerHitClaims.cs)
             BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, _muzzlePos, shotVec, flags, NodeRef, _scene);
+            _hitClaimFiring = false;
             if (result == BeamResultFlags.NoSpawn)
             {
                 EquipInfo.Weapon = curWeapon;
                 PlayBeamEmptySfx(EquipInfo.Weapon.Beam);
+                NetCountShot(NetShotNoSpawn, pressed);
                 return false;
             }
+            NetCountShot(-1, pressed, _muzzlePos, shotVec);
             // todo: update license stats
             _timeSinceShot = 0;
             OnPirateBlasterShot(curWeapon); // recomp: the Pirate Blaster's burst (PlayerPirateBlaster.cs)

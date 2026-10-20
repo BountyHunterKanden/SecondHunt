@@ -68,7 +68,7 @@ internal sealed partial class CampaignRenderer
             return false;
         }
         Scene scene = _host.Scene;
-        Matrix4 view = scene.ViewMatrix, proj = scene.PerspectiveMatrix;
+        Matrix4 view = GunView(scene), proj = scene.PerspectiveMatrix; // the cannon is placed at the step (smooth frames)
         Vector4 v = new Vector4(_cannonModel.Row3.Xyz, 1) * view;
         Vector4 g = v * GunProjection(scene), c = v * proj;
         if (g.W <= 1e-5f || c.W <= 1e-5f) return false;

@@ -142,7 +142,8 @@ internal sealed partial class CampaignRenderer
             foreach (PlayerEntity p in _fbSeats.Keys)
             {
                 if (!p.DroneLaserOn) continue;
-                Vector3 from = p.DroneLaserOrigin, to = p.DroneLaserEnd;
+                // the start carried with the seat (smooth frames, SmoothCarry), the end stays on what it hits
+                Vector3 from = Vector3.TransformPosition(p.DroneLaserOrigin, SmoothCarry(p, scene)), to = p.DroneLaserEnd;
                 Vector3 dir = to - from;
                 if (dir.LengthSquared < 1e-6f) continue;
                 dir.Normalize();
@@ -164,13 +165,14 @@ internal sealed partial class CampaignRenderer
             foreach ((PlayerEntity p, DroneFallbackSeat seat) in _fbSeats)
             {
                 float t = (_host.Scene.FrameCount % 100000) * 0.9f + p.SlotIndex * 1.7f;
+                Matrix4 carry = SmoothCarry(p, scene);
                 if (p.DroneLaserOn)
                 {
                     Vector3 at = p.DroneLaserEnd + p.DroneLaserNormal * 0.03f;
                     float flick = 0.85f + 0.15f * MathF.Sin(t) * MathF.Sin(t * 2.3f);
                     Glow(ref n, vp, right, up, at, 0.55f * flick, new Vector4(1, 0.35f, 0.12f, 0.75f));
                     Glow(ref n, vp, right, up, at, 0.22f * flick, new Vector4(1, 0.95f, 0.85f, 1));
-                    Glow(ref n, vp, right, up, p.DroneLaserOrigin, 0.18f * flick, new Vector4(1, 0.6f, 0.5f, 0.8f));
+                    Glow(ref n, vp, right, up, Vector3.TransformPosition(p.DroneLaserOrigin, carry), 0.18f * flick, new Vector4(1, 0.6f, 0.5f, 0.8f));
                 }
                 int state = p.DroneFireState;
                 if (state is 1 or 2 && p.DroneLaserFrame < 0)
@@ -184,7 +186,7 @@ internal sealed partial class CampaignRenderer
                     side = side.LengthSquared > 1e-6f ? side.Normalized() : right;
                     foreach (float s in new[] { -1f, 1f })
                     {
-                        Vector3 gun = p.DroneDrawCenter + aim * DroneGunAhead + side * (s * DroneGunSide);
+                        Vector3 gun = Vector3.TransformPosition(p.DroneDrawCenter + aim * DroneGunAhead + side * (s * DroneGunSide), carry);
                         Glow(ref n, vp, right, up, gun, 0.34f * grow * pulse, new Vector4(1, 0.85f, 0.45f, 0.6f * a));
                         Glow(ref n, vp, right, up, gun, 0.12f * grow * pulse, new Vector4(1, 1, 0.9f, 0.95f * a));
                     }

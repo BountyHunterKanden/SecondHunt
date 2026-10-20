@@ -268,7 +268,8 @@ internal sealed class DesktopInput
     }
 
     // a replay's bar (MatchReplay.cs) from the keyboard: Enter A (press the picked button), Space X (pause / play),
-    // Q / E L1 / R1 (10 s back / forward), Z / C L2 / R2 (slower / faster), Y the camera; the arrows are the D-pad
+    // Q / E L1 / R1 (10 s back / forward), Z / C L2 / R2 (slower / faster), Y the camera, H B (hide the bar and HUD);
+    // the arrows are the D-pad
     static PadButton? ReplayKey(CampaignRenderer game, Keys key) => !game.ReplayPlaying ? null : key switch
     {
         Keys.Enter or Keys.KeyPadEnter => PadButton.A,
@@ -278,6 +279,7 @@ internal sealed class DesktopInput
         Keys.Z => PadButton.L2,
         Keys.C => PadButton.R2,
         Keys.Y => PadButton.Y,
+        Keys.H => PadButton.B,
         _ => null,
     };
 

@@ -266,6 +266,7 @@ namespace MphRecomp.Import.Retro
                 envLen = len;
             }
 
+            var loops = new Dictionary<int, int>();
             Span<byte> s8 = stackalloc byte[8];
             for (int c = 0; c + 8 <= cmds.Length; c += 8)
             {
@@ -299,6 +300,20 @@ namespace MphRecomp.Import.Retro
                         }
                         r.Steps.Add($"wait {wait * 1000 / rate} ms{(sampleEnd ? " (or the sample's end)" : "")}");
                         Advance(wait);
+                        break;
+                    }
+                    case 0x05: // Loop [count u16, step u16]: jump back to command `step`, count times
+                    {
+                        int step5 = s8[4] | s8[5] << 8;
+                        loops.TryGetValue(c, out int left);
+                        if (left == 0 && !loops.ContainsKey(c)) left = u16b;
+                        if (left > 0)
+                        {
+                            loops[c] = left - 1;
+                            r.Steps.Add($"loop to {step5} ({left} left)");
+                            c = step5 * 8 - 8;
+                        }
+                        else loops.Remove(c);
                         break;
                     }
                     case 0x0D: // ScaleVolume [scale, add, table u16, original]

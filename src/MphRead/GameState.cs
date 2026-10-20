@@ -1641,6 +1641,9 @@ namespace MphRead
                 Suicides[i] = 0;
                 FriendlyKills[i] = 0;
                 HeadshotKills[i] = 0;
+                // a streak only ended on death or a teammate kill, so the last match's run carried into the next
+                // match's first kills ("5 in a row" on a first kill)
+                KillStreak[i] = 0;
                 OctolithScores[i] = 0;
                 OctolithDrops[i] = 0;
                 OctolithStops[i] = 0;

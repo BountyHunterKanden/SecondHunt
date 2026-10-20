@@ -9,6 +9,8 @@ namespace MphRecomp.Replay
     // Where the app keeps replays, beside the player's other files (docs/REPLAY_MODE.md R2):
     //   <data>/replays/          the last KeepRecent matches, saved as they end; the oldest goes when a new one comes
     //   <data>/replays/pinned/   the ones the player chose to keep (never removed by the app)
+    //   <data>/replays/shared/   the ones that came from someone else (a friend's shared replay, a file opened with or shared
+    //                            to the app: 2026-10-19); kept until deleted, never pushed out by the last ten
     // Names sort by time: "20261007-131502 Battle Combat Hall.mphreplay".
     public static class ReplayLibrary
     {
@@ -17,6 +19,7 @@ namespace MphRecomp.Replay
 
         public static string RecentDir(string dataDir) => Path.Combine(dataDir, "replays");
         public static string PinnedDir(string dataDir) => Path.Combine(dataDir, "replays", "pinned");
+        public static string SharedDir(string dataDir) => Path.Combine(dataDir, "replays", "shared");
 
         // Writes the replay (to a temporary name first, so a crash mid-write never leaves a cut file under the real
         // name), then drops the oldest unpinned ones past KeepRecent. Returns the new file's path.
@@ -57,6 +60,27 @@ namespace MphRecomp.Replay
         // newest first
         public static IReadOnlyList<string> Recent(string dataDir) => Files(RecentDir(dataDir));
         public static IReadOnlyList<string> Pinned(string dataDir) => Files(PinnedDir(dataDir));
+        public static IReadOnlyList<string> Shared(string dataDir) => Files(SharedDir(dataDir));
+
+        // a replay from someone else into shared/: throws InvalidDataException for anything that isn't an intact replay this
+        // build reads (its message says why); named "<now> <mode> <arena> from <who>"; returns the saved file's path
+        public static string SaveShared(string dataDir, byte[] bytes, string from)
+        {
+            ReplayFile.Read(new MemoryStream(bytes)); // (checked whole; the bytes are kept as they came)
+            // (named without the arena table: the app may have been started just to take the file, its game files not read yet)
+            ReplayFile header = ReplayFile.ReadHeader(new MemoryStream(bytes), out _);
+            string dir = SharedDir(dataDir);
+            Directory.CreateDirectory(dir);
+            string name = $"{DateTime.Now:yyyyMMdd-HHmmss} " + Clean($"{header.Settings.Mode} {header.Settings.Arena.ToLowerInvariant()} from {from}");
+            string path = Path.Combine(dir, name + Extension);
+            for (int i = 2; File.Exists(path); i++) path = Path.Combine(dir, $"{name} ({i}){Extension}");
+            File.WriteAllBytes(path + ".tmp", bytes);
+            File.Move(path + ".tmp", path);
+            return path;
+        }
+
+        public static bool IsShared(string dataDir, string path) =>
+            string.Equals(Path.GetFullPath(Path.GetDirectoryName(path)!), Path.GetFullPath(SharedDir(dataDir)), StringComparison.Ordinal);
 
         // the most recently saved replay, pinned or not (null = none yet)
         public static string? Newest(string dataDir)
@@ -87,7 +111,8 @@ namespace MphRecomp.Replay
 
         // ---- the REPLAYS list (docs/REPLAY_MODE.md R3): what the multiplayer menu's REPLAYS page shows and does ----
 
-        // Every replay, newest first, pinned and recent together, read from the files' headers (cheap: no steps).
+        // Every replay, newest first, pinned, recent and shared together (a shared one says so: ReplayInfo.Shared), read from the
+        // files' headers (cheap: no steps).
         // Refused: why it can't play exactly on this build and device (the same checks playback makes up front:
         // game logic version, bot vision, the arena present, the arena's files the same) -- null = it plays here.
         public static IReadOnlyList<ReplayInfo> List(string dataDir)
@@ -96,6 +121,10 @@ namespace MphRecomp.Replay
             foreach ((string path, bool pinned) in Recent(dataDir).Select(p => (p, false)).Concat(Pinned(dataDir).Select(p => (p, true))))
             {
                 list.Add(Describe(path, pinned));
+            }
+            foreach (string path in Shared(dataDir))
+            {
+                list.Add(Describe(path, pinned: false) with { Shared = true });
             }
             return list.OrderByDescending(i => Path.GetFileName(i.Path), StringComparer.Ordinal).ToList();
         }
@@ -186,6 +215,8 @@ namespace MphRecomp.Replay
         string? Refused)
     {
         public bool PlaysHere => Refused == null;
+        // from someone else (replays/shared/: a friend's shared replay, or a file opened with or shared to the app)
+        public bool Shared { get; init; }
         public bool Complete => Header?.Complete == true;
         public int Seconds => Steps / 60;
         public MphRead.GameMode? Mode => Header?.Settings.Mode;

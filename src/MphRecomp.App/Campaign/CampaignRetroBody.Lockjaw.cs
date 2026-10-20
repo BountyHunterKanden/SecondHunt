@@ -19,15 +19,16 @@ internal sealed partial class CampaignRetroBody
         if (LogClips && a.Playing != was) Log.Info(Tag, $"body {Id}: seat {p.SlotIndex} lockjaw: {a.Playing}");
     }
 
-    // its orb's place (BeyondLockjaw.Core) when the opaque pass drew it, else null
-    public Vector3? DrawLockjaw(PlayerEntity p, Matrix4 view, Matrix4 proj, SuitPass pass, bool flash)
+    // its orb's place (BeyondLockjaw.Core) when the opaque pass drew it, else null; alpha as DrawBody's (CurAlpha: the death
+    // fade, cloak)
+    public Vector3? DrawLockjaw(PlayerEntity p, Matrix4 view, Matrix4 proj, SuitPass pass, bool flash, float alpha)
     {
         if (!_lockjaws.TryGetValue(p, out BeyondLockjaw.Animator? a)) return null;
         // its middle on the alt form's collision sphere's centre (Sylux's: his position), where vanilla Lockjaw draws
         Vector3 centre = p.Position;
         centre.Y += MphRead.Fixed.ToFloat(p.Values.AltColYPos);
         Matrix4 model = BeyondLockjaw.ModelMatrix(Body, centre, p.HostAltTurn);
-        Draw(a.Clips, null, model, view, proj, pass, 1f, flash);
-        return pass == SuitPass.Opaque && !Failed ? BeyondLockjaw.Core(Body, model) : null;
+        Draw(a.Clips, null, model, view, proj, pass, alpha, flash);
+        return pass == SuitPass.Opaque && !Failed && alpha > 0 ? BeyondLockjaw.Core(Body, model) : null;
     }
 }

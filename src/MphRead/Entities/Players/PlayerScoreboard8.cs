@@ -89,6 +89,10 @@ namespace MphRead.Entities
                 : Strings.GetHudMessage(220); // kills
             DrawText2D(160, posY, Align.Center, 0, header1, new ColorRgba(0x3FEF), fontSpacing: 8);
             DrawText2D(215, posY, Align.Center, 0, header2, new ColorRgba(0x3FEF), fontSpacing: 8);
+            if (AnySeatPing())
+            {
+                DrawText2D(252, posY, Align.Right, 0, "ms", new ColorRgba(0x3FEF), fontSpacing: 8); // recomp: online ping column
+            }
             posY += _scoreStartSpace;
             string teamText = Strings.GetHudMessage(222); // team
             int curTeam = -1;
@@ -133,6 +137,7 @@ namespace MphRead.Entities
                 _scene.DrawHudObject(_starsInst, mode: 2);
                 DrawText2D(160, posY + 4, Align.Center, 0, value1, color, fontSpacing: 8);
                 DrawText2D(215, posY + 4, Align.Center, 0, value2, color, fontSpacing: 8);
+                DrawScoreboardPing(slot, 252, posY + 4); // recomp: online (PlayerScoreboardPing.cs)
                 posY += _score8RowSpace;
             }
         }

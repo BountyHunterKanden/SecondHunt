@@ -329,6 +329,9 @@ namespace MphRead.Entities
             {
                 targetPos = player.Position.AddY(Fixed.ToFloat(player.Values.MinPickupHeight));
             }
+            // recomp (PlayerEntity.HostLagFix): an online host tests the lines and the snare where the bomber saw this player
+            Vector3 lag = PlayerEntity.HostLagFix ? PlayerEntity.NetLagShift(Owner, player) : Vector3.Zero;
+            targetPos += lag;
             float cylHeight = Fixed.ToFloat(player.Values.MaxPickupHeight) - Fixed.ToFloat(player.Values.MinPickupHeight);
             CollisionResult discard = default;
             bool lineHitPlayer = false;
@@ -406,7 +409,7 @@ namespace MphRead.Entities
             else if (Owner.SyluxBombCount == 3)
             {
                 Debug.Assert(BombIndex == 0);
-                if (LockjawCheckSnare(player.Position))
+                if (LockjawCheckSnare(player.Position + lag))
                 {
                     // player in snare
                     hitEntity = player;

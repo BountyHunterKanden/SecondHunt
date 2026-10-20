@@ -11,11 +11,14 @@ using MphRecomp.Replay;
 // REPLAYS (Replay mode, docs/REPLAY_MODE.md R3; owner 2026-10-08): the vanilla multiplayer menu's REPLAYS button (RIVAL
 // RADAR's corner, MultiplayerMenu call 93) opens a list in the multiplayer setup screens' look, made from their pieces
 // (owner's pick: mockup A, length beside the result and PLAY after the date; no side panels, the width used instead;
-// "record replays" as a setting in the corner opposite back). Three replays a page, newest first, L / R page: each row
+// "record replays" as a setting in the corner opposite back). Tabs over it as the settings screen's (2026-10-19: MY
+// REPLAYS, FAVORITES, SHARED WITH ME; touch or L1 / R1), three replays a page, newest first, the D-pad on past the last
+// row to the next page (the page's n/m and arrows at the bottom): each row
 // shows the four hunters (SELECT HUNTER's round icons, seats 1-4, the player who recorded it ringed), the mode, a medal
 // with WIN / LOSS, the length, the date, a PLAY button (the lobby's START GAME pill) and the arena's picture far right,
 // popping out of the row; a favorite has HUNTER LICENSE's gold star on its mode line. A row opens its details page: the
-// picture, date, length, result, PLAY, FAVORITE (kept past the last ten), RENAME, DELETE and the four players.
+// picture, date, length, result, PLAY, EXPORT (the file to another app: 2026-10-19, was SHARE), FAVORITE (kept past the last ten),
+// RENAME, DELETE and the four players.
 // A network match's replay (O10, Replays track) names its players: NAME on the row over the foot of each opponent's icon,
 // NAME#tag on the details page, where a player who carries a friend code is tappable: their HUNTER LICENSE as it was
 // (RecompMenus.ReplayLicense.cs).
@@ -32,7 +35,8 @@ namespace MphRecomp.Frontend
         // the two pages (appended; -1 = not installed): static for MenuLayout.For, as MultiplayerMenu's card and keypad
         private static int s_listPage = -1, s_detailPage = -1;
         public static bool IsReplaysPage(MenuPage page) => page.Index >= 0
-            && (page.Index == s_listPage || page.Index == s_detailPage || page.Index == s_replayLicensePage);
+            && (page.Index == s_listPage || page.Index == s_detailPage || page.Index == s_replayLicensePage
+                || page.Index == s_sharePickPage);
 
         private IReadOnlyList<ReplayInfo> _replays = Array.Empty<ReplayInfo>();
         private string? _replayOpen; // the replay on the details page (its path)
@@ -42,6 +46,8 @@ namespace MphRecomp.Frontend
 
         // watch a replay (FrontendSession: FrontendRequestKind.PlayReplay, Arg = the path); null = nothing plays it here
         public Action<string>? PlayReplay { get; set; }
+        // EXPORT: the replay file out of the app (FrontendRequestKind.ShareReplay, Arg = the path); null = not on this host
+        public Action<string>? ShareReplay { get; set; }
 
         // the game's name keyboard for RENAME (MultiplayerMenu.EditText: start text, most letters, the page it comes back
         // to, done = the new text or null = cancelled); null = not yet
@@ -51,9 +57,11 @@ namespace MphRecomp.Frontend
         // our callbacks (RecompMenus takes every call >= 1000; ReplayCall answers these before its rows pages' dispatch)
         private const int ReplayRowCall = 2100, ReplayPlayCall = 2110, ReplayRowDeleteCall = 2120; // + the row
         private const int ReplayPrevCall = 2130, ReplayNextCall = 2131, ReplayRecordCall = 2132, ReplayDeleteFocusedCall = 2133;
-        private const int ReplayWatchCall = 2140, ReplayFavoriteCall = 2141, ReplayRenameCall = 2142, ReplayDeleteCall = 2143;
+        private const int ReplayUpCall = 2134, ReplayDownCall = 2135;
+        private const int ReplayWatchCall = 2140, ReplayFavoriteCall = 2141, ReplayRenameCall = 2142, ReplayDeleteCall = 2143,
+            ReplayShareCall = 2144;
         private const int ReplaySeatCall = 2150; // + the seat (the details page's players); 2154-2159: RecompMenus.ReplayLicense.cs
-        private const int ReplayLastCall = 2159;
+        private const int ReplayLastCall = 2199; // 2160-2199: RecompMenus.ReplayShare.cs
         private const int ReplayRows = 3;
 
         // ---- geometry (menu units, Y up, the touch screen's space widened; MenuLayout.Replays shows x -60..316) ----
@@ -67,6 +75,7 @@ namespace MphRecomp.Frontend
         private const float MapX = 237.5f, MapW = 64.2f, MapH = 40.4f, MapFrame = 1.2f;
         // the title's page arrows (the setup's option arrows), fixed beside "replays 10/10"
         private const float ArrowW = 9.8f, ArrowH = 12.4f, ArrowGap = 62, ArrowTop = -9.8f;
+        private const float PageArrowGap = 30, PageIndicatorTop = -173f; // the list's page n/m, bottom centre
         // record replays, in the bottom-right corner (MenuLayout.Replays' corner region, x 330..462 y -200..-182)
         private const float RecordBoxX0 = 424, RecordBoxX1 = 458, RecordTop = -185, RecordBottom = -198, RecordLabelX = 419;
         // the details page
@@ -74,6 +83,8 @@ namespace MphRecomp.Frontend
         private const float FactsX = 111.8f, FactsRight = 297.7f, FactsTop = -36.6f, FactsPitch = 12.5f;
         private const float BigPillTop = -77, BigPillW = 113.1f, BigPillH = 22.6f;
         private const float ButtonTop = -108.1f, ButtonW = 58.6f, ButtonH = 13.3f, ButtonPitch = 61.6f;
+        // EXPORT: a button's size beside PLAY, at the facts' right edge, level with the pill's middle
+        private const float ShareX0 = FactsRight - ButtonW, ShareTop = BigPillTop - (BigPillH - ButtonH) / 2;
         private const float PlayerX0 = -39.7f, PlayerPitch = 86.9f, PlayerTop = -133.6f, PlayerIcon = 30.3f;
 
         // the game's text colours: the title (page 60's), orange labels (CREATE GAME's), pale ("HUNTER"), white, and the
@@ -84,7 +95,7 @@ namespace MphRecomp.Frontend
         // items on the list page / the details page (-1 = none)
         private int _lPanel = -1, _lBack = -1, _lTitle = -1, _lPrev = -1, _lNext = -1, _lRecord = -1;
         private readonly int[] _lRow = { -1, -1, -1 }, _lPlay = { -1, -1, -1 };
-        private int _dPanel = -1, _dBack = -1, _dTitle = -1, _dPlay = -1, _dFavorite = -1, _dRename = -1, _dDelete = -1;
+        private int _dPanel = -1, _dBack = -1, _dTitle = -1, _dPlay = -1, _dFavorite = -1, _dRename = -1, _dDelete = -1, _dShare = -1;
         private readonly int[] _dSeat = { -1, -1, -1, -1 };
         // the ROM items whose sounds ours borrow (-1 = not found): CREATE OR JOIN's back arrow, the main menu's adventure
         // highlight (opening a replay sounds like choosing the campaign), a file select file (PLAY sounds like starting it),
@@ -187,14 +198,14 @@ namespace MphRecomp.Frontend
 
             // ---- the list ----
             // X deletes the focused row's replay: a page action, so it makes no row sound (a row's borrowed sound plays for
-            // any of its actions)
-            MenuPage list = AddFramePage(MultiplayerMenu.TypePage, Call(MenuKeys.R, ReplayNextCall), Call(MenuKeys.L, ReplayPrevCall),
-                Call(MenuKeys.X, ReplayDeleteFocusedCall));
+            // any of its actions). L1 / R1 the tabs; up / down page actions so the D-pad goes on past a page's last row
+            MenuPage list = AddFramePage(MultiplayerMenu.TypePage, Call(MenuKeys.R, ReplayTabNextCall), Call(MenuKeys.L, ReplayTabPrevCall),
+                Call(MenuKeys.X, ReplayDeleteFocusedCall), Call(MenuKeys.Up, ReplayUpCall), Call(MenuKeys.Down, ReplayDownCall));
             s_listPage = list.Index;
             _lPanel = list.AddItem(i => Clone(panel, i, PanelDx, 0, stretchX: PanelStretchX, stretchDown: PanelStretchDown)).Index;
             list.AddItem(i => Clone(backIcon, i, 0, 0));
             _lBack = list.AddItem(i => Clone(backButton, i, 0, 0, actions: backButton.Actions.Select(a => WithTarget(a, MultiplayerMenu.TypePage)).ToList())).Index;
-            _listTitleString = _strings.Add("REPLAYS");
+            _listTitleString = _strings.Add(""); // (the tabs are drawn where the title was)
             _lTitle = list.AddItem(i => Clone(title, i, 0, 0, stringId: _listTitleString)).Index;
             for (int r = 0; r < ReplayRows; r++)
             {
@@ -209,8 +220,8 @@ namespace MphRecomp.Frontend
                 // after the rows, so a tap on the pill is the pill's (the engine tries the last items first)
                 _lPlay[r] = list.AddItem(i => Input(i, x0, y0, x1, y1, ReplayPlayCall + row, secondTap: true)).Index;
             }
-            _lPrev = list.AddItem(i => Touch(i, 128 - ArrowGap - ArrowW - 4, ArrowTop + 4, 128 - ArrowGap + 4, ArrowTop - ArrowH - 4, ReplayPrevCall)).Index;
-            _lNext = list.AddItem(i => Touch(i, 128 + ArrowGap - 4, ArrowTop + 4, 128 + ArrowGap + ArrowW + 4, ArrowTop - ArrowH - 4, ReplayNextCall)).Index;
+            _lPrev = list.AddItem(i => Touch(i, 128 - PageArrowGap - ArrowW - 4, PageIndicatorTop + 4, 128 - PageArrowGap + 4, PageIndicatorTop - ArrowH - 4, ReplayPrevCall)).Index;
+            _lNext = list.AddItem(i => Touch(i, 128 + PageArrowGap - 4, PageIndicatorTop + 4, 128 + PageArrowGap + ArrowW + 4, PageIndicatorTop - ArrowH - 4, ReplayNextCall)).Index;
             _lRecord = list.AddItem(i => Input(i, RecordLabelX - 76, RecordTop + 1, RecordBoxX1, RecordBottom - 1, ReplayRecordCall)).Index;
 
             // ---- one replay ----
@@ -231,6 +242,7 @@ namespace MphRecomp.Frontend
                 buttons[j] = detail.AddItem(i => Input(i, x0, ButtonTop, x0 + ButtonW, ButtonTop - ButtonH, call)).Index;
             }
             (_dFavorite, _dRename, _dDelete) = (buttons[0], buttons[1], buttons[2]);
+            _dShare = detail.AddItem(i => Input(i, ShareX0, ShareTop, ShareX0 + ButtonW, ShareTop - ButtonH, ReplayShareCall)).Index;
             // the players (a tap: their license as it was, when the replay carries who they are)
             for (int k = 0; k < _dSeat.Length; k++)
             {
@@ -241,6 +253,9 @@ namespace MphRecomp.Frontend
 
             // ---- a player's license as it was (RecompMenus.ReplayLicense.cs) ----
             InstallReplayLicense(AddFramePage, (i, x0, y0, x1, y1, call) => Input(i, x0, y0, x1, y1, call), panel, backIcon, backButton, title, detail.Index);
+            // ---- sharing: the SHARED view, SAVE, SEND TO FRIEND (RecompMenus.ReplayShare.cs) ----
+            InstallReplayShare(list, detail, AddFramePage, (i, x0, y0, x1, y1, call) => Input(i, x0, y0, x1, y1, call), Touch,
+                panel, backIcon, backButton, title);
 
             // the sounds' ROM items, found by what they do (each revision numbers its items its own way)
             _soundBack = backButton.Index;
@@ -273,6 +288,7 @@ namespace MphRecomp.Frontend
             Like(s_listPage, _lRecord, OptionBoxPage, _soundToggle);
             foreach (int seat in _dSeat) Like(s_detailPage, seat, MainMenuPage, _soundCampaign);
             ApplyReplayLicenseSounds(Like);
+            ApplyReplayShareSounds(Like);
         }
 
         private static (float X0, float Top, float X1, float Bottom) PillRect(int row)
@@ -296,24 +312,36 @@ namespace MphRecomp.Frontend
                 Console.Error.WriteLine("replays: folder unreadable (" + ex.Message + ")");
                 _replays = Array.Empty<ReplayInfo>();
             }
+            BuildListed();
         }
 
         private ReplayInfo? OpenInfo => _replays.FirstOrDefault(i => i.Path == _replayOpen);
 
-        private int ReplayPages => Math.Max(1, (_replays.Count + ReplayRows - 1) / ReplayRows);
+        private int ReplayPages => Math.Max(1, (_listed.Count + ReplayRows - 1) / ReplayRows);
 
         // RecompMenus.OnPageEntered: the folder read as the list comes in; the details page shows the replay open
         private void EnterReplays(MenuEngine menu, int page)
         {
-            if (page == s_listPage || page == s_detailPage || page == s_replayLicensePage) ApplyReplaySounds(menu.Sounds);
+            if (IsReplaysPageIndex(page))
+            {
+                ApplyReplaySounds(menu.Sounds);
+                _rpMenu = menu;
+            }
             if (page == s_listPage)
             {
                 if (_lastPage != s_detailPage) _replayOffset = 0;
                 ListReplays();
-                // back from a replay's page or from watching it: its page of the list, its row focused
-                int at = _replayOpen == null ? -1 : _replays.ToList().FindIndex(r => r.Path == _replayOpen);
+                // back from a replay's page or from watching it: its tab (MY REPLAYS unless it's a favorite opened from
+                // FAVORITES, or a friend's) and page of the list, its row focused; from elsewhere with none open, MY REPLAYS
+                ReplayInfo? open = OpenInfo;
+                if (open?.Shared == true) _replayTab = 2;
+                else if (open != null) { if (_replayTab != 1 || !open.Pinned) _replayTab = 0; }
+                else if (!IsReplaysPageIndex(_lastPage)) _replayTab = 0;
+                BuildListed();
+                _rpFetch = true;
+                int at = _replayOpen == null ? -1 : _listed.FindIndex(e => e.Info?.Path == _replayOpen);
                 if (at >= 0) _replayOffset = at / ReplayRows * ReplayRows;
-                if (_replayOffset >= _replays.Count) _replayOffset = 0;
+                if (_replayOffset >= _listed.Count) _replayOffset = 0;
                 ShowReplayRows(menu, at >= 0 ? at - _replayOffset : 0);
             }
             else if (page == s_detailPage)
@@ -327,12 +355,19 @@ namespace MphRecomp.Frontend
             {
                 EnterReplayLicense(menu);
             }
+            else if (page == s_sharePickPage)
+            {
+                EnterSharePick(menu);
+            }
         }
 
         // the list's items for the rows shown: rows past the end hidden, PLAY greyed where the replay can't play here
         private void ShowReplayRows(MenuEngine menu, int focus)
         {
-            int shown = Math.Max(0, Math.Min(ReplayRows, _replays.Count - _replayOffset));
+            int shown = Math.Max(0, Math.Min(ReplayRows, _listed.Count - _replayOffset));
+            // an offer's button focused (it stays so): no row focused as well
+            bool other = Enumerable.Range(0, shown).Any(r => _listed[_replayOffset + r].Offer != null
+                    && (menu.ItemState(_lGet[r]) == MenuState.Focused || menu.ItemState(_lDrop[r]) == MenuState.Focused));
             for (int r = 0; r < ReplayRows; r++)
             {
                 if (r >= shown)
@@ -341,12 +376,75 @@ namespace MphRecomp.Frontend
                     menu.SetState(_lPlay[r], MenuState.Hidden);
                     continue;
                 }
-                ReplayInfo info = _replays[_replayOffset + r];
-                menu.SetState(_lRow[r], r == Math.Clamp(focus, 0, shown - 1) ? MenuState.Focused : MenuState.Idle);
-                menu.SetState(_lPlay[r], info.PlaysHere ? MenuState.Idle : MenuState.State5);
+                ReplayInfo? info = _listed[_replayOffset + r].Info;
+                menu.SetState(_lRow[r], !other && r == Math.Clamp(focus, 0, shown - 1) ? MenuState.Focused : MenuState.Idle);
+                menu.SetState(_lPlay[r], info == null ? MenuState.Hidden : info.PlaysHere ? MenuState.Idle : MenuState.State5);
             }
-            if (shown == 0) menu.SetState(_lRecord, MenuState.Focused);
-            _strings.Set(_listTitleString, ReplayPages > 1 ? $"REPLAYS {_replayOffset / ReplayRows + 1}/{ReplayPages}" : "REPLAYS");
+            ShowShareRows(menu, shown);
+            if (shown == 0 && _replayTab == 0) menu.SetState(_lRecord, MenuState.Focused);
+        }
+
+        // D-pad up / down on the list (page actions: the page's own sound, the focus moved quietly): the same column a row
+        // up or down (the bar, PLAY, an offer's DOWNLOAD / DELETE), on past the last row to the next page and then RECORD
+        // REPLAYS (MY REPLAYS), back up likewise
+        private void ReplayStep(MenuEngine menu, bool down)
+        {
+            int shown = Math.Max(0, Math.Min(ReplayRows, _listed.Count - _replayOffset));
+            int focused = menu.FocusedItem(), row = -1, col = 0;
+            for (int r = 0; r < shown; r++)
+            {
+                if (focused == _lRow[r]) row = r;
+                else if (focused == _lPlay[r]) (row, col) = (r, 1);
+                else if (focused == _lGet[r]) (row, col) = (r, 2);
+                else if (focused == _lDrop[r]) (row, col) = (r, 3);
+            }
+            void Focus(int item)
+            {
+                if (focused != -1) menu.SetState(focused, MenuState.Idle);
+                menu.SetState(item, MenuState.Focused);
+                focused = item;
+            }
+            // row r's item in this column, else its bar
+            int Cell(int r, int c)
+            {
+                if (c == 1 && menu.ItemState(_lPlay[r]) == MenuState.Idle) return _lPlay[r];
+                if (c >= 2 && _listed[_replayOffset + r].Offer is ReplayOffer o && !_rpBusy.Contains(o.Id))
+                {
+                    int item = c == 2 ? _lGet[r] : _lDrop[r];
+                    if (menu.ItemState(item) != MenuState.Hidden) return item;
+                }
+                return _lRow[r];
+            }
+            // another page of rows, focused on the given row in this column
+            void Page(int offset, int r)
+            {
+                if (focused != -1) menu.SetState(focused, MenuState.Idle);
+                _replayOffset = offset;
+                ShowReplayRows(menu, r);
+                focused = menu.FocusedItem();
+                int at = Math.Min(r, Math.Min(ReplayRows, _listed.Count - _replayOffset) - 1);
+                if (at >= 0 && Cell(at, col) != focused) Focus(Cell(at, col));
+            }
+            if (focused == _lRecord && _replayTab == 0)
+            {
+                if (!down && shown > 0) Focus(_lRow[shown - 1]);
+            }
+            else if (row == -1)
+            {
+                if (shown > 0) Focus(_lRow[0]);
+                else if (_replayTab == 0) Focus(_lRecord);
+            }
+            else if (down)
+            {
+                if (row < shown - 1) Focus(Cell(row + 1, col));
+                else if (_replayOffset + ReplayRows < _listed.Count) Page(_replayOffset + ReplayRows, 0);
+                else if (_replayTab == 0) Focus(_lRecord);
+            }
+            else
+            {
+                if (row > 0) Focus(Cell(row - 1, col));
+                else if (_replayOffset > 0) Page(_replayOffset - ReplayRows, ReplayRows - 1);
+            }
         }
 
         private void ShowDetail(MenuEngine menu)
@@ -360,6 +458,9 @@ namespace MphRecomp.Frontend
             _strings.Set(_detailTitleString, DetailTitle(r).ToUpperInvariant());
             // nothing focused as it opens (owner 2026-10-08); the D-pad or A focuses PLAY first
             menu.SetState(_dPlay, r.PlaysHere ? MenuState.Idle : MenuState.State5);
+            // a friend's replay: no FAVORITE or RENAME (its sender's name goes there)
+            Show(menu, _dFavorite, !r.Shared);
+            Show(menu, _dRename, !r.Shared);
             for (int k = 0; k < _dSeat.Length; k++) Show(menu, _dSeat[k], LicenseOf(r, k) != null);
         }
 
@@ -375,6 +476,11 @@ namespace MphRecomp.Frontend
         private bool ReplayCall(MenuEngine menu, int call)
         {
             if (call < ReplayRowCall || call > ReplayLastCall) return false;
+            if (call >= ShareFirstCall)
+            {
+                ShareCall(menu, call);
+                return true;
+            }
             if (call >= ReplaySeatCall)
             {
                 ReplayLicenseCall(menu, call);
@@ -386,6 +492,8 @@ namespace MphRecomp.Frontend
                 int focused = menu.FocusedItem();
                 int at = Array.IndexOf(_lRow, focused);
                 if (at < 0) at = Array.IndexOf(_lPlay, focused);
+                if (at < 0) at = Array.IndexOf(_lGet, focused);
+                if (at < 0) at = Array.IndexOf(_lDrop, focused);
                 if (at < 0) return true;
                 call = ReplayRowDeleteCall + at;
             }
@@ -393,8 +501,17 @@ namespace MphRecomp.Frontend
                 or >= ReplayRowDeleteCall and < ReplayRowDeleteCall + ReplayRows)
             {
                 int row = call % 10, at = _replayOffset + row;
-                if (at >= _replays.Count) return true;
-                ReplayInfo r = _replays[at];
+                if (at >= _listed.Count) return true;
+                if (_listed[at].Offer is ReplayOffer offer)
+                {
+                    // a friend's replay not yet here: the row downloads it, X deletes it
+                    _rpMenu = menu;
+                    if (_rpBusy.Contains(offer.Id) || call - row == ReplayPlayCall) return true;
+                    if (call - row == ReplayRowCall) Download(offer);
+                    else AskDrop(offer);
+                    return true;
+                }
+                ReplayInfo r = _listed[at].Info!;
                 _replayOpen = r.Path;
                 if (call - row == ReplayRowCall) menu.GoTo(s_detailPage);
                 else if (call - row == ReplayPlayCall) Watch(r);
@@ -412,6 +529,10 @@ namespace MphRecomp.Frontend
                     _replayOffset = (_replayOffset / ReplayRows + (call == ReplayNextCall ? 1 : pages - 1)) % pages * ReplayRows;
                     ShowReplayRows(menu, 0);
                 }
+                return true;
+            case ReplayUpCall:
+            case ReplayDownCall:
+                ReplayStep(menu, call == ReplayDownCall);
                 return true;
             case ReplayRecordCall:
                 _settings.RecordReplays = !_settings.RecordReplays;
@@ -433,6 +554,10 @@ namespace MphRecomp.Frontend
                 break;
             case ReplayDeleteCall:
                 AskDelete(open, backToList: true);
+                break;
+            case ReplayShareCall:
+                if (ShareReplay == null) Import.Popup?.Inform(FrontendSession.WorkInProgressText);
+                else ShareReplay(open.Path);
                 break;
             }
             return true;
@@ -461,10 +586,13 @@ namespace MphRecomp.Frontend
         private void TickReplays()
         {
             TickReplayLicense();
+            TickReplayShare();
             if (_launchPath == null || --_launchTicks > 0) return;
             string path = _launchPath;
             _launchPath = null;
             MultiplayerMenu.PendingReturn = ReplaysPage; // back to the list after it, on its row
+            // the REPLAYS pages' server connection isn't kept while it plays (back on the list connects again)
+            if (_client != null && !_connecting) CloseOnline();
             PlayReplay?.Invoke(path);
         }
 
@@ -551,10 +679,10 @@ namespace MphRecomp.Frontend
         // the list after a delete: the page stepped back when its last row went, the focus kept on a row
         private void ReshowReplayList()
         {
-            MenuEngine? menu = _stepMenu;
+            MenuEngine? menu = _rpMenu ?? _stepMenu;
             if (menu == null || menu.Page?.Index != s_listPage) return;
             int focus = Array.FindIndex(_lRow, i => menu.ItemState(i) == MenuState.Focused);
-            if (_replayOffset > 0 && _replayOffset >= _replays.Count) _replayOffset -= ReplayRows;
+            while (_replayOffset > 0 && _replayOffset >= _listed.Count) _replayOffset -= ReplayRows;
             ShowReplayRows(menu, focus < 0 ? 0 : focus);
         }
 
@@ -568,7 +696,8 @@ namespace MphRecomp.Frontend
         }
 
         // the recorder names a replay "<Mode> <arena>" (ReplayLibrary); anything else is the player's own name for it
-        private static bool Renamed(ReplayInfo r) => r.Header != null
+        // (a friend's: its file is named for who sent it, so it reads as mode and arena)
+        private static bool Renamed(ReplayInfo r) => r.Header != null && !r.Shared
             && !r.Title.Equals($"{r.Header.Settings.Mode} {r.Arena}", StringComparison.OrdinalIgnoreCase)
             && !r.Title.Equals($"{r.Header.Settings.Mode} {r.Header.Settings.Arena}", StringComparison.OrdinalIgnoreCase);
 
@@ -605,7 +734,7 @@ namespace MphRecomp.Frontend
             if (page == null || !IsReplaysPage(page)) return;
             _drawMenu = menu;
             _out = tris;
-            int panel = page.Index == s_listPage ? _lPanel : page.Index == s_detailPage ? _dPanel : _rlPanel;
+            int panel = page.Index == s_listPage ? _lPanel : page.Index == s_detailPage ? _dPanel : page.Index == s_sharePickPage ? _spPanel : _rlPanel;
             bool settled = menu.PendingPage == -1 && menu.ItemState(panel) == MenuState.Idle && menu.ItemCode(panel) == (int)MenuState.Idle;
             // the glows: lifted out of the engine's triangles, drawn again by Glow below in their place in the order
             var glows = new Dictionary<int, List<WidgetTri>>();
@@ -622,6 +751,7 @@ namespace MphRecomp.Frontend
             {
                 if (page.Index == s_listPage) DrawList(menu, glows);
                 else if (page.Index == s_detailPage) DrawDetail(menu, glows);
+                else if (page.Index == s_sharePickPage) DrawSharePick(glows);
                 else DrawReplayLicense(glows);
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or KeyNotFoundException)
@@ -633,10 +763,15 @@ namespace MphRecomp.Frontend
 
         private void DrawList(MenuEngine menu, Dictionary<int, List<WidgetTri>> glows)
         {
-            int shown = Math.Max(0, Math.Min(ReplayRows, _replays.Count - _replayOffset));
+            int shown = Math.Max(0, Math.Min(ReplayRows, _listed.Count - _replayOffset));
             for (int r = 0; r < shown; r++)
             {
-                ReplayInfo info = _replays[_replayOffset + r];
+                if (_listed[_replayOffset + r].Offer is ReplayOffer offer)
+                {
+                    DrawOffer(offer, r, glows);
+                    continue;
+                }
+                ReplayInfo info = _listed[_replayOffset + r].Info!;
                 int tag = _lRow[r];
                 float top = RowTop0 - RowPitch47 * r;
                 // the bar: the setup's value box (gameoptions box_type) stretched over a dark band
@@ -651,25 +786,29 @@ namespace MphRecomp.Frontend
                 if (info.Pinned) Star(ColumnRight - StarSize, top - 2.3f, StarSize, tag); // a favorite
                 Result(info, TextX, top - 13.3f, 9.7f, tag);
                 if (info.Header != null) Text(Length(info.Seconds), ColumnRight, top - 14.5f, 1, White, tag);
-                Text(Day(info.Recorded), TextX, top - 25.9f, 0, White, tag);
+                if (SharedWho(info) is string who) FitText("from " + who, TextX, top - 25.9f, 0, ColumnRight - PillW - 4 - TextX, White, tag);
+                else Text(Day(info.Recorded), TextX, top - 25.9f, 0, White, tag);
                 (float px0, float py0, float px1, float py1) = PillRect(r);
                 Pill(px0, py0, px1 - px0, py0 - py1, info.PlaysHere, _lPlay[r], glows);
                 // the arena, far right, out past the bar's end and over its edges
                 Picture(info, MapX, top + 2.2f, MapW, MapH, MapFrame, tag);
             }
-            if (shown == 0)
+            DrawReplayTabs(shown, ReplayPages > 1 ? 128 + PageArrowGap + ArrowW + 8 : 128, ReplayPages > 1 ? 0 : 2);
+            if (shown == 0 && _replayTab == 0)
             {
                 int tag = _lTitle;
-                Text(_replays.Count == 0 ? "no replays yet." : "", 128, -70, 2, White, tag);
+                Text(_listed.Count == 0 ? "no replays yet." : "", 128, -70, 2, White, tag);
                 Text(_settings.RecordReplays ? "play a match against bots: it is recorded here." : "turn on record replays below to keep your matches.",
                     128, -84, 2, Pale, tag);
             }
             if (ReplayPages > 1)
             {
-                Arrow(false, 128 - ArrowGap - ArrowW, ArrowTop, _lPrev);
-                Arrow(true, 128 + ArrowGap, ArrowTop, _lNext);
+                Arrow(false, 128 - PageArrowGap - ArrowW, PageIndicatorTop, _lPrev);
+                Arrow(true, 128 + PageArrowGap, PageIndicatorTop, _lNext);
+                Text($"{_replayOffset / ReplayRows + 1}/{ReplayPages}", 128, PageIndicatorTop - 2.2f, 2, White, _lTitle);
             }
-            // record replays (owner 2026-10-08: "a setting in the corner to turn replays on or off")
+            // record replays (2026-10-08: on / off in the corner); MY REPLAYS only
+            if (_replayTab != 0) return;
             Text("record replays", RecordLabelX, RecordTop - 2.5f, 1, Pale, _lRecord);
             Fill(RecordBoxX0, RecordTop, RecordBoxX1, RecordBottom, 0, 0, 0, 0.43f, _lRecord);
             Box(RecordBoxX0, RecordTop, RecordBoxX1, RecordBottom, _lRecord);
@@ -692,9 +831,14 @@ namespace MphRecomp.Frontend
             if (!r.PlaysHere) Text("can't play here", FactsRight, FactsTop - 2 * FactsPitch, 1, White, tag);
             else if (r.LocalPlace is int) Result(r, FactsRight - ResultWidth(r) - 10.9f - 2.4f, FactsTop - 2 * FactsPitch + 1.6f, 10.9f, tag);
             Pill(FactsX, BigPillTop, BigPillW, BigPillH, r.PlaysHere, _dPlay, glows);
+            Fill(ShareX0, ShareTop, ShareX0 + ButtonW, ShareTop - ButtonH, 0, 0, 0, 0.35f, _dShare);
+            Box(ShareX0, ShareTop, ShareX0 + ButtonW, ShareTop - ButtonH, _dShare);
+            Glow(glows, _dShare, ShareX0, ShareTop, ShareX0 + ButtonW, ShareTop - ButtonH, _dShare);
+            Text("export", ShareX0 + ButtonW / 2, ShareTop - 2.65f, 2, Orange, _dShare);
             string[] labels = { "favorite", "rename", "delete" };
             int[] items = { _dFavorite, _dRename, _dDelete };
-            for (int j = 0; j < 3; j++)
+            DrawDetailShare(r, glows);
+            for (int j = r.Shared ? 2 : 0; j < 3; j++)
             {
                 float x0 = FactsX + ButtonPitch * j;
                 Fill(x0, ButtonTop, x0 + ButtonW, ButtonTop - ButtonH, 0, 0, 0, 0.35f, items[j]);
@@ -818,9 +962,13 @@ namespace MphRecomp.Frontend
 
         // the arena's picture in an orange frame: the ROM's stage picture, an imported arena's own (thumb.png), or random's
         private void Picture(ReplayInfo r, float x, float top, float w, float h, float frame, int tag)
+            => Picture(r.Header?.Settings.Arena, x, top, w, h, frame, tag);
+
+        // (by the arena's name or in-game name: a shared replay's offer carries the in-game one)
+        private void Picture(string? arena, float x, float top, float w, float h, float frame, int tag)
         {
             Fill(x - frame, top + frame, x + w + frame, top - h - frame, FrameOrange.R, FrameOrange.G, FrameOrange.B, 1, tag);
-            RoomMetadata? meta = r.Header == null ? null : MatchArenas.Find(r.Header.Settings.Arena);
+            RoomMetadata? meta = string.IsNullOrEmpty(arena) ? null : MatchArenas.Find(arena);
             string? stage = meta == null ? null : MultiplayerMenu.StageModel(_stageFolder + "x", meta.Id);
             string? png = meta != null && stage == null ? MultiplayerMenu.ImportedPicture(meta.Id) : null;
             if (png != null)

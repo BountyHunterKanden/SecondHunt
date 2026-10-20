@@ -10,20 +10,25 @@ namespace MphRead
     // The relay's own delay= is on top. Keepalives (the relay ping) are the RelayTransport's and aren't touched.
     // lag=<ms> (the device test, external=1): a round trip added on this device only, half on its sends and half on what
     // it receives, so a phone joining a PC host over the live server sees that much more ping than its real one.
+    // burst=<ms> (2026-10-19, match B3H0BA: a phone on mobile data whose inputs reached the host in bunches): about
+    // once a second (at random) the link stalls for 1/2-1 of that, then lets everything held go together, in order.
     internal sealed class SimulatedLink : IDatagramTransport
     {
         private readonly IDatagramTransport _inner;
         private readonly float _loss;
         private readonly int _jitterMs;
         private readonly int _sendLagMs, _receiveLagMs;
+        private readonly int _burstMs;
+        private long _release;
         private readonly Random _random;
         private readonly object _lock = new();
         private readonly object _deliver = new();
         private DatagramHandler? _received;
         public int Dropped, Sent;
 
-        public SimulatedLink(IDatagramTransport inner, float loss, int jitterMs, int seed, int lagMs = 0)
+        public SimulatedLink(IDatagramTransport inner, float loss, int jitterMs, int seed, int lagMs = 0, int burstMs = 0)
         {
+            _burstMs = burstMs;
             _inner = inner;
             _loss = loss;
             _jitterMs = jitterMs;
@@ -94,6 +99,15 @@ namespace MphRead
                     return;
                 }
                 wait = _sendLagMs + (_jitterMs > 0 ? _random.Next(_jitterMs + 1) : 0);
+                if (_burstMs > 0)
+                {
+                    long now = Environment.TickCount64;
+                    if (now >= _release && _random.Next(60) == 0)
+                    {
+                        _release = now + _burstMs / 2 + _random.Next(_burstMs / 2 + 1);
+                    }
+                    wait += (int)Math.Max(0, _release - now);
+                }
             }
             byte[] copy = payload.ToArray();
             if (wait == 0)

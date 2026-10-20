@@ -9,7 +9,8 @@ namespace MphRead.Entities
 {
     // recomp: the Pirate Blaster on the player (Metadata/PirateBlaster.cs; owner 2026-10-09). A shot is a 3-bolt burst:
     // TryFireWeapon fires bolt 1 (it pays the burst's 5 UA and starts the 20-frame cooldown), then UpdatePirateBlasterBurst
-    // fires bolts 2 and 3 BurstGap frames apart, each aimed fresh. The burst stops on death, morphing, a weapon switch or
+    // fires bolts 2 and 3 BurstGap frames apart, each aimed fresh (with PirateBlaster.HostBoltCost each pays 5 UA as well,
+    // and the burst ends when the UA runs out). The burst stops on death, morphing, a weapon switch or
     // being grabbed. Sim only (replays and network matches run it the same everywhere).
     public partial class PlayerEntity
     {
@@ -88,7 +89,14 @@ namespace MphRead.Entities
             shotVec = shotVec.Normalized();
             WeaponInfo curWeapon = EquipInfo.Weapon;
             bool affinity = IsPrimeHunter || curWeapon == PirateBlaster.WeaponMPAffinity;
-            EquipInfo.Weapon = affinity ? PirateBlaster.BoltMPAffinity : PirateBlaster.BoltMP;
+            if (PirateBlaster.HostBoltCost)
+            {
+                EquipInfo.Weapon = affinity ? PirateBlaster.WeaponMPAffinity : PirateBlaster.WeaponMP; // pays its own shot
+            }
+            else
+            {
+                EquipInfo.Weapon = affinity ? PirateBlaster.BoltMPAffinity : PirateBlaster.BoltMP;
+            }
             BeamSpawnFlags flags = BeamSpawnFlags.NoMuzzle;
             if (_doubleDmgTimer > 0)
             {
@@ -103,6 +111,10 @@ namespace MphRead.Entities
             _burstShots++;
             if (result == BeamResultFlags.NoSpawn)
             {
+                if (PirateBlaster.HostBoltCost)
+                {
+                    _burstShots = 0; // out of UA: the burst ends (and the empty switch can happen)
+                }
                 return;
             }
             HostPirateBlasterBolts++;

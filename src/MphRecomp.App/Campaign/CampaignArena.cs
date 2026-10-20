@@ -78,7 +78,8 @@ internal sealed partial class CampaignRenderer
         if (pass == 0) DrawCrates(scene, hd);
         // the occupant's see-through turret after the arena's blended surfaces (water, glass) and the crates: drawn with
         // the opaque pass and writing no depth, the water and the crates painted over it (owner 10-16)
-        if (pass == 1 && _seatShell.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _seatShell);
+        // (turned with the step's aim, so seen with the step's view: it rides the camera under smooth frames)
+        if (pass == 1 && _seatShell.Count > 0) hd.DrawProps(GunView(scene), scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _seatShell);
         // the turret effects' model particles (all additive) last of all: drawn with the opaque pass the water and glass
         // blended over them (the firing rods washed out, the grates showing through: owner 10-16), and the shell's quarter
         // alpha would dim them

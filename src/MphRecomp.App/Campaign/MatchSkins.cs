@@ -392,7 +392,7 @@ internal sealed partial class CampaignRenderer
                 if (p.IsAltForm)
                 {
                     if (s == null || !s.HasBall || !p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson)) continue;
-                    s.DrawBall(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostDamageFlash);
+                    s.DrawBall(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostDamageFlash, p.CurAlpha);
                     drew = true;
                 }
                 // (and a replay watching this seat from its eyes, PlayerEntity.HostFirstPersonSeat: T9)

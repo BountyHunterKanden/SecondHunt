@@ -99,6 +99,7 @@ namespace MphRecomp.Multiplayer.Net
             public int Slot;
             public MatchPlayer Player = new();
             public HashSet<string>? Arenas; // its extra arenas (ExtraArenas: JOIN's last field; null = an older joiner, none)
+            public Dictionary<int, uint>? Prints; // its arenas' play data (ExtraArenas.Prints.cs, after Arenas; null = not sent)
             public int Seat;
             public long LastHeard = Environment.TickCount64;
             public NetInput Latest;
@@ -110,11 +111,20 @@ namespace MphRecomp.Multiplayer.Net
             public int NewestSeq = -1;
             public int Applied = -1;
             public int Held;
-            public int Merged, Starved; // inputs folded into one to catch up; frames with nothing new to apply
+            public int Merged, Starved; // inputs folded into one to catch up (a long stall only); frames with nothing new to apply
+            public CampaignButtons LastButtons; // (the last applied input's: a fire press among folded ones, TryTakeInput)
+            // E (2026-10-19): the pace of its inputs (Pace below): this window's frames, starved frames and fewest spare
+            // inputs, windows in a row with one spare, frames counted, the frame its last ask can have shown by
+            public int PaceFrames, PaceStarves, PaceSpare = int.MaxValue, PaceSpareRun, PaceFrame, PaceWaitUntil;
+            // (the fewest spare in each of the last few windows, -1 = it starved, and the spare kept for a bursty link)
+            public readonly int[] PaceLow = new int[BurstWindows];
+            public int PaceLowCount, PaceKeep;
+            public int PaceSerial, PaceFrameCount; // (the ask: its serial 1-15 and frames, + = skip, - = run twice)
+            public int PaceSlowed, PaceHurried; // (frames asked, for the stats line)
             // O5: the newest snapshot it has rebuilt (the base of its next delta), when the host last sent it one, its rate
             public uint AckedTick;
             public uint LastSentTick;
-            public int Interval = SnapshotIntervalNormal;
+            public int Interval = SnapshotIntervalDefault;
             public int RttMs = -1;
             public long WindowStart;
             public int WindowPackets, WindowFirstSeq = -1;
@@ -147,7 +157,8 @@ namespace MphRecomp.Multiplayer.Net
         // O5: the snapshots sent lately (the joiners' delta bases), oldest first
         private readonly Dictionary<uint, SnapshotDelta.Encoded> _sent = new();
         private readonly Queue<uint> _sentOrder = new();
-        private const int SnapshotIntervalNormal = 2, SnapshotIntervalWeak = 3; // frames: 30 Hz, 20 Hz on a weak link
+        // frames between snapshots to a joiner: SnapshotIntervalNormal (60 Hz since 0.3.6; a match host takes it from the server,
+        // NetMatchSession.Rate.cs), 30 Hz on a middling link, 20 Hz on a weak one
         // inputs waiting past the jitter (in frames) + 2 are folded into one (the jitter buffer catches up), never fewer than 3
         private const int MinBacklog = 3;
         private Timer? _lobbyTimer; // host: LOBBY once a second while there's no match
@@ -241,7 +252,8 @@ namespace MphRecomp.Multiplayer.Net
                 Crates = t.Crates, Breakables = t.Breakables,
                 Abilities = true, // the Trooper's Wall Cling + Scout Drone (owner 2026-10-09)
                 PirateBlaster = t.PirateBlaster, ExtraCharacters = t.ExtraCharacters,
-                ServedHost = t.ServedHost // a served match host: no human in the template, every player a joiner
+                ServedHost = t.ServedHost, // a served match host: no human in the template, every player a joiner
+                FruitySync = t.FruitySync
             };
             s.Players.AddRange(t.Players.Where(p => !p.Bot));
             foreach (Joiner j in _joiners.Where(j => !j.Left))
@@ -303,6 +315,11 @@ namespace MphRecomp.Multiplayer.Net
             j.NewestSeq = -1;
             j.Applied = -1;
             j.Held = 0;
+            j.LastButtons = CampaignButtons.None;
+            j.PaceFrames = j.PaceStarves = j.PaceSpareRun = j.PaceFrame = j.PaceWaitUntil = 0;
+            j.PaceLowCount = j.PaceKeep = 0;
+            j.PaceSpare = int.MaxValue;
+            j.PaceSerial = j.PaceFrameCount = 0;
             j.AckedTick = 0;
             j.LastSentTick = 0;
             j.Trimmed.Clear();
@@ -319,8 +336,13 @@ namespace MphRecomp.Multiplayer.Net
         }
 
         // host, once per frame per remote seat: the next input in sequence (the jitter buffer). Nothing new = false: the
-        // seat holds its last input this frame (Held counts it). More than MaxBacklog waiting (a burst after a stall): the
-        // ones in between are folded into one (their button presses kept), so the delay doesn't stay.
+        // seat holds its last input this frame (Held counts it) and the late one is applied the next frame, so the buffer
+        // grows by that frame. Each input is applied on its own frame with its own aim, move and view (ViewTick: its lag
+        // compensation), a fire press too (E, 2026-10-19: folding late inputs into one lost their aims; the cloud's fold
+        // stopped at a fire press, this goes further). The joiner keeps the buffer short instead: Pace asks it to skip a
+        // frame when inputs wait spare, or to run one twice when they come late. Only past EmergencyBacklog (a long stall,
+        // or an app from before E that never paces) the ones in between are folded into one (their button presses kept),
+        // stopping at a fire press.
         public bool TryTakeInput(int seat, out NetInput input)
         {
             input = default;
@@ -331,6 +353,10 @@ namespace MphRecomp.Multiplayer.Net
                 {
                     return false;
                 }
+                if (j.Applied >= 0 && Paced)
+                {
+                    Pace(j, j.Queue.Count == 0 ? -1 : j.NewestSeq - j.Applied - 1);
+                }
                 if (j.Queue.Count == 0)
                 {
                     if (j.Applied >= 0)
@@ -340,10 +366,27 @@ namespace MphRecomp.Multiplayer.Net
                     }
                     return false;
                 }
-                int target = j.Queue.Keys.First();
-                if (j.NewestSeq - j.Applied > j.MaxBacklog && j.Applied >= 0)
+                int target = LatestInputs ? j.Queue.Keys.Last() : j.Queue.Keys.First();
+                if (!LatestInputs && j.NewestSeq - j.Applied > (Paced ? EmergencyBacklog : j.MaxBacklog) && j.Applied >= 0)
                 {
                     target = j.NewestSeq - 1;
+                    // (2026-10-19) catching up stops at a fire press: that input is applied with its own aim, move and view
+                    // (ViewTick: its lag compensation), not folded into a later one's; the rest catch up on the next frames
+                    bool held = (j.LastButtons & CampaignButtons.Shoot) != 0;
+                    foreach (int seq in j.Queue.Keys)
+                    {
+                        if (seq >= target)
+                        {
+                            break;
+                        }
+                        bool shoot = (j.Queue[seq].Buttons & CampaignButtons.Shoot) != 0;
+                        if (shoot && !held)
+                        {
+                            target = seq;
+                            break;
+                        }
+                        held = shoot;
+                    }
                 }
                 CampaignButtons pressed = CampaignButtons.None;
                 int folded = 0;
@@ -364,11 +407,107 @@ namespace MphRecomp.Multiplayer.Net
                     input = q;
                 }
                 input.Buttons |= pressed & PressButtons;
+                j.LastButtons = input.Buttons;
                 j.Merged += folded;
                 j.Applied = target;
                 j.Held = 0;
                 return true;
             }
+        }
+
+        // Fruity Prime's input rule (2026-10-19; PC test fruitylatest=0, MatchHost --latest-input off): of the inputs waiting
+        // only the newest is run, the ones before it folded into it (their button presses kept). The report riding on it names where the
+        // seat is, so the older ones carry nothing the host still needs. Default OFF (10-20 PC A/B): with our pacing (E) it empties the
+        // spare inputs every frame, so the next frame starves (merged/starved ~2,200 a minute, Far refusals and claim refusals up);
+        // Fruity has no such buffer. On with pace=0 only
+        public static bool LatestInputOnly = false;
+
+        // E on (default): no folding short of EmergencyBacklog, the joiners paced; off (PC test pace=0): the cloud's fold
+        // past MaxBacklog (stopping at a fire press) and no pace byte, to compare
+        public static bool PaceInputs = true;
+        // a Fruity P1 match (Net/FruitySync.cs) runs Fruity's rule whatever the two switches say: latest input, no pacing
+        private static bool LatestInputs => LatestInputOnly || FruitySync.On;
+        private static bool Paced => PaceInputs && !FruitySync.On;
+        // E: past this many inputs waiting (a long stall, 0.25 s) they're folded to catch up at once
+        private const int EmergencyBacklog = 15;
+        // E: the frames per pace window (1 s)
+        private const int PaceWindow = 60;
+        // the jitter (frames) from which a link counts as bursty, and the windows its fewest spare is judged over (Pace)
+        private const int BurstyJitter = 3, BurstWindows = 4;
+        // on (default): a bursty link keeps spare inputs; off (PC test burstbuf=0, an in-process host: served=1): as before
+        public static bool BurstBuffer = true;
+
+        // E, once per frame per joiner before its input is taken: spare = the inputs left waiting after this frame's (-1:
+        // none came, starved). Each 1 s window (counted once the last ask can have reached the inputs: a round trip on)
+        // asks the joiner to skip frames when every frame of it had 2+ spare (or 1 spare two windows running), down to 1
+        // spare, or to run a frame twice when 3+ frames starved (a single late input already grows the buffer by its frame)
+        private static void Pace(Joiner j, int spare)
+        {
+            j.PaceFrame++;
+            if (j.PaceFrame < j.PaceWaitUntil)
+            {
+                return;
+            }
+            if (spare < 0)
+            {
+                j.PaceStarves++;
+            }
+            else
+            {
+                j.PaceSpare = Math.Min(j.PaceSpare, spare);
+            }
+            if (++j.PaceFrames < PaceWindow)
+            {
+                return;
+            }
+            bool spareAll = j.PaceStarves == 0 && j.PaceSpare >= 1 && j.PaceSpare != int.MaxValue;
+            j.PaceSpareRun = spareAll ? j.PaceSpareRun + 1 : 0;
+            int frames = j.PaceStarves >= 3 ? -1
+                : spareAll && j.PaceSpare >= 2 ? Math.Min(j.PaceSpare - 1, 7)
+                : spareAll && j.PaceSpareRun >= 2 ? 1 : 0;
+            // a bursty link (2026-10-19, match B3H0BA: a phone on mobile data, its inputs in bunches, 3-8 frames of
+            // jitter): skipping down to 1 spare after a calm second starved it at the next bunch's gap (205 frames in two
+            // minutes against the other seat's 13, each a hold then a correction = rubber banding). For such a seat the
+            // spare is only trimmed a frame at a time, when none of the last BurstWindows windows came within the jitter's
+            // half of starving; its starves grow the buffer as before. A steady link (jitter under BurstyJitter) is as it was.
+            int jitter = Math.Max(j.JitterFrames, j.JitterFramesBefore);
+            j.PaceLow[j.PaceLowCount++ % BurstWindows] = j.PaceStarves > 0 ? -1 : j.PaceSpare == int.MaxValue ? 0 : j.PaceSpare;
+            j.PaceKeep = 0;
+            if (BurstBuffer && jitter >= BurstyJitter)
+            {
+                j.PaceKeep = Math.Clamp(jitter / 2, 1, 6);
+                frames = j.PaceStarves >= 3 ? -1
+                    : j.PaceLowCount >= BurstWindows && j.PaceLow.Min() >= j.PaceKeep + 1 ? 1 : 0;
+            }
+            if (frames != 0)
+            {
+                j.PaceLowCount = 0; // (the windows before the ask no longer count)
+                j.PaceSerial = j.PaceSerial % 15 + 1;
+                j.PaceFrameCount = frames;
+                j.PaceSpareRun = 0;
+                if (frames > 0) j.PaceSlowed += frames;
+                else j.PaceHurried -= frames;
+                // (its effect shows a round trip later: the ask rides the next snapshot, the joiner's paced inputs come back)
+                int rtt = j.RttMs > 0 ? j.RttMs * 60 / 1000 : 30;
+                j.PaceWaitUntil = j.PaceFrame + rtt + SnapshotIntervalWeak + Math.Abs(frames) * PaceStepEvery + 2;
+            }
+            j.PaceFrames = j.PaceStarves = 0;
+            j.PaceSpare = int.MaxValue;
+        }
+
+        // E: the joiner spreads an ask's frames out, one per this many steps (MatchNetDriver)
+        public const int PaceStepEvery = 4;
+
+        // E: the pace byte in each snapshot to a joiner: high nibble the ask's serial (0 = none yet, 1-15; the joiner acts on
+        // each serial once, snapshots repeat it), low nibble its frames as a signed nibble (+ skip, - run twice)
+        private static int PaceByte(Joiner j) => !Paced ? -1 : j.PaceSerial << 4 | (j.PaceFrameCount & 0xF);
+
+        // joiner: the ask in a pace byte (PaceByte); false = none
+        public static bool ReadPace(int pace, out int serial, out int frames)
+        {
+            serial = pace < 0 ? 0 : pace >> 4;
+            frames = pace < 0 ? 0 : (pace & 0x8) != 0 ? (pace & 0xF) - 16 : pace & 0xF;
+            return serial != 0 && frames != 0;
         }
 
         // buttons whose short press must survive being folded into a later input
@@ -417,7 +556,7 @@ namespace MphRecomp.Multiplayer.Net
             }
         }
 
-        // host, every frame: each joiner whose turn it is (30 Hz, 20 on a weak link) gets this snapshot as a delta against
+        // host, every frame: each joiner whose turn it is (60 Hz; 30 or 20 on a weaker link) gets this snapshot as a delta against
         // the newest one it acked (or whole), with its own input ack
         public void SendSnapshot(Snapshot snap)
         {
@@ -455,7 +594,7 @@ namespace MphRecomp.Multiplayer.Net
                     byte[] packet = new byte[1 + SnapshotDelta.MaxSize(cur)];
                     packet[0] = MsgSnapshot;
                     int size = 1 + SnapshotDelta.Write(packet.AsSpan(1), cur, baseSnap, j.Applied < 0 ? -1 : j.Applied & 0xFFFF,
-                        j.Held);
+                        j.Held, PaceByte(j));
                     if (size > _net.MaxPayload && baseSnap == null && (cur.Extras.Length > 0 || cur.Handoff.Length > 0))
                     {
                         // P8: a whole 8-seat snapshot can pass MaxPayload (Capture: ~1.5 KB). Send it without the online
@@ -467,7 +606,7 @@ namespace MphRecomp.Multiplayer.Net
                             ObjectiveStart = cur.ObjectiveStart, SentAt = cur.SentAt
                         };
                         size = 1 + SnapshotDelta.Write(packet.AsSpan(1), trimmed, null, j.Applied < 0 ? -1 : j.Applied & 0xFFFF,
-                            j.Held);
+                            j.Held, PaceByte(j));
                         if (size <= _net.MaxPayload)
                         {
                             j.Trimmed[cur.Tick] = trimmed;
@@ -508,8 +647,8 @@ namespace MphRecomp.Multiplayer.Net
                     return $"snapshots {_snapsReceived}, {_bytesReceived / 1024.0:0.0} KB in, missing bases {_receiver.MissingBase}";
                 }
                 return string.Join("; ", _joiners.Where(j => !j.Left).Select(j => $"seat {j.Seat}: {60 / j.Interval} Hz, rtt "
-                    + $"{j.RttMs} ms, loss {j.Loss * 100:0}%, jitter {j.JitterFrames} frames, {j.BytesSent / 1024.0:0.0} KB out, "
-                    + $"inputs merged {j.Merged}, starved {j.Starved}, biggest snapshot {j.MaxSnapshot} B, oversize {j.Oversize}{j.OversizeNote}"
+                    + $"{j.RttMs} ms, loss {j.Loss * 100:0}%, jitter {j.JitterFrames} frames, queue {Math.Max(0, j.NewestSeq - j.Applied)}/{j.MaxBacklog}, {j.BytesSent / 1024.0:0.0} KB out, "
+                    + $"inputs merged {j.Merged}, starved {j.Starved}, paced skip {j.PaceSlowed} double {j.PaceHurried}{(j.PaceKeep > 0 ? $" keep {j.PaceKeep}" : "")}, biggest snapshot {j.MaxSnapshot} B, oversize {j.Oversize}{j.OversizeNote}"
                     + (j.TrimmedSends > 0 ? $", whole without extras {j.TrimmedSends}" : "")));
             }
         }
@@ -655,7 +794,9 @@ namespace MphRecomp.Multiplayer.Net
         {
             lock (_lock)
             {
-                return _joiners.Where(j => !j.Left && !ExtraArenas.Has(j.Arenas, arena)).Select(j => j.Player.Nickname ?? "a player").ToList();
+                // (or has another copy of it: ExtraArenas.PrintDiffers, 2026-10-19)
+                return _joiners.Where(j => !j.Left && (!ExtraArenas.Has(j.Arenas, arena) || ExtraArenas.PrintDiffers(j.Prints, arena)))
+                    .Select(j => j.Player.Nickname ?? "a player").ToList();
             }
         }
 
@@ -853,6 +994,7 @@ namespace MphRecomp.Multiplayer.Net
             w.Write((sbyte)rankLevel);
             LanSession.WriteLook(w, character, skin);
             ExtraArenas.Write(w); // (optional, last)
+            ExtraArenas.WritePrints(w); // (optional too, after it: 2026-10-19, no protocol bump)
             _join = ms.ToArray();
             (_lookHunter, _lookCharacter, _lookSkin, _lookChoosing, _lookRank) = (hunter, character, skin, false, rankLevel);
             SetStatus("joining the host...");
@@ -936,7 +1078,7 @@ namespace MphRecomp.Multiplayer.Net
             Array.Copy(_recentInputs, 0, _recentInputs, 1, _recentInputs.Length - 1);
             _recentInputs[0] = input;
             _recentCount = Math.Min(_recentCount + 1, _recentInputs.Length);
-            Span<byte> packet = stackalloc byte[6 + 4 * NetInput.RecordSize];
+            Span<byte> packet = stackalloc byte[6 + 4 * NetInput.RecordSize + ClientPosition.TrailerMax];
             packet[0] = MsgInput;
             System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(packet[1..], Volatile.Read(ref _ackTick));
             packet[5] = (byte)_recentCount;
@@ -944,7 +1086,9 @@ namespace MphRecomp.Multiplayer.Net
             {
                 _recentInputs[i].WriteRecord(packet[(6 + i * NetInput.RecordSize)..]);
             }
-            _net.Send(_hostSlot, packet[..(6 + _recentCount * NetInput.RecordSize)]);
+            int size = 6 + _recentCount * NetInput.RecordSize;
+            size += ClientPosition.WriteTrailer(packet[size..], input); // (0.3.6: the newest input's own position, Net/ClientPosition.cs)
+            _net.Send(_hostSlot, packet[..size]);
             if (_rehosting && Environment.TickCount64 - _lastRehost > 200)
             {
                 SendRehost();
@@ -1035,6 +1179,7 @@ namespace MphRecomp.Multiplayer.Net
                     for (int i = 0; i < count; i++)
                     {
                         NetInput input = NetInput.ReadRecord(data[(6 + i * NetInput.RecordSize)..]);
+                        if (i == 0) ClientPosition.ReadTrailer(data[(6 + count * NetInput.RecordSize)..], ref input); // (0.3.6)
                         // the 16-bit sequence unwrapped against the newest seen
                         int seq = j.NewestSeq < 0 ? input.Seq : j.NewestSeq + (short)(input.Seq - (ushort)j.NewestSeq);
                         if (i == 0)
@@ -1183,6 +1328,7 @@ namespace MphRecomp.Multiplayer.Net
             int rankLevel = r.ReadSByte();
             (string? character, string? skin) = LanSession.ReadLook(r);
             HashSet<string>? arenas = ExtraArenas.Read(r);
+            Dictionary<int, uint>? prints = ExtraArenas.ReadPrints(r);
             bool joined = false;
             lock (_lock)
             {
@@ -1229,9 +1375,15 @@ namespace MphRecomp.Multiplayer.Net
                     : _hostStarted ? "this match already started"
                     : Humans >= SeatLimit ? "this match is full"
                     // an arena this joiner lacks (owner 2026-10-10, N27: it would fail to load it and the match start without it)
-                    : ExtraArenas.Refusal(arenas, Settings?.Arena ?? _template?.Arena ?? "");
+                    : ExtraArenas.Refusal(arenas, Settings?.Arena ?? _template?.Arena ?? "")
+                    // another copy of the arena than this host's (another app version or import: items and crates out of step)
+                    ?? ExtraArenas.PrintRefusal(prints, Settings?.Arena ?? _template?.Arena ?? "");
                 if (refuse != null)
                 {
+                    if (ExtraArenas.PrintDiffers(prints, Settings?.Arena ?? _template?.Arena ?? ""))
+                    {
+                        Console.WriteLine($"match: refused {nickname}: {ExtraArenas.PrintNote(prints, Settings?.Arena ?? _template?.Arena ?? "")}");
+                    }
                     _net.Send(from, Refuse(refuse));
                     return;
                 }
@@ -1243,6 +1395,7 @@ namespace MphRecomp.Multiplayer.Net
                         Hunter = hunter, Remote = true, Nickname = nickname, RankLevel = rankLevel, Character = character, Skin = skin
                     },
                     Arenas = arenas,
+                    Prints = prints,
                 };
                 _joiners.Add(joiner);
                 Settings = Build();
@@ -1319,6 +1472,7 @@ namespace MphRecomp.Multiplayer.Net
             {
                 int seat = r.ReadByte();
                 MatchSettings host = LanSession.ReadSettings(r);
+                host.FruitySync = FruitySync.Read(r);
                 _welcomeSeat = seat;
                 Interlocked.Exchange(ref _hostHeard, Environment.TickCount64);
                 Settings = MatchClient.ForSeat(host, seat);
@@ -1353,6 +1507,7 @@ namespace MphRecomp.Multiplayer.Net
             {
                 int seat = r.ReadByte();
                 _hostSettings = LanSession.ReadSettings(r);
+                _hostSettings.FruitySync = FruitySync.Read(r);
                 Settings = MatchClient.ForSeat(_hostSettings, seat);
                 // a fresh match: its snapshots count from its own first tick, and the driver gives a loading host 20 s again
                 lock (_lock)
@@ -1520,8 +1675,8 @@ namespace MphRecomp.Multiplayer.Net
         }
 
         // a joiner's input packets per 2 s window: the share of its sequence numbers that never came = loss; a lossy or
-        // slow link gets 20 snapshots a second, a good one 30 (with a margin, so it doesn't flip back and forth)
-        private static void CountPacket(Joiner j, int seq, long now)
+        // slow link gets fewer snapshots a second (RateFor, with a margin, so it doesn't flip back and forth)
+        private void CountPacket(Joiner j, int seq, long now)
         {
             if (j.WindowFirstSeq < 0)
             {
@@ -1543,14 +1698,7 @@ namespace MphRecomp.Multiplayer.Net
             j.TransitMax = Double.MinValue;
             int span = seq - j.WindowFirstSeq + 1;
             j.Loss = span <= 0 ? 0 : Math.Clamp(1 - j.WindowPackets / (float)span, 0, 1);
-            if (j.Loss > 0.08f || j.RttMs > 250)
-            {
-                j.Interval = SnapshotIntervalWeak;
-            }
-            else if (j.Loss < 0.03f && j.RttMs < 200)
-            {
-                j.Interval = SnapshotIntervalNormal;
-            }
+            j.Interval = RateFor(j); // (60 / 30 / 20 Hz: NetMatchSession.Rate.cs)
             j.WindowFirstSeq = -1;
         }
 
@@ -1563,6 +1711,7 @@ namespace MphRecomp.Multiplayer.Net
             Header(w, type);
             w.Write((byte)seat);
             LanSession.WriteSettings(w, settings);
+            if (settings.FruitySync) w.Write(FruitySync.Mark); // (after the settings: older clients stop reading before it)
             return ms.ToArray();
         }
 

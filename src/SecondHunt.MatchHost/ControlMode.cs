@@ -33,7 +33,9 @@ namespace SecondHunt.MatchHost
             var relayInfo = new RelayInfo { Host = o.RelayHost, Port = o.RelayPort, Token = o.Token, Slot = 0 };
             using RelayTransport relay = RelayTransport.For(relayInfo, new Uri($"ws://{o.RelayHost}/"));
             MatchSettings template = Program.Template(o);
+            Program.ReplayBuild = $"match host {OnlineMatch.VersionKey(romKey)}";
             using NetMatchSession net = NetMatchSession.Host(relay, template, romKey, o.Seats);
+            Program.Netcode(net); // (the snapshot rate the server set: Program.Netcode.cs)
             net.OwnerSlot = o.Owner;
             using var stop = new CancellationTokenSource();
             var reader = new Thread(() => ReadServer(net, stop)) { IsBackground = true, Name = "control" };
@@ -74,7 +76,7 @@ namespace SecondHunt.MatchHost
                         if (net.Lacking(arena) is { Count: > 0 } lacking)
                         {
                             // (the owner's START waits: LOBBY shows the arena; TODO D4: tell the owner who lacks it)
-                            Program.Log($"start refused: {string.Join(", ", lacking)} don't have {arena}");
+                            Program.Log($"start refused: {string.Join(", ", lacking)} don't have {arena} (or have another copy of it)");
                             continue;
                         }
                         net.KickNotBack(reason.Length > 0 ? reason : "the game started without you.");
@@ -106,6 +108,7 @@ namespace SecondHunt.MatchHost
             }
             finally
             {
+                Program.CloseReplayLink(5000); // (the last match's recording to its players first)
                 Say($"bye {bye}");
             }
             return 0;

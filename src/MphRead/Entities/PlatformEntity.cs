@@ -849,6 +849,7 @@ namespace MphRead.Entities
                     );
                     transform = Matrix.GetTransform4(new Vector3(transform.Row1), new Vector3(transform.Row2), position);
                     effect.Transform(position, transform);
+                    effect.SetHostOwner(this); // recomp: carried with it (smooth frames)
                     _effects[i] = effect;
                 }
             }

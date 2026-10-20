@@ -31,7 +31,7 @@ namespace MphRecomp.Multiplayer.Net
     {
         public const int GamePort = 47770;
         public const int BeaconPort = 47771;
-        private const byte Protocol = 21; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
+        private const byte Protocol = 22; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
                                          // 5: JOIN carries the game logic version (Replay ReplayFile.CurrentSimVersion);
                                          // 6: JOIN and the players carry the Hunter License rank level;
                                          // 7: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
@@ -58,6 +58,8 @@ namespace MphRecomp.Multiplayer.Net
                                          // 20: the Trooper's Squad Mark; SeatAbilities carry each seat's marks (1 byte a
                                          //     seat: the marking seats, PlayerEntity.NetSquadMark)
                                          // 21: Shooting Gallery's turret on; snapshots carry it (NetWorld.Turret, 14 bytes)
+                                         // 22: no wire change; 0.3.6's rules (one wall cling per airtime, Pirate Blaster
+                                         //     10 / 14, the drone fixes, body splash) so a 0.3.5 app can't join a 0.3.6 game
         private const byte MsgBeacon = 1, MsgJoin = 2, MsgWelcome = 3, MsgRefuse = 4, MsgInput = 5, MsgSnapshot = 6, MsgBye = 7,
             MsgStart = 8, MsgLobby = 9;
         // SNAPSHOT: type, the joiner's input ack (u16), frames held on it (u8), then the snapshot (protocol 17)

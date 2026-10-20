@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -18,6 +19,10 @@ namespace SecondHunt.Server
     //                  root-only, loaded by the systemd unit); none = every turn_creds answers UseRelay
     //                  [--matchhost <SecondHuntMatchHost> --matchhost-data <its game files' folder> [--max-matches 4]]: served
     //                  games (0.8.0, HubServed.cs; none = every game player-hosted as before)
+    //                  [--served-snapshot-hz 60|30|20] [--served-client-position on|off] [--served-position-limit <units>]:
+    //                  each served match's netcode (0.3.6, ServedConfig; not given = the match host's defaults)
+    //                  [--served-fruity-pin on|off] [--served-fruity-hold on|off] [--served-latest-input on|off] [--served-catchup-cap <0..60>]:
+    //                  Fruity Prime's player sync pieces (match host defaults: on, on, on, 5)
     // SecondHuntServer admin [--db secondhunt.db] <command>   (the owner's moderation tool: see Admin.cs, deploy/admin.ps1)
     // SecondHuntServer --selftest
     // Behind Caddy (HTTPS) on the VPS: Caddy terminates TLS and forwards wss://<domain>/v1/ws here. The relay is plain
@@ -46,6 +51,7 @@ namespace SecondHunt.Server
                 args.Contains("--find-fast") ? FindConfig.Fast : null, TurnConfig.FromArgs(args, Arg));
             Hub hub = app.Services.GetRequiredService<Hub>();
             hub.Served = ServedConfig.FromArgs(args, Arg);
+            if (Int64.TryParse(Arg(args, "--replay-cap-mb"), out long replayCapMb)) hub.ReplayCapBytes = replayCapMb << 20; // (shared replays' folder)
             hub.StartServed();
             Relay relay = app.Services.GetRequiredService<Relay>();
             // test only (MphRead.Tools -onlinetest delay=): every relayed packet waits this long, a far-away player
@@ -82,6 +88,7 @@ namespace SecondHunt.Server
             hub.Find = find ?? new FindConfig();
             hub.Turn = turn ?? new TurnConfig();
             hub.DrainFile = Admin.DrainPath(dbPath); // (served games: admin drain on)
+            hub.ReplayDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dbPath)) ?? ".", "replays"); // (0.9.0: shared replays)
             hub.ReportAlertUrl = Environment.GetEnvironmentVariable("REPORT_ALERT_URL")?.Trim() ?? ""; // HubAlerts.cs
             Console.WriteLine(hub.ReportAlertUrl.Length > 0 ? "report alerts: on" : "report alerts: off (no REPORT_ALERT_URL)");
             builder.Services.AddSingleton(store);
@@ -94,6 +101,10 @@ namespace SecondHunt.Server
             // (O5b: pings every 5 s and a 10 s timeout notice a dropped host within ~15 s, for host migration)
             app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(5), KeepAliveTimeout = TimeSpan.FromSeconds(10) });
             app.MapGet("/v1/health", () => FormattableString.Invariant($"ok {Hub.ServerVersion} online {hub.OnlineCount} turn {hub.TurnGbThisMonth:0.00} GB{hub.ServedHealth}"));
+            // shared replays' files (0.9.0, HubReplays.cs): one-use tickets from the WebSocket requests
+            app.MapPut("/v1/replays/{id}", async (HttpContext ctx, string id) =>
+                ctx.Response.StatusCode = await hub.PutReplay(id, ctx.Request.Query["t"], ctx.Request.Body, ctx.RequestAborted));
+            app.MapGet("/v1/replays/{id}", (HttpContext ctx, string id) => hub.GetReplay(ctx, id, ctx.Request.Query["t"]));
             app.Map("/v1/ws", async (HttpContext ctx) =>
             {
                 if (!ctx.WebSockets.IsWebSocketRequest)

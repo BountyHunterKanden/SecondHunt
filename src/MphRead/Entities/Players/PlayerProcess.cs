@@ -828,6 +828,11 @@ namespace MphRead.Entities
             {
                 _field449++;
             }
+            if (_droneSwitchWait > 0)
+            {
+                _droneSwitchWait--; // recomp: the Trooper's wait between splits and merges (PlayerScoutDrone.cs)
+            }
+            ScoutDroneFootWaits(); // recomp: the drone's burst and laser waits run on while he's on foot (PlayerScoutDrone.cs)
             if (Input.HasInput || IsBot && !AiData.Flags3.TestFlag(AiFlags3.NoInput))
             {
                 _timeSinceInput = 0;
@@ -1190,6 +1195,7 @@ namespace MphRead.Entities
                 _soundSource.PlaySfx(SfxId.JUMP_PAD);
             }
             Speed = vector;
+            NetHostMoved(NetHostMove.Pad); // recomp: a jump pad launched a remote seat on the host (PlayerNetPosition.cs)
             _jumpPadAccel = vector;
             _lastJumpPad = jumpPad;
             Flags1 |= PlayerFlags1.UsedJumpPad;
@@ -1238,6 +1244,12 @@ namespace MphRead.Entities
             distSqr *= distSqr;
             foreach (ItemInstanceEntity item in _scene.GetItemInstanceEntities())
             {
+                // recomp: network play: the local player takes only what the host took for it (PlayerNetConfirm.cs)
+                bool confirmed = NetClient && NetConfirmedPickups.Contains(item);
+                if (NetClient && !confirmed)
+                {
+                    continue;
+                }
                 bool inRange = false;
                 if (IsAltForm)
                 {
@@ -1258,7 +1270,7 @@ namespace MphRead.Entities
                         inRange = true;
                     }
                 }
-                if (!inRange)
+                if (!inRange && !confirmed)
                 {
                     continue;
                 }
@@ -1311,7 +1323,10 @@ namespace MphRead.Entities
                         amount = GameState.Multiplayer ? 50 : 100;
                         PlaySfx(SfxId.AMMO_POWER_UP1);
                     }
-                    _ammo[slot] += amount;
+                    if (!NetClient) // recomp: network play: the host's ammo, with this pickup in it, came with the confirmation
+                    {
+                        _ammo[slot] += amount;
+                    }
                     if (_ammo[slot] > _ammoMax[slot])
                     {
                         _ammo[slot] = _ammoMax[slot];
@@ -1437,7 +1452,10 @@ namespace MphRead.Entities
                 // recomp: a seat with an app affinity weapon (the Trooper: the Pirate Blaster) gets it, whatever its hunter
                 if (HostAffinityBeam == null && (Hunter == Hunter.Samus || Hunter == Hunter.Guardian)) // game doesn't check for Guardian
                 {
-                    _ammo[1] = Math.Min(_ammo[1] + 50, _ammoMax[1]);
+                    if (!NetClient) // recomp: network play: the host's ammo, with this pickup in it, came with the confirmation
+                    {
+                        _ammo[1] = Math.Min(_ammo[1] + 50, _ammoMax[1]);
+                    }
                     if (IsMainPlayer && Sfx.TimedSfxMute == 0)
                     {
                         _soundSource.PlayFreeSfx(SfxId.AMMO_POWER_UP1);
@@ -1481,7 +1499,7 @@ namespace MphRead.Entities
                 ShowDialog(DialogType.Event, messageId: 5, param1: weaponId, value1: value1, value2: value2);
             }
             WeaponInfo info = PirateBlaster.Info(weapon);
-            if (_ammo[info.AmmoType] < 60)
+            if (_ammo[info.AmmoType] < 60 && !NetClient) // recomp: (network play: the host's ammo has it already)
             {
                 _ammo[info.AmmoType] = Math.Min(_ammo[info.AmmoType] + 60, 60);
             }
@@ -1565,7 +1583,8 @@ namespace MphRead.Entities
                     || Flags2.TestFlag(PlayerFlags2.NoFormSwitch)
                     || !IsAltForm && Flags2.TestFlag(PlayerFlags2.BipedStuck)
                     || IsAltForm && MorphCamera != null
-                    || HostSeated || HostSlotHeld)) // recomp: no switching in the turret or its bomb slot (a bot's touch buttons come here; PlayerEchoesSeat.cs)
+                    || HostSeated || HostSlotHeld // recomp: no switching in the turret or its bomb slot (a bot's touch buttons come here; PlayerEchoesSeat.cs)
+                    || DroneSwitchWaiting)) // recomp: the Trooper's wait between splits and merges (PlayerScoutDrone.cs)
             {
                 if (IsMainPlayer && (CameraSequence.Current == null || !CameraSequence.Current.BlockInput))
                 {
@@ -1590,6 +1609,7 @@ namespace MphRead.Entities
                 }
             }
 
+            NetFormSwitched(); // recomp: (a match client's own switch: PlayerNetConfirm.cs)
             if (!IsAltForm)
             {
                 EnterAltForm();
