@@ -16,6 +16,10 @@ Second Hunt is a fan project and a fork of MphRead. It contains no game data fro
 > ping on the scoreboard, Overcharged Dark Samus, and Sylux from _Metroid Prime 4: Beyond_. Playable start to finish,
 > with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
 
+> <a href="https://discord.gg/WkvJ5ddjye"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FWkvJ5ddjye%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&logo=discord&logoColor=white&color=5865F2" alt="Discord: players online"></a>
+> **Join the Hunters Outpost Discord** for Second Hunt support or to discuss and play Second Hunt and related
+> projects with other players! [Click here to join!](https://discord.gg/WkvJ5ddjye)
+
 ## What Second Hunt is
 
 The game's logic (enemies, weapons, physics, rooms, scripting, bots) comes from
