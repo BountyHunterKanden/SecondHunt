@@ -226,7 +226,7 @@ internal sealed class ImportItemRender
         return (view, proj);
     }
 
-    // the box of the pixels a picture has drawn (anything brighter than its black ground); null when it is empty
+    // the box of the pixels a picture has drawn (anything not see-through); null when it is empty
     static (int X0, int Y0, int X1, int Y1)? Drawn(byte[] px, int size)
     {
         int x0 = size, y0 = size, x1 = -1, y1 = -1;
@@ -234,7 +234,7 @@ internal sealed class ImportItemRender
             for (int x = 0; x < size; x++)
             {
                 int i = (y * size + x) * 4;
-                if (Math.Max(px[i], Math.Max(px[i + 1], px[i + 2])) <= 12) continue;
+                if (px[i + 3] <= 12) continue;
                 if (x < x0) x0 = x;
                 if (x > x1) x1 = x;
                 if (y < y0) y0 = y;
@@ -266,33 +266,66 @@ internal sealed class ImportItemRender
                 return null;
             }
             GLES30.GlViewport(0, 0, w, h);
-            GLES30.GlClearColor(0, 0, 0, 1);
-            GLES30.GlDepthMask(true);
-            GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
-            GLES30.GlEnable(GLES30.GlDepthTest);
-            bool drawn = draw();
-            GLES30.GlDisable(GLES30.GlDepthTest);
-            GLES30.GlDisable(GLES30.GlBlend);
-            GLES30.GlDepthMask(true);
-            if (!drawn) return null;
-
-            // resolve the samples, then read the picture back
-            GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, outFbo);
-            GLES30.GlBindRenderbuffer(GLES30.GlRenderbuffer, rbs[2]);
-            GLES30.GlRenderbufferStorage(GLES30.GlRenderbuffer, GLES30.GlRgba8, w, h);
-            GLES30.GlFramebufferRenderbuffer(GLES30.GlFramebuffer, GLES30.GlColorAttachment0, GLES30.GlRenderbuffer, rbs[2]);
-            GLES30.GlBindFramebuffer(GLES30.GlReadFramebuffer, msFbo);
-            GLES30.GlBindFramebuffer(GLES30.GlDrawFramebuffer, outFbo);
-            GLES30.GlBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GLES30.GlColorBufferBit, GLES30.GlNearest);
-            GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, outFbo);
-            byte[] raw = new byte[w * h * 4];
-            GLES30.GlReadPixels(0, 0, w, h, GLES30.GlRgba, GLES30.GlUnsignedByte, raw);
-            // GL's rows run bottom up; the picture is opaque
-            byte[] px = new byte[raw.Length];
+            // drawn twice, on white and on black: what differs between the two is the ground showing through, so the
+            // picture keeps the model only, see-through elsewhere (owner 2026-10-30: the square pictures sat in black
+            // boxes on the lighter IMPORT GAMES tiles)
+            bool resolveReady = false, premultiplied = OperatingSystem.IsAndroid();
+            byte[]? onWhite = Pass(1), onBlack = onWhite != null ? Pass(0) : null;
+            if (onWhite == null || onBlack == null) return null;
+            // GL's rows run bottom up
+            byte[] px = new byte[onBlack.Length];
             int row = w * 4;
-            for (int y = 0; y < h; y++) Buffer.BlockCopy(raw, (h - 1 - y) * row, px, y * row, row);
-            for (int i = 3; i < px.Length; i += 4) px[i] = 255;
+            for (int y = 0; y < h; y++)
+            {
+                int src = (h - 1 - y) * row, dst = y * row;
+                for (int x = 0; x < row; x += 4)
+                {
+                    int ground = 0;
+                    for (int c = 0; c < 3; c++) ground = Math.Max(ground, onWhite[src + x + c] - onBlack[src + x + c]);
+                    int a = Math.Clamp(255 - ground, 0, 255);
+                    if (a == 0) continue;
+                    // the colour over black is the model's times its cover: Android's PNG encoder takes it so (a Bitmap
+                    // holds premultiplied pixels), the desktop's wants the colour itself
+                    for (int c = 0; c < 3; c++)
+                    {
+                        int v = Math.Min(onBlack[src + x + c], a);
+                        px[dst + x + c] = (byte)(premultiplied ? v : v * 255 / a);
+                    }
+                    px[dst + x + 3] = (byte)a;
+                }
+            }
             return px;
+
+            byte[]? Pass(float ground)
+            {
+                GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, msFbo);
+                GLES30.GlClearColor(ground, ground, ground, 1);
+                GLES30.GlDepthMask(true);
+                GLES30.GlClear(GLES30.GlColorBufferBit | GLES30.GlDepthBufferBit);
+                GLES30.GlEnable(GLES30.GlDepthTest);
+                bool drawn = draw();
+                GLES30.GlDisable(GLES30.GlDepthTest);
+                GLES30.GlDisable(GLES30.GlBlend);
+                GLES30.GlDepthMask(true);
+                if (!drawn) return null;
+
+                // resolve the samples, then read the picture back
+                GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, outFbo);
+                if (!resolveReady)
+                {
+                    GLES30.GlBindRenderbuffer(GLES30.GlRenderbuffer, rbs[2]);
+                    GLES30.GlRenderbufferStorage(GLES30.GlRenderbuffer, GLES30.GlRgba8, w, h);
+                    GLES30.GlFramebufferRenderbuffer(GLES30.GlFramebuffer, GLES30.GlColorAttachment0, GLES30.GlRenderbuffer, rbs[2]);
+                    resolveReady = true;
+                }
+                GLES30.GlBindFramebuffer(GLES30.GlReadFramebuffer, msFbo);
+                GLES30.GlBindFramebuffer(GLES30.GlDrawFramebuffer, outFbo);
+                GLES30.GlBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GLES30.GlColorBufferBit, GLES30.GlNearest);
+                GLES30.GlBindFramebuffer(GLES30.GlFramebuffer, outFbo);
+                byte[] raw = new byte[w * h * 4];
+                GLES30.GlReadPixels(0, 0, w, h, GLES30.GlRgba, GLES30.GlUnsignedByte, raw);
+                return raw;
+            }
         }
         finally
         {

@@ -1356,7 +1356,7 @@ namespace MphRecomp.Frontend
             if (sp.Focus >= 0 && sp.Focus < sp.Entries.Count)
             {
                 Entry f = sp.Entries[sp.Focus];
-                if (f.Kind == EntryKind.SubTabs) desc = ControlHints.For(sp == _gamePage ? "settingsubtabs" : "subtabs", keys);
+                if (f.Kind == EntryKind.SubTabs) desc = ControlHints.For(sp == _gamePage ? "settingsubtabs" : sp == _appPage ? "appsubtabs" : "subtabs", keys);
                 else if (f.Kind == EntryKind.Bind)
                 {
                     desc = _captureId == f.Bind ? ControlHints.For("waiting", keys)

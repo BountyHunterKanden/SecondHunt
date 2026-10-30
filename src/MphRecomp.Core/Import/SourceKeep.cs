@@ -345,6 +345,24 @@ namespace MphRecomp.Import
             return heldEdition == editionId ? covered : new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
+        // what the copies' check found the kept files can't make (MarkChecked's "checked"); empty when none or unreadable
+        public static Dictionary<string, string> ReadChecked(string root, string gameId)
+        {
+            var found = new Dictionary<string, string>(StringComparer.Ordinal);
+            string manifest = ManifestPath(Dir(root, gameId));
+            if (!File.Exists(manifest)) return found;
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(manifest, Encoding.UTF8));
+                if (doc.RootElement.TryGetProperty("checked", out JsonElement chk) && chk.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (JsonProperty c in chk.EnumerateObject()) found[c.Name] = c.Value.GetString() ?? "";
+                }
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException or IOException) { }
+            return found;
+        }
+
         internal static List<(long Start, long End)> ReadRanges(string path)
         {
             byte[] b = File.ReadAllBytes(path);
@@ -557,13 +575,22 @@ namespace MphRecomp.Import
             // after a rebuild from the kept files: the items it made are covered at today's recipe/importer stamps (the kept
         // bytes held everything they read). Rewrites only the manifest's "covered"; a missing manifest is left alone.
         public static void MarkCovered(string root, string gameId, IReadOnlyDictionary<string, string> stamps)
+            => MarkChecked(root, gameId, stamps, new Dictionary<string, string>());
+
+        // the copies' check (ImportService.CheckKept): `covered` as MarkCovered; `checkedItems` the items it found the kept
+        // files can't make, id -> "recipe hash:importer number|lacks" (a byte they don't hold) or "...|failed" (another error),
+        // so each is tried once per stamp. Store writes a new manifest without them: a top-up from the disc starts over.
+        public static void MarkChecked(string root, string gameId, IReadOnlyDictionary<string, string> covered,
+            IReadOnlyDictionary<string, string> checkedItems)
         {
-            if (stamps.Count == 0) return;
+            if (covered.Count == 0 && checkedItems.Count == 0) return;
             string manifest = ManifestPath(Dir(root, gameId));
             if (!File.Exists(manifest)) return;
             if (System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(manifest)) is not System.Text.Json.Nodes.JsonObject o) return;
             if (o["covered"] is not System.Text.Json.Nodes.JsonObject cov) o["covered"] = cov = new System.Text.Json.Nodes.JsonObject();
-            foreach (KeyValuePair<string, string> kv in stamps) cov[kv.Key] = kv.Value;
+            if (o["checked"] is not System.Text.Json.Nodes.JsonObject chk) o["checked"] = chk = new System.Text.Json.Nodes.JsonObject();
+            foreach (KeyValuePair<string, string> kv in covered) { cov[kv.Key] = kv.Value; chk.Remove(kv.Key); }
+            foreach (KeyValuePair<string, string> kv in checkedItems) chk[kv.Key] = kv.Value;
             File.WriteAllText(manifest + ".new", o.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             File.Move(manifest + ".new", manifest, overwrite: true);
         }

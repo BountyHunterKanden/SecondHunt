@@ -57,6 +57,7 @@ namespace MphRecomp.Frontend
             ["subtabs.keys"] = "left and right, z / c, or click to switch controls tabs.",
             // SETTINGS' GAME sub-tabs (owner 2026-10-28)
             ["settingsubtabs"] = "left and right, l2 / r2, or tap to switch between campaign and multiplayer settings.",
+            ["appsubtabs"] = "left and right, l2 / r2, or tap to switch between startup, updates and help.",
             ["settingsubtabs.keys"] = "left and right, z / c, or click to switch between campaign and multiplayer settings.",
             ["resetbuttons"] = "puts every button, chat mode and drone dials back to default.",
             ["resetbuttons.keys"] = "puts every key and mouse button, chat mode and drone dials back to default.",

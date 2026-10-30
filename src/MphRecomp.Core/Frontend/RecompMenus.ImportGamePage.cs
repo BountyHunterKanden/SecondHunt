@@ -54,10 +54,13 @@ namespace MphRecomp.Frontend
         // every item of the game, its songs among them (the tiles show the songs as one MUSIC tile: ImportGames.SongsTile)
         private List<ImportItemInfo> _gameAll = new(), _gameSongs = new();
         private ImportPicked? _gameSource;
+        private bool _gameKept; // its import files are kept: IMPORT ALL rebuilds from them with no disc
         private bool _keyShown, _keyNeeded, _hasKey, _switchKeys, _keepDone;
         private bool _firstImport; // nothing imported, no import files: only the disc button (owner 2026-10-26, ImportGames.FirstPick)
         private string _keepSize = ""; // KEEP IMPORT FILES' size: what's kept, or about what keeping takes
+        private int _keepAdd; // UPDATE COPIES: how many items the update adds to the copies (ImportGames.CopiesToAdd)
         private int _gameStale; // the items an update made stale (UPDATE ALL)
+        private bool _gameBadge; // one of them needs an update (its red badge; a deleted item lights the pill only)
 
         private int GamePages => Math.Max(1, ((_gameItems?.Count ?? 0) + GameTiles - 1) / GameTiles);
 
@@ -147,6 +150,7 @@ namespace MphRecomp.Frontend
             _gameAll = items ?? new();
             _gameSongs = _gameAll.Where(ImportGames.IsSong).ToList();
             _gameStale = _gameAll.Count(ImportGames.NeedsUpdate);
+            _gameBadge = _gameAll.Any(ImportGames.NeedsUpdate);
             _gameItems = items?.Where(i => !ImportGames.IsSong(i)).ToList();
             if (_gameItems != null && _gameSongs.Count > 0) _gameItems.Add(ImportGames.SongsTile(_gameSongs));
             // the import files: greyed IMPORT FILES KEPT while they're whole (ImportGames.KeepDone)
@@ -154,6 +158,8 @@ namespace MphRecomp.Frontend
             _firstImport = Import.FirstImportOf(id);
             _keepSize = Import.KeepSize(id);
             _gameSource = Import.Source(id);
+            _gameKept = Import.KeptFor(id);
+            _keepAdd = _gameKept && !_keepDone ? Import.CopiesToAdd(id) : 0;
             // the key box: the Wii key for a Wii disc, the player's Switch keys for a Switch game file (Prime 4)
             _switchKeys = Import.TakesSwitchFiles(id);
             _keyShown = _switchKeys || Import.TakesWiiDiscs(id);
@@ -411,13 +417,21 @@ namespace MphRecomp.Frontend
             Glow(glows, _gPick, GX(PickX), GY(PickY), GX(PickX + PickW), GY(PickY + PickH), _gPick);
             ScaledText(_gameSource == null ? "pick" : "change", GX(PickX + PickW / 2), GY(PickY + 9), 2, Orange, _gPick, 0.8f);
             // KEEP IMPORT FILES and its size; greyed IMPORT FILES KEPT while they're whole (A still says what they are)
-            // (none on a game's first import: only the disc button, ImportGames.FirstPick)
+            // (none on a game's first import: only the disc button, ImportGames.FirstPick); UPDATE COPIES once they're there
+            // but an updated importer wants a file they lack (ImportGames.NeedsDiscIn)
             if (!_firstImport)
             {
+                // an update (owner 2026-10-30: "the lit copy files button is no different than when you first press it there
+                // needs to be SOME indication that its an update"): a lit orange plate, pale text, what it adds in place of the
+                // size and the red badge UPDATE ALL wears, so it can't be taken for a first copy
+                bool update = _gameKept && !_keepDone;
+                if (update) Fill(GX(PickX), GY(KeepY), GX(PickX + PickW), GY(KeepY + KeepH), 230 / 255f, 99 / 255f, 8 / 255f, 110 / 255f, _gKeep);
                 Box(GX(PickX), GY(KeepY), GX(PickX + PickW), GY(KeepY + KeepH), _gKeep, _keepDone);
                 Glow(glows, _gKeep, GX(PickX), GY(KeepY), GX(PickX + PickW), GY(KeepY + KeepH), _gKeep);
-                ScaledText(_keepDone ? "files copied" : "copy files", GX(PickX + PickW / 2), GY(KeepY + 5), 2, _keepDone ? Grey : Orange, _gKeep, 0.5f);
-                ScaledText(_keepSize, GX(PickX + PickW / 2), GY(KeepY + 31), 2, _keepDone ? Grey : White, _gKeep, 0.42f);
+                ScaledText(_keepDone ? "files copied" : update ? "update copies" : "copy files", GX(PickX + PickW / 2), GY(KeepY + 5), 2, _keepDone ? Grey : update ? Pale : Orange, _gKeep, 0.5f);
+                string keepLine = !update ? _keepSize : _keepAdd > 0 ? (_keepAdd == 1 ? "1 new item" : $"{_keepAdd} new items") : "new files";
+                ScaledText(keepLine, GX(PickX + PickW / 2), GY(KeepY + 31), 2, _keepDone ? Grey : White, _gKeep, 0.42f);
+                if (update) Picture(ImportCardPictures.Alert, GX(PickX + PickW - 18), GY(KeepY - 10), GL(30), off: false, _gKeep);
             }
 
             // the wii key (or the switch keys): greyed while the disc needs none (a GameCube disc, an .rvz / .wia, a game no
@@ -430,9 +444,10 @@ namespace MphRecomp.Frontend
             ScaledText(_switchKeys ? "switch keys" : "wii key", GX(KeyX + 100), GY(StripY + 26), 0, key ? Orange : Grey, keyTag, _switchKeys ? 0.66f : 0.8f);
             ScaledText(key ? _hasKey ? "set" : "none" : "not needed", GX(KeyX + 100), GY(StripY + 76), 0, key ? White : Grey, keyTag, 0.62f);
 
-            // IMPORT ALL and UPDATE ALL (the lobby's START GAME pill each; IMPORT ALL dimmed until there's a disc, UPDATE ALL
-            // until an update made something stale: its red badge then), how many are imported, the bar
-            bool live = _gameSource != null;
+            // IMPORT ALL and UPDATE ALL (the lobby's START GAME pill each; IMPORT ALL dimmed while nothing is missing, or until
+            // there's a disc or kept import files to rebuild from, UPDATE ALL until something an update changed or added is on
+            // the page (ImportGames.NotImported / NeedsUpdate), how many are imported, the bar
+            bool live = (_gameSource != null || _gameKept) && _gameAll.Any(ImportGames.NotImported);
             float ax = GX(AllX + 10), atop = GY(StripY + 6), aw = GL(AllPillW), ah = GL(64);
             Model(@"startgame\startgame", ax, atop, aw, ah, _gAll, alpha: live ? 1 : 0.4f);
             Glow(glows, _gAll, ax, atop, ax + aw, atop - ah, _gAll);
@@ -442,7 +457,7 @@ namespace MphRecomp.Frontend
             Model(@"startgame\startgame", ux, atop, aw, ah, _gUpd, alpha: stale ? 1 : 0.4f);
             Glow(glows, _gUpd, ux, atop, ux + aw, atop - ah, _gUpd);
             ScaledText("update all", ux + aw * 0.38f, GY(StripY + 27), 2, stale ? Orange : Grey, _gUpd, 0.5f);
-            if (stale) Picture(ImportCardPictures.Alert, GX(UpdX + AllPillW - 22), GY(StripY - 10), GL(30), off: false, _gUpd); // (over the pill's right end)
+            if (_gameBadge) Picture(ImportCardPictures.Alert, GX(UpdX + AllPillW - 22), GY(StripY - 10), GL(30), off: false, _gUpd); // (over the pill's right end)
             int done = _gameAll.Count(i => i.Status == ItemImportStatus.Complete), total = _gameAll.Count;
             ScaledText($"{done}/{total}", GX(AllX + AllW - 10), GY(StripY + 86), 1, White, tag, 0.8f);
             Bar(GX(AllX + 10), GY(StripY + 88), GX(AllX + AllW - 170), done, total, tag); // clear of a two-digit count
@@ -473,7 +488,7 @@ namespace MphRecomp.Frontend
             ScaledText(value, GX(x + TileW / 2), GY(vy + 7), 2, item.Status == ItemImportStatus.Complete ? Pale : Orange, tag, 0.6f);
             // import again: the cards' red badge in the corner across from the X (the MUSIC tile: any of its songs)
             bool stale = item.Kind == ImportGames.SongsTileKind ? _gameSongs.Any(ImportGames.NeedsUpdate) : ImportGames.NeedsUpdate(item);
-            if (stale) Picture(ImportCardPictures.Alert, GX(x + 12), GY(y + 12), GL(44), off: false, tag);
+            if (_gameBadge) Picture(ImportCardPictures.Alert, GX(x + 12), GY(y + 12), GL(44), off: false, tag);
             if (!made) return;
             Fill(GX(x + TileW - 52), GY(y + 16), GX(x + TileW - 16), GY(y + 52), 0, 0, 0, 160 / 255f, tag);
             Box(GX(x + TileW - 52), GY(y + 16), GX(x + TileW - 16), GY(y + 52), tag);

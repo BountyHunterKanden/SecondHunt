@@ -78,14 +78,18 @@ namespace MphRecomp.Frontend
             var rows = new List<RowModel>();
             if (songs.Count == 0) return rows;
             int done = songs.Count(i => i.Status == ItemImportStatus.Complete);
+            // IMPORT ALL in the first area's section: with none of its own it was a page by itself and the songs hid behind
+            // the page turn (owner 2026-10-30: "you absolutely cannot see and import individual songs")
+            string? first = TrackCatalog.Find(songs[0].Name) is Track t0 ? MusicCatalog.Of(t0).Category.ToUpperInvariant() : null;
             rows.Add(new RowModel
             {
                 Label = "import\nall",
-                Description = $"imports all {songs.Count} songs from your disc. {done} of {songs.Count} imported now. "
+                Description = $"imports the songs not imported yet from your disc. {done} of {songs.Count} imported now. "
                     + "pick them in settings > sound: match music, menu music.",
                 Value = () => "START",
                 Step = _ => Import.ImportSongs(id),
-                Action = true
+                Action = true,
+                Section = first
             });
             foreach (ImportItemInfo item in songs)
             {

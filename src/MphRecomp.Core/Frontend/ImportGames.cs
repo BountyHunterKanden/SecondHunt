@@ -231,19 +231,37 @@ namespace MphRecomp.Frontend
             };
         }
 
-        // the song list's IMPORT ALL: every song of the game (the disc picker first if there's no disc yet)
+        // the song list's IMPORT ALL: the songs of the game not imported yet (owner 2026-10-30: "just import what is missing
+        // and report what it will import first"), from the kept import files when the disc is gone or was never picked (it
+        // brought up the file picker on Prime 1, whose disc is gone), else the disc (the disc picker first if there's none yet)
         public void ImportSongs(string gameId)
         {
             if (Busy || !Ready()) return;
             List<ImportItemInfo> songs = Game(gameId)?.Items.Where(IsSong).ToList() ?? new();
             if (songs.Count == 0) return;
+            List<ImportItemInfo> missing = songs.Where(NotImported).ToList();
+            if (missing.Count == 0)
+            {
+                Popup!.Inform(songs.Any(NeedsUpdate) ? "every song is imported. update all on the game's page brings the ones an update changed up to date."
+                    : "every song is imported. to import one again, pick it and press a.");
+                return;
+            }
+            string[] ids = missing.Select(i => i.Id).ToArray();
             ImportPicked? src = Source(gameId);
+            if ((src == null || DiscGone(src)) && KeptFor(gameId))
+            {
+                Popup!.Ask(MissingQuestion(missing, "the import files copied from your disc"), yes =>
+                {
+                    if (yes) Run(new[] { gameId }, null, ids, gameId);
+                });
+                return;
+            }
             if (src == null)
             {
                 PickDisc(gameId, () => ImportSongs(gameId));
                 return;
             }
-            Confirm($"import all {songs.Count} songs from {Lower(src.Name)}?", new[] { gameId }, src, songs.Select(i => i.Id).ToArray(), gameId);
+            Confirm(MissingQuestion(missing, Lower(src.Name)), new[] { gameId }, src, ids, gameId);
         }
 
         public string Extensions(string gameId) => String.Join(" ", AcceptedExtensions(gameId));
@@ -687,20 +705,56 @@ namespace MphRecomp.Frontend
             });
         }
 
-        // "import all": every item of the game (the disc picker first if there's no disc yet)
+        // IMPORT ALL and UPDATE ALL split (owner 2026-10-30: "go ahead with the split ... have import all not always import
+        // all and just import what is missing and report what it will import first"): IMPORT ALL takes what isn't imported
+        // (never taken, deleted with its X box, stopped, new, failed; items this disc version can't make don't count), UPDATE
+        // ALL what NeedsUpdate says. One imported item is imported again from its tile
+        public static bool NotImported(ImportItemInfo item) => item.Status is ItemImportStatus.Missing or ItemImportStatus.Failed;
+
+        // the question before an import of what's missing: how many, and what (the names when there are a few, else counts)
+        private static string MissingQuestion(IReadOnlyCollection<ImportItemInfo> missing, string from)
+        {
+            int n = missing.Count;
+            string what;
+            if (n <= 6) what = String.Join(", ", missing.Select(i => Lower(ItemName(i))));
+            else
+            {
+                var parts = new List<string>();
+                void Add(int c, string one, string many) { if (c > 0) parts.Add(c == 1 ? "1 " + one : $"{c} {many}"); }
+                Add(missing.Count(IsSong), "song", "songs");
+                Add(missing.Count(IsSuit), "suit", "suits");
+                Add(missing.Count(IsBall), "morph ball", "morph balls");
+                Add(missing.Count(i => i.Kind == "hd" && !IsSuit(i) && !IsBall(i)), "character", "characters");
+                Add(missing.Count(i => i.Kind == "arenas"), "arena", "arenas");
+                Add(missing.Count(i => i.Kind != "hd" && i.Kind != "arenas" && !IsSong(i)), "other item", "other items");
+                what = String.Join(", ", parts);
+            }
+            string suits = missing.Any(i => i.Kind == "hd") ? " the suits take a few minutes." : "";
+            return (n == 1 ? "1 item isn't imported yet: " : $"{n} items aren't imported yet: ") + what + ". "
+                + $"import {(n == 1 ? "it" : "them")} from {from}?{suits}";
+        }
+
+        // "import all": the game's items not imported yet (the disc picker first if there's no disc yet)
         public void ImportAll(string gameId)
         {
             if (Busy || !Ready()) return;
             ImportGameInfo? g = Game(gameId);
             if (g == null || g.Items.Count == 0) return;
+            List<ImportItemInfo> missing = g.Items.Where(NotImported).ToList();
+            if (missing.Count == 0)
+            {
+                Popup!.Inform(g.Items.Any(NeedsUpdate) ? "everything is imported. update all brings the items an update changed up to date."
+                    : "everything is imported and up to date. to import one again, pick it and press a.");
+                return;
+            }
+            string[] ids = missing.Select(i => i.Id).ToArray();
             ImportPicked? src = Source(gameId);
-            string time = g.Items.Any(i => i.Kind == "hd") ? " the suits take a few minutes." : "";
             if ((src == null || DiscGone(src)) && KeptFor(gameId))
             {
                 // the disc is gone (or never picked) but its files are kept: rebuild from them, no disc
-                Popup!.Ask($"import all {TileCount(g).Total} from the import files copied from your disc?{time}", yes =>
+                Popup!.Ask(MissingQuestion(missing, "the import files copied from your disc"), yes =>
                 {
-                    if (yes) Run(new[] { gameId }, null, g.Items.Select(i => i.Id).ToArray(), gameId);
+                    if (yes) Run(new[] { gameId }, null, ids, gameId);
                 });
                 return;
             }
@@ -714,7 +768,8 @@ namespace MphRecomp.Frontend
                 PickDisc(gameId, () => ImportAll(gameId));
                 return;
             }
-            Confirm($"import all {TileCount(g).Total} from {Lower(src.Name)}?{time}", new[] { gameId }, src, null, gameId);
+            // nothing imported yet: the whole game (Confirm then asks about the import files whenever they aren't kept)
+            Confirm(MissingQuestion(missing, Lower(src.Name)), new[] { gameId }, src, missing.Count == g.Items.Count ? null : ids, gameId);
         }
 
         // ---- the import files (owner 2026-10-24, docs/IMPORT_RETENTION.md): a copy of everything each imported item is made
@@ -766,7 +821,7 @@ namespace MphRecomp.Frontend
         }
 
         // the game strip's KEEP IMPORT FILES reads IMPORT FILES KEPT, greyed
-        public bool KeepDone(string gameId) => GamesOf(gameId).All(KeptFor) && !NeedsDiscIn(gameId);
+        public bool KeepDone(string gameId) => GamesOf(gameId).All(KeptFor) && !NeedsDiscIn(gameId) && LackCount(gameId) == 0;
 
         // free space where the imports go; null = unknown (then nothing is checked)
         private long? FreeBytes()
@@ -900,25 +955,45 @@ namespace MphRecomp.Frontend
         private void KeepCopy(string gameId)
         {
             ImportPicked? src = Source(gameId);
+            string[] games = GamesOf(gameId);
+            string[] needs = DiscNeeds(games);
+            int adding = CopiesToAdd(gameId);
             if (src == null || DiscGone(src))
             {
-                PickDisc(gameId, () =>
+                void Pick() => PickDisc(gameId, () =>
                 {
                     if (Source(gameId) is { } picked && !DiscGone(picked)) KeepCopy(gameId);
                 });
+                // owner 2026-10-30: "and then prompt the user to re add their rom"
+                if (adding > 0 && games.All(KeptFor))
+                {
+                    Popup!.Ask($"an update needs files from your {Lower(Row(gameId).Title)} rom that your copies don't have "
+                        + $"({(adding == 1 ? "1 item" : $"{adding} items")}). pick your rom to add them?", yes => { if (yes) Pick(); });
+                }
+                else Pick();
                 return;
             }
-            string[] games = GamesOf(gameId);
-            string[] needs = games.SelectMany(id => Game(id)?.Items.Where(NeedsDisc).Select(i => i.Id) ?? Enumerable.Empty<string>()).ToArray();
             string[] fresh = games.Where(id => !KeptFor(id)).ToArray();
             long keep = fresh.Sum(id => Estimate(id).Keep);
             string question = fresh.Length == 0
-                ? $"add what {(needs.Length == 1 ? "1 item needs" : $"{needs.Length} items need")} from {Lower(src.Name)} to the import files?"
+                ? $"add what {(adding == 1 ? "1 item needs" : $"{adding} items need")} from {Lower(src.Name)} to the import files?"
                 : $"copy the import files from {Lower(src.Name)}? about {Megabytes(keep)}.";
             Popup!.Ask(question + " it takes a while. then the ROM can be deleted. " + NeedRomNotice, yes =>
             {
                 if (yes) RunWithRoom(games, src, needs, gameId, games, 0, keep);
             });
+        }
+
+        private string[] DiscNeeds(IEnumerable<string> games)
+            => games.SelectMany(id => Game(id)?.Items.Where(NeedsDisc).Select(i => i.Id) ?? Enumerable.Empty<string>()).ToArray();
+
+        // what an update adds to a game's copies: items that needed the disc, with what the copies' check found the copies
+        // lack (items not imported too: the run's top-up reads those for the copies without importing them). 0 = nothing
+        // to add (the UPDATE COPIES box shows the count, owner 2026-10-30: "there needs to be SOME indication that its an update")
+        public int CopiesToAdd(string gameId)
+        {
+            string[] games = GamesOf(gameId);
+            return DiscNeeds(games).Union(games.SelectMany(LacksOf)).Count();
         }
 
         // DELETE IMPORT FILES: a game's (null: every game's) import files only. What was imported stays, but updating it needs
@@ -938,6 +1013,7 @@ namespace MphRecomp.Frontend
             Popup!.Ask(question, yes =>
             {
                 if (!yes) return;
+                StopCheck();
                 try
                 {
                     foreach (string id in games) Service!.DeleteKept(id);
@@ -1090,6 +1166,121 @@ namespace MphRecomp.Frontend
             return n;
         }
 
+        // the copies' check's share of that (FrontendSession.TickNewContent, its own box): items an update wants files for
+        // that the game's copies don't have, in games whose rom isn't picked and present
+        public int CopiesLackingRom()
+        {
+            int n = 0;
+            foreach (string id in DeletableGames.Where(KeptFor))
+            {
+                ImportPicked? src = Source(id);
+                if (src != null && !DiscGone(src)) continue;
+                n += LacksOf(id).Count;
+            }
+            return n;
+        }
+
+        // ---- the copies' check (owner 2026-10-30: "why cant it only light up when there's truly something to add to the
+        //      copies" "and then prompt the user to re add their rom"): once an update changed an importer, each kept game's
+        //      changed items are made from its copies on a worker (ImportService.CheckKept, output thrown away, each item
+        //      once per update). What the copies lack turns COPY FILES into UPDATE COPIES and the main menu asks for the rom
+        //      when it's gone. An import stops the check and it carries on after ----
+
+        private Task? _check;
+        private CancellationTokenSource? _checkCts;
+        private bool _checkDone;
+
+        // the check has gone through every kept game since launch (the main menu's box waits for it)
+        public bool KeptCheckDone => _checkDone;
+
+        public void StartKeptCheck()
+        {
+            if (_checkDone || _check is { IsCompleted: false } || _task != null) return;
+            ImportService? service = Service;
+            if (service == null) { _checkDone = true; return; }
+            var due = new List<ImportRecipe>();
+            string[] games;
+            try
+            {
+                games = DeletableGames.Where(KeptFor).ToArray();
+                foreach (string id in games) due.AddRange(service.KeptChecksDue(id));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log?.Invoke("import: copies' check skipped (" + ex.Message + ")");
+                _checkDone = true;
+                return;
+            }
+            if (due.Count == 0) { _checkDone = true; return; }
+            // the suits are fitted on MPH's own hunters: read here, on the menu thread, as Run does, so the worker only takes
+            // MphRead's cached models
+            try
+            {
+                var hunters = new HashSet<MphRead.Hunter>();
+                foreach (ImportRecipe r in due.Where(r => r.Kind == "hd"))
+                {
+                    hunters.Add(MphRead.Hunter.Samus);
+                    if (MphRecomp.Anim.TrophyRigs.TryHunterFor(r.Name, out MphRead.Hunter h)) hunters.Add(h);
+                }
+                foreach (MphRead.Hunter h in hunters) _ = MphRead.Read.GetModelInstance(MphRead.Metadata.HunterModels[h][0]);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke("import: copies' check skipped, mph's hunter model unreadable: " + ex.Message);
+                _checkDone = true;
+                return;
+            }
+            Log?.Invoke($"import: copies' check, {due.Count} item(s) changed by an update");
+            var cts = _checkCts = new CancellationTokenSource();
+            CancellationToken ct = cts.Token;
+            Task? check = null;
+            check = _check = Task.Factory.StartNew(() =>
+            {
+                try { Thread.CurrentThread.Priority = ThreadPriority.BelowNormal; } catch (Exception) { }   // a game may be running
+                int lacking = 0;
+                foreach (string id in games)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    lacking += service.CheckKept(id, ct).Count;
+                }
+                return lacking;
+            }, ct, TaskCreationOptions.LongRunning, TaskScheduler.Default).ContinueWith(t =>
+            {
+                _posted.Enqueue(() =>
+                {
+                    if (_check == check) { _check = null; _checkCts = null; }
+                    cts.Dispose();
+                    if (t.IsCanceled || t.Exception?.GetBaseException() is OperationCanceledException) return;   // Tick starts it again after the run
+                    _checkDone = true;
+                    Log?.Invoke(t.IsCompletedSuccessfully ? $"import: copies' check done, {t.Result} item(s) need the rom"
+                        : "import: copies' check failed: " + t.Exception?.GetBaseException().Message);
+                    Changed?.Invoke();
+                });
+            }, TaskScheduler.Default);
+        }
+
+        // stops a running check; the task to wait for (null = none)
+        private Task? StopCheck()
+        {
+            try { _checkCts?.Cancel(); } catch (ObjectDisposedException) { }
+            return _check;
+        }
+
+        private static void WaitCheck(Task? check)
+        {
+            try { check?.Wait(); }
+            catch (AggregateException) { }
+        }
+
+        // what the check found a game's copies lack (KeptLacks: today's importers only); none when unreadable
+        public IReadOnlyList<string> LacksOf(string gameId)
+        {
+            try { return Service?.KeptLacks(gameId) ?? Array.Empty<string>(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return Array.Empty<string>(); }
+        }
+
+        private int LackCount(string gameId) => GamesOf(gameId).Sum(id => LacksOf(id).Count);
+
         // an item a stopped import removed (the Scout Drones, first in line, were lost this way on the Odin and never came
         // back: nothing marked them) counts too: the red badge, the main-menu box and UPDATE ALL bring it back
         public static bool WasStopped(ImportItemInfo item)
@@ -1138,11 +1329,13 @@ namespace MphRecomp.Frontend
             });
         }
 
+        private static bool Takes(ImportItemInfo item) => NeedsUpdate(item);
+
         // the next disc: every game left that reads from it, their stale items only (a Trilogy disc picked on its card is
         // Prime 1's, Echoes' and Corruption's disc: one run)
         private void NextUpdate()
         {
-            _updates.RemoveAll(id => Game(id)?.Items.Any(NeedsUpdate) != true);
+            _updates.RemoveAll(id => Game(id)?.Items.Any(Takes) != true);
             if (_updates.Count == 0)
             {
                 EndUpdates(null);
@@ -1151,11 +1344,11 @@ namespace MphRecomp.Frontend
             // the kept import files first (owner 2026-10-23: an update rebuilds from them, no disc): a game with a kept copy runs
             // its items from it once; what the copy lacks answers "needs the disc again" and is asked of the disc below
             string? keptGame = _updates.FirstOrDefault(id => !_keptTried.Contains(id) && KeptFor(id)
-                && Game(id)?.Items.Any(i => NeedsUpdate(i) && !NeedsDisc(i)) == true);
+                && Game(id)?.Items.Any(i => Takes(i) && !NeedsDisc(i)) == true);
             if (keptGame != null)
             {
                 _keptTried.Add(keptGame);
-                string[] ids = Game(keptGame)!.Items.Where(i => NeedsUpdate(i) && !NeedsDisc(i)).Select(i => i.Id).ToArray();
+                string[] ids = Game(keptGame)!.Items.Where(i => Takes(i) && !NeedsDisc(i)).Select(i => i.Id).ToArray();
                 Run(new[] { keptGame }, null, ids, keptGame);
                 if (_task == null) EndUpdates("");
                 return;
@@ -1191,7 +1384,7 @@ namespace MphRecomp.Frontend
             }
             string[] games = _updates.Where(id => Source(id)?.Token == src.Token).ToArray();
             _updates.RemoveAll(games.Contains);
-            string[] only = games.SelectMany(id => Game(id)?.Items.Where(NeedsUpdate).Select(i => i.Id) ?? Enumerable.Empty<string>()).Distinct().ToArray();
+            string[] only = games.SelectMany(id => Game(id)?.Items.Where(Takes).Select(i => i.Id) ?? Enumerable.Empty<string>()).Distinct().ToArray();
             Run(games, src, only, first);
             if (_task == null) EndUpdates("");   // Run answered by itself (its box says why)
         }
@@ -1336,6 +1529,7 @@ namespace MphRecomp.Frontend
             _fraction = 0;
             _gameIndex = 0;
             _ticks = 0;
+            Task? check = StopCheck();   // the copies' check writes the same manifests: the worker waits for it to stop
             _cts = new CancellationTokenSource();
             CancellationToken ct = _cts.Token;
             WiiCommonKeys? keys = LoadWiiKey();
@@ -1355,6 +1549,7 @@ namespace MphRecomp.Frontend
                 string[] ids = only!;
                 _task = Task.Run(() =>
                 {
+                    WaitCheck(check);
                     var reports = new List<ImportReport>();
                     for (int k = 0; k < games.Length; k++)
                     {
@@ -1372,6 +1567,7 @@ namespace MphRecomp.Frontend
                 string marker = service.AcceptedSources(games[0]).Marker;
                 _task = Task.Run(() =>
                 {
+                    WaitCheck(check);
                     // a folder: its tree read in place (a picked Android folder through its own source, else a path)
                     service.KeepSources = keeps.Contains(games[0]);
                     if (ImportHost.OpenFolder == null) return new List<ImportReport> { service.Import(games[0], src.Token, sink, ct, only) };
@@ -1382,6 +1578,7 @@ namespace MphRecomp.Frontend
             }
             _task = Task.Run(() =>
             {
+                WaitCheck(check);
                 using Stream s = ImportHost.Open(src.Token) ?? throw new FileNotFoundException("can't open " + src.Name);
                 service.WiiKeys = keys;
                 service.SwitchKeys = switchKeys;
@@ -1449,6 +1646,7 @@ namespace MphRecomp.Frontend
                 answer = Failure(ex);
             }
             Log?.Invoke("import: " + answer);
+            StartKeptCheck();   // stopped by the run, or new copies: what's still due
             if (_updating)
             {
                 // UPDATE ALL: the next disc (its busy box takes this one's place), or the end

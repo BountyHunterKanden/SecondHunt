@@ -23,8 +23,9 @@ namespace MphRecomp.Frontend
         public const int BodyW = 384, BodyH = 576, BallSize = 384;
 
         // a body picture's framing, in its file name: "_2" = framed on its head (2026-10-08, ImportItemRender.HeadRow); "_3" =
-        // the Early Phazon suit's visor solid like the other suits' (2026-10-18, MenuSamus.json "visor")
-        private const string BodyLook = "_3";
+        // the Early Phazon suit's visor solid like the other suits' (2026-10-18, MenuSamus.json "visor"); "_4" (balls "_e", drones "_h") = see-through
+        // around the model (2026-10-30, ImportItemRender.Render)
+        private const string BodyLook = "_4";
 
         // the app renders the jobs (Android sets it); else nothing is queued
         public static bool HostRenders { get; set; }
@@ -67,7 +68,7 @@ namespace MphRecomp.Frontend
                 return null;
             }
             bool ball = native || ImportGames.IsBall(item);
-            string look = native ? "_g" : ball ? "_d" : BodyLook; // a body framed anew is drawn again (the drones: unfolded; the balls: turned, with their lit core, 2026-10-26)
+            string look = native ? "_h" : ball ? "_e" : BodyLook; // a body framed anew is drawn again (the drones: unfolded; the balls: turned, with their lit core, 2026-10-26)
             string png = Path.Combine(RendersDir(root), $"{item.Name}_{File.GetLastWriteTimeUtc(dae).Ticks:x}{look}.png");
             if (File.Exists(png))
             {

@@ -83,6 +83,7 @@ namespace MphRecomp.Frontend
             // ---- SOUND ----
             ["sfxvolume"] = "sound effects volume, 0 to 9. changes live.",
             ["musicvolume"] = "music volume, 0 to 9. changes live.",
+            ["voicevolume"] = "how loud other players' voice chat is, 0 to 200%. changes live.",
             ["musicquality.orig"] = "original ds music, as is. changes live.",
             ["musicquality.orig+fix"] = "original ds music with clicks and clipping fixed. changes live.",
             ["musicquality.hq+fix"] = "higher quality music with clicks and clipping fixed. changes live.",

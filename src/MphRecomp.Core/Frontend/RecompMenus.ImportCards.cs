@@ -46,7 +46,8 @@ namespace MphRecomp.Frontend
         private CardInfo[]? _cardInfos;
 
         // what a card shows, read as the page comes in and after every import (not each frame: ImportGames.Game sorts);
-        // Stale: an update changed how some of its items are made (UPDATE on its page) -> the red badge in its corner
+        // Stale: an update changed how some of its items are made (UPDATE on its page), or its copies have something to add
+        // (UPDATE COPIES) -> the red badge in its corner
         private sealed record CardInfo(ImportGames.GameRow Row, bool Known, int Done, int Total, List<(string Kind, int Count)> Kinds,
             ImportPicked? Source = null, List<ImportItemInfo>? Shown = null, bool Stale = false);
 
@@ -141,7 +142,8 @@ namespace MphRecomp.Frontend
                 if (row.Id == ImportGames.TrilogyId)
                 {
                     (int tDone, int tTotal) = Import.TrilogyCount();
-                    bool tStale = ImportGames.TrilogyGames.Any(id => Import.Game(id)?.Items.Any(ImportGames.NeedsUpdate) == true);
+                    bool tStale = ImportGames.TrilogyGames.Any(id => Import.Game(id)?.Items.Any(ImportGames.NeedsUpdate) == true)
+                        || Import.CopiesToAdd(row.Id) > 0;
                     cards[k] = new CardInfo(row, tTotal > 0, tDone, tTotal, new(), Import.Source(row.Id), Stale: tStale);
                     continue;
                 }
@@ -166,7 +168,7 @@ namespace MphRecomp.Frontend
                     : ImportGames.IsBall(i) ? 2 : 3).ToList();
                 (int gDone, int gTotal) = ImportGames.TileCount(g);
                 cards[k] = new CardInfo(row, true, gDone, gTotal, kinds,
-                    Import.Source(row.Id), shown, g.Items.Any(ImportGames.NeedsUpdate));
+                    Import.Source(row.Id), shown, g.Items.Any(ImportGames.NeedsUpdate) || Import.CopiesToAdd(row.Id) > 0);
             }
             _cardInfos = cards;
         }

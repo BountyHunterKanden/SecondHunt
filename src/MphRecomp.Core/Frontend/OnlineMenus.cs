@@ -843,7 +843,7 @@ namespace MphRecomp.Frontend
                             _netError = null;
                             _retries = 0;
                             KnowFindable(c.Findable);
-                            OfferRejoin(c);
+                            if (!RunWhenConnected()) OfferRejoin(c); // (a settings row that waited on it: OnlineMenus.Settings.cs)
                             RefreshOnline(lists: true);
                             if (_onlineMenu is MenuEngine at) TryRehost(at); // (PLAY AGAIN after the host left)
                             if (_onlineMenu?.Page?.Index == s_onLicense) FetchLicense();
@@ -858,6 +858,7 @@ namespace MphRecomp.Frontend
                             _connecting = false;
                             _netError = Problem(ex);
                             ConnectFailed();
+                            FailWhenConnected(_netError);
                             Redraw();
                         });
                     }

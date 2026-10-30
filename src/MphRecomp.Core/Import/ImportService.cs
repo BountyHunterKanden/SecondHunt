@@ -641,6 +641,100 @@ namespace MphRecomp.Import
             return ImportFrom(def, kept, progress, ct, only, Stopwatch.StartNew(), edition);
         }
 
+        // ---- the copies' check (owner 2026-10-30: "why cant it only light up when there's truly something to add to the copies"):
+        //      an offered item whose recipe or importer changed since the kept files last covered it is made once from them into
+        //      a scratch folder, the output thrown away. Reading all it needs makes it covered; wanting a byte they don't hold
+        //      marks it as lacking (KeptLacks: the game's COPY FILES button turns UPDATE COPIES and asks for the disc) ----
+
+        const string LacksMark = "|lacks", FailedMark = "|failed";
+
+        KeptSource? OpenKept(string gameId, out ImportEdition? edition)
+        {
+            edition = null;
+            KeptSource? kept = SourceKeep.Open(OutputRoot, gameId);
+            if (kept == null || kept.EditionId.Length == 0) return kept;
+            edition = Editions.FirstOrDefault(e => e.Id == kept.EditionId);
+            return edition != null ? kept : null;
+        }
+
+        // the items the check still has to try: not covered at today's stamp, and not tried at it before
+        public List<ImportRecipe> KeptChecksDue(string gameId)
+        {
+            if (OpenKept(gameId, out ImportEdition? edition) is not { } kept) return new List<ImportRecipe>();
+            Dictionary<string, string> covered = SourceKeep.ReadCovered(OutputRoot, gameId, kept.EditionId);
+            Dictionary<string, string> tried = SourceKeep.ReadChecked(OutputRoot, gameId);
+            return KeptRecipes(gameId, edition).Where(r =>
+            {
+                string stamp = Stamp(r);
+                return _kinds.ContainsKey(r.Kind) && !(covered.TryGetValue(r.Id, out string? c) && c == stamp)
+                    && !(tried.TryGetValue(r.Id, out string? t) && (t == stamp + LacksMark || t == stamp + FailedMark));
+            }).ToList();
+        }
+
+        // runs the check for one game (a worker thread: it touches no import state, only the kept files' manifest and a
+        // scratch folder); what it learnt is written as it goes, so a stop loses only the item it was on. Returns KeptLacks.
+        public IReadOnlyList<string> CheckKept(string gameId, CancellationToken ct = default)
+        {
+            List<ImportRecipe> due = KeptChecksDue(gameId);
+            if (due.Count == 0) return KeptLacks(gameId);
+            KeptSource? kept = OpenKept(gameId, out ImportEdition? edition);
+            if (kept == null) return Array.Empty<string>();
+            GameDef def = Def(gameId);
+            var ctx = new ImportContext(kept);
+            var hashes = new Dictionary<string, string>();
+            string scratch = "";
+            try
+            {
+                foreach (ImportRecipe r in due)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    scratch = Path.Combine(OutputRoot, r.Kind, "." + r.Name + ".checking");   // beside an import's staging
+                    string stamp = Stamp(r);
+                    IImportKind kind = _kinds[r.Kind];
+                    var covered = new Dictionary<string, string>();
+                    var tried = new Dictionary<string, string>();
+                    string? why = CheckSources(ctx, kept, def, edition, r, kind, hashes);
+                    if (why != null)
+                    {
+                        tried[r.Id] = stamp + (why.StartsWith(NeedsDiscPrefix, StringComparison.Ordinal) ? LacksMark : FailedMark);
+                    }
+                    else
+                    {
+                        if (Directory.Exists(scratch)) Directory.Delete(scratch, true);
+                        Directory.CreateDirectory(scratch);
+                        try
+                        {
+                            kind.Run(ctx, r, scratch, (_, _) => { }, ct);
+                            covered[r.Id] = stamp;
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (SourceMissingException) { tried[r.Id] = stamp + LacksMark; }
+                        catch (Exception) { tried[r.Id] = stamp + FailedMark; }   // not the copies' doing: an import says why
+                        if (Directory.Exists(scratch)) Directory.Delete(scratch, true);
+                    }
+                    try { SourceKeep.MarkChecked(OutputRoot, gameId, covered, tried); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
+                }
+            }
+            finally
+            {
+                try { if (scratch.Length > 0 && Directory.Exists(scratch)) Directory.Delete(scratch, true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+            return KeptLacks(gameId);
+        }
+
+        // the offered items the check found the kept files lack bytes for, at today's stamps (a top-up from the disc rewrites
+        // the manifest and clears them)
+        public IReadOnlyList<string> KeptLacks(string gameId)
+        {
+            if (!HasKept(gameId)) return Array.Empty<string>();
+            Dictionary<string, string> tried = SourceKeep.ReadChecked(OutputRoot, gameId);
+            if (tried.Count == 0) return Array.Empty<string>();
+            return Recipes.ForGame(gameId).Where(r => (KeepFilter?.Invoke(r) ?? true)
+                && tried.TryGetValue(r.Id, out string? t) && t == Stamp(r) + LacksMark).Select(r => r.Id).ToList();
+        }
+
         // what a row removed by a stopped import records (Remove's message for the games a stopped Trilogy run finished)
         public const string StoppedMessage = "removed: the import was stopped";
 
@@ -713,7 +807,9 @@ namespace MphRecomp.Import
 
         // clear items (IMPORT GAMES' clear rows, owner 2026-10-07; a stopped import): the files their imports wrote are
         // deleted and each one reads "not imported" again. ids: "arenas/M02_Spires"; unknown ids are skipped
-        public void Remove(string gameId, IReadOnlyCollection<string> ids, string message = "cleared")
+        public const string ClearedMessage = "cleared";   // a deleted item's (Remove's default)
+
+        public void Remove(string gameId, IReadOnlyCollection<string> ids, string message = ClearedMessage)
         {
             var cleared = new List<string>();
             foreach (ImportRecipe r in Recipes.ForGame(gameId).Where(r => ids.Contains(r.Id)))
@@ -795,6 +891,10 @@ namespace MphRecomp.Import
                 w.WriteStartArray("recipes");
                 foreach (ImportRecipe r in Recipes.ForGame(report.GameId)) w.WriteStringValue(r.Id);
                 w.WriteEndArray();
+                // the ones this build offered the player (KeepFilter): an item a later build ungates reads as new too
+                w.WriteStartArray("offered");
+                foreach (ImportRecipe r in Recipes.ForGame(report.GameId)) if (KeepFilter?.Invoke(r) ?? true) w.WriteStringValue(r.Id);
+                w.WriteEndArray();
                 w.WriteEndObject();
             }
             File.WriteAllBytes(path, ms.ToArray());
@@ -816,9 +916,16 @@ namespace MphRecomp.Import
                 JsonElement root = doc.RootElement;
                 provided = true;
                 discId = root.TryGetProperty("discId", out JsonElement di) ? di.GetString() : null;
-                if (root.TryGetProperty("recipes", out JsonElement rs) && rs.ValueKind == JsonValueKind.Array)
+                if (root.TryGetProperty("offered", out JsonElement os) && os.ValueKind == JsonValueKind.Array)
                 {
-                    known = new HashSet<string>(rs.EnumerateArray().Select(e => e.GetString() ?? ""), StringComparer.Ordinal);
+                    known = new HashSet<string>(os.EnumerateArray().Select(e => e.GetString() ?? ""), StringComparer.Ordinal);
+                }
+                else if (root.TryGetProperty("recipes", out JsonElement rs) && rs.ValueKind == JsonValueKind.Array)
+                {
+                    // Beta 3.4 to 4.0 listed every recipe, the Prime songs too, which public builds hid until 0.4.0 (owner
+                    // 2026-10-30: they never showed up in the update); those read as not known so they come up as new
+                    known = new HashSet<string>(rs.EnumerateArray().Select(e => e.GetString() ?? "")
+                        .Where(id => !id.StartsWith("tracks/", StringComparison.Ordinal)), StringComparer.Ordinal);
                 }
                 if (root.TryGetProperty("items", out JsonElement items))
                 {

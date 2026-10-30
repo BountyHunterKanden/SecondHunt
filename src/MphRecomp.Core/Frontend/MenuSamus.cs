@@ -138,13 +138,17 @@ namespace MphRecomp.Frontend
 
         // RECOMP SETTINGS "menu art"'s pick (RecompSettings.MenuArtSuit): that suit when the user has it (or a DS body:
         // StandinPictures.MenuArtOf, drawn by StandinPictures.MenuArt rather than the HD suit code); "shuffle" = any of
-        // Samus's imported suits but `avoid` (the last one shown, so each start differs); else the recipe's order
+        // Samus's imported suits or the DS bodies but `avoid` (the last one shown, so each start differs); else the recipe's order
         public string? PickSuit(string hdRoot, string? want, string? avoid, Random? random = null)
         {
             if (want == Config.RecompSettings.MenuArtShuffle)
             {
                 List<string> all = Multiplayer.Characters.Skins(Multiplayer.Characters.Samus, hdRoot)
                     .Where(s => !Multiplayer.Characters.IsOriginal(s) && Has(hdRoot, s)).ToList();
+                // and the DS bodies the chooser offers (owner 2026-10-30: shuffle never drew a low-poly hunter)
+                all.AddRange(new[] { Multiplayer.Characters.DarkSamusStandinSkin }
+                    .Concat(StandinPictures.MenuArtHunters.Select(StandinPictures.MenuArtId))
+                    .Where(id => StandinPictures.MenuArtOf(id) != null));
                 List<string> fresh = all.Where(s => !s.Equals(avoid, StringComparison.OrdinalIgnoreCase)).ToList();
                 List<string> from = fresh.Count > 0 ? fresh : all;
                 if (from.Count > 0) return from[(random ?? Random.Shared).Next(from.Count)];

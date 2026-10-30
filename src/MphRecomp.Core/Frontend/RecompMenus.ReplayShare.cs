@@ -216,7 +216,7 @@ namespace MphRecomp.Frontend
             if (shown == 0)
             {
                 Text("nothing shared with you yet.", 128, -70, 2, White, tag);
-                Text(SharedReplays.Blocked(ProfileDir) ? "friend replays are off (recomp settings > help)."
+                Text(SharedReplays.Blocked(ProfileDir) ? "friend replays are off (settings > online)."
                     : "a friend's replay waits here until you download it.", 128, -84, 2, Pale, tag);
             }
         }

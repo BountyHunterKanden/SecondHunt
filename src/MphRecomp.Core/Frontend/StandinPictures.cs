@@ -82,7 +82,7 @@ namespace MphRecomp.Frontend
         // screen, chest on the touch screen -- on the game's own DS model in its idle, drawn by this rasterizer ----
 
         // in the menu art's cache name: a new framing draws them again
-        public const string MenuArtStamp = "ds3";
+        public const string MenuArtStamp = "ds4";
         // the menu-art ids of the DS bodies (RecompSettings.MenuArtSuit): the low-poly Dark Samus, and "ds:<hunter>"
         public const string MenuArtPrefix = "ds:";
         public static readonly Hunter[] MenuArtHunters =
@@ -162,15 +162,20 @@ namespace MphRecomp.Frontend
             LastHead = (head, radius, min, max);
             float span = (max.Y - min.Y) * spanShare;
             float midY = head.Y - span * (0.5f - headAt + MenuArtRaise(id));
-            // across: the middle of what the picture shows (the median across of the corners in its band), not the head's
-            // (owner 2026-10-29: Spire leans, his head off his body's middle)
-            var across = new List<float>();
-            foreach (var v in verts)
+            // across: the head, on the body's middle line; for Spire the middle of what the picture shows (the median across
+            // of the corners in its band), as he leans with his head off his body's middle (owner 2026-10-29). The median
+            // put Noxus off centre, pulled toward his heavier arm (owner 2026-10-30: "noxus is a little off center")
+            float midX = head.X;
+            if (MenuArtHunter(id) == Hunter.Spire)
             {
-                if (MathF.Abs(v.P.Y - midY) <= span / 2) across.Add(v.P.X);
+                var across = new List<float>();
+                foreach (var v in verts)
+                {
+                    if (MathF.Abs(v.P.Y - midY) <= span / 2) across.Add(v.P.X);
+                }
+                across.Sort();
+                if (across.Count > 0) midX = across[across.Count / 2];
             }
-            across.Sort();
-            float midX = across.Count > 0 ? across[across.Count / 2] : head.X;
             Vector3 target = new(midX, midY, head.Z);
             float dist = span / 2 / MathF.Tan(FovY * MathF.PI / 360f);
             byte[] px = Draw(model, LookAlikes.Look.None, 0, verts, target - Vector3.UnitZ * dist, target, outW, outH, super);

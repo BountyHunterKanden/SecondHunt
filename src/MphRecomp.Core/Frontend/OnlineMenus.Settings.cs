@@ -92,12 +92,14 @@ namespace MphRecomp.Frontend
         }
 
         // one ONLINE SETTINGS row run (ONLINE PLAY's page and SECOND HUNT SETTINGS' ONLINE tab, page: the one it's on); the
-        // server's two (findable, delete) only from ONLINE PLAY's, where the connection is
+        // server's two (findable, delete) connect first wherever they are (owner 2026-10-30: "find profile by name and delete
+        // profile should not be locked by needing to go to a differnet menu changing those settings should connect to the
+        // serer"; SECOND HUNT SETTINGS' rows used to send the player to online play)
         private void OnlineRow(MenuEngine menu, int row, int page)
         {
-            if ((row is StFindable or StDelete) && page != s_onSettings && _client is not { Connected: true })
+            if ((row is StFindable or StDelete) && _client is not { Connected: true })
             {
-                Import.Popup?.Inform("this one needs the server.\n\nchange it in online play: settings.");
+                ConnectThen(() => OnlineRow(menu, row, page));
                 return;
             }
             switch (row)
@@ -165,6 +167,46 @@ namespace MphRecomp.Frontend
             }
         }
 
+        private Action? _whenConnected; // a server row (findable, delete) waiting on the connection (ConnectThen)
+
+        // a server row with no connection: "connecting..." (NO stops waiting), then the row runs once RefreshOnline is in
+        // (RunWhenConnected), or the box says why not. Leaving the page closes the connection again (OnlineMenus' page change)
+        private void ConnectThen(Action then)
+        {
+            if (Import.Popup == null) return;
+            _whenConnected = then;
+            Import.Popup.BusyCancel("connecting to the server...", () =>
+            {
+                _whenConnected = null;
+                Import.Popup?.Close();
+            });
+            if (!_connecting) RefreshOnline(lists: false);
+            if (!_connecting && _client is not { Connected: true })
+            {
+                // (RefreshOnline didn't start one: a join or a hosted game has the menus)
+                _whenConnected = null;
+                Import.Popup.Inform("can't reach the server.\n\ntry again in a moment.");
+            }
+        }
+
+        // the connection is up (RefreshOnline): the row that waited on it, if one did
+        private bool RunWhenConnected()
+        {
+            if (_whenConnected is not Action then) return false;
+            _whenConnected = null;
+            Import.Popup?.Close();
+            then();
+            return true;
+        }
+
+        // it couldn't connect: the row that waited says why
+        private void FailWhenConnected(string? why)
+        {
+            if (_whenConnected == null) return;
+            _whenConnected = null;
+            Import.Popup?.Inform("can't reach the server.\n\n" + (why ?? "try again in a moment."));
+        }
+
         // DELETE ONLINE PROFILE: two yeses, then the server forgets this player (DeleteProfileReq)
         private void AskDelete(MenuEngine menu)
         {
@@ -178,7 +220,8 @@ namespace MphRecomp.Frontend
             Import.Popup.Ask("delete your online profile?\n\nyour name, friend code, friends, rivals and license leave the server.", yes =>
             {
                 if (!yes) return;
-                Import.Popup?.Ask("are you sure?\n\nthis can't be undone.", sure =>
+                // (owner 2026-10-30: a second box "stating this cant be undone and account cannot be recovered")
+                Import.Popup?.Ask("are you sure?\n\nthis can't be undone. your profile can't be recovered, not even with your backup code.", sure =>
                 {
                     if (sure) DeleteProfile(menu, client);
                 });

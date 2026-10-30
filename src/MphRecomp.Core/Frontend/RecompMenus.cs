@@ -590,6 +590,17 @@ namespace MphRecomp.Frontend
                 // at once (FrontendRenderer / CampaignAudio read the saved values); RESET puts back 9
                 VolumeRow("sfx\nvolume", () => _settings.SfxVolume, v => _settings.SfxVolume = v),
                 VolumeRow("music\nvolume", () => _settings.MusicVolume, v => _settings.MusicVolume = v),
+                // the online voices' volume here too (owner 2026-10-30: "voice chat volume should be an option in the volume
+                // section"): VoiceSettings.Volume, the same one as the online chat page's VOLUME bar, 0-200% by 10s
+                new()
+                {
+                    Label = "voice\nvolume",
+                    Value = () => $"{(int)MathF.Round(MphRecomp.Online.Voice.VoiceSettings.Current.Volume * 100)}%",
+                    Step = s => MphRecomp.Online.Voice.VoiceSettings.Current.SetVolume(
+                        MathF.Round(MphRecomp.Online.Voice.VoiceSettings.Current.Volume * 10 + s) / 10),
+                    Reset = () => MphRecomp.Online.Voice.VoiceSettings.Current.SetVolume(1),
+                    AtDefault = () => MathF.Abs(MphRecomp.Online.Voice.VoiceSettings.Current.Volume - 1) < 0.01f,
+                },
                 new()
                 {
                     Label = "music\nquality",
@@ -1456,7 +1467,7 @@ namespace MphRecomp.Frontend
             rows.Add(new RowModel
             {
                 Label = "import\nall",
-                Description = $"makes all {tiles} from your disc. {done} of {tiles} imported now."
+                Description = $"makes what isn't imported yet from your disc. {done} of {tiles} imported now."
                     + (g.Items.Any(i => i.Kind == "hd") ? " the suits take a few minutes." : ""),
                 Value = () => "START",
                 Step = _ => Import.ImportAll(id),

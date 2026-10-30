@@ -786,6 +786,7 @@ namespace MphRecomp.Frontend
         private const int MainMenuPage = 18;
         public const string StaleImportsText = "an update changed or added some items. update them on import games: a red badge marks them.";
         public const string NewContentText = "new content has been added to the game. you need your rom again to import it: pick it on import games.";
+        public const string CopiesLackText = "an update needs files from your rom that your copied files don't have. pick it on import games, then press update copies.";
         private bool _staleImportsChecked, _newContentChecked;
 
         private void TickStaleImports()
@@ -815,19 +816,31 @@ namespace MphRecomp.Frontend
         private void TickNewContent()
         {
             if (!_staleImportsChecked || _newContentChecked || Popup == null || PopupOpen || Paused || Menu.PendingPage >= 0 || Menu.Page?.Index != MainMenuPage) return;
+            // owner 2026-10-30: the copies' check (ImportGames.StartKeptCheck) finds what an update needs that the copied files
+            // don't hold; the box waits for it (it only has work once per update)
+            Recomp.Import.StartKeptCheck();
+            if (!Recomp.Import.KeptCheckDone) return;
             _newContentChecked = true;
-            int n;
+            int n, lacking;
             try
             {
                 n = Recomp.Import.NewContentNeedingRom();
+                lacking = Recomp.Import.CopiesLackingRom();
             }
             catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
             {
                 return;
             }
-            if (n == 0) return;
-            Log?.Invoke($"imports: {n} new item(s) need the rom again");
-            Popup.Inform(NewContentText);
+            if (n > 0)
+            {
+                Log?.Invoke($"imports: {n} new item(s) need the rom again");
+                Popup.Inform(NewContentText);
+            }
+            else if (lacking > 0)
+            {
+                Log?.Invoke($"imports: {lacking} item(s) need files the copies lack");
+                Popup.Inform(CopiesLackText);
+            }
         }
 
         // IMPORT GAMES, come to from another page: the check or the X for updating what an update made stale (ImportGames.

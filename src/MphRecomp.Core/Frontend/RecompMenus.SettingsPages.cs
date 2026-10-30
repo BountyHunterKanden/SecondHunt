@@ -56,9 +56,10 @@ namespace MphRecomp.Frontend
         // (owner 2026-10-17: "look and sound should be split. look should be menus/hud and sound should be its own tab")
         private static readonly (string Header, string[] Labels)[] SoundSections =
         {
-            ("VOLUME", new[] { "sfx\nvolume", "music\nvolume" }),
+            ("VOLUME", new[] { "sfx\nvolume", "music\nvolume", "voice\nvolume" }), // voice: owner 2026-10-30
             ("MUSIC", new[] { "music\nquality" }),
         };
+        // (owner 2026-10-30: "split up the app settings into sub tabs with help in its own tab": one sub-tab per section)
         private static readonly (string Header, string[] Labels)[] AppSections =
         {
             ("STARTUP", new[] { "skip boot\nlogos", "skip\nintro" }), // owner 2026-10-29
@@ -70,10 +71,10 @@ namespace MphRecomp.Frontend
             ("TESTING", new[] { "controls\npage", "status\ntext" }),
             ("TOOLS", new[] { "developer", "dev\ntools" }),
         };
-        // the rows placed elsewhere: CONTROLS' gyro and touch sections, the page's own CONTROLS and IMPORT GAMES buttons
+        // the rows placed elsewhere: ONLINE's FRIEND REPLAYS (owner 2026-10-30), CONTROLS' gyro and touch sections, the page's own CONTROLS and IMPORT GAMES buttons
         private static readonly HashSet<string> PlacedRows = new(
             new[] { CampaignSections, MultiplayerSections, LookSections, SoundSections, FirstHuntSections, AppSections, DevSections }.SelectMany(s => s).SelectMany(s => s.Labels)
-                .Concat(new[] { "controls", "reset\ngyro speed", "gyro\naim", "gyro\nspeed", "gyro\naxis", "gyro y\nspeed", "invert gyro\npitch", "invert gyro\nyaw", "gyro\ndeadband", "gyro\nsmoothing", "gyro\nacceleration", "imperialist\ngyro speed", "auto imp\ngyro", "touch\ncontrols", "touch\naim", "touch aim\nspeed", "touch aim\ny speed", "imperialist\ntouch speed", "auto imp\ntouch", "touch invert\ny", "touch invert\nx", "aim while\nfiring" }),
+                .Concat(new[] { "controls", "friend\nreplays", "reset\ngyro speed", "gyro\naim", "gyro\nspeed", "gyro\naxis", "gyro y\nspeed", "invert gyro\npitch", "invert gyro\nyaw", "gyro\ndeadband", "gyro\nsmoothing", "gyro\nacceleration", "imperialist\ngyro speed", "auto imp\ngyro", "touch\ncontrols", "touch\naim", "touch aim\nspeed", "touch aim\ny speed", "imperialist\ntouch speed", "auto imp\ntouch", "touch invert\ny", "touch invert\nx", "aim while\nfiring" }),
             StringComparer.Ordinal);
 
         // a row that runs something: a button with this text (the menu art row keeps its value: it opens a chooser)
@@ -103,7 +104,7 @@ namespace MphRecomp.Frontend
             _fhPage = add("FIRST HUNT");
             _fhPage.Source = () => SettingsEntries(FirstHuntSections);
             _appPage = add("APP");
-            _appPage.Source = () => SettingsEntries(AppSections);
+            _appPage.Source = () => SubTabEntries(_appPage, AppSections.Select(s => (s.Header, new[] { s })));
             _devPage = add("DEVELOPER");
             _devPage.Source = () => SettingsEntries(DevSections);
             _onlinePage = add("ONLINE");
@@ -168,6 +169,12 @@ namespace MphRecomp.Frontend
                     + (V().Mode == VoiceMode.Off ? " (voice chat is off)" : ""), StPtt, false);
             Toggle("chat", () => V().Chat, "see and send chat messages in online lobbies and matches.", StChat);
             Toggle("duck music", () => V().DuckMusic, "the music fades down while others talk, and comes back after.", StDuck);
+            // (owner 2026-10-30: "friend replays" setting should be in online settings; it sat under APP's HELP)
+            if (SectionRows().Find(r => r.Label == "friend\nreplays") is { } fr)
+            {
+                Header("REPLAYS");
+                e.Add(new Entry { Kind = EntryKind.Setting, Label = "friend replays", Row = fr });
+            }
             Header("GAME FILTERS");
             Toggle("no extra pickup games", () => OnlineSettings.NoExtraPickups, "don't list or join games with extra pickups (the pirate blaster).", StNoPickups);
             Toggle("no extra character games", () => OnlineSettings.NoExtraCharacters, "don't list or join games with the trooper or dark samus.", StNoCharacters);
@@ -180,8 +187,7 @@ namespace MphRecomp.Frontend
                 () => _stShowBackup ? "your backup code: " + (_stBackupText ?? "") : "moves your online profile to another device. keep it secret.", StBackup, true);
             Row("restore from a backup code", () => "ENTER", () => "play as your hunter from another device.", StRestore, true);
             Row("about online play", () => "READ", () => "who sees what, and what the server keeps.", StAbout, true);
-            Row("delete online profile", () => "DELETE", () => "the server forgets your name, friend code, friends and license."
-                + (sp == _onlineHubPage ? "" : " (in online play's settings)"), StDelete, true);
+            Row("delete online profile", () => "DELETE", () => "the server forgets your name, friend code, friends and license.", StDelete, true);
             return e;
         }
 
@@ -324,11 +330,14 @@ namespace MphRecomp.Frontend
 
         // GAME's entries: the CAMPAIGN / MULTIPLAYER strip (as CONTROLS' sub-tabs), then the chosen sub-tab's sections (a
         // sub-tab with no rows on this build and device goes; one left, no strip)
-        private List<Entry> GameEntries()
+        private List<Entry> GameEntries() =>
+            SubTabEntries(_gamePage!, new[] { ("CAMPAIGN", CampaignSections), ("MULTIPLAYER", MultiplayerSections) });
+
+        // a section page in sub-tabs (GAME's, APP's): the strip, then the chosen sub-tab's sections
+        private List<Entry> SubTabEntries(SectionPage sp, IEnumerable<(string Name, (string Header, string[] Labels)[] Sections)> tabs)
         {
-            SectionPage sp = _gamePage!;
             var subs = new List<(string Name, List<Entry> Rows)>();
-            foreach ((string name, (string Header, string[] Labels)[] sections) in new[] { ("CAMPAIGN", CampaignSections), ("MULTIPLAYER", MultiplayerSections) })
+            foreach ((string name, (string Header, string[] Labels)[] sections) in tabs)
             {
                 List<Entry> rows = SettingsEntries(sections);
                 if (rows.Count > 0) subs.Add((name, rows));
