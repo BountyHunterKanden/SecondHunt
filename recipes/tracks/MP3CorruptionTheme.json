@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Corruption Theme",
+  "group": "Menus \u0026 Endings",
+  "role": "menu",
+  "files": [
+    { "name": "fe/Audio/Front_End_32k.fsb", "sha1": "dab52c0e4be9fe63018a225821b20234d2b86633" }
+  ],
+  "gain": 0.866
+}

@@ -1,0 +1,29 @@
+{
+  "Room": "AD2 MAGMA VENTS",
+  "RoomId": 112,
+  "Arena": "Council Chamber",
+  "Saved": "2026-10-10 13:51:30",
+  "Pickups": [
+    {
+      "Item": "PirateBlaster",
+      "Pos": [
+        -54.686,
+        6.624,
+        -18.106
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -52.732,
+        6.624,
+        -18.225
+      ],
+      "RespawnSeconds": 10
+    }
+  ],
+  "Crates": [],
+  "RemovedItems": [],
+  "RemovedCrates": []
+}

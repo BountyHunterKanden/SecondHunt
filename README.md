@@ -12,9 +12,11 @@ Second Hunt aims to modernize and add new features and content to the original H
 
 Second Hunt is a fan project and a fork of MphRead. It contains no game data from any Metroid game and isn't affiliated with or endorsed by Nintendo.
 
-> **Beta 3.6 (0.3.6-beta, Android and Windows).** Smoother online matches on the Second Hunt server, replay sharing,
-> ping on the scoreboard, Overcharged Dark Samus, and Sylux from _Metroid Prime 4: Beyond_. Playable start to finish,
-> with some rough edges. See [Known issues](#known-issues) and [What's planned](#whats-planned).
+> **Beta 4 (0.4.0-beta, Android and Windows).** Pick your own colour in multiplayer, play the campaign as any hunter
+> after your first clear, bring your DS save over, and use music from every Prime game you import. Bots play closer to
+> the original, replays seek almost instantly, Windows gets Switch Pro and other SDL3 controllers with gyro aim, and
+> there are new HUD, field of view and control options. Playable start to finish, with some rough edges. See
+> [Known issues](#known-issues) and [What's planned](#whats-planned).
 
 > <a href="https://discord.gg/WkvJ5ddjye"><img src="docs/images/hunters-outpost.png" width="48" height="48" align="left" alt="Hunters Outpost"></a> <a href="https://discord.gg/WkvJ5ddjye"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FWkvJ5ddjye%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&logo=discord&logoColor=white&color=5865F2" alt="Discord: players online"></a>
 > **Join the Hunters Outpost Discord** for Second Hunt support or to discuss and play Second Hunt and related
@@ -44,7 +46,29 @@ Android. On Windows the keyboard and mouse use MphRead's own PC controls.
 The aim is for it to play like the DS game. When something behaves differently (a speed, a timing, a fire rate, a
 sound), it is compared against the original game and fixed. Gameplay values aren't changed.
 
-## What's in Beta 3.6
+## Thanks
+
+Second Hunt wouldn't be where it is without these people:
+
+- **[Fruity Prime](https://github.com/liveteklol/Fruity-Prime)** by liveteklol, another MphRead fork, for its netcode
+  work. Second Hunt's served online matches run on a port of it: server authority, shooter-side hit claims that the
+  server checks, and a longer rewind for lag compensation.
+- **Limoki**, for the low-poly Dark Samus model that Dark Samus seats wear when no Dark Samus is imported, and the
+  morph ball to match. The app builds them from your own game files plus a recipe of Limoki's edits, so none of the
+  game's art ships with it.
+- **Everyone who reported issues on GitHub** that have since been fixed or added:
+  - [@MusicGoat91](https://github.com/MusicGoat91): QUIT SECOND HUNT? on the title screen ([#3](../../issues/3)),
+    typing on the on-screen keyboards with a PC keyboard ([#4](../../issues/4)), and side mouse buttons repeating
+    next/previous weapon ([#2](../../issues/2))
+  - [@drencoss](https://github.com/drencoss): visor and helmet opacity settings ([#1](../../issues/1))
+  - [@EliParker28](https://github.com/EliParker28): SDL3 controller support on Windows, including the Switch Pro
+    Controller ([#6](../../issues/6))
+  - [@JustinBenedick](https://github.com/JustinBenedick): look invert for X and Y separately, for an inverted mouse
+    ([#10](../../issues/10))
+- **Everyone who has sent reports on Discord**, including finRatman, Limoki and Yaba, and every player who has sent
+  in bug reports, logs, replays, screenshots and videos. Second Hunt is a lot better for it.
+
+## What's in Beta 4
 
 **Campaign**
 - The whole adventure from the opening to Gorea: Celestial Archives, Alinos, Vesper Defense Outpost, Arcterra and the
@@ -58,6 +82,10 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - The game's music and sound effects from your ROM, plus the title music and voices
 - Both endings, with the credits roll and the results screen
 - The MOVIES gallery: a movie opens once you've seen it
+- After your first clear, a new file can be played as any hunter, the Trooper included
+- IMPORT DS SAVES starts a file from your DS save (a .sav file), and EXPORT DS SAVE
+  writes your file back out as one (SECOND HUNT SETTINGS > GAME)
+- Everything the original lets you scan can be scanned, sealed force fields included, so 100% scans can be reached
 
 **Multiplayer** (Main menu > MULTIPLAYER)
 - Up to 8 players in every mode, any mix of people and bots. Matches of 4 or fewer play exactly like the original.
@@ -66,11 +94,19 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - The Hunter License: your name, rank and stats, kept like the original. Hunters and arenas unlock the original way,
   or all at once with SECOND HUNT SETTINGS > UNLOCKS.
 - SELECT HUNTER has two new characters next to the seven hunters, TROOPER and DARK SAMUS (see Imports below)
+- Pick your colour: the split circle next to your seat opens a colour picker with a picture of your hunter in each
+  colour. It works in every mode, LAN and online too, and nobody else can take a colour you're using.
+- Bots play closer to the original. They use the game's own bot code where MphRead differed, take drop-downs, jump
+  pads and ledges, shoot down breakable walls in their way and get unstuck on their own. Trooper bots wall cling, and
+  Trooper and Dark Samus bots can join online games.
 - A weapon ring: hold L2 and point with the right stick. It works while you move.
 - Hold Select for the live scoreboard, like the original (online, it also shows each player's ping)
-- The radar shows the other hunters (SHOW HUNTERS ON RADAR), with anyone out of range sitting on its edge
+- The radar shows the other hunters (SHOW HUNTERS ON RADAR), with anyone out of range sitting on its edge, and pickups
+  like the original (SECOND HUNT SETTINGS > LOOK > RADAR PICKUPS)
 - REPLAYS: your last ten matches are saved (favorites are kept), online games on the server included. Watch them at
-  any speed, skip back and forward, follow any player, or fly a free camera, and HIDE clears the screen for clean shots.
+  any speed, skip back and forward, follow any player (with their view, arm cannon and sounds), or fly a free camera,
+  and HIDE clears the screen for clean shots. Skipping around is almost instant: after a match the game gets the
+  replay ready in the background.
   SEND TO FRIEND sends a replay to up to 8 friends, the ones sent to you are under SHARED WITH ME, and EXPORT saves one
   as a file.
 - EXTRA rules under ADVANCED: EXTRA PICKUPS (the Pirate Blaster), EXTRA CHARACTERS and EXTRA ARENAS, each of which
@@ -85,8 +121,10 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   Invite friends to your game, or into a party that searches together.
 - Voice chat: push to talk (hold R3, or the TALK button on touch), always on, or off. ONLINE SETTINGS has
   VOICE CHAT, PUSH TO TALK and CHAT switches.
-- Text chat in the lobby and in a match: hold Select and point with the right stick for quick messages, or tap Select
-  to type
+- Text chat in the lobby and in a match: CHAT in the pause menu, the CHAT button on touch, or a controller button
+  bound to CHAT. On Windows, Enter or T types a message.
+- Music gets quieter while someone talks, and a speaker icon shows who's talking
+- STREAMING settings hide your IP address, your name and your friend code on screen (SECOND HUNT SETTINGS > GAME)
 - Tap any player's name for their license, your record against them, and MUTE, BLOCK or REPORT
 - Online games run on the Second Hunt server, so nobody's device is the host: FIND GAME, games you create, _Echoes_
   arenas and 8-player games. Movement and hits sync 60 times a second, so other players move smoothly and your shots
@@ -118,6 +156,10 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - A Beyond suit for Sylux, his arm cannon and Lockjaw, from your own _Metroid Prime 4: Beyond_ (Switch). Point IMPORT
   GAMES at your .xci or .nsp along with your Switch's prod.keys, or at an extracted RomFS folder.
 - The beta Phazon Suit from the _Metroid Prime_ disc, as a Samus skin
+- No Dark Samus imported? Dark Samus seats wear Limoki's LOW-POLY DARK SAMUS, built from your ROM, with its own morph
+  ball and the _Corruption_ float.
+- Music from every Prime game you import, for matches, menus and the lobby (see Audio below)
+- KEEP IMPORT FILES or DELETE IMPORT FILES for each game: keep what a re-import needs, or free the space
 - When an import is out of date after an update, its card shows a red mark, and UPDATE ALL redoes them in one go
 - Playing with someone who hasn't imported a character? They still see you, drawn as the closest hunter in matching
   colors.
@@ -125,7 +167,11 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 **Controls** (OPTIONS > CONTROLS, also SECOND HUNT SETTINGS > CONTROLS and the gunship's OPTIONS)
 - One page with every function in sections, each with a PRIMARY and SECONDARY button (CLEAR removes one). For a
   controller on Android and Windows, and for the keyboard and mouse on Windows, where 1 to 0 can pick weapons.
-- Sensitivity and look invert for the controller, and on Windows a separate sensitivity for the mouse
+- Sensitivity, a separate Y speed, and look invert for X and Y separately, for the controller, the mouse, touch and
+  gyro
+- L3 can be bound, each bind has its own RESET, and L1 / R1 / L2 / R2 step through the pages
+- On Windows, controllers go through SDL3, so the Switch Pro Controller and other pads work, and a controller's gyro
+  can aim
 - Imperialist zoom: the original zoom, or zoom in steps (ZOOM STEP), with its own sensitivity and a RETICLE INDICATOR
 - TRY CONTROLS: a practice room to test your setup
 - Stylus aim (TOUCH AIM: STYLUS) like the DS, minus the DS's delay before it starts turning
@@ -139,6 +185,9 @@ sound), it is compared against the original game and fixed. Gameplay values aren
   - ORIG+FIX: the DS sound without the clicks and clipping
   - HQ+FIX: smoother
   - HQ+TONE: HQ+FIX with the DS's treble added back
+- SONG LIST (SECOND HUNT SETTINGS > SOUND) has the music of every game you've imported, Hunters included, sorted by
+  game into areas, battles, menus and other, with where each song plays. Tick the songs you want for matches and
+  menus, and press play to hear one first. The lobby's MUSIC box picks from the same list.
 
 **Options** (Options > SECOND HUNT SETTINGS, tabs with L1 / R1 or a tap)
 - IMPORT GAMES (see Imports above) and the Samus suit
@@ -146,7 +195,13 @@ sound), it is compared against the original game and fixed. Gameplay values aren
 - Music quality, the same setting as QUALITY on OPTIONS > AUDIO. In the pause menu the paused music plays while MUSIC
   is selected, so a change can be heard.
 - Controls: the same page as OPTIONS > CONTROLS
-- Gyro aim (Android): off, on, or only while zoomed or scanning, with its own speed and axis settings
+- Gyro aim (Android, and controllers with a gyro on Android and Windows): off, on, or only while zoomed or scanning,
+  with speed, axis, deadband, smoothing and acceleration settings
+- HUD SWAY, helmet, visor and readout opacity, the hit direction indicator (SHOT INDICATOR) and the campaign radar
+- Field of view, from 80 to 130 (110 is the original). The reticle keeps the original's size at any field of view.
+- Skip the boot logos and the intro (SECOND HUNT SETTINGS > APP)
+- Every setting shows a hint for the value you're on. Rule values step by 1 and speed up when held, or you can type
+  them in.
 - Touch controls (Android): auto (shown when no controller is connected), on, aim only (no buttons, the whole screen aims) or off
 - Record replays on or off, and UNLOCKS to open every hunter, arena and movie at once
 - Menus with both DS screens merged into one or side by side, crisp or smoothed pixel art, and the HUD's line art
@@ -184,7 +239,8 @@ To install:
 2. Open `SecondHunt.exe`. Windows may say it protected your PC, since the app isn't signed with a paid certificate:
    click "More info", then "Run anyway".
 3. On first launch, pick your ROM file or drop it on the window. Saves and settings are kept in
-   `%LOCALAPPDATA%\Second Hunt`.
+   `%LOCALAPPDATA%\Second Hunt`. To keep everything next to the game instead (a portable copy), put an empty file
+   named `portable.txt` beside `SecondHunt.exe`, and Second Hunt uses a `data` folder there.
 4. For LAN and online matches, Windows Firewall has to let Second Hunt through. Windows usually asks the first time you host or
    join, but the prompt can hide behind a full-screen window, and on a network set to Public nothing gets through until
    it's allowed. If other devices can't see your match or joining says no answer, go to Windows Security > Firewall &
@@ -219,7 +275,7 @@ buttons in menus and dialogs stay where they are.
 | D-pad left / right | Previous / next weapon (only weapons you have, with ammo) |
 | D-pad up | Scan visor on/off (in a match, where there's no visor: Power Beam) |
 | D-pad down | Missiles |
-| Select | Pause map (campaign). In an online match: hold and point the right stick for quick messages, tap to type one. |
+| Select | Pause map (campaign). Hold it in a match for the live scoreboard. |
 | Start | Pause menu |
 | A / B in dialogs | OK or YES / NO (the press that closes a dialog doesn't also jump or fire) |
 | Android Back (button or gesture) | Pause menu. In a menu, the map or the ship it works like B. It never quits the game. |
@@ -258,7 +314,8 @@ jump, and in morph ball drag to roll and flick to boost. When missiles are selec
 dialogs, JUMP is OK/YES and FIRE is NO. The touch buttons keep these jobs whatever the controller's buttons are changed
 to.
 
-**Gyro:** tilt the device to fine-tune your aim. The right stick still works as normal.
+**Gyro:** tilt the device, or a controller with a gyro (on Android or Windows), to fine-tune your aim. The right stick
+still works as normal.
 
 ## Known issues
 
@@ -290,6 +347,7 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 
 **Looks and performance**
 - Pop-ups like item pickups and the enter-ship prompt look rough and still need layout work.
+- In some colours, the beta Phazon Suit's inner-thigh seams are brighter than the original's.
 - You may get short frame dips the first time a room or cutscene loads.
 - The scan visor's box and icon aren't quite the right shape in widescreen.
 - The HUD's energy and ammo bars don't flash and change color exactly like the original (low ammo, pickups).
@@ -331,7 +389,6 @@ log the same way.
 
 **Later**
 - Rumble on controllers and phones that support it
-- Gyro aim on Windows, for controllers with a gyro
 - The original's SURROUND and HEADPHONES speaker modes, and HQ music that keeps more of the DS's treble
 - Unlocking the sound test the original way (after the true ending's results screen). For now it's always open.
 - An optional Prime-style HUD with a mini map and weapon indicators and a radar
@@ -424,6 +481,8 @@ Gameplay values are the original's. What's different is how the game looks, soun
 - A pause map on Select. Its Prime-style mode only shows rooms you've explored and lets you move around and hop between
   rooms, and its detailed view draws every room from its real shape.
 - An optional third-person camera
+- A field of view setting, and the HUD's sway and opacity can be changed
+- Your own colour in multiplayer, picked from any colour nobody else is using
 - The HUD's line art redrawn as clean lines at any resolution, or kept as DS pixels
 - Menus with both DS screens merged into one, or side by side
 - Bot matches on one device in every mode, LAN matches over Wi-Fi without needing a second DS, and online play for up
@@ -435,14 +494,20 @@ Gameplay values are the original's. What's different is how the game looks, soun
 
 ## Source code
 
-Second Hunt is closed source as of October 20, 2026. Only the Android and Windows builds are released now, on the
-[Releases](../../releases) page. Code that was published here before that date keeps the MIT license it came out
-under. Anything made after it isn't licensed for copying or redistribution. See `NOTICE-fork.md`.
+Second Hunt is source-available: the source is published so you can read it, study it, and build it for your own
+personal use, but it is not open source and is not licensed for redistribution. The original Second Hunt code written
+from October 20, 2026 on is under the PolyForm Strict License 1.0.0, with an added permission for personal modification
+(root `LICENSE`). The upstream MphRead code
+(`LICENSE-MphRead`), Second Hunt code published before that date, and the third-party libraries
+(`THIRD_PARTY_NOTICES.md`) keep their own permissive licenses and are not restricted by it. Only the official Android
+and Windows builds are released, on the [Releases](../../releases) page. See `NOTICE-fork.md` for the full breakdown.
 
 ## Credits
 
-Second Hunt is built on **MphRead** by NoneGiven (MIT, see `LICENSE` and `NOTICE-fork.md`). Third-party libraries and
+Second Hunt is built on **MphRead** by NoneGiven (MIT, see `LICENSE-MphRead` and `NOTICE-fork.md`). Third-party libraries and
 their licenses are listed in `THIRD_PARTY_NOTICES.md`, which the app also shows under SECOND HUNT SETTINGS > credits.
+
+The people who helped make Second Hunt are thanked [near the top](#thanks).
 
 From MphRead's README:
 

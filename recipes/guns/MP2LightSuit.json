@@ -1,0 +1,13 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "pak": "SamusGun.pak",
+  "pakSha1": "1712cadada7be9658ca81156027352caed2e93f9",
+  "ancs": "41b63d84",
+  "char": "Power",
+  "echoes": true,
+  "gunSet": 0,
+  "arm": "4ad9bbac",
+  "armSet": 2,
+  "lights": [3, 5]
+}

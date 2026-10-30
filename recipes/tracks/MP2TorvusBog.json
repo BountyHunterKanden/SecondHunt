@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Torvus Bog",
+  "group": "Torvus Bog",
+  "role": "area",
+  "files": [
+    { "name": "Audio/swamp3-32.dsp", "sha1": "640aa5392ed6ffc91c037e6837ce97f6f6693ddf" }
+  ],
+  "gain": 0.702
+}

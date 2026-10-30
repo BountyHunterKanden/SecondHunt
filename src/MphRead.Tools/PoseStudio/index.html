@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pose Studio</title>
+<style>
+  :root { --bg: #16171a; --panel: #202226; --line: #33363c; --text: #e6e6e6; --dim: #9a9ca3; --accent: #ffcf5a; --ok: #6fd18a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, "Segoe UI", sans-serif; overflow: hidden; }
+  #view { position: absolute; inset: 0 300px 0 0; }
+  #side { position: absolute; top: 0; right: 0; bottom: 0; width: 300px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 10px 12px; box-sizing: border-box; }
+  h1 { font-size: 15px; margin: 0 0 8px; color: var(--accent); }
+  h2 { font-size: 12px; margin: 14px 0 6px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  select, button { background: #2b2e33; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #555a62; }
+  button.on { background: #4a3f1c; border-color: var(--accent); color: var(--accent); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
+  .row > * { flex: 1 1 auto; }
+  #bones { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+  #bones button { text-align: left; padding: 3px 6px; font-size: 12px; }
+  #bones button.sel { border-color: var(--accent); color: var(--accent); }
+  #bones button.turned::after { content: " \2022"; color: var(--ok); }
+  #status { color: var(--dim); min-height: 18px; margin-top: 6px; }
+  .help { color: var(--dim); font-size: 12px; }
+  .help b { color: var(--text); }
+  #labels { position: absolute; top: 8px; left: 0; right: 300px; display: flex; justify-content: space-around; pointer-events: none; color: var(--dim); font-size: 12px; }
+  #busy { position: absolute; inset: 0 300px 0 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); color: var(--accent); font-size: 15px; }
+  input[type=range] { width: 100%; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="labels"><span>vanilla (game)</span><span>statue as sculpted</span><span>your working copy</span></div>
+<div id="busy">loading…</div>
+<div id="side">
+  <h1>Pose Studio</h1>
+  <div class="row"><select id="trophy"></select></div>
+  <div id="status"></div>
+
+  <h2>Pose shown</h2>
+  <div class="row"><button id="poseRest" class="on">Rest (A-pose)</button><button id="poseIdle">Vanilla standing</button></div>
+
+  <h2>Hands on (the right-hand figure)</h2>
+  <div class="help"><b>Left-drag</b> an arm or leg: pull it like a doll's. <b>Right-drag</b> any piece (or left-drag the body / head): spin it freely.</div>
+  <div class="row"><button id="follow" class="on" title="C">Children follow (C)</button><button id="mirror" class="on" title="M">Mirror L/R (M)</button></div>
+  <div class="row"><button id="resetPiece">Reset piece</button><button id="resetAll">Reset all</button></div>
+  <div class="row"><button id="undo" title="Ctrl+Z">Undo</button><button id="redo" title="Ctrl+Y">Redo</button></div>
+  <div class="row"><button id="rings" title="precise turns with handles">Rings (precise)</button></div>
+  <div id="ringTools" style="display:none">
+    <div class="row"><button id="modeRot" class="on" title="R">Turn (R)</button><button id="modeMove" title="G">Move (G)</button><button id="space" title="Q">Axes: world</button></div>
+  </div>
+
+  <h2>View</h2>
+  <div class="row"><button id="frameWork" title="W">Close-up (W)</button><button id="frameAll" title="F">All three (F)</button></div>
+
+  <h2>Pieces (click one, or click the working copy)</h2>
+  <div id="bones"></div>
+
+  <h2>Play the game's animations</h2>
+  <div class="row"><select id="clip"></select></div>
+  <div class="row"><button id="play">Play</button><button id="stop">Back to pose</button></div>
+  <div class="row"><input id="speed" type="range" min="0.25" max="2" step="0.25" value="1"></div>
+
+  <h2>Show</h2>
+  <div class="row"><button id="colBones">Colour by piece</button><button id="showOrig" class="on">Statue as sculpted</button></div>
+
+  <h2>Save</h2>
+  <div class="row"><button id="save">Save pose</button></div>
+
+  <h2>How to</h2>
+  <div class="help">
+    <p><b>Pull:</b> left-drag a hand, forearm, foot or shin and the limb bends after it, like a doll's arm (shoulder / hip, elbow / knee).</p>
+    <p><b>Spin:</b> right-drag a piece and it turns about its joint as if in your hand, on every axis; drag near the edge of the screen circle round it to twist.
+    With <b>Children follow</b> on, everything hanging off it turns along (joints too, so nothing comes apart when it moves); off, the piece turns alone.</p>
+    <p><b>Mirror</b> copies every change to the other side. <b>Rest</b> is a clean A-pose; <b>Vanilla standing</b> shows the same corrections in the game's own stance.</p>
+    <p><b>Play</b> runs the game's real clips on your working copy, exactly as the Odin will. On empty space: left-drag orbits, right-drag pans, wheel zooms.</p>
+  </div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

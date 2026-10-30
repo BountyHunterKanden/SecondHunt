@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Ruins Entrance",
+  "group": "Chozo Ruins",
+  "role": "area",
+  "files": [
+    { "name": "Audio/ruins-firstL.dsp", "sha1": "c3717969490954ca2d1ccb4d4e06bdc4726be4af" },
+    { "name": "Audio/ruins-firstR.dsp", "sha1": "46442df08c4af0dfbf52a2954e555a7d5559e182" }
+  ],
+  "gain": 0.623
+}

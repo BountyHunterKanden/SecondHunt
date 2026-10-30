@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Ghor Battle",
+  "group": "SkyTown Elysia",
+  "role": "boss",
+  "files": [
+    { "name": "MP3/Audio/Skytown/Boss_SkyTownGhor.fsb", "sha1": "52119f08790936b54ea9b47c631a51b52139f119" }
+  ],
+  "gain": 0.570
+}

@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Gandrayda",
+  "group": "Pirate Homeworld",
+  "role": "boss",
+  "files": [
+    { "name": "MP3/Audio/Pirate/gandrayda-fight.fsb", "sha1": "6cc67db6d296f600db9d110a855640a8971ef7fd" }
+  ],
+  "gain": 1.000
+}

@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Dark Energy Controller",
+  "group": "Shared",
+  "role": "area",
+  "files": [
+    { "name": "Audio/sunG-heya-dark32.dsp", "sha1": "3a547b30f1a26a72c0a5336869aa96ee3d0b14b1" }
+  ],
+  "gain": 0.655
+}

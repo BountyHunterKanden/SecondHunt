@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Dark Samus Encounter (prelude)",
+  "group": "Shared",
+  "role": "boss",
+  "files": [
+    { "name": "Audio/darksamus-mae.dsp", "sha1": "9a778b546eef99d96341736f389b731140a0fe2b" }
+  ],
+  "gain": 0.983
+}

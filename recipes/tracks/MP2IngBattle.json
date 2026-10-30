@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Ing Battle",
+  "group": "Shared",
+  "role": "battle",
+  "files": [
+    { "name": "Audio/ing_Large.dsp", "sha1": "068f26edf44f9188ce79c4585c468fac1c011999" }
+  ],
+  "gain": 0.926
+}

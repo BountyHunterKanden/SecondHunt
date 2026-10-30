@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Aurora Unit 313 (phase 2)",
+  "group": "Phaaze",
+  "role": "boss",
+  "files": [
+    { "name": "MP3/Audio/Phaaze/Aurora_fight2.fsb", "sha1": "9838700c603ee3ca58d7350c5427ef153d50a37e" }
+  ],
+  "gain": 0.388
+}

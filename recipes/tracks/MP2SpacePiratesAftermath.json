@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Space Pirate Base Music",
+  "group": "Shared",
+  "role": "area",
+  "files": [
+    { "name": "Audio/pirates_ato.dsp", "sha1": "2af4f6795cd8b3d03293a50e4a7f1e6d78306826" }
+  ],
+  "gain": 0.964
+}

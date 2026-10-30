@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "paks": [
+    {
+      "name": "Metroid1.pak",
+      "sha1": "1ae13e2325ed8b57462f7a39d9d7fac035745598"
+    }
+  ],
+  "ancs": "8169653a",
+  "char": "spacepirate",
+  "height": 17.5
+}

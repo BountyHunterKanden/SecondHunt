@@ -1,0 +1,97 @@
+using MphRead;
+using MphRecomp.Config;
+
+namespace MphRecomp.App;
+
+internal sealed partial class CampaignRenderer
+{
+    // For a host with a keyboard and mouse: true while the player is in the game itself (the mouse aims, the keys play;
+    // dialogs included), false while one of the game's screens has the input (the pause menu, the gun-adjust pause,
+    // the map, the ship's screens, a cutscene), where the pointer clicks and the keys navigate.
+    public bool InGameplay => _host != null && _error == null && !ShipOpen && !MapOpen && !MovieShowing && !PauseMenuOpen && !_paused;
+
+    // The campaign or match screen the launch args ask for. filesDir: the extracted ROM (MphRead's working directory);
+    // dataDir: the player's own files (recomp_settings.json, saves/, mods/, and the dev builds' guns/ and hd/). The host
+    // then wires what is its own: StatusSink, ShipSink (the centred text panel), ExitSink, the pause menu's Credits /
+    // ShareCrashLog / DevTools, and input. Launch args (Android: intent extras; dev shortcuts in brackets):
+    //   room       the room to start in (UNIT2_LAND: the Celestial Archives landing site)
+    //   hunter     play as another hunter (MphRead supports it; Features.AlternateHunters1P adds what they need)
+    //   character/skin  an app character on that hunter's rig and its skin (trooper on Weavel: CampaignHost.Start)
+    //   save/slot  continue a save file / the file a new game saves to (the front end's files A/B/C = 1/2/3)
+    //   gun        [mp1 / none] the first-person gun from <data>/guns/<id>; default: RECOMP SETTINGS' suit
+    //   layout     [reference] the first on-device control layout; default: Prime-style
+    //   loadout    [all] every weapon, nothing saved (dev "Boss fights"); boss [down] (dev "Escape tests")
+    //   escape     [1] start with the escape running (dev "Escape at the ship");
+    //   shipmenu   [1] start in the in-ship menu; movies [off]; view [wide|ds|prime|panini]
+    //   match / arena / bots / botlevel / time / points, or net host|client: a multiplayer match (MatchSession.cs)
+    public static CampaignRenderer Create(string filesDir, string dataDir, LaunchArgs args)
+    {
+        string room = args.Get("room") ?? "UNIT2_LAND";
+        var layout = args.Get("layout") == "reference" ? ControlLayout.Reference : ControlLayout.Prime;
+        Hunter hunter = Enum.TryParse(args.Get("hunter"), out Hunter h) ? h : Hunter.Samus;
+        string gunsRoot = Path.Combine(dataDir, "guns");
+        string settingsPath = Path.Combine(dataDir, "recomp_settings.json");
+        // Echoes arenas and their music imported in-app (IMPORT GAMES) are read from <data>/arenas and <data>/music
+        MphRecomp.Arenas.EchoesArena.ImportRoot = dataDir;
+        // gun mp1: the first-person Prime arm cannon from <data>/guns/mp1 in place of MPH's (an explicit arg wins at
+        // launch, dev-launcher style); gun none keeps MPH's own. With no arg (or gun settings, the dev launcher's
+        // default): Samus takes whatever suit RECOMP SETTINGS has (default MP1PowerSuit, "original" = MPH's own); other
+        // hunters keep MP1PowerSuit.
+        string? explicitGun = args.Get("gun") is string g && g != "settings" ? g : null;
+        string gunId = explicitGun ?? (hunter == Hunter.Samus ? RecompSettings.Load(settingsPath).SamusSuit : "MP1PowerSuit");
+        // a public build wears the picked suit's body and morph ball but keeps MPH's own arm cannon (owner 2026-10-07: the
+        // Prime arm cannons are held, the suits are public; was no HD gear at all, Beta 1): CampaignRenderer.StartGearLoad
+        string? gunDir = gunId is "none" or "original" ? null : Path.Combine(gunsRoot, gunId);
+        // RECOMP SETTINGS -> pause -> resume hot-swaps Samus's suit whenever the player changes it there, even over an
+        // explicit arg (cheap: a small file load, no GL work until the next draw); see ReloadGunFromSettings
+        var renderer = new CampaignRenderer(filesDir, room, layout, hunter, gunDir, gunsRoot, settingsPath);
+        renderer.PlayAs(args.Get("character"), args.Get("skin"));
+        // Start: the recomp's pause menu (resume / recomp settings / mod settings / quit to main menu), the same settings
+        // file and mods folder as the front end; L3 + R3 together: the gun-adjust pause
+        renderer.PauseMenu = new PauseOverlay(settingsPath, Path.Combine(dataDir, "mods"));
+        renderer.SettingsPath = settingsPath; // CampaignAudio.cs: RecompSettings.Music
+        renderer.ReloadAimFromSettings();
+        renderer.PauseMenu.Resumed += () => { renderer.ReloadGunFromSettings(); renderer.ReloadTrooperFromSettings(); renderer.ReloadAimFromSettings(); };
+        renderer.PauseMenu.ControlsClosed += renderer.ReloadAimFromSettings; // the customizer from the ship's OPTIONS
+        renderer.PauseMenu.QuitToMenu += () => renderer.ExitSink?.Invoke();
+        // the gunship between planets (save, star map, travel): CampaignShip.cs
+        // hardmode 1: the HARD MODE campaign (docs/ENEMY_IMPORT.md H1): its own saves (<data>/saves/hardmode) and the enemy
+        // placements of <data>/campaigns/hardmode (Core Campaign/EnemyPlacement.cs); enemyplace 1 (dev) also turns on the
+        // in-game enemy placer (EnemyPlacer.cs). Every other launch turns the placements off.
+        bool enemyPlace = args.Get("enemyplace") == "1" && !RecompSettings.PublicBuild;
+        bool hardMode = enemyPlace || args.Get("hardmode") == "1";
+        // (First Hunt's enemies come from its import: registered here, when there is one, for the catalogue)
+        if (hardMode && MphRecomp.FirstHunt.FirstHuntGame.Register(dataDir)) MphRecomp.Campaign.EnemyCatalogue.Reset();
+        MphRecomp.Campaign.EnemyPlacement.Install(hardMode ? Path.Combine(dataDir, "campaigns", "hardmode") : null);
+        renderer.ConfigureShip(hardMode ? Path.Combine(dataDir, "saves", "hardmode") : Path.Combine(dataDir, "saves"), args);
+        // (the pause's CAMPAIGN TROOPER TYPE shows with a Trooper file: the front end's saves, and this campaign's own)
+        renderer.PauseMenu.SavesDir = hardMode ? Path.Combine(dataDir, "saves", "hardmode") : Path.Combine(dataDir, "saves");
+        renderer.ConfigureEnemyPlacer(enemyPlace);
+        // loadout all (dev launcher "Boss fights"): a fresh story with every weapon, full ammo and 799 energy, and nothing
+        // saved (the ship's save prompt would otherwise write slot 1, the player's file A). Both are dev-only: a public
+        // build never honours them, whatever starts it (owner 2026-10-05: "be sure no cheats are enabled")
+        if (args.Get("loadout") == "all" && !RecompSettings.PublicBuild)
+        {
+            renderer.UseTestLoadout();
+        }
+        // boss down (dev launcher "Escape tests"): the boss is beaten for the player once its intro is over (CampaignBossSkip.cs)
+        if (args.Get("boss") == "down" && !RecompSettings.PublicBuild) renderer.UseBossSkip();
+        // escape 1 (dev launcher "Escape at the ship"): the room starts with the escape already running, to walk to the ship
+        // and test EXIT SHIP being off after boarding (CampaignEscape.cs)
+        if (args.Get("escape") == "1" && !RecompSettings.PublicBuild) renderer.UseEscapeStart();
+        // in-game cutscenes (CampaignMovie.cs); movies off skips them
+        ConfigureMovies(args);
+        renderer.PlacementDir = Path.Combine(dataDir, "placements"); // dev pickup placement editor (PickupPlacer.cs)
+        renderer.MapReportPath = Path.Combine(dataDir, "map_reports.json"); // the PRIME map's split reports (PrimeMap.Report.cs)
+        // a multiplayer match with bots instead of the campaign (MatchSession.cs)
+        renderer.ConfigureMatch(args);
+        renderer.ReloadCameraFromSettings(); // a match takes the match camera setting, not the campaign's (CampaignRenderer)
+        renderer.ConfigureFirstHunt(args); // dev fhlevel: a First Hunt level (FirstHunt/FirstHuntSession.cs)
+        if (explicitGun == null) renderer.DropSettingsSuitInMatch(); // matches don't wear RECOMP SETTINGS' suit
+        // its seats' multiplayer skins (MatchSkins.cs; dev: --es skins)
+        renderer.ConfigureSkins(args);
+        // view framing: WIDE (CampaignView.cs; dev only: view wide|ds|prime|panini)
+        ConfigureView(args);
+        return renderer;
+    }
+}

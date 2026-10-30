@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Phendrana Battle",
+  "group": "Phendrana Drifts",
+  "role": "battle",
+  "files": [
+    { "name": "Audio/ice_kincyoL.dsp", "sha1": "ac959e532e27e4bf57a4dcdd845295c44da99369" },
+    { "name": "Audio/ice_kincyoR.dsp", "sha1": "c63acac0aeaa107769956856c181fe4166af4334" }
+  ],
+  "gain": 0.482
+}

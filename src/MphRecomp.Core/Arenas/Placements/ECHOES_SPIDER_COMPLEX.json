@@ -1,0 +1,26 @@
+{
+  "Room": "ECHOES SPIDER COMPLEX",
+  "RoomId": 1005,
+  "Arena": "Spider Complex",
+  "Saved": "2026-10-10 12:25:35",
+  "Pickups": [],
+  "Crates": [
+    {
+      "Pool": [
+        "AffinityWeapon"
+      ],
+      "Pos": [
+        0.6,
+        24.615,
+        0.1
+      ],
+      "Floor": [
+        0.6,
+        23.515,
+        0.1
+      ]
+    }
+  ],
+  "RemovedItems": [],
+  "RemovedCrates": []
+}

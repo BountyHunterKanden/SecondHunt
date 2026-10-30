@@ -1,0 +1,12 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "rsf",
+  "title": "Metroid Prime Credits",
+  "group": "Menus \u0026 Endings",
+  "role": "ending",
+  "files": [
+    { "name": "Audio/ending3.rsf", "sha1": "e5f2de8e320c3ba2aa90413ec6020cc83b99a69a" }
+  ],
+  "gain": 0.750
+}

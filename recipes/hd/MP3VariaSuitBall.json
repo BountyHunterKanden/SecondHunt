@@ -1,0 +1,19 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "paks": [
+    {
+      "name": "MP3/InGameDVD.PAK",
+      "sha1": "e68617e163a969c40b22b4012317afd5345643f3"
+    }
+  ],
+  "cmdl": "65625a4714720dfc",
+  "static": true,
+  "matset": 0,
+  "scale": 5.3994,
+  "core": [
+    255,
+    150,
+    50
+  ]
+}

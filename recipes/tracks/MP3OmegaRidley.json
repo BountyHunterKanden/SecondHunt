@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Omega Ridley",
+  "group": "Pirate Homeworld",
+  "role": "boss",
+  "files": [
+    { "name": "MP3/Audio/Seeds/Boss_M_ridley.fsb", "sha1": "259be9242135ce8f30e20b30898bc02e91604e3b" }
+  ],
+  "gain": 0.524
+}

@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Dark Trooper",
+  "group": "Temple Grounds",
+  "role": "battle",
+  "files": [
+    { "name": "Audio/zonbihei32-2.dsp", "sha1": "5573ec08dfb47f7c9539be1a4c47ce60ad319aaf" }
+  ],
+  "gain": 0.750
+}

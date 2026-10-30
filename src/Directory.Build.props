@@ -1,0 +1,9 @@
+<Project>
+  <!-- Every project under src/: no machine path may end up in a binary (embedded PDBs, the PE debug entry, stack traces
+       in crash logs). The compiler writes source and PDB paths as /_/src/... instead of the folder the build ran in,
+       and the SDK's automatic Source Link (which records the checkout folder) is off. -->
+  <PropertyGroup>
+    <PathMap>$(MSBuildThisFileDirectory)=/_/src/</PathMap>
+    <EnableSourceLink>false</EnableSourceLink>
+  </PropertyGroup>
+</Project>

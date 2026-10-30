@@ -21,9 +21,17 @@ against it before each public build.
 | SoundFlow | 1.4.1 | MIT | `SoundFlow.dll` |
 | miniaudio (bundled by SoundFlow) | (SoundFlow 1.4.1) | MIT or Unlicense (used under MIT) | `libminiaudio.so` (Android), `miniaudio.dll` (Windows) |
 | GLFW (bundled by OpenTK as OpenTK.redist.glfw) | 3.4 | zlib | `glfw3.dll` (Windows only: the window, input and GL context) |
+| SDL (Simple DirectMedia Layer), Sam Lantinga and the SDL contributors | 3.4.14 | zlib | `SDL3.dll` (Windows only: gamepads and their gyro) |
 | CommunityToolkit.HighPerformance | 8.4.2 | MIT | `CommunityToolkit.HighPerformance.dll` |
 | lzokay, Jack Andersen (AxioDL) | 2018 (ported to C#) | MIT | ported into `MphRecomp.Core.dll` (`Import/Retro/Lzo1x.cs`: LZO1X decompression for the Echoes / Prime 3 imports) |
 | System.IO.Hashing, .NET runtime, .NET for Android, .NET Windows Desktop (Windows Forms, System.Drawing) | 10.0.8 / 9.0 | MIT | Android: the `System.*`, `Mono.*`, `Java.Interop` assemblies and the runtime `.so` files; Windows: inside `SecondHunt.exe` (a self-contained .NET app) |
+
+Art made for Second Hunt by others, shipped with their permission:
+
+| Work | By | Permission | In the app as |
+|---|---|---|---|
+| Dark Samus stand-in (low-poly model, an edit of the game's Samus) | Limoki | given to the owner 2026-10-27 to ship in the app, credited as "Limoki" | `recipes/standin/DarkSamus/` inside `MphRecomp.Core.dll`: her geometry as edits to the user's own Samus model plus her texture layout and paint (no game geometry or pixels), built at run time by `Multiplayer/DarkSamusStandin.cs` |
+| Dark Samus stand-in morph ball (her own sphere and paint, not made from the game's art) | Limoki | given to the owner with the model, credited as "Limoki" | `recipes/standin/DarkSamusBall/` inside `MphRecomp.Core.dll`: her sphere and textures as plain data, drawn on the user's own Samus morph ball frame (its nodes and roll animation) by `Multiplayer/DarkSamusStandin.cs` |
 
 The online server (`src/SecondHunt.Server/`, run on the project's own VPS; not part of the app) also uses:
 
@@ -39,6 +47,7 @@ Format references (no code shipped from them unless the entry says so):
 |---|---|---|
 | PrimeWorldEditor (Aruki, AxioDL Team) | MIT | the Retro file layouts the `MphRecomp.Core/Import/Retro*` readers follow (via this project's own Python reference scripts). **Code translated from it: `Import/Retro/Anim.cs` only** (CAnimationLoader, LibCommon CBitStreamInWrapper, CBone::UpdateTransform; board S11), so its notice below applies; the other readers are this project's own parsers of the layouts it reads |
 | metaforce (Metaforce Contributors, AxioDL; a reverse-engineered re-implementation of Metroid Prime's engine) | MIT | Prime 1 behaviour re-implemented in this project's own code from reading metaforce's source: particle effects (`Campaign/RetroParticles.cs`: CElementGen, CUVEAnimTexture), swooshes (`Campaign/RetroSwoosh.cs`: CParticleSwoosh), the PART / SWHC readers (`Import/Retro/Part.cs`: CParticleDataFactory), the animation event layout (`Import/Effects/BodyFx.cs`: CAnimPOIData, CPOINode), the sound id lookup (`Import/Retro/MusyX.cs`: CSfxManager::TranslateSFXID), the Scout Drone laser's look and sweep (`App/Campaign/CampaignRenderer.DroneFx.cs`: CDroneLaser; `MphRead/Entities/Players/PlayerDroneLaser.cs`: CDrone::UpdateLaser); and layouts only: the Prime 3 ANIM (`Import/Retro3/Anim3.cs`, a clean re-implementation) and the CMDL material flag names (`Import/Retro/Cmdl.cs`). Its notice is below |
+| Fruity Prime (liveteklol; another MphRead fork) | MIT | the netcode of served online matches, ported from its C++ `src/MphRead.Native/Mods/Network` (master 610dc5b, 2026-10-20) into this project's C#: owner-reported positions and the correction rule, the latest-wins intent channel, remote player smoothing, shooter-side hit claims with a 45-frame rewind, client hit and death prediction, and packet fencing (`MphRecomp.Core/Multiplayer/Net/`: `FruitySync.cs`, `ClientPosition.cs`, `ClientPrediction.cs`, `HitClaims.cs`, `RemoteSmoothing.cs`, `NetMatchSession.cs`; `MphRead/Entities/Players/`: `PlayerHitClaims.cs`, `PlayerNetPosition.cs`, `PlayerNetPredict.cs`; `SecondHunt.MatchHost/Program.Netcode.cs`; `SecondHunt.Server/HubServed.cs`). Map: `docs/FRUITY_PORT.md`. Its notice is below |
 | amuse (Antidote / Jackoalan, AxioDL) | MIT | the MusyX SoundMacro command layout `Import/Retro/MusyX.cs` reads (the decoder and `DspAdpcm.cs` are this project's own; every sound and its coefficients come from the user's disc). Its notice is below |
 | Dolphin's `docs/WiaAndRvz.md` | GPL-2.0-or-later (the Dolphin repository's default) | the RVZ/WIA format's facts; no Dolphin code or text was taken (`Import/Disc/WiaReader.cs`) |
 | Retro Modding Wiki (wiki.axiodl.com), WiiBrew | CC BY 4.0 / wiki | file-layout facts (`Import/Retro/Ancs.cs`, `Mrea.cs`, `Retro3/Anim3.cs`; `Import/Disc/WiiDisc.cs`); no text taken |
@@ -339,8 +348,10 @@ redistributed to you under the same terms of the general Opus license dictated a
 ## SixLabors.ImageSharp
 
 Licensed to this project under the **Apache License, Version 2.0**: the Six Labors Split License (below) grants Apache
-2.0 to software under an open-source licence (section 2, first case), and this project is MIT-licensed. The Apache
-License 2.0 text follows the Split License.
+2.0 when the Work is consumed "in software licensed under an Open Source or **Source Available** license" (section 2,
+first bullet), which is exactly this project's posture. The grant also holds independently under section 2's third
+bullet (a Direct Package Dependency used by a for-profit individual with under 1M USD annual gross revenue). The
+Apache License 2.0 text follows the Split License.
 
 ```text
 Six Labors Split License
@@ -658,6 +669,28 @@ freely, subject to the following restrictions:
    distribution.
 ```
 
+## SDL (`SDL3.dll`, Windows only)
+
+```text
+Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+```
+
 ## System.IO.Hashing, the .NET runtime, .NET for Android and the .NET Windows Desktop runtime
 
 MIT, Copyright (c) .NET Foundation and Contributors. Their own third-party notices:
@@ -720,6 +753,35 @@ https://github.com/AxioDL/metaforce. See the format-references table for the fil
 The MIT License
 
 Copyright (c) 2015-2026 Metaforce Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Fruity Prime (served online match netcode)
+
+https://github.com/liveteklol/Fruity-Prime. See the format-references table for the files ported from it. Its licence file
+names only NoneGiven, the holder it inherits from MphRead.
+
+```text
+MIT License
+
+Copyright (c) 2020 NoneGiven
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,0 +1,33 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "paks": [
+    {
+      "name": "Metroid3.pak",
+      "sha1": "9981f8273bd1cd0b71789419850889560d0a3ceb"
+    },
+    {
+      "name": "AudioGrp.pak",
+      "sha1": "157e0841155cc7b699176dd7afc746c7048dbc28"
+    }
+  ],
+  "ancs": "5e058399",
+  "char": "AlphaDrone",
+  "fx": {
+    "clips": [
+      "A_intoshootloop_drone",
+      "A_shootloop_drone",
+      "A_outofshootloop_drone",
+      "A_cuttinglaser_drone"
+    ],
+    "crsc": "c59e2b05",
+    "laser": "5cf355af",
+    "sounds": [
+      632
+    ],
+    "sfx": {
+      "lookup": "b7c1b3a7",
+      "group": "98b283bf"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Incinerator Drone Battle",
+  "group": "Chozo Ruins",
+  "role": "boss",
+  "files": [
+    { "name": "Audio/rui_monkeylowerL.dsp", "sha1": "76ce6ef38923a0c66ad3971e7d2a7b46a6eaaff2" },
+    { "name": "Audio/rui_monkeylowerR.dsp", "sha1": "71c288f9f9ce9c4da02ef8790798406284057dce" }
+  ],
+  "gain": 0.679
+}

@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Aurora Chamber",
+  "group": "SkyTown Elysia",
+  "role": "area",
+  "files": [
+    { "name": "MP3/Audio/Skytown/Auro.fsb", "sha1": "68f940bdb8a36629edb69d97538272b3e3883f29" }
+  ],
+  "gain": 0.777
+}

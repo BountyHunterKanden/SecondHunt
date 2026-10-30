@@ -1,0 +1,355 @@
+using System;
+using System.Collections.Generic;
+using MphRead.Effects;
+using MphRead.Formats;
+using MphRead.Formats.Culling;
+using OpenTK.Mathematics;
+
+namespace MphRead.Entities
+{
+    public readonly struct ItemInstanceEntityData
+    {
+        public readonly Vector3 Position;
+        public readonly ItemType ItemType;
+        public readonly int DespawnTimer;
+
+        public ItemInstanceEntityData(Vector3 position, ItemType type, int despawnTimer)
+        {
+            Position = position;
+            ItemType = type;
+            DespawnTimer = despawnTimer;
+        }
+    }
+
+    // todo: preallocation
+    public class ItemInstanceEntity : SpinningEntityBase
+    {
+        public ItemType ItemType { get; }
+        private EffectEntry? _effectEntry = null;
+        private bool _linkDone = false;
+        public int ParentId { get; set; } = -1;
+        private EntityBase? _parent = null;
+        private Vector3 _invPos;
+
+        public int DespawnTimer { get; set; } = -1;
+        public ItemSpawnEntity? Owner { get; set; }
+        public NodeData3? ClosestNode { get; set; } = null;
+
+        // recomp: the model an item draws with, by the host (dev pictures: each Pirate Blaster pickup in a lineup in its own
+        // look, MphRecomp.Core BlasterPickup.cs); null = MPH's item table
+        public static Func<ItemType, Vector3, string?>? HostItemModel;
+
+        private static readonly IReadOnlyList<int> _scanIds = new int[24]
+        {
+            9, 11, 12, 0, 10, 21, 13, 23, 22, 18, 20, 19, 28, 14, 15, 16, 17, 0, 24, 463, 0, 0,
+            0, 0 // recomp: PickWpnMissile (unused), PirateBlaster
+        };
+
+        public ItemInstanceEntity(ItemInstanceEntityData data, NodeRef nodeRef, Scene scene)
+            : base(0.35f, Vector3.UnitY, 0, 0, EntityType.ItemInstance, nodeRef, scene)
+        {
+            Position = data.Position;
+            ItemType = data.ItemType;
+            _scanId = _scanIds[(int)data.ItemType];
+            if (GameState.Multiplayer && GameState.AffinityWeapons && (ItemType == ItemType.VoltDriver
+                || ItemType == ItemType.Battlehammer || ItemType == ItemType.Imperialist
+                || ItemType == ItemType.Judicator || ItemType == ItemType.Magmaul || ItemType == ItemType.ShockCoil))
+            {
+                ItemType = ItemType.AffinityWeapon;
+            }
+            SetUpModel(HostItemModel?.Invoke(ItemType, Position) ?? Metadata.Items[(int)ItemType]); // recomp: HostItemModel
+            if (data.DespawnTimer > 0)
+            {
+                DespawnTimer = data.DespawnTimer;
+            }
+        }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            if (ItemType == ItemType.ArtifactKey)
+            {
+                Matrix4 transform = Matrix.GetTransform4(Vector3.UnitX, Vector3.UnitY, Position);
+                _effectEntry = _scene.SpawnEffectGetEntry(144, transform); // artifactKeyEffect
+                _effectEntry?.SetElementExtension(true);
+            }
+        }
+
+        public override void GetVectors(out Vector3 position, out Vector3 up, out Vector3 facing)
+        {
+            position = Position;
+            up = Vector3.UnitY;
+            facing = Vector3.UnitZ;
+        }
+
+        private static readonly IReadOnlyList<int> _sfxIds = new int[22]
+        {
+            33, 33, 33, -1, 34, -1, 34, -1, -1, -1, -1, -1, -1, 33, 33, 33, 33, -1, -1, -1, -1, -1
+        };
+
+        public override bool Process()
+        {
+            if (!_linkDone && ParentId != -1)
+            {
+                if (_scene.TryGetEntity(ParentId, out EntityBase? parent))
+                {
+                    _parent = parent;
+                }
+                if (_parent != null)
+                {
+                    _invPos = Matrix.Vec3MultMtx4(Position, DetMatrix.Inverted(_parent.CollisionTransform));
+                }
+                _linkDone = true;
+            }
+            if (_linkDone && _parent != null)
+            {
+                Position = Matrix.Vec3MultMtx4(_invPos, _parent.CollisionTransform);
+            }
+            _soundSource.Update(Position, rangeIndex: 7);
+            UpdateNodeRefVolume();
+            if (_effectEntry != null)
+            {
+                Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY, Position);
+                _effectEntry.Transform(Position, transform);
+            }
+            if (DespawnTimer > 0)
+            {
+                DespawnTimer--;
+            }
+            if (DespawnTimer == 0)
+            {
+                if (Owner != null)
+                {
+                    Owner.Item = null;
+                    if (GameState.SinglePlayer)
+                    {
+                        GameState.StorySave.SetRoomState(_scene.RoomId, Owner.Id, state: 1);
+                        if (!Owner.AlwaysActive)
+                        {
+                            Owner.Active = false;
+                        }
+                    }
+                }
+                if (_effectEntry != null)
+                {
+                    _scene.DetachEffectEntry(_effectEntry, setExpired: false);
+                    _effectEntry = null;
+                }
+                return false;
+            }
+            // recomp: the Pirate Blaster (item 23) is past the table -- no hum, as the other weapons
+            int sfx = (int)ItemType < _sfxIds.Count ? _sfxIds[(int)ItemType] : -1;
+            if (sfx != -1)
+            {
+                _soundSource.PlaySfx(sfx, loop: true);
+            }
+            if (Owner == null && GameState.SinglePlayer && PlayerEntity.Main.EquipInfo.Weapon != null)
+            {
+                EquipInfo equip = PlayerEntity.Main.EquipInfo;
+                if (equip.ChargeLevel >= equip.Weapon.MinCharge * 2) // todo: FPS stuff
+                {
+                    // todo: visualize
+                    Vector3 between = PlayerEntity.Main.Position - Position;
+                    float distSqr = between.LengthSquared;
+                    if (distSqr > 0 && distSqr < 20 * 20)
+                    {
+                        // hyperbolic function -- (20 - x) / (80 * x)
+                        float distance = MathF.Sqrt(distSqr);
+                        float div = distance / 20;
+                        float pct = (1 - div) / distance;
+                        Position += between * (pct / (4 * 2)); // todo: FPS stuff
+                    }
+                }
+            }
+            return base.Process();
+        }
+
+        public void OnPickedUp()
+        {
+            DespawnTimer = 0;
+            Owner?.OnItemPickedUp();
+            if (GameState.SinglePlayer)
+            {
+                int scanId = GetScanId();
+                GameState.StorySave.UpdateLogbook(scanId);
+            }
+        }
+
+        public override bool ScanVisible()
+        {
+            // vanilla default ScanVisible (rev 1 0x2048DBC) returns true when the entity has no node ref, which is the case for this type
+            return true;
+        }
+
+        public override void GetDrawInfo()
+        {
+            if (IsVisible(NodeRef))
+            {
+                base.GetDrawInfo();
+            }
+        }
+
+        public override void Destroy()
+        {
+            if (_effectEntry != null)
+            {
+                _scene.UnlinkEffectEntry(_effectEntry);
+            }
+            _soundSource.StopAllSfx(force: true);
+            base.Destroy();
+        }
+    }
+
+    public readonly struct FhItemInstanceEntityData
+    {
+        public readonly Vector3 Position;
+        public readonly FhItemType ItemType;
+
+        public FhItemInstanceEntityData(Vector3 position, FhItemType type)
+        {
+            Position = position;
+            ItemType = type;
+        }
+    }
+
+    public class FhItemEntity : SpinningEntityBase
+    {
+        public FhItemEntity(FhItemInstanceEntityData data, Scene scene)
+            : base(0.35f, Vector3.UnitY, 0, 0, EntityType.FhItemInstance, scene)
+        {
+            // note: the actual height at creation is 1.0f greater than the spawner's,
+            // but 0.5f is subtracted when drawing (after the floating calculation)
+            Position = data.Position.AddY(0.5f);
+            SetUpModel(Metadata.FhItems[(int)data.ItemType], firstHunt: true);
+            ItemType = data.ItemType;
+            ItemPosition = data.Position.AddY(1);
+            _fhBob = _nextFhBob;
+            _nextFhBob += 0x2000;
+        }
+
+        // recomp: First Hunt's item (0x20212ec/0x202120c; docs/FIRST_HUNT_PORT.md P1) while a First Hunt level runs
+        // (PlayerEntity.HostFirstHunt): picked up within 1.35 of ItemPosition (spawner + 1.0; PlayerFirstHunt.cs), gone the
+        // frame after; never expires. No spin: it bobs, 0.125 * sin(angle) - 0.25 about that point, the angle 0x300 a frame
+        // from a start that steps 0x2000 an item
+        public FhItemType ItemType { get; }
+        public Vector3 ItemPosition { get; }
+        public bool PickedUp { get; set; }
+        // network play: the host took it for this device's player (ItemSync), whose pickup takes it at any reach
+        public bool NetConfirmed { get; set; }
+        private ushort _fhBob;
+        private static ushort _nextFhBob = 0;
+
+        public override bool Process()
+        {
+            if (!PlayerEntity.HostFirstHunt)
+            {
+                return base.Process();
+            }
+            if (PickedUp)
+            {
+                return false;
+            }
+            _fhBob += 0x300 / 2; // todo: FPS stuff
+            Position = ItemPosition.AddY(0.125f * MathF.Sin(_fhBob / 65536f * MathF.Tau) - 0.25f);
+            return base.Process();
+        }
+
+        protected override Matrix4 GetModelTransform(ModelInstance inst, int index)
+        {
+            if (!PlayerEntity.HostFirstHunt)
+            {
+                return base.GetModelTransform(inst, index);
+            }
+            Matrix4 transform = Matrix4.CreateScale(inst.Model.Scale);
+            transform *= Matrix4.CreateTranslation(Position);
+            return transform;
+        }
+    }
+
+    public abstract class SpinningEntityBase : EntityBase
+    {
+        private float _spin;
+        private readonly float _spinSpeed;
+        private readonly Vector3 _spinAxis;
+        protected int _spinModelIndex;
+        protected int _floatModelIndex;
+
+        private static ushort _nextItemRotation = 0;
+
+        public SpinningEntityBase(float spinSpeed, Vector3 spinAxis,
+            EntityType type, Scene scene) : base(type, scene)
+        {
+            _spin = GetItemRotation();
+            _spinSpeed = spinSpeed;
+            _spinAxis = spinAxis;
+            _spinModelIndex = -1;
+            _floatModelIndex = -1;
+        }
+
+        public SpinningEntityBase(float spinSpeed, Vector3 spinAxis, int spinModelIndex,
+            EntityType type, Scene scene) : base(type, scene)
+        {
+            _spin = GetItemRotation();
+            _spinSpeed = spinSpeed;
+            _spinAxis = spinAxis;
+            _spinModelIndex = spinModelIndex;
+            _floatModelIndex = -1;
+        }
+
+        public SpinningEntityBase(float spinSpeed, Vector3 spinAxis, int spinModelIndex, int floatModelIndex,
+            EntityType type, Scene scene) : base(type, scene)
+        {
+            _spin = GetItemRotation();
+            _spinSpeed = spinSpeed;
+            _spinAxis = spinAxis;
+            _spinModelIndex = spinModelIndex;
+            _floatModelIndex = floatModelIndex;
+        }
+
+        public SpinningEntityBase(float spinSpeed, Vector3 spinAxis, int spinModelIndex, int floatModelIndex,
+            EntityType type, NodeRef nodeRef, Scene scene) : base(type, nodeRef, scene)
+        {
+            _spin = GetItemRotation();
+            _spinSpeed = spinSpeed;
+            _spinAxis = spinAxis;
+            _spinModelIndex = spinModelIndex;
+            _floatModelIndex = floatModelIndex;
+        }
+
+        public override bool Process()
+        {
+            _spin = (float)(_spin + _scene.FrameTime * 360 * _spinSpeed) % 360;
+            return base.Process();
+        }
+
+        protected override Matrix4 GetModelTransform(ModelInstance inst, int index)
+        {
+            var transform = Matrix4.CreateScale(inst.Model.Scale);
+            if (index == _spinModelIndex)
+            {
+                transform *= Matrix.GetTransformSRT(Vector3.One, new Vector3(
+                    MathHelper.DegreesToRadians(_spinAxis.X * _spin),
+                    MathHelper.DegreesToRadians(_spinAxis.Y * _spin),
+                    MathHelper.DegreesToRadians(_spinAxis.Z * _spin)),
+                    Vector3.Zero);
+            }
+            transform *= _transform;
+            if (index == _floatModelIndex)
+            {
+                transform.M42 += (MathF.Sin(_spin / 180 * MathF.PI) + 1) / 8f;
+            }
+            return transform;
+        }
+
+        // (10-27 FAST SEEK) a static count, so without this a match's pickups started at angles left over from earlier matches in
+        // the same process (the replay prepare vs the viewer drew pickups 225 degrees apart)
+        public static void ResetItemRotation() => _nextItemRotation = 0;
+
+        private static float GetItemRotation()
+        {
+            float rotation = _nextItemRotation / (float)0x10000 * 360f;
+            _nextItemRotation += 0x2000;
+            return rotation;
+        }
+    }
+}

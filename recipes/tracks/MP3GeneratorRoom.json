@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Generator Room",
+  "group": "Shared",
+  "role": "area",
+  "files": [
+    { "name": "MP3/Audio/Shared/G-heya_mix2.fsb", "sha1": "c3151bddb4b9607715710513040d2950167c6b60" }
+  ],
+  "gain": 0.632
+}

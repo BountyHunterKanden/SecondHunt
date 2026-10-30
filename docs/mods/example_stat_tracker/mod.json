@@ -1,0 +1,7 @@
+{
+  "Id": "example_stat_tracker",
+  "Name": "Example: Stat Tracker",
+  "Version": "1.0.0",
+  "Description": "Tracks launches, room visits, and playtime, and shows off the mod API (hooks, save/load, config, assets). A copy-me starting point for mph-recomp mods.",
+  "Entry": "main.lua"
+}

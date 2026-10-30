@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "pak": "SamusGun.pak",
+  "pakSha1": "b99af73f8c3dbfba49fd196a9ab320a6398e9df0",
+  "ancs": "41b63d84",
+  "char": "Power",
+  "echoes": false,
+  "gunSet": 0,
+  "arm": "07111aa7",
+  "armSet": 0,
+  "lights": [0, 2, 5]
+}

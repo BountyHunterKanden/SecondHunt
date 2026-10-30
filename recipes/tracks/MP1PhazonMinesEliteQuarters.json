@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Elite Quarters",
+  "group": "Phazon Mines",
+  "role": "area",
+  "files": [
+    { "name": "Audio/min_darkL.dsp", "sha1": "6f50c7cf15db5ae0787a6d7950a0f6df38fdeb9a" },
+    { "name": "Audio/min_darkR.dsp", "sha1": "f513106f2272e1f5b2bbff77ae1425897744adb5" }
+  ],
+  "gain": 1.399
+}

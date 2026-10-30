@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Space Pirate Base Music",
+  "group": "Shared",
+  "role": "area",
+  "files": [
+    { "name": "Audio/pir_yoinL.dsp", "sha1": "6bb9fe767d8df16c8af017bb3e673ce7f4e094b7" },
+    { "name": "Audio/pir_yoinR.dsp", "sha1": "63fcd7e53d4a2950a8d4e897f93ebd8493e3c709" }
+  ],
+  "gain": 0.681
+}

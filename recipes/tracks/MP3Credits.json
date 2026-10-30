@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Corruption Credits",
+  "group": "Menus \u0026 Endings",
+  "role": "ending",
+  "files": [
+    { "name": "MP3/Audio/PRIME_3_End_credit3.fsb", "sha1": "692eddb7b45f393e6e598deb35b2f7ad98e9b4c2" }
+  ],
+  "gain": 1.042
+}

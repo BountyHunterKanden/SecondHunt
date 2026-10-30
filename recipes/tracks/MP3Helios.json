@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Helios",
+  "group": "SkyTown Elysia",
+  "role": "boss",
+  "files": [
+    { "name": "MP3/Audio/Seeds/Boss_SkySeedBoss.fsb", "sha1": "78acc88a9cc46263079af0b498ab7a2e5dc0b552" }
+  ],
+  "gain": 0.636
+}

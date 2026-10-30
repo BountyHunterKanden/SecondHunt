@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Amorbis",
+  "group": "Agon Wastes",
+  "role": "boss",
+  "files": [
+    { "name": "Audio/sand-boss32.dsp", "sha1": "a2299572bdb468d25adc64ab3c259e93fe92fe01" }
+  ],
+  "gain": 0.703
+}

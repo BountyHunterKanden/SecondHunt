@@ -1,0 +1,12 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "format": "fsb3",
+  "title": "Bryyo Ice",
+  "group": "Bryyo",
+  "role": "area",
+  "files": [
+    { "name": "MP3/Audio/Bryyo/ICE-bryoo.fsb", "sha1": "fc646bd4adc7feee430fdbf155284b1be9a85c2e" }
+  ],
+  "gain": 1.254
+}

@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Emperor Ing Spider",
+  "group": "Great Temple",
+  "role": "boss",
+  "files": [
+    { "name": "Audio/Enp-ing-type2-3-32.dsp", "sha1": "e37aa04b6a44f889d7f95620c8454838803a2596" }
+  ],
+  "gain": 0.766
+}

@@ -1,0 +1,13 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "format": "dsp",
+  "title": "Crashed Ship",
+  "group": "Tallon Overworld",
+  "role": "area",
+  "files": [
+    { "name": "Audio/crash-ship-3L.dsp", "sha1": "bcc79743aec992d5df51efe6a2097b2bbcf671c9" },
+    { "name": "Audio/crash-ship-3R.dsp", "sha1": "992b84ccca25a479c31f58b70064f6cbc7b85dbb" }
+  ],
+  "gain": 0.838
+}

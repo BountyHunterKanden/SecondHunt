@@ -1,0 +1,23 @@
+{
+  "game": "mp3",
+  "discId": "R3ME01",
+  "paks": [
+    {
+      "name": "MP3/Metroid1.pak",
+      "sha1": "d449307aa8f66ce0ac8dff1dd019ccb78156e020"
+    }
+  ],
+  "chars": [
+    "8e0b5bdec9bb46b5"
+  ],
+  "char": "ZeroSuit",
+  "height": 17.5,
+  "hold": [
+    {
+      "bone": "R_elbow",
+      "cut": 0.41,
+      "anchor": [ "R_wrist", "R_middle_1" ],
+      "scale": 1.0
+    }
+  ]
+}

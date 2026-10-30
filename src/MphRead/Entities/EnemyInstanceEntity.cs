@@ -1,0 +1,738 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using MphRead.Effects;
+using MphRead.Formats;
+using MphRead.Formats.Culling;
+using OpenTK.Mathematics;
+
+namespace MphRead.Entities
+{
+    public readonly struct EnemyInstanceEntityData
+    {
+        public readonly EnemyType Type;
+        public readonly EntityBase Spawner; // todo: nullable?
+
+        public EnemyInstanceEntityData(EnemyType type, EntityBase spawner)
+        {
+            Type = type;
+            Spawner = spawner;
+        }
+    }
+
+    public class EnemyInstanceEntity : EntityBase
+    {
+        protected readonly EnemyInstanceEntityData _data;
+        protected ushort _timeSinceDamage = 510;
+        protected ushort _health = 20;
+        protected ushort _healthMax = 20;
+        public ushort Health => _health;
+        public ushort HealthMax => _healthMax;
+        protected EntityBase? _owner = null;
+        protected CollisionVolume _hurtVolume = default;
+        protected CollisionVolume _hurtVolumeInit = default;
+        protected byte _state1 = 0; // todo: names ("next?")
+        protected byte _state2 = 0;
+        // some enemies needs to update this in between _state1 being set to _state2 and the subroutine being called
+        protected byte _subId = 0;
+        public bool[] HitPlayers { get; } = new bool[PlayerEntity.SlotCapacity];
+        protected Vector3 _prevPos = Vector3.Zero;
+        protected Vector3 _speed = Vector3.Zero;
+        protected float _boundingRadius = 0;
+        protected Action[]? _stateProcesses;
+
+        public byte StateA => _state1;
+        public byte StateB => _state2;
+
+        public readonly Effectiveness[] BeamEffectiveness = new Effectiveness[9];
+        private bool _onlyMoveHurtVolume = false;
+        private bool _noIneffectiveEffect = false;
+        public EnemyFlags Flags { get; set; }
+        public CollisionVolume HurtVolume => _hurtVolume;
+        public EnemyType EnemyType => _data.Type;
+        public EntityBase? Owner => _owner;
+        public int HealthbarMessageId { get; protected set; } = 0;
+
+        protected static BeamProjectileEntity[] _beams = null!;
+
+        public EnemyInstanceEntity(EnemyInstanceEntityData data, NodeRef nodeRef, Scene scene)
+            : base(EntityType.EnemyInstance, nodeRef, scene)
+        {
+            _data = data;
+            if (_beams == null)
+            {
+                _beams = SceneSetup.CreateBeamList(64, scene); // in-game: 64
+            }
+        }
+
+        public static void DestroyBeams()
+        {
+            _beams = null!;
+        }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            _owner = _data.Spawner;
+            _scanId = Metadata.EnemyScanIds[(int)_data.Type];
+            Metadata.LoadEffectiveness(_data.Type, BeamEffectiveness);
+            Flags = EnemyFlags.CollidePlayer | EnemyFlags.CollideBeam;
+            EnemyInitialize();
+            // the game sets parent collision transform here, but enemies that need it (e.g. spawner, Cretaphid)
+            // handle it themselves by just checking the parent spawner's ent col fields
+            _prevPos = Position;
+            if (_data.Type == EnemyType.Gorea1A || _data.Type == EnemyType.GoreaHead || _data.Type == EnemyType.GoreaArm
+                || _data.Type == EnemyType.GoreaLeg || _data.Type == EnemyType.Gorea1B || _data.Type == EnemyType.GoreaSealSphere1
+                || _data.Type == EnemyType.Trocra || _data.Type == EnemyType.Gorea2 || _data.Type == EnemyType.GoreaSealSphere2)
+            {
+                _onlyMoveHurtVolume = true;
+            }
+            if (_data.Type == EnemyType.Cretaphid || _data.Type == EnemyType.CretaphidEye || _data.Type == EnemyType.CretaphidCrystal
+                || _data.Type == EnemyType.Unknown22 || _data.Type == EnemyType.Gorea1A || _data.Type == EnemyType.GoreaHead
+                || _data.Type == EnemyType.GoreaArm || _data.Type == EnemyType.GoreaLeg || _data.Type == EnemyType.Gorea1B
+                || _data.Type == EnemyType.GoreaSealSphere1 || _data.Type == EnemyType.Trocra || _data.Type == EnemyType.Gorea2
+                || _data.Type == EnemyType.GoreaSealSphere2 || _data.Type == EnemyType.GoreaMeteor || _data.Type == EnemyType.Slench
+                || _data.Type == EnemyType.SlenchShield || _data.Type == EnemyType.SlenchNest || _data.Type == EnemyType.FireSpawn
+                || _data.Type == EnemyType.HitZone)
+            {
+                _noIneffectiveEffect = true;
+            }
+        }
+
+        public override void Destroy()
+        {
+            _soundSource.StopAllSfx(force: true);
+            base.Destroy();
+        }
+
+        public override void GetPosition(out Vector3 position)
+        {
+            position = _hurtVolume.GetCenter();
+        }
+
+        public override void GetVectors(out Vector3 position, out Vector3 up, out Vector3 facing)
+        {
+            position = _hurtVolume.GetCenter();
+            up = UpVector;
+            facing = FacingVector;
+        }
+
+        public override bool GetTargetable()
+        {
+            return _health != 0;
+        }
+
+        public void ClearHitPlayers()
+        {
+            HitPlayers[0] = false;
+            HitPlayers[1] = false;
+            HitPlayers[2] = false;
+            HitPlayers[3] = false;
+            for (int i = 4; i < HitPlayers.Length; i++) // recomp: seats 5-8 (P8)
+            {
+                HitPlayers[i] = false;
+            }
+        }
+
+        protected Vector3 FixParallelVectors(Vector3 facing, Vector3 up)
+        {
+            // check for issue observed with visible enemy spawners (e.g. Psycho Bits in Weapons Complex)
+            // where the spawner's facing vector is unit Y (or close enough) -- in-game, such cases probably
+            // just don't use their transform in a way where that vector matter, prior to it getting overwritten
+            // by player-seeking code or the like. but we need to make sure we don't put NaNs in the transform mtx.
+            var right = Vector3.Cross(up, facing);
+            if (right != Vector3.Zero)
+            {
+                return up;
+            }
+            if (facing.Y != 0 || facing.Z != 0)
+            {
+                right = Vector3.Cross(facing, Vector3.UnitX);
+            }
+            else
+            {
+                right = Vector3.Cross(facing, Vector3.UnitY);
+            }
+            right = right.Normalized();
+            up = Vector3.Cross(facing, right);
+            return up;
+        }
+
+        public override bool Process()
+        {
+            bool inRange = false;
+            if (_data.Type == EnemyType.Spawner || Flags.TestFlag(EnemyFlags.NoMaxDistance)
+                || _scene.CameraMode != CameraMode.Player) // skdebug
+            {
+                inRange = true;
+            }
+            else
+            {
+                float distSqr = 35f * 35f;
+                if (Owner?.Type == EntityType.EnemySpawn)
+                {
+                    var spawner = (EnemySpawnEntity)Owner;
+                    distSqr = spawner.Data.EnemyActiveDistance.FloatValue;
+                    distSqr *= distSqr;
+                }
+
+                bool CheckInRange(Vector3 pos)
+                {
+                    Vector3 between = Position - pos;
+                    return between.LengthSquared < distSqr && between.Y > -15 && between.Y < 15;
+                }
+
+                if (GameState.Multiplayer)
+                {
+                    foreach (PlayerEntity player in _scene.GetPlayerEntities())
+                    {
+                        if (player.Health > 0 && CheckInRange(player.Position))
+                        {
+                            inRange = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    inRange = CheckInRange(PlayerEntity.Main.Position);
+                }
+            }
+            if (inRange)
+            {
+                if (_timeSinceDamage < 510)
+                {
+                    _timeSinceDamage++;
+                }
+                if (_health > 0)
+                {
+                    _state1 = _state2;
+                    _subId = _state1;
+                    if (!Flags.TestFlag(EnemyFlags.Static))
+                    {
+                        DoMovement();
+                    }
+                    int rangeIndex = Metadata.EnemyAudioRangeIndices[(int)EnemyType];
+                    _soundSource.Update(Position, rangeIndex);
+                    UpdateNodeRefVolume();
+                    ClearHitPlayers();
+                    foreach (PlayerEntity player in _scene.GetPlayerEntities())
+                    {
+                        CollisionResult hitRes = default;
+                        if (player.Health > 0)
+                        {
+                            // the game does not check fot alt attacks hitting enemies
+                            bool hit = player.CheckAltAttackHitEnemy1(this);
+                            if (!hit)
+                            {
+                                hit = player.CheckAltAttackHitEnemy2(this);
+                            }
+                            if (!hit && CollisionDetection.CheckVolumesOverlap(player.Volume, HurtVolume, ref hitRes))
+                            {
+                                HitPlayers[player.SlotIndex] = true;
+                                if (Flags.TestFlag(EnemyFlags.CollidePlayer))
+                                {
+                                    player.HandleCollision(hitRes);
+                                }
+                            }
+                        }
+                    }
+                    EnemyProcess();
+                    if (!Flags.TestFlag(EnemyFlags.Static))
+                    {
+                        UpdateHurtVolume();
+                    }
+                    if (NodeRef != NodeRef.None)
+                    {
+                        NodeRef = _scene.UpdateNodeRef(NodeRef, _prevPos, Position);
+                    }
+                    return BaseProcess();
+                }
+                _scene.SendMessage(Message.Destroyed, this, _owner, 0, 0);
+                if (_owner?.Type == EntityType.EnemySpawn)
+                {
+                    var spawner = (EnemySpawnEntity)_owner;
+                    Vector3 pos = _hurtVolume.GetCenter().AddY(0.5f);
+                    ItemSpawnEntity.SpawnItemDrop(spawner.Data.ItemType, pos, NodeRef, spawner.Data.ItemChance, _scene);
+                }
+                return false;
+            }
+            _scene.SendMessage(Message.Destroyed, this, _owner, 1, 0);
+            return false;
+        }
+
+        protected bool ContactDamagePlayer(uint damage, bool knockback)
+        {
+            if (!HitPlayers[PlayerEntity.Main.SlotIndex])
+            {
+                return false;
+            }
+            PlayerEntity.Main.TakeDamage(damage, DamageFlags.None, _speed, this);
+            if (knockback)
+            {
+                Vector3 between = PlayerEntity.Main.Volume.SpherePosition - Position;
+                float factor = between.Length * 5;
+                PlayerEntity.Main.Speed = PlayerEntity.Main.Speed.AddX(between.X / factor).AddZ(between.Z / factor);
+            }
+            return true;
+        }
+
+        protected virtual bool BaseProcess()
+        {
+            return base.Process();
+        }
+
+        private void DoMovement()
+        {
+            _prevPos = Position;
+            Position += _speed;
+            UpdateHurtVolume();
+        }
+
+        private void UpdateHurtVolume()
+        {
+            if (_onlyMoveHurtVolume)
+            {
+                _hurtVolume = CollisionVolume.Move(_hurtVolumeInit, Position);
+            }
+            else
+            {
+                _hurtVolume = CollisionVolume.Transform(_hurtVolumeInit, Transform);
+            }
+        }
+
+        public override void GetDrawInfo()
+        {
+            if (_health > 0 && Flags.TestFlag(EnemyFlags.Visible))
+            {
+                if (!EnemyGetDrawInfo())
+                {
+                    DrawGeneric();
+                }
+            }
+        }
+
+        protected void DrawGeneric()
+        {
+            if (!Flags.TestFlag(EnemyFlags.NoMaxDistance) && !IsVisible(NodeRef))
+            {
+                return;
+            }
+            if (_timeSinceDamage < 5 * 2) // todo: FPS stuff
+            {
+                PaletteOverride = Metadata.RedPalette;
+            }
+            base.GetDrawInfo();
+            PaletteOverride = null;
+        }
+
+        protected virtual void EnemyInitialize()
+        {
+        }
+
+        protected virtual void EnemyProcess()
+        {
+        }
+
+        /// <summary>
+        /// Must return true if overriden.
+        /// </summary>
+        protected virtual bool EnemyGetDrawInfo()
+        {
+            return false;
+        }
+
+        public void SetHealth(ushort health)
+        {
+            _health = health;
+        }
+
+        protected virtual void Detach()
+        {
+        }
+
+        public bool CheckHitByBomb(BombEntity bomb)
+        {
+            if (Flags.TestFlag(EnemyFlags.Invincible))
+            {
+                return false;
+            }
+            Vector3 between = Position - bomb.Position;
+            if (between.LengthSquared > bomb.Radius * bomb.Radius)
+            {
+                return false;
+            }
+            TakeDamage(bomb.EnemyDamage, bomb);
+            _scene.SendMessage(Message.Impact, bomb, bomb.Owner, this, 0); // the game doesn't set anything as sender
+            return true;
+        }
+
+        public void TakeDamage(uint damage, EntityBase? source)
+        {
+            if (FirstHuntTakeDamage(damage, source)) // recomp: First Hunt's enemies take damage their own way (FirstHunt/Enemies)
+            {
+                return;
+            }
+            ushort prevHealth = _health;
+            Effectiveness effectiveness = Effectiveness.Normal;
+            BeamProjectileEntity? beamSource = null;
+            if (source?.Type == EntityType.BeamProjectile)
+            {
+                beamSource = (BeamProjectileEntity)source;
+            }
+            if (beamSource != null)
+            {
+                if (beamSource.Owner?.Type == EntityType.EnemyInstance)
+                {
+                    return;
+                }
+                effectiveness = GetEffectiveness(beamSource.Beam);
+            }
+            bool unaffected = false;
+            if (effectiveness == Effectiveness.Zero || Flags.TestFlag(EnemyFlags.Invincible)
+                || (source?.Type == EntityType.Bomb && Flags.TestFlag(EnemyFlags.NoBombDamage)))
+            {
+                unaffected = true;
+            }
+            bool dead = false;
+            bool doubleDead = false;
+            if (!unaffected)
+            {
+                if (beamSource?.Owner?.Type == EntityType.Player)
+                {
+                    damage = (uint)(damage * Metadata.GetDamageMultiplier(effectiveness));
+                    if (damage == 0)
+                    {
+                        damage = 1;
+                    }
+                }
+                if (damage >= _health)
+                {
+                    dead = true;
+                    if (_health <= 0)
+                    {
+                        doubleDead = true;
+                    }
+                    _health = 0;
+                }
+                else
+                {
+                    _health -= (ushort)damage;
+                }
+            }
+            if (EnemyTakeDamage(source))
+            {
+                _health = prevHealth;
+                unaffected = true;
+                dead = false;
+            }
+            if (unaffected)
+            {
+                if (effectiveness == Effectiveness.Zero && !_noIneffectiveEffect)
+                {
+                    Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY);
+                    transform.Row3.Xyz = _hurtVolume.GetCenter();
+                    EffectEntry? effect = _scene.SpawnEffectGetEntry(115, transform); // ineffectivePsycho
+                    if (effect != null)
+                    {
+                        effect.SetReadOnlyField(0, _boundingRadius);
+                        _scene.DetachEffectEntry(effect, setExpired: false);
+                    }
+                }
+            }
+            else
+            {
+                if (doubleDead && Bugfixes.NoDoubleEnemyDeath)
+                {
+                    return;
+                }
+                if (beamSource != null)
+                {
+                    beamSource.SpawnDamageEffect(effectiveness);
+                }
+                if (dead)
+                {
+                    if (_data.Type != EnemyType.CarnivorousPlant && _data.Type != EnemyType.CretaphidEye
+                        && GameState.StorySave.Stats.EnemyKills != UInt32.MaxValue)
+                    {
+                        GameState.StorySave.Stats.EnemyKills++;
+                    }
+                    if (_data.Type == EnemyType.Temroid) // condition is not strictly necessary
+                    {
+                        Detach();
+                    }
+                    _soundSource.StopAllSfx();
+                    PlayEnemySfx(Metadata.EnemyDeathSfx[(int)EnemyType], noUpdate: true);
+                    int effectId;
+                    if (EnemyType == EnemyType.FireSpawn)
+                    {
+                        Debug.Assert(_owner?.Type == EntityType.EnemySpawn);
+                        var spawner = (EnemySpawnEntity)_owner;
+                        effectId = spawner.Data.Fields.S06.EnemySubtype == 1 ? 217 : 218;
+                    }
+                    else
+                    {
+                        effectId = Metadata.GetEnemyDeathEffect(EnemyType);
+                    }
+                    if (effectId > 0)
+                    {
+                        Matrix4 transform = Transform.ClearScale();
+                        _scene.SpawnEffect(effectId, transform);
+                    }
+                }
+                else
+                {
+                    _timeSinceDamage = 0;
+                    PlayEnemySfx(Metadata.EnemyDamageSfx[(int)EnemyType], noUpdate: false);
+                    switch (_data.Type)
+                    {
+                    case EnemyType.Zoomer:
+                    case EnemyType.Petrasyl1:
+                    case EnemyType.Petrasyl2:
+                    case EnemyType.Petrasyl3:
+                    case EnemyType.Petrasyl4:
+                        _models[0].SetAnimation(1, AnimFlags.NoLoop);
+                        break;
+                    case EnemyType.Blastcap:
+                        _models[0].SetAnimation(0, AnimFlags.NoLoop);
+                        // 3 - blastCapHit
+                        Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY);
+                        transform.Row3.Xyz = Position;
+                        _scene.SpawnEffect(3, transform);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private void PlayEnemySfx(int sfx, bool noUpdate)
+        {
+            if (sfx != -1)
+            {
+                float recency = -1;
+                bool sourceOnly = false;
+                if ((sfx & 0x20000) != 0)
+                {
+                    recency = Single.MaxValue;
+                    sourceOnly = true;
+                }
+                else if ((sfx & 0x80000) != 0)
+                {
+                    recency = 0;
+                }
+                _soundSource.PlaySfx(sfx & ~0xA0000, noUpdate: noUpdate, recency: recency, sourceOnly: sourceOnly);
+            }
+        }
+
+        public Effectiveness GetEffectiveness(BeamType beam)
+        {
+            int index = PirateBlaster.BaseIndex(beam); // recomp: the Pirate Blaster takes the Power Beam's row
+            Debug.Assert(index < BeamEffectiveness.Length);
+            return BeamEffectiveness[index];
+        }
+
+        // recomp: true when a First Hunt enemy took the damage itself
+        protected virtual bool FirstHuntTakeDamage(uint damage, EntityBase? source)
+        {
+            return false;
+        }
+
+        /// <summary>
+        /// When overridden, must return true when unaffected by damage and false otherwise.
+        /// </summary>
+        protected virtual bool EnemyTakeDamage(EntityBase? source)
+        {
+            return false;
+        }
+
+        protected void CallStateProcess()
+        {
+            Debug.Assert(_stateProcesses != null && _state1 >= 0 && _state1 < _stateProcesses.Length);
+            _stateProcesses[_state1].Invoke();
+        }
+
+        protected bool CallSubroutine<T>(IReadOnlyList<EnemySubroutine<T>> subroutines, T enemy) where T : EnemyInstanceEntity
+        {
+            Debug.Assert(enemy == this);
+            EnemySubroutine<T> subroutine = subroutines[_subId];
+            if (subroutine.Behaviors.Count == 0)
+            {
+                return false;
+            }
+            int index = 0;
+            while (!subroutine.Behaviors[index].Function.Invoke(enemy))
+            {
+                index++;
+                if (index >= subroutine.Behaviors.Count)
+                {
+                    return false;
+                }
+            }
+            _state2 = subroutine.Behaviors[index].NextState;
+            return true;
+        }
+
+        protected bool HandleBlockingCollision(Vector3 position, CollisionVolume volume, bool updateSpeed)
+        {
+            bool a = false;
+            bool b = false;
+            return HandleBlockingCollision(position, volume, updateSpeed, ref a, ref b);
+        }
+
+        protected bool HandleBlockingCollision(Vector3 position, CollisionVolume volume, bool updateSpeed,
+            ref bool withGround, ref bool withWall)
+        {
+            int count = 0;
+            var results = new CollisionResult[30];
+            Vector3 pointOne = Vector3.Zero;
+            Vector3 pointTwo = Vector3.Zero;
+            if (volume.Type == VolumeType.Cylinder)
+            {
+                pointOne = _prevPos.AddY(0.5f);
+                pointTwo = Position.AddY(0.5f);
+                count = CollisionDetection.CheckSphereBetweenPoints(pointOne, pointTwo, volume.CylinderRadius, limit: 30,
+                    includeOffset: false, TestFlags.None, _scene, results);
+            }
+            else
+            {
+                count = CollisionDetection.CheckInRadius(position, _boundingRadius, limit: 30,
+                    getSimpleNormal: false, TestFlags.None, _scene, results);
+            }
+            withGround = false;
+            if (count == 0)
+            {
+                return false;
+            }
+            for (int i = 0; i < count; i++)
+            {
+                CollisionResult result = results[i];
+                float v18;
+                if (result.Field0 != 0)
+                {
+                    v18 = _boundingRadius - result.Field14;
+                }
+                else if (volume.Type == VolumeType.Cylinder)
+                {
+                    v18 = _boundingRadius + result.Plane.W - Vector3.Dot(pointTwo, result.Plane.Xyz);
+                }
+                else
+                {
+                    v18 = _boundingRadius + result.Plane.W - Vector3.Dot(position, result.Plane.Xyz);
+                }
+                if (v18 > 0)
+                {
+                    if (result.Plane.Y < 0.1f && result.Plane.Y > -0.1f)
+                    {
+                        withWall = true;
+                    }
+                    else
+                    {
+                        withGround = true;
+                    }
+                    Position += result.Plane.Xyz * v18;
+                    if (updateSpeed)
+                    {
+                        float dot = Vector3.Dot(_speed, result.Plane.Xyz);
+                        if (dot < 0)
+                        {
+                            _speed += result.Plane.Xyz * -dot;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        public override void GetDisplayVolumes()
+        {
+            if (_scene.ShowVolumes == VolumeDisplay.EnemyHurt)
+            {
+                AddVolumeItem(_hurtVolume, Vector3.UnitX);
+            }
+        }
+
+        public static Vector3 RotateVector(Vector3 vec, Vector3 axis, float angle)
+        {
+            return vec * DetMatrix.CreateFromAxisAngle3(axis, MathHelper.DegreesToRadians(angle));
+        }
+
+        public static bool SeekTargetVector(Vector3 target, ref Vector3 current, Vector3 axis, ref ushort steps, float angle)
+        {
+            if (steps > 0 && Vector3.Dot(target, current) < MathF.Cos(MathHelper.DegreesToRadians(angle)))
+            {
+                current = RotateVector(current, axis, angle).Normalized();
+                steps--;
+                return false;
+            }
+            current = target;
+            return true;
+        }
+
+        // similar to the above, where current is always the facing vector and current up vector is maintained
+        public bool SeekTargetFacing(Vector3 target, Vector3 up, ref ushort steps, float angle)
+        {
+            bool result = false;
+            Vector3 facing = FacingVector;
+            float radians = MathHelper.DegreesToRadians(angle);
+            if (steps > 0 && Vector3.Dot(target, facing) < MathF.Cos(radians))
+            {
+                var cross = Vector3.Cross(target, facing);
+                var rotY = DetMatrix.CreateRotationY3(radians * (cross.Y <= 0 ? 1 : -1));
+                facing = (facing * rotY).Normalized();
+                steps--;
+            }
+            else
+            {
+                facing = target;
+                result = true;
+            }
+            SetTransform(facing, up, Position);
+            return result;
+        }
+    }
+
+    [Flags]
+    public enum EnemyFlags : ushort
+    {
+        Visible = 1,
+        NoHomingNc = 2,
+        NoHomingCo = 4,
+        Invincible = 8,
+        NoBombDamage = 0x10,
+        CollidePlayer = 0x20,
+        CollideBeam = 0x40,
+        NoMaxDistance = 0x80,
+        OnRadar = 0x100,
+        Static = 0x200
+    }
+
+    public enum Effectiveness : byte
+    {
+        Zero,
+        Half,
+        Normal,
+        Double
+    }
+
+    public readonly struct EnemyBehavior<T> where T : EnemyInstanceEntity
+    {
+        public readonly byte NextState;
+        public readonly Func<T, bool> Function;
+
+        public EnemyBehavior(byte nextState, Func<T, bool> function)
+        {
+            NextState = nextState;
+            Function = function;
+        }
+    }
+
+    public readonly struct EnemySubroutine<T> where T : EnemyInstanceEntity
+    {
+        public readonly IReadOnlyList<EnemyBehavior<T>> Behaviors { get; }
+
+        public EnemySubroutine(IReadOnlyList<EnemyBehavior<T>> behaviors)
+        {
+            Behaviors = behaviors;
+        }
+    }
+}

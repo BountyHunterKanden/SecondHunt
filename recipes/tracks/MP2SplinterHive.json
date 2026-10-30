@@ -1,0 +1,12 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "format": "rs03",
+  "title": "Splinter Hive",
+  "group": "Temple Grounds",
+  "role": "area",
+  "files": [
+    { "name": "Audio/SplinterHive-naka32.dsp", "sha1": "cff4ecb574b54eb509ecf95e81e6e8cf41660bd3" }
+  ],
+  "gain": 0.739
+}

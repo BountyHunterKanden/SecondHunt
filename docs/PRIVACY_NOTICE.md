@@ -17,7 +17,7 @@ Contact for anything in this notice, including deleting your data: secondhuntgam
 | Your **hunter name and tag** (e.g. KANDEN#4821) and your **friend code** | So others can find and add you | Until you delete your profile |
 | Your **Hunter License** numbers (wins, kills, favourite hunter and so on, as the game counts them) | Others can view your license | Until you delete your profile |
 | Your **friends, rivals, requests, blocks** and **recent players** lists | The friends features | Until you delete your profile (or remove them) |
-| Your **online match count** and any **chat limits** on your profile | New players' typed chat opens after a few matches; a moderator's chat mute | Kept after a profile delete, so a new profile can't wipe a ban or limit |
+| Your **online match count** and any **chat limits** on your profile | A moderator's chat mute | Kept after a profile delete, so a new profile can't wipe a ban or limit |
 | **Reports** you send or that are about you, including, for a chat report, **the last few typed lines** of the reported player and of that game | So the moderator can check the report | Handled reports: 30 days. Unhandled: 90 days. Then deleted |
 | **Bans**: the banned key, name, reason and end date, and a **scrambled ID of each device** the banned profile logged in from (a one-way hash of the device's own ID: Android's app ID or the computer's install ID) | Keeping a banned player out, also after they clear the app's data or reinstall it | Until the ban ends (or forever for a permanent ban) |
 | **Nightly backups** of the above | Recovering from a server failure | The last 14 days |
