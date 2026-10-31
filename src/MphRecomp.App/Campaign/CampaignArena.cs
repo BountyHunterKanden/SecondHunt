@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using MphRead;
 using MphRead.Entities;
+using MphRead.Rendering;
 using MphRecomp.Anim;
 using MphRecomp.Arenas;
 using MphRecomp.Assets;
@@ -125,6 +126,92 @@ internal sealed partial class CampaignRenderer
         GLES30.GlUseProgram(_program);
         GLES30.GlBindVertexArray(0);
         GLES30.GlEnable(GLES30.GlDepthTest);
+    }
+
+    // the item pickups held out of the room's layers while Echoes water is up, drawn after the water (WaterPickups)
+    readonly List<RenderItem> _pickOpaque = new(), _pickTrans = new(), _restOpaque = new(), _restDecal = new(), _restTrans = new();
+
+    // with Echoes water in the arena, item pickups (health, ammo, weapons) leave the room's layers and draw after the
+    // water's surface and the underwater tint (DrawWaterPickups): a pickup always looks as it does next to it above
+    // water, from either side of the surface (owner 10-31: through the surface a health pickup's glow was lost). False
+    // (lists untouched) anywhere else.
+    bool SplitWaterPickups(Scene scene, ref IReadOnlyList<RenderItem> opaque, ref IReadOnlyList<RenderItem> decal,
+        ref IReadOnlyList<RenderItem> trans)
+    {
+        _pickOpaque.Clear();
+        _pickTrans.Clear();
+        if (_host == null || scene != _host.Scene || _arenaHd == null || _arenaHd.Failed) return false;
+        if (!PlayerEntity.HostEchoesMoves || PlayerEntity.HostWater == null) return false;
+        static bool Pickup(RenderItem item) => item.HostOwner is ItemInstanceEntity;
+        bool any = false;
+        for (int i = 0; i < opaque.Count && !any; i++) any = Pickup(opaque[i]);
+        for (int i = 0; i < trans.Count && !any; i++) any = Pickup(trans[i]);
+        if (!any) return false;
+        static void Split(IReadOnlyList<RenderItem> all, List<RenderItem> rest, List<RenderItem>? picks)
+        {
+            rest.Clear();
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (!Pickup(all[i])) rest.Add(all[i]);
+                else picks?.Add(all[i]);
+            }
+        }
+        Split(opaque, _restOpaque, _pickOpaque);
+        Split(decal, _restDecal, null); // (a pickup has no decal parts)
+        Split(trans, _restTrans, _pickTrans);
+        opaque = _restOpaque;
+        decal = _restDecal;
+        trans = _restTrans;
+        return true;
+    }
+
+    // the held-out pickups (SplitWaterPickups) over the finished room, its water and tint, in the room's own phases
+    // (LayeredDraw) against its depth: solids, then the see-through parts by stencil ownership, back layer then front
+    void DrawWaterPickups(Scene scene)
+    {
+        GlesLayerGl gl = _layerGl;
+        GLES30.GlUseProgram(_program);
+        GLES30.GlEnable(GLES30.GlDepthTest);
+        GLES30.GlEnable(GLES30.GlBlend);
+        GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
+        gl.SetAlphaFilter(LayerAlphaFilter.SolidOnly);
+        gl.SetColorWrites(true);
+        gl.SetDepthWrites(true);
+        gl.SetDepthFunc(LayerDepthFunc.Less);
+        for (int i = 0; i < _pickOpaque.Count; i++) DrawItem(_pickOpaque[i], scene);
+        if (_pickTrans.Count > 0)
+        {
+            gl.SetStencilTest(true);
+            gl.SetStencilWriteMask(0xFF);
+            GLES30.GlClearStencil(0);
+            GLES30.GlClear(GLES30.GlStencilBufferBit);
+            gl.SetAlphaFilter(LayerAlphaFilter.SeeThroughOnly);
+            gl.SetDepthFunc(LayerDepthFunc.LessOrEqual);
+            gl.SetDepthWrites(false);
+            gl.SetColorWrites(false);
+            gl.SetStencilOp(LayerStencilOp.Keep, LayerStencilOp.Keep, LayerStencilOp.Replace);
+            for (int i = 0; i < _pickTrans.Count; i++)
+            {
+                gl.SetItemStencilFunc(LayerStencilFunc.Greater, _pickTrans[i].PolygonId, 0xFF);
+                DrawItem(_pickTrans[i], scene);
+            }
+            gl.SetColorWrites(true);
+            gl.SetStencilOp(LayerStencilOp.Keep, LayerStencilOp.Keep, LayerStencilOp.Keep);
+            for (int i = 0; i < _pickTrans.Count; i++)
+            {
+                gl.SetItemStencilFunc(LayerStencilFunc.NotEqual, _pickTrans[i].PolygonId, 0xFF);
+                DrawItem(_pickTrans[i], scene);
+            }
+            for (int i = 0; i < _pickTrans.Count; i++)
+            {
+                gl.SetItemStencilFunc(LayerStencilFunc.Equal, _pickTrans[i].PolygonId, 0xFF);
+                DrawItem(_pickTrans[i], scene);
+            }
+            gl.SetStencilTest(false);
+        }
+        gl.SetAlphaFilter(LayerAlphaFilter.Off);
+        gl.SetDepthWrites(true);
+        GLES30.GlDisable(CullFaceCap);
     }
 
     readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _crates = new();
@@ -513,7 +600,9 @@ internal sealed class ArenaHdDraw
                 b.FastTex = Path.Combine(_dir, f.Tex + ".png");
                 b.FastGlow = f.Glow is string g ? Path.Combine(_dir, g + ".png") : null;
             }
-            else if (pass < ArenaHdWriter.PropPass && ArenaGxSpec.Frag(p) is string spec)
+            // (the fluid surfaces too: on the interpreter, Pipeline's water a few units from the ball camera took a Redmi
+            // 15's GPU from ~25 to 240 ms a frame, 10-31)
+            else if ((pass < ArenaHdWriter.PropPass || pass == ArenaHdWriter.FluidPass) && ArenaGxSpec.Frag(p) is string spec)
             {
                 b.SpecSrc = spec;
                 if (!_specOrder.Contains(spec)) _specOrder.Add(spec);

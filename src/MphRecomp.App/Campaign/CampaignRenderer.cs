@@ -80,6 +80,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
     {
         if (_padBinds.Uses(PadButton.ThumbL)) return; // (L3 given a function: L3 + R3 is just those, thread D 10-24)
         _gunComboUsed = true;
+        // a dev pause: never in a public build, and never in a LAN / online match, where it froze this player's
+        // simulation under the others
+        if (MphRecomp.Config.RecompSettings.PublicBuild || _netSession != null) return;
         if (PauseMenuOpen) return;
         _paused = !_paused;
     }
@@ -1537,6 +1540,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
 
         UpdateBodyCut(scene);
         GpuNoteDrawn(opaque, decal, trans);
+        bool waterPickups = SplitWaterPickups(scene, ref opaque, ref decal, ref trans); // after Echoes water (CampaignArena.cs)
         // solids, decals, then translucent surfaces in two layers (MphRead.Rendering.LayeredDraw); the Prime gun, an
         // imported arena and the HD suit draw between the phases
         _layerScene = scene;
@@ -1581,6 +1585,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlDisable(CullFaceCap);
         GpuMark(GpuSegSuit);
         DrawArenaUnderwater(scene); // the view's tint inside Echoes water (CampaignArena.cs)
+        if (waterPickups) DrawWaterPickups(scene); // item pickups over the water and its tint (CampaignArena.cs)
         // the HD suit's see-through and glowing parts, over everything else in the room
         DrawSuit(scene, SuitPass.Translucent);
         DrawSuit(scene, SuitPass.Additive);
