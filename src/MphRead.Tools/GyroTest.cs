@@ -220,6 +220,82 @@ namespace MphRead
             }
             Check("all filters max: 200 deg/s turn for 0.5 s -> 100, first sample already 1:1 (no lag)",
                 Near(d.X, 100, 0.2f) && Near(first, 1f, 0.01f), $"got {d.X:0.00}, first step {first:0.000}");
+
+            // paced takes (owner 2026-11-02, gyro shaky next to the stick): a steady 60 deg/s turn, 200 Hz samples that
+            // arrive in 20 ms bursts, an uneven display (some frames run two steps): each step should get an even share
+            (float spread, float total) Paced(bool paced)
+            {
+                var a = Tuned(o => o.TightenDps = 0f);
+                const long SampleNs = 5_000_000, BurstNs = 20_000_000;
+                long nextSample = SampleNs, frameNs = 0;
+                double accum = 0;
+                float lo = float.MaxValue, hi = 0, sum = 0;
+                var rng = new Random(7);
+                for (int f = 0; f < 240; f++)
+                {
+                    long dt = (long)(1e9 / 120 * (0.6 + 0.8 * rng.NextDouble()));
+                    frameNs += dt;
+                    // samples whose burst has arrived by now
+                    while ((nextSample + BurstNs - 1) / BurstNs * BurstNs <= frameNs)
+                    {
+                        a.AddSample(new NVec3(0, 60, 0) * (MathF.PI / 180f), SampleNs * 1e-9f, nextSample);
+                        nextSample += SampleNs;
+                    }
+                    accum += dt * 1e-9;
+                    while (accum >= 1 / 60.0)
+                    {
+                        accum -= 1 / 60.0;
+                        float x = (paced ? a.TakePaced(frameNs, (long)(accum * 1e9)) : a.TakeDegrees()).X;
+                        sum += x;
+                        if (f < 60) continue; // settled
+                        lo = MathF.Min(lo, x);
+                        hi = MathF.Max(hi, x);
+                    }
+                }
+                return ((hi - lo) / (60f * 1.5f / 60f), sum + a.TakeDegrees().X); // a step: 60 deg/s x the default 1.5 speed / 60
+            }
+            (float rawSpread, float rawTotal) = Paced(false);
+            (float pacedSpread, float pacedTotal) = Paced(true);
+            Check("paced takes: a steady turn in bursts gives even steps (spread under 15% of a step), nothing lost",
+                pacedSpread < 0.15f && rawSpread > 0.5f && Near(pacedTotal, rawTotal, 0.01f),
+                $"step spread {rawSpread:0.00} -> {pacedSpread:0.00} (1 = a whole step), total {rawTotal:0.00} / {pacedTotal:0.00} deg");
+            var off = Tuned(o => o.TightenDps = 0f);
+            off.AddSample(new NVec3(0, 60, 0) * (MathF.PI / 180f), 0.005f, 5_000_000_000);
+            float elsewhere = off.TakePaced(9_000_000_000, 0).X;
+            Check("paced takes: samples on another clock are taken whole", Near(elsewhere, 0.3f, 0.001f), $"got {elsewhere:0.000}");
+
+            // touch (STYLUS touch aim): a steady drag reported once a 120 Hz frame in ms times, on uneven frames; then the
+            // finger rests a second and moves again -- the rest mustn't hold the next drag back
+            {
+                var sum = new MphRecomp.Input.PacedSum();
+                var trng = new Random(11);
+                long frameNs = 0, lastNs = 0;
+                double accum = 0;
+                float lo = float.MaxValue, hi = 0, firstAfterRest = -1;
+                for (int f = 0; f < 480; f++)
+                {
+                    long dt = (long)(1e9 / 120 * (0.6 + 0.8 * trng.NextDouble()));
+                    frameNs += dt;
+                    bool resting = f >= 240 && f < 360;
+                    if (!resting)
+                    {
+                        long ms = frameNs / 1_000_000 * 1_000_000; // MotionEvent.EventTime is in ms
+                        sum.Add(new NVec2((ms - lastNs) * 1e-6f, 0), ms); // 1 px a ms
+                    }
+                    lastNs = frameNs / 1_000_000 * 1_000_000;
+                    accum += dt * 1e-9;
+                    while (accum >= 1 / 60.0)
+                    {
+                        accum -= 1 / 60.0;
+                        float x = sum.TakePaced(frameNs, (long)(accum * 1e9)).X;
+                        if (f >= 60 && f < 240) { lo = MathF.Min(lo, x); hi = MathF.Max(hi, x); }
+                        if (f >= 362 && firstAfterRest < 0) firstAfterRest = x;
+                    }
+                }
+                float touchSpread = (hi - lo) / (1000f / 60f);
+                Check("paced touch: a steady drag gives even steps (under 15% of a step); after a rest the drag turns at once",
+                    touchSpread < 0.15f && firstAfterRest > 1f, $"step spread {touchSpread:0.00}, first step after the rest {firstAfterRest:0.0} px");
+            }
         }
 
         // ------------------------------------------------------------ through MphRead's sim

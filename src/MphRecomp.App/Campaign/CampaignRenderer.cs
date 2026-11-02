@@ -124,6 +124,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         ApplyCameraSetting(s);
         // SETTINGS > LOOK > DISPLAY (CampaignSmoothFrames.cs); off in a public build (owner 2026-10-18: not in the next release)
         _smoothFrames = s.SmoothFrames && !MphRecomp.Config.RecompSettings.PublicBuild;
+        // SETTINGS > LOOK > VIEW "aim view" (CampaignLookAhead.cs); public builds too
+        _aimView = s.AimView ?? "instant";
         // the control customizer's buttons (OPTIONS > CONTROLS, the ship's OPTIONS; Config/ControlBinds.cs)
         _padBinds.Load(s);
         _chatToggle = s.ChatToggle; // the CHAT button: hold or toggle (MatchChat.cs)
@@ -274,6 +276,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         MphRead.Entities.RoomEntity.HostTransitionGc = false;
         MphRead.Entities.RoomEntity.HostTransitionTrace = msg => Log.Info("MPHPerf", msg);
         MphRead.Scene.HostEntityInitTrace = msg => Log.Info("MPHPerf", "set-up: " + msg);
+        MphRead.Scene.HostDrawCullWiden = LookCullWiden; // the aim view's walls at the screen's edges (CampaignLookAhead.cs)
         _suitSeen = gunSettingsPath != null ? MphRecomp.Config.RecompSettings.Load(gunSettingsPath).SamusSuit : null;
         _suitId = hunter == Hunter.Samus && gunDir != null ? System.IO.Path.GetFileName(gunDir) : null;
     }
@@ -1195,7 +1198,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
         (input.TouchDown, input.TouchDx, input.TouchDy) = pad.TakeStylus();
         // TOUCH AIM: STYLUS (owner 2026-10-16): the stylus finger's drag aims by the DS's rule (Core Input/StylusAim.cs);
         // nothing comes in while the touch controls aim with their stick
-        System.Numerics.Vector2 stylusAim = StylusAimDelta(input.TouchDown, pad.TakeStylusAim());
+        // (each step its own 1/60 s of the drag while the finger is down, PadState.TakeStylusAimPaced; the rest on a lift)
+        System.Numerics.Vector2 stylusAim = StylusAimDelta(input.TouchDown,
+            input.TouchDown ? pad.TakeStylusAimPaced((long)(Math.Max(_accum, 0) * 1e9)) : pad.TakeStylusAim());
         // a PC's keyboard and mouse on MphRead's own PC controls (KeyboardMouseInput.cs; null on a device without them)
         KeyboardMouseInput? km = KeyboardMouse;
         bool yesNo = _host.Dialog == DialogType.YesNo;
@@ -1618,6 +1623,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlBindSampler(1, _samplers[0]);
         bool maskBound = false;
         int hudItems = scene.HudItemCount; // (a replay's HIDE hides only its own bar, owner 2026-10-27; free cam records none)
+        bool reticleMoves = LookReticleShift(scene, out float reticleDx, out float reticleDy); // the aim view (CampaignLookAhead.cs)
         for (int i = 0; i < hudItems; i++)
         {
             Scene.HostHudItem item = scene.GetHudItem(i);
@@ -1644,6 +1650,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
             }
             GlNative.Uniform1i(HU("use_mask"), mask && maskBound ? 1 : 0);
             GlNative.Uniform1f(HU("alpha"), item.Alpha);
+            if (reticleMoves && i == scene.HostReticleItem)
+            {
+                DrawHudQuad(item.Left + reticleDx, item.Right + reticleDx, item.Top + reticleDy, item.Bottom + reticleDy);
+                continue;
+            }
             DrawHudQuad(item.Left, item.Right, item.Top, item.Bottom);
         }
         float fade = PlayerEntity.HostNoViewer ? 0 : scene.HostFadeAmount; // a replay's free cam: not the main player's eyes

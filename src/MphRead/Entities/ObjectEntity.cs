@@ -565,7 +565,9 @@ namespace MphRead.Entities
             {
                 if (_data.EffectId != 0)
                 {
-                    if (!IsVisible(NodeRef))
+                    // recomp: the step's visibility (Process reads this flag), not HostDrawCullWiden's widened draw set
+                    if (NodeRef != Formats.Culling.NodeRef.None && _scene.CameraMode == CameraMode.Player && !_scene.ShowInvisibleEntities
+                        && !_scene.IsNodeRefStepVisible(NodeRef)) // = !IsVisible(NodeRef) on the step's parts
                     {
                         _flags &= ~ObjectFlags.IsVisible;
                     }

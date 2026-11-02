@@ -46,6 +46,13 @@ namespace MphRecomp.Config
         // frames drawn between the game's 60 Hz steps show motion (App Campaign/SmoothFrames.cs): the aim turns, the view
         // and what moves carry on by their last step's motion. Drawing only: what the game does is the same either way.
         public bool SmoothFrames { get; set; } = true;
+        // SETTINGS > LOOK > VIEW "aim view" (touch/gyro lag report 2026-11-02, SecondHunt issue #11 "static reticle";
+        // App Campaign/CampaignLookAhead.cs): instant = the first-person view turns with your aim the moment it moves (the
+        // game's own view eases after it, up to ~12 degrees and ~180 ms behind a quick turn), so the reticle stays where
+        // you shoot; classic = the game's eased view. Drawing only: the aim is the same either way. A stored "static" (an
+        // option dropped the same day) plays as instant.
+        public static readonly string[] AimViews = { "instant", "classic" };
+        public string AimView { get; set; } = "instant";
         public int RenderScale { get; set; } = 100;
         public string Music { get; set; } = "original";
         public string MenuLayout { get; set; } = "combined";

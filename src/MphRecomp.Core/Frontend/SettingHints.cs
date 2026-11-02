@@ -71,6 +71,8 @@ namespace MphRecomp.Frontend
             ["lockreadoutstovisor.on"] = "readouts use visor opacity. readout opacity follows it.",
             ["lockreadoutstovisor.off"] = "readouts have their own opacity, separate from the visor.",
             ["fieldofview.110"] = "vanilla view, 110 degrees on a 16:9 screen. zoom and third person stay the same.",
+            ["aimview.instant"] = "the view turns with your aim right away, with no lag behind touch, gyro, mouse or stick.",
+            ["aimview.classic"] = "vanilla view. it eases after your aim, so the reticle swings out when you turn fast.",
             ["fieldofview"] = "how wide the view is in degrees on a 16:9 screen (vanilla is 110). zoom and third person scale with it.",
             ["lineart.smooth"] = "hud line art redrawn as clean lines, traced from your rom.",
             ["lineart.pixel"] = "hud line art as the original ds pixels.",

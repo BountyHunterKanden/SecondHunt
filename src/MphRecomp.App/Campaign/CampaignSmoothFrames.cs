@@ -53,6 +53,7 @@ internal sealed partial class CampaignRenderer
             _sfCurAt.Clear();
             _sfLifeCur.Clear();
         }
+        LookRecordStep(); // the aim, for the aim view's carry (CampaignLookAhead.cs)
         Matrix4 world = scene.ViewMatrix.Inverted();
         _sfPos0 = _sfPos1;
         _sfFwd0 = _sfFwd1;
@@ -114,13 +115,14 @@ internal sealed partial class CampaignRenderer
         _sfOn = false;
         _sfBound = SmoothNone;
         SmoothCount();
-        if (!_smoothFrames || scene == null || scene != _sfScene || _host == null || MovieShowing) return;
+        if (scene == null || scene != _sfScene || _host == null || MovieShowing) return;
         float phase = (float)(_accum * 60);
-        if (phase > 1.25f) return; // the steps have stopped (a cutscene holds them, the end): the step's picture
-        phase = Math.Min(phase, 1);
-        if (phase <= 0) return;
+        // past 1.25 the steps have stopped (a cutscene holds them, the end): the step's picture
+        bool smooth = _smoothFrames && phase > 0 && phase <= 1.25f;
+        phase = smooth ? Math.Min(phase, 1) : 0;
         Matrix4 view = scene.ViewMatrix;
-        if (_sfCamPrev && _sfCamCur && CameraSequence.Current == null && !ReplayFreeCam) // (a replay's free cam: its own view each picture)
+        Vector3 carry = Vector3.Zero;
+        if (smooth && _sfCamPrev && _sfCamCur && CameraSequence.Current == null && !ReplayFreeCam) // (a replay's free cam: its own view each picture)
         {
             Vector3 move = _sfPos1 - _sfPos0;
             bool moves = move.LengthSquared < SmoothCamJump * SmoothCamJump;
@@ -129,7 +131,8 @@ internal sealed partial class CampaignRenderer
             bool turns = sin > 1e-5f && angle < SmoothTurnJump;
             if (moves || turns)
             {
-                Vector3 pos = moves ? _sfPos1 + move * phase : _sfPos1, fwd = _sfFwd1, up = _sfUp1;
+                if (moves) carry = move * phase;
+                Vector3 pos = _sfPos1 + carry, fwd = _sfFwd1, up = _sfUp1;
                 if (turns)
                 {
                     axis /= sin;
@@ -139,10 +142,13 @@ internal sealed partial class CampaignRenderer
                 view = Matrix4.LookAt(pos, pos + fwd, up);
             }
         }
+        // the aim view (CampaignLookAhead.cs): turned to the aim, the aim's own turn carried in place of the camera's
+        bool look = LookView(scene, phase, carry, ref view);
+        if (!smooth && !look) return;
         _sfPhase = phase;
         _sfStep = scene.HostPresentView(view);
         _sfOn = true;
-        _sfCarried++;
+        if (smooth) _sfCarried++;
     }
 
     // logcat / log.txt MPHSmooth, every 600 pictures: how many were carried pictures between steps

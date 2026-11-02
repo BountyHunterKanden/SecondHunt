@@ -814,6 +814,16 @@ namespace MphRecomp.Frontend
                     Reset = () => _settings.HorizontalFov = 110,
                     AtDefault = () => _settings.HorizontalFov == 110
                 },
+                // the view following the aim (touch/gyro lag report 2026-11-02, SecondHunt issue #11)
+                new()
+                {
+                    Label = "aim\nview",
+                    Description = "instant turns the view with your aim right away, so the reticle stays where you shoot. classic is the game's own view, which eases after your aim.",
+                    Value = () => _settings.AimView == "classic" ? "CLASSIC" : "INSTANT",
+                    Step = s => _settings.AimView = Next(RecompSettings.AimViews, _settings.AimView, s),
+                    Reset = () => _settings.AimView = "instant",
+                    AtDefault = () => _settings.AimView == "instant"
+                },
                 // OPTIONS > CONTROLS' copy (owner 2026-10-05: "controls" here, the same page inside RECOMP SETTINGS)
                 new()
                 {

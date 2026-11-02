@@ -56,10 +56,10 @@ namespace MphRecomp.Input
         public Vector3 Bias;
 
         private readonly object _lock = new();
-        private Vector2 _pending; // degrees not yet taken: X = turn left +, Y = look up +
         private Vector3 _up; // unit "away from gravity" in the screen's axes; zero until the first accelerometer sample
         private readonly Vector2[] _smooth = new Vector2[64];
         private int _smoothIndex, _smoothCount;
+        private readonly PacedSum _paced = new(); // degrees not yet taken (X = turn left +, Y = look up +), by sample time
 
         public GyroAim(GyroAimOptions? options = null)
         {
@@ -90,8 +90,8 @@ namespace MphRecomp.Input
 
         // One gyroscope sample: angular velocity in rad/s about the SCREEN's axes -- X right, Y up, Z out of the screen
         // toward the player, counterclockwise positive (Android's sensor convention after remapping for the display
-        // rotation) -- held for dt seconds.
-        public void AddSample(Vector3 gyroRad, float dt)
+        // rotation) -- held for dt seconds, ending at the sensor's timeNs (0 = no timestamp; TakePaced then takes everything).
+        public void AddSample(Vector3 gyroRad, float dt, long timeNs = 0)
         {
             if (!(dt > 0f && dt <= 0.1f)) return; // first sample, or a gap (sensor paused): nothing to integrate
             if (!float.IsFinite(gyroRad.X) || !float.IsFinite(gyroRad.Y) || !float.IsFinite(gyroRad.Z)) return; // bad sample
@@ -117,19 +117,21 @@ namespace MphRecomp.Input
                 rate = SoftTieredSmooth(rate, o.SmoothDps, o.SmoothSeconds, dt);
                 float accel = Accel(rate.Length(), o.AccelSlowScale, o.AccelSlowDps, o.AccelFastDps);
                 Vector2 add = rate * new Vector2(o.Sensitivity, o.PitchSensitivity ?? o.Sensitivity) * (accel * dt);
-                if (float.IsFinite(add.X) && float.IsFinite(add.Y)) _pending += add;
+                if (float.IsFinite(add.X) && float.IsFinite(add.Y)) _paced.Add(add, timeNs);
             }
+        }
+
+        // Degrees turned up to this step's own time, and starts over from there (PacedSum: the sensor delivers in bursts):
+        // nowNs on the sensor's clock (Android: elapsedRealtimeNanos), behindNs how far before now this step's time is.
+        public Vector2 TakePaced(long nowNs, long behindNs)
+        {
+            lock (_lock) return _paced.TakePaced(nowNs, behindNs);
         }
 
         // Degrees turned since the last call (X = turn left +, Y = look up +), and starts over.
         public Vector2 TakeDegrees()
         {
-            lock (_lock)
-            {
-                Vector2 d = _pending;
-                _pending = Vector2.Zero;
-                return d;
-            }
+            lock (_lock) return _paced.TakeAll();
         }
 
         // Forgets pending motion and the smoothing history (e.g. after a pause, so nothing turned during it lands late).
@@ -137,7 +139,7 @@ namespace MphRecomp.Input
         {
             lock (_lock)
             {
-                _pending = Vector2.Zero;
+                _paced.Clear();
                 _smoothCount = 0;
                 _smoothIndex = 0;
             }

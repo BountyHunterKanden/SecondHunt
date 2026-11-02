@@ -50,7 +50,7 @@ namespace MphRecomp.Frontend
         {
             ("MENUS", new[] { "menu\nart" }),
             ("HUD", new[] { "campaign\nradar", "radar\npickups", "hud", "hud\nsway", "shot\nindicator", "helmet\nopacity", "visor\nopacity", "readout\nopacity", "lock readouts\nto visor", "line\nart" }),
-            ("VIEW", new[] { "field of\nview" }),
+            ("VIEW", new[] { "field of\nview", "aim\nview" }),
             ("DISPLAY", new[] { "frame\nrate", "smooth\nframes" }),
         };
         // (owner 2026-10-17: "look and sound should be split. look should be menus/hud and sound should be its own tab")

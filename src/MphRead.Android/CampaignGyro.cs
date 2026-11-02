@@ -86,6 +86,8 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyro
     GyroAim IGyroAimSource.Aim => Aim;
     bool IGyroAimSource.OnlyWhenZoomed => OnlyWhenZoomed;
     bool IGyroAimSource.ZoomScaling => ZoomScaling;
+    // SensorEvent.Timestamp's clock (paced gyro takes, GyroAim.TakePaced; a device on another clock falls back to unpaced)
+    long IGyroAimSource.SensorNowNs => Android.OS.SystemClock.ElapsedRealtimeNanos();
 
     public GyroSensor(Activity activity, string settingsPath, Intent? intent)
     {
@@ -360,7 +362,7 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyro
                 v *= _padScale;
                 Calibrate(v, dt);
             }
-            Aim.AddSample(v, dt);
+            Aim.AddSample(v, dt, e.Timestamp);
             if (_log) LogSample(v, dt);
         }
         else if (type == SensorType.Accelerometer)

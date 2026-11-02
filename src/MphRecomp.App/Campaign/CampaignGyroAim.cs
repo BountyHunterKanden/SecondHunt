@@ -29,7 +29,8 @@ internal sealed partial class CampaignRenderer
         double now = _clock.Elapsed.TotalSeconds;
         bool stale = _gyroLastTake < 0 || now - _gyroLastTake > 0.1;
         _gyroLastTake = now;
-        System.Numerics.Vector2 degrees = g.Aim.TakeDegrees();
+        // this step's own share of the motion (GyroAim.TakePaced): its time is the frame's minus the catch-up still to run
+        System.Numerics.Vector2 degrees = g.Aim.TakePaced(g.SensorNowNs, (long)(Math.Max(_accum, 0) * 1e9));
         if (stale)
         {
             g.Aim.Reset();
@@ -54,8 +55,10 @@ internal sealed partial class CampaignRenderer
 public interface IGyroAimSource
 {
     bool Running { get; }
-    // the degrees turned since the last take (GyroAim.TakeDegrees)
+    // the degrees turned since the last take (GyroAim.TakeDegrees / TakePaced)
     GyroAim Aim { get; }
+    // now on the clock the sensor stamps its samples with (Android: elapsedRealtimeNanos); 0 = none, takes are unpaced
+    long SensorNowNs => 0;
     // "zoom" mode: only while zoomed or in the scan visor
     bool OnlyWhenZoomed { get; }
     bool ZoomScaling { get; }

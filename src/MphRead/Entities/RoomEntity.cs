@@ -878,6 +878,14 @@ namespace MphRead.Entities
             return _roomFrustumItems[_roomFrustumIndex];
         }
 
+        // recomp: Scene.HostDrawCullWiden's frustum and projection while the draw list's visibility is found
+        private FrustumInfo? _hostCullFrustum;
+        private Matrix4 _hostCullPerspective;
+        private readonly bool[] _hostDrawParts = new bool[_roomPartMax]; // the widened frustum's parts, for entity draws
+        private bool _hostDrawPartsOn;
+        private readonly bool[] _hostStepParts = new bool[_roomPartMax]; // the step's own parts while the widened walk runs
+        private readonly bool[] _hostStepAudible = new bool[_roomPartMax];
+
         private void ClearRoomPartState()
         {
             for (int i = 0; i < _roomPartMax; i++)
@@ -914,11 +922,12 @@ namespace MphRead.Entities
             _activeRoomParts[curNodeRef.PartIndex] = true;
             RoomFrustumItem curRoomFrustum = GetRoomFrustumItem();
             _roomFrustumIndex++;
-            curRoomFrustum.Info.Count = _scene.FrustumInfo.Count; // always 5
-            curRoomFrustum.Info.Index = _scene.FrustumInfo.Index; // always 1
+            FrustumInfo frustum = _hostCullFrustum ?? _scene.FrustumInfo; // recomp: HostDrawCullWiden
+            curRoomFrustum.Info.Count = frustum.Count; // always 5
+            curRoomFrustum.Info.Index = frustum.Index; // always 1
             for (int i = 0; i < curRoomFrustum.Info.Planes.Length; i++)
             {
-                curRoomFrustum.Info.Planes[i] = _scene.FrustumInfo.Planes[i];
+                curRoomFrustum.Info.Planes[i] = frustum.Planes[i];
             }
             curRoomFrustum.NodeRef = curNodeRef;
             RoomFrustumItem? link = _roomFrustumLinks[curNodeRef.PartIndex];
@@ -1092,7 +1101,7 @@ namespace MphRead.Entities
         // todo: name/purpose
         private float Func2117F84(Vector3 point, ref Vector3 dest)
         {
-            Matrix4 matrix = _scene.ViewMatrix * _scene.PerspectiveMatrix; // todo: no need to do this multiple times
+            Matrix4 matrix = _scene.ViewMatrix * (_hostCullFrustum != null ? _hostCullPerspective : _scene.PerspectiveMatrix); // todo: no need to do this multiple times
             float v4 = point.X * matrix.Row0.W + point.Y * matrix.Row1.W + point.Z * matrix.Row2.W + matrix.Row3.W;
             if (v4 <= 0)
             {
@@ -1429,12 +1438,16 @@ namespace MphRead.Entities
             return _audibleRoomParts[nodeRef.PartIndex];
         }
 
-        public bool IsNodeRefVisible(NodeRef nodeRef)
+        public bool IsNodeRefVisible(NodeRef nodeRef, bool step = false)
         {
             // workaround for unintended modes
             if (nodeRef.PartIndex == -1)
             {
                 return false;
+            }
+            if (!step && _hostDrawPartsOn && _scene.HostDrawVisibility) // recomp: HostDrawCullWiden
+            {
+                return _hostDrawParts[nodeRef.PartIndex];
             }
             return _activeRoomParts[nodeRef.PartIndex];
         }
@@ -1480,10 +1493,28 @@ namespace MphRead.Entities
                 {
                     ModelInstance inst = _models[0];
                     UpdateTransforms(inst, 0);
+                    // recomp: HostDrawCullWiden: the step's own visibility for the game's logic (enemies, doors, sounds),
+                    // then the widened frustum's walk left in place for drawing, so every picture until the next step (two
+                    // a step on a 120 Hz screen) draws from it; re-found from the step's view after the step's picture,
+                    // the pictures between steps dropped the edge walls again (owner 2026-11-02, Alinos Gateway pop-in)
                     if (_scene.ProcessFrame)
                     {
+                        FrustumInfo? hostFrustum = _scene.HostDrawFrustum(out _hostCullPerspective);
                         ClearRoomPartState();
                         UpdateRoomParts();
+                        _hostDrawPartsOn = hostFrustum != null;
+                        if (hostFrustum != null)
+                        {
+                            Array.Copy(_activeRoomParts, _hostStepParts, _roomPartMax);
+                            Array.Copy(_audibleRoomParts, _hostStepAudible, _roomPartMax);
+                            ClearRoomPartState();
+                            _hostCullFrustum = hostFrustum;
+                            UpdateRoomParts();
+                            _hostCullFrustum = null;
+                            Array.Copy(_activeRoomParts, _hostDrawParts, _roomPartMax);
+                            Array.Copy(_hostStepParts, _activeRoomParts, _roomPartMax);
+                            Array.Copy(_hostStepAudible, _audibleRoomParts, _roomPartMax);
+                        }
                     }
                     if (_partVisInfoHead == null || _scene.ShowAllNodes)
                     {

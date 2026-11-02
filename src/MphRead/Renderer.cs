@@ -223,6 +223,7 @@ namespace MphRead
         {
             _hudItemCount = 0;
             DamageArrowItem = -1;
+            HostReticleItem = -1;
             HudMaskBindingId = -1;
             // (recomp: seatless, only a served match replay's watched seat has a HUD: PlayerServedHost.cs)
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player && PlayerEntity.HostHudShown)
@@ -618,6 +619,15 @@ namespace MphRead
         public bool IsNodeRefVisible(NodeRef nodeRef)
         {
             return Room?.IsNodeRefVisible(nodeRef) ?? false;
+        }
+
+        // recomp: HostDrawCullWiden: true while the entities (not the players) add their draws, so a door, platform or
+        // pickup in a room part only the widened frustum reached draws too. The step's own visibility otherwise.
+        public bool HostDrawVisibility { get; private set; }
+
+        public bool IsNodeRefStepVisible(NodeRef nodeRef)
+        {
+            return Room?.IsNodeRefVisible(nodeRef, step: true) ?? false;
         }
 
         public bool IsNodeRefAudible(NodeRef nodeRef)
@@ -1654,6 +1664,14 @@ namespace MphRead
             Vector3 camPos = HostView is { } view && _cameraMode == CameraMode.Player
                 ? view.Position // recomp: HostView
                 : PlayerEntity.Main.CameraInfo.Position + HostCameraOffset;
+            _frustumCamPos = camPos; // recomp: HostDrawFrustum
+            _frustumFov = fov;
+            FillFrustum(FrustumInfo, camPos, fov);
+        }
+
+        // recomp: UpdateProjection's frustum maths for a given eye and view angle (HostDrawFrustum widens it)
+        private void FillFrustum(FrustumInfo dest, Vector3 camPos, float fov)
+        {
             var camRight = new Vector3(_viewMatrix.Row0.X, _viewMatrix.Row0.Y, -_viewMatrix.Row0.Z);
             var camUp = new Vector3(_viewMatrix.Row1.X, _viewMatrix.Row1.Y, -_viewMatrix.Row1.Z);
             var camFacing = new Vector3(_viewMatrix.Row2.X, _viewMatrix.Row2.Y, -_viewMatrix.Row2.Z);
@@ -1674,22 +1692,52 @@ namespace MphRead
             float cosFovDiv = cosFov / aspect;
             float sinFov = MathF.Sin(fov / 2);
 
-            FrustumInfo.Index = 1;
-            FrustumInfo.Count = 5;
+            dest.Index = 1;
+            dest.Count = 5;
             // near plane
-            FrustumInfo.Planes[0] = SetBoundsIndices(ComputePlane(Vector3.UnitZ).AddW(_nearClip));
+            dest.Planes[0] = SetBoundsIndices(ComputePlane(Vector3.UnitZ).AddW(_nearClip));
             // right plane
             Vector3 temp = new Vector3(cosFovDiv, 0, sinFov).Normalized();
-            FrustumInfo.Planes[1] = SetBoundsIndices(ComputePlane(temp));
+            dest.Planes[1] = SetBoundsIndices(ComputePlane(temp));
             // left plane
             temp = new Vector3(-cosFovDiv, 0, sinFov).Normalized();
-            FrustumInfo.Planes[2] = SetBoundsIndices(ComputePlane(temp));
+            dest.Planes[2] = SetBoundsIndices(ComputePlane(temp));
             // bottom plane
             temp = new Vector3(0, -cosFov, sinFov).Normalized();
-            FrustumInfo.Planes[3] = SetBoundsIndices(ComputePlane(temp));
+            dest.Planes[3] = SetBoundsIndices(ComputePlane(temp));
             // top plane
             temp = new Vector3(0, cosFov, sinFov).Normalized();
-            FrustumInfo.Planes[4] = SetBoundsIndices(ComputePlane(temp));
+            dest.Planes[4] = SetBoundsIndices(ComputePlane(temp));
+        }
+
+        // recomp: a host that draws a view turned from the step's camera between steps (the app's view following the aim,
+        // smooth frames) widens the room's portal culling for the step's draw list only, so walls at the edges of the
+        // turned view don't pop in. Radians added to each side; null or 0 = MphRead's own. Read in RoomEntity.GetDrawInfo,
+        // which then rebuilds the step's own room visibility (game logic reads it), so the sim and replays are unchanged.
+        public static Func<Scene, float>? HostDrawCullWiden { get; set; }
+        private Vector3 _frustumCamPos;
+        private float _frustumFov;
+        private readonly FrustumInfo _hostDrawFrustum = new FrustumInfo();
+
+        // the step's frustum widened by HostDrawCullWiden and the projection to match (the room places portals on screen
+        // with it), or null when it's off
+        public FrustumInfo? HostDrawFrustum(out Matrix4 perspective)
+        {
+            perspective = _perspectiveMatrix;
+            float widen = HostDrawCullWiden?.Invoke(this) ?? 0;
+            if (!(widen > 0)) // (the app runs the scene headless with a draw list: GetDrawItems only runs with one)
+            {
+                return null;
+            }
+            // the side planes sit at atan(aspect * tan(fov / 2)) (FillFrustum): on a wide screen widening the fov by 2 * widen
+            // moves them less than widen, so the fov is also worked out from the sides' own angle
+            float aspect = Size.X / (float)Size.Y;
+            float sides = MathF.Min(MathF.Atan(aspect * MathF.Tan(_frustumFov / 2)) + widen, MathHelper.DegreesToRadians(85));
+            float fov = MathF.Max(_frustumFov + 2 * widen, 2 * MathF.Atan(MathF.Tan(sides) / aspect));
+            fov = MathF.Min(fov, MathHelper.DegreesToRadians(170));
+            FillFrustum(_hostDrawFrustum, _frustumCamPos, fov);
+            perspective = GetPerspectiveMatrix(fov);
+            return _hostDrawFrustum;
         }
 
         public static FrustumPlane SetBoundsIndices(Vector4 plane)
@@ -3228,6 +3276,7 @@ namespace MphRead
                     player.GetDisplayVolumes();
                 }
             }
+            HostDrawVisibility = true; // recomp: HostDrawCullWiden (the room's widened parts for these draws)
             foreach (EntityBase entity in Entities)
             {
                 if (!entity.Initialized || entity.Type == EntityType.Player || entity.Type == EntityType.Room)
@@ -3246,6 +3295,7 @@ namespace MphRead
                 }
             }
 
+            HostDrawVisibility = false;
             _hostItemOwner = null;
             if (ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
             {
@@ -4413,6 +4463,15 @@ namespace MphRead
         private readonly Dictionary<(HostHudSprite, int), HostHudSprite> _damageTurned = new();
         private readonly Dictionary<HostHudSprite, HostHudSprite> _damageWhole = new();
         public int DamageArrowItem { get; private set; } = -1; // the last flash's HUD item this step (tests: -dmgind)
+
+        // recomp (2026-11-02, the app's view following the aim, CampaignLookAhead.cs): the main player's reticle as this
+        // step recorded it -- its HUD item (-1 = none), the point it marks and where it sat (0..1 screen fractions, as
+        // HudObjectInstance.PositionX/Y) -- so a host drawing a turned view can move it to match. Drawing only.
+        public int HostReticleItem { get; set; } = -1;
+        public Vector3 HostReticleAim { get; set; }
+        public Vector2 HostReticleAt { get; set; }
+        // NDC per screen fraction across, for HUD quads (the dialogs' 4:3 box narrows it)
+        public float HostHudNdcPerX => 2 * HudLayoutWidth / Size.X;
 
         public void DrawHudDamageArrow(ModelInstance inst, float angle)
         {

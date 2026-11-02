@@ -980,6 +980,8 @@ namespace MphRead.Entities
             _smallReticleTimer = 0;
         }
 
+        private Vector3 _reticleAimAt; // recomp: Scene.HostReticleAim
+
         private void UpdateReticle()
         {
             if (_smallReticleTimer > 0 && !_sniperReticle)
@@ -994,6 +996,7 @@ namespace MphRead.Entities
                 }
             }
             Vector3 aimAt = HostFirstPersonView ? HostTurnAboutEye(_aimPosition) : _aimPosition; // recomp: a replay's turned view
+            _reticleAimAt = aimAt; // recomp: the host re-places the reticle in a turned view (Scene.HostReticleAim)
             Matrix.ProjectPosition(aimAt, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
             pos = Scene.HostWarpScreenPos(pos); // recomp: Panini view
             _targetCircleInst.PositionX = MathF.Round(pos.X, 5);
@@ -1310,7 +1313,19 @@ namespace MphRead.Entities
                             _scene.DrawHudObject(_weaponIconInst);
                             // recomp: faint until ZOOM STEP's target zoom is ready (PlayerZoomReady.cs)
                             _targetCircleInst.Alpha = Features.ReticleOpacity * ZoomReadyReticleAlpha();
-                            if (!HostHideReticle) DrawReticle(); // recomp: a replay's other views
+                            if (!HostHideReticle) // recomp: a replay's other views
+                            {
+                                // recomp: which HUD item is the reticle, and what it points at, for a host that draws a
+                                // turned view between steps (the app's view following the aim, CampaignLookAhead.cs)
+                                int reticleItem = _scene.HudItemCount;
+                                DrawReticle();
+                                if (_scene.HudItemCount > reticleItem)
+                                {
+                                    _scene.HostReticleItem = reticleItem;
+                                    _scene.HostReticleAim = _reticleAimAt;
+                                    _scene.HostReticleAt = new Vector2(_targetCircleInst.PositionX, _targetCircleInst.PositionY);
+                                }
+                            }
                         }
                         DrawModeHud();
                         DrawDoubleDamageHud();

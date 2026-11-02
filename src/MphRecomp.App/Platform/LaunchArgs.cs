@@ -141,26 +141,30 @@ public sealed class PadState
     }
 
     // stylus aim (the touch controls' TOUCH AIM: STYLUS, owner 2026-10-16): the aim finger's drag in DS touch-screen
-    // pixels, unrounded; the next simulation step turns it into aim (CampaignRenderer.StylusAimDelta)
-    float _stylusAimX, _stylusAimY;
+    // pixels, unrounded; the next simulation step turns it into aim (CampaignRenderer.StylusAimDelta). Each move carries
+    // the touch event's time (StylusClockNs's clock) so a step takes its own 1/60 s of the drag (PacedSum: the screen
+    // reports once a display frame, which doesn't line up with the steps -- a steady drag turned in uneven steps)
+    readonly MphRecomp.Input.PacedSum _stylusAim = new();
+    public Func<long>? StylusClockNs; // the touch events' clock, now (Android: uptime); null = takes are unpaced
 
-    public void StylusAim(float dsX, float dsY)
+    public void StylusAim(float dsX, float dsY, long timeNs = 0)
     {
         lock (_aimGate)
         {
-            _stylusAimX += dsX;
-            _stylusAimY += dsY;
+            _stylusAim.Add(new System.Numerics.Vector2(dsX, dsY), timeNs);
         }
     }
 
     public System.Numerics.Vector2 TakeStylusAim()
     {
-        lock (_aimGate)
-        {
-            var aim = new System.Numerics.Vector2(_stylusAimX, _stylusAimY);
-            _stylusAimX = _stylusAimY = 0;
-            return aim;
-        }
+        lock (_aimGate) return _stylusAim.TakeAll();
+    }
+
+    // this step's share of the drag: up to behindNs before now (the frame's catch-up still to run)
+    public System.Numerics.Vector2 TakeStylusAimPaced(long behindNs)
+    {
+        long now = StylusClockNs?.Invoke() ?? 0;
+        lock (_aimGate) return _stylusAim.TakePaced(now, behindNs);
     }
 
     // everything released (focus lost, a screen change)

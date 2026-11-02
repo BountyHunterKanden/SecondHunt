@@ -119,6 +119,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         : base(context)
     {
         _renderer = renderer;
+        renderer.Pad.StylusClockNs = static () => Android.OS.SystemClock.UptimeMillis() * 1_000_000; // MotionEvent.EventTime's clock
         _campaign = campaign;
         _settingsPath = settingsPath;
         _explicitMode = explicitMode;
@@ -308,6 +309,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
             Down(pointer, e.GetX(index), e.GetY(index));
             break;
         case MotionEventActions.Move:
+            _moveNs = e.EventTime * 1_000_000; // the stylus aim's step pacing (PadState.StylusAim)
             for (int i = 0; i < e.PointerCount; i++)
             {
                 Moved(e.GetPointerId(i), e.GetX(i), e.GetY(i));
@@ -402,6 +404,8 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         return Sq(x - b.X * Width) + Sq(y - b.Y * Height) <= r * r;
     }
 
+    long _moveNs; // the Move event's time (uptime, ns)
+
     void Moved(int pointer, float x, float y)
     {
         foreach (Stick s in new[] { _move, _aim, _wheel, _fire })
@@ -414,7 +418,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
                     _renderer.Pad.StylusMove(dsX, dsY);
                     if (StylusAims && _wheel.Pointer == -1)
                     {
-                        _renderer.Pad.StylusAim(dsX, dsY); // (while the weapon ring is up the view holds, as with the stick)
+                        _renderer.Pad.StylusAim(dsX, dsY, _moveNs); // (while the weapon ring is up the view holds, as with the stick)
                     }
                 }
                 s.X = x;
