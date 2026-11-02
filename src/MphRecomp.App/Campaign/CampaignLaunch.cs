@@ -39,6 +39,8 @@ internal sealed partial class CampaignRenderer
         // hunters keep MP1PowerSuit.
         string? explicitGun = args.Get("gun") is string g && g != "settings" ? g : null;
         string gunId = explicitGun ?? (hunter == Hunter.Samus ? RecompSettings.Load(settingsPath).SamusSuit : "MP1PowerSuit");
+        // a file saved with a non-suit picked (MP4Sylux, a Dark Samus) wears MPH's own Samus
+        if (explicitGun == null && !MphRecomp.Multiplayer.Characters.IsSamusSuit(gunId)) gunId = "original";
         // a public build wears the picked suit's body and morph ball but keeps MPH's own arm cannon (owner 2026-10-07: the
         // Prime arm cannons are held, the suits are public; was no HD gear at all, Beta 1): CampaignRenderer.StartGearLoad
         string? gunDir = gunId is "none" or "original" ? null : Path.Combine(gunsRoot, gunId);

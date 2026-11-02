@@ -27,7 +27,11 @@ namespace MphRecomp.Arenas
     // Register / RegisterImported add every imported arena to MphRead's room table (Metadata.AddHostRoom).
     public static class EchoesArena
     {
-        public sealed record Def(string Key, uint Mrea, string Room, string InGameName, string Archive, int Id);
+        public sealed record Def(string Key, uint Mrea, string Room, string InGameName, string Archive, int Id)
+        {
+            // the disc file its MREA is in (the story rooms aren't in Metroid6.pak)
+            public string Pak { get; init; } = "Metroid6.pak";
+        }
 
         public static readonly IReadOnlyList<Def> All = new[]
         {
@@ -37,6 +41,8 @@ namespace MphRecomp.Arenas
             new Def("M04_Pipeline", 0x845dcf93, "ECHOES PIPELINE", "Pipeline", "echoes_m04", 1004),
             new Def("M05_SpiderComplex", 0xe7095052, "ECHOES SPIDER COMPLEX", "Spider Complex", "echoes_m05", 1005),
             new Def("M06_ShootingGallery", 0xd97a600b, "ECHOES SHOOTING GALLERY", "Shooting Gallery", "echoes_m06", 1006),
+            // a story room as an arena (MiningPlaza.cs): Agon Wastes
+            new Def("M07_MiningPlaza", 0x427fad9a, "ECHOES MINING PLAZA", "Mining Plaza", "echoes_m07", 1007) { Pak = "Metroid3.pak" },
         };
 
         public static Def? Find(string keyOrName) => All.FirstOrDefault(d =>
@@ -56,9 +62,9 @@ namespace MphRecomp.Arenas
             // (then the owner's baked pickup placements, any arena: PlacedPickups, so the ids before them stay; then
             // Shooting Gallery's turret, after them so their ids stay too: EchoesTurret)
             SceneSetup.HostExtraEntities = (scene, room, entities) =>
-                EchoesTurret.Extra(scene, room, PlacedPickups.Extra(scene, room, EchoesMovement.Extra(scene, room, EchoesBreakables.Extra(scene, room,
-                    EchoesCrates.Extra(scene, room, EchoesAmmo.Extra(scene, room, entities))))));
-            MphRead.Formats.CollisionDetection.HostEntityCollision = e => e is EchoesBreakableEntity || e is EchoesTurretEntity || e is EchoesTurretBaseEntity;
+                MiningPlazaCrates.Extra(scene, room, MiningPlazaGate.Extra(scene, room, MiningPlazaPillars.Extra(scene, room, EchoesTurret.Extra(scene, room, PlacedPickups.Extra(scene, room, EchoesMovement.Extra(scene, room,
+                    EchoesBreakables.Extra(scene, room, EchoesCrates.Extra(scene, room, EchoesAmmo.Extra(scene, room, entities)))))))));
+            MphRead.Formats.CollisionDetection.HostEntityCollision = e => e is EchoesBreakableEntity || e is EchoesTurretEntity || e is EchoesTurretBaseEntity || e is MiningPlazaPillarEntity || e is MiningPlazaGateEntity || e is MiningPlazaCrateEntity;
             MphRead.Entities.BeamProjectileEntity.HostHitPush = EchoesTurret.Knock;   // (only the turret's shots)
             // the view before a match's first spawn (these rooms have no intro sequence): the arena picture's lens
             MphRead.Entities.PlayerEntity.HostPreSpawnView = PreSpawnView;
@@ -122,6 +128,14 @@ namespace MphRecomp.Arenas
             // Shooting Gallery's manned turret and bomb slot (EchoesTurret); absent in arenas without one
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             public TurretSpot? Turret { get; set; }
+            // Mining Plaza's collapsing pillars (MiningPlazaPillars); absent elsewhere
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public List<MiningPlazaPillars.PillarSpot>? Pillars { get; set; }
+            // Mining Plaza's sand crates (MiningPlazaCrates: break, drop, regrow); absent elsewhere
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public List<MiningPlazaCrates.CrateSpot>? SandCrates { get; set; }
+            // Mining Plaza's Luminoth gate (MiningPlazaGate: opens mid-match); absent elsewhere
+            public MiningPlazaGate.GateSpot? Gate { get; set; }
             public List<string> Notes { get; set; } = new();
         }
 
@@ -132,6 +146,18 @@ namespace MphRecomp.Arenas
             public int Pass { get; set; }
             public float[]? Ambient { get; set; }
             public List<float[]>? Lights { get; set; }
+            // a spinning actor (Mining Plaza's lore hologram and translator rings, turned by their ActorRotate): its Echoes
+            // transform, the own axis turned (3 X, 4 Y, 5 Z), degrees a loop and the loop's seconds; absent = still
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public float[]? SpinXf { get; set; }
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+            public int SpinAxis { get; set; }
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+            public float SpinDegrees { get; set; }
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+            public float SpinPeriod { get; set; }
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+            public float Scale { get; set; }
         }
 
         public sealed class BreakSpot
@@ -289,7 +315,7 @@ namespace MphRecomp.Arenas
         // EchoesTurret.ImportHud; null: none)
         public static Info Import(Pak metroid6, Def def, Layout files, float scale, IReadOnlyList<ArenaCannons.Cannon>? tuned,
             Action<string>? log = null, Action<float, string>? progress = null, string? fsRoot = null, CancellationToken ct = default,
-            IReadOnlyList<ItemType>? crates = null, Pak? audio = null, Pak? hud = null)
+            IReadOnlyList<ItemType>? crates = null, Pak? audio = null, Pak? hud = null, byte[]? jingle = null)
         {
             var info = new Info { Key = def.Key, Scale = scale };
             progress?.Invoke(0, $"{def.InGameName}: collision and objects");
@@ -313,11 +339,31 @@ namespace MphRecomp.Arenas
                 ed.Points.Add(a); ed.Points.Add(b); ed.Points.Add(c);
                 ed.Terrain = TerrainOf(Mrea.Collision.SurfaceOf(flags));
                 if ((flags & (1UL << (int)Mrea.Surface.ShootThru)) != 0) ed.Beams = false;
+                // not Echoes floor material (flag bit 31, on ~all flat faces and no walls): too steep to stand on below
+                // Prime's 0.85 floor slope (PlayerCollision, Echoes arenas only)
+                if ((flags & (1UL << 31)) == 0) ed.Flags |= CollisionFlags.Bit12;
                 editors.Add(ed);
                 tris.Add((a, b, c));
             }
+            bool plaza = def.Key == MiningPlaza.Key;
+            int areaTris = tris.Count;
+            if (plaza)
+            {
+                // Mining Plaza's sealed exits: solid as their own actors are (MiningPlaza.Seals)
+                MiningPlaza.Seals(metroid6, scripts, Map, (a, b, c, surface) =>
+                {
+                    Vector3 n = Vector3.Cross(b - a, c - a).Normalized();
+                    var ed = new CollisionDataEditor { Plane = new Vector4(n, Vector3.Dot(n, a)), LayerMask = (ushort)(4 | PrimaryAxis(n)) };
+                    ed.Points.Add(a); ed.Points.Add(b); ed.Points.Add(c);
+                    ed.Terrain = TerrainOf(surface);
+                    editors.Add(ed);
+                    tris.Add((a, b, c));
+                }, info.Notes);
+            }
             info.CollisionPolygons = editors.Count;
             var ray = new ArenaRaycaster(tris);
+            // Mining Plaza's actors are lit by the area's own shape, not shadowed by their own collision
+            ArenaRaycaster lightRay = plaza ? new ArenaRaycaster(tris.GetRange(0, areaTris)) : ray;
             info.Min = new[] { ray.Min.X, ray.Min.Y, ray.Min.Z };
             info.Max = new[] { ray.Max.X, ray.Max.Y, ray.Max.Z };
 
@@ -339,7 +385,18 @@ namespace MphRecomp.Arenas
             bool Fresh(Vector3 p) { if (used.Any(u => (u - p).LengthSquared < 0.25f)) return false; used.Add(p); return true; }
             Vector3 OnFloor(Vector3 p) => ray.FloorBelow(p + Vector3.UnitY * 0.3f, 3f) ?? p;
             short id = 0;
-            foreach (Mrea.ScriptObject o in scripts.Where(o => o.Type == "SPWN" && o.Active))
+            if (plaza)
+            {
+                // stand-ins until the owner's own spawns (the dev placer's spawn mode, PlacedPickups); no room pickups
+                foreach ((Vector3 p, Vector3 facing) in MiningPlaza.StandInSpawns(scripts, Map, ray))
+                {
+                    if (!Fresh(p)) continue;
+                    ents.Add(new PlayerSpawnEntityEditor { Id = id++, LayerMask = 0xFFFF, NodeName = ArenaModelWriter.RoomNode,
+                        Position = p, Up = Vector3.UnitY, Facing = facing, Availability = 0, Active = true, TeamIndex = -1 });
+                    info.Spawns++;
+                }
+            }
+            foreach (Mrea.ScriptObject o in scripts.Where(o => !plaza && o.Type == "SPWN" && o.Active))
             {
                 float[] x = o.Transform;
                 Vector3 p = OnFloor(Map(x[0], x[1], x[2]));
@@ -350,7 +407,7 @@ namespace MphRecomp.Arenas
                     Position = p, Up = Vector3.UnitY, Facing = facing, Availability = 0, Active = true, TeamIndex = -1 });
                 info.Spawns++;
             }
-            foreach (Mrea.ScriptObject o in scripts.Where(o => o.Active && o.Type == "PCKP"))
+            foreach (Mrea.ScriptObject o in scripts.Where(o => !plaza && o.Active && o.Type == "PCKP"))
             {
                 ushort interval = 450;                               // Echoes pickups respawn in 15 s
                 uint what = o.Root.Find(PickupItemId)?.U32 ?? uint.MaxValue;
@@ -509,7 +566,14 @@ namespace MphRecomp.Arenas
                         + $"; {fluids.Count(f => f.Look == Water)} surface pieces drawn");
                 }
                 breakLights ??= area.ReadLights()[0];
-                AddStatics(area, scripts, metroid6, Map, tris, ray, breakLights, info, placed);
+                AddStatics(area, scripts, metroid6, Map, tris, lightRay, breakLights, info, placed);
+                if (plaza) MiningPlaza.Looks(metroid6, scripts, Map, lightRay, breakLights, info, placed);
+                if (plaza)
+                {
+                    MiningPlaza.Pillars(metroid6, scripts, Map, lightRay, breakLights, info, placed);
+                    MiningPlaza.Crates(metroid6, scripts, area.ReadScripts(includeGenerated: true), Map, lightRay, breakLights, info, placed);
+                }
+                if (plaza) MiningPlaza.Gate(metroid6, scripts, Map, lightRay, breakLights, info, placed);
                 // the turret, its hologram and the slot's ring (EchoesTurret.ImportLook): placed passes after the statics'
                 turretLook = EchoesTurret.ImportLook(metroid6, scripts, Map, scale, placed, p => EchoesCrates.Lighting(breakLights, p, Map, ray), info.Notes);
             }
@@ -532,7 +596,32 @@ namespace MphRecomp.Arenas
             // the water's floors are left with the Gravity Boost (ArenaNav version 3)
             List<(Vector3, Vector3)> navWater = (info.Fluids ?? new()).Where(f => f.Kind == "water")
                 .Select(f => (new Vector3(f.Min[0], f.Min[1], f.Min[2]), new Vector3(f.Max[0], f.Max[1], f.Max[2]))).ToList();
-            ArenaNav.Graph Nav() => ArenaNav.Build(navRay, anchors, info.KillHeight, cannons.Where(c => !c.Dropped).Select(c => (c.PadV, c.TargetV)).ToList(), navWater);
+            // Mining Plaza's pillars change the room mid-match: a graph per pillar state, written as node data sets
+            List<ArenaRaycaster>? stateRays = null;
+            // (and its Luminoth gate: the bit after the pillars', set once it's open)
+            if (info.Pillars is { Count: > 0 and <= 3 } pillars)
+            {
+                List<(Vector3 A, Vector3 B, Vector3 C)> baseTris = tris.Concat(info.Breakables?.Where(b => b.Kind == "grate").SelectMany(GrateTris) ?? Enumerable.Empty<(Vector3, Vector3, Vector3)>()).ToList();
+                MiningPlazaGate.GateSpot? gate = info.Gate is { Tris.Length: > 0 } g ? g : null;
+                int bits = pillars.Count + (gate != null ? 1 : 0);
+                stateRays = Enumerable.Range(0, 1 << bits)
+                    .Select(st => new ArenaRaycaster(baseTris.Concat(MiningPlazaPillars.StateTris(pillars, st & ((1 << pillars.Count) - 1)))
+                        .Concat(gate != null ? MiningPlazaGate.StateTris(gate, (st >> pillars.Count & 1) != 0) : Enumerable.Empty<(Vector3, Vector3, Vector3)>()).ToList())).ToList();
+            }
+            ArenaNav.Graph Nav()
+            {
+                var jumps = cannons.Where(c => !c.Dropped).Select(c => (c.PadV, c.TargetV)).ToList();
+                int heavyFrom = jumps.Count;   // the placed pads, which an octolith carrier's routes avoid
+                // the shipped placement file's jump pads and spawns (Mining Plaza: bots ride the placed pads)
+                if (PlacedPickups.Files.TryGetValue(def.Id, out PickupPlacement.FileData? placed))
+                {
+                    static Vector3 P(float[] v) => new Vector3(v[0], v[1], v[2]);
+                    jumps.AddRange(placed.JumpPads.Where(j => j.Pos is { Length: 3 } && j.Target is { Length: 3 }).Select(j => (P(j.Pos), P(j.Target))));
+                    anchors.AddRange(placed.Spawns.Where(sp => sp.Pos is { Length: 3 }).Select(sp => P(sp.Pos)));
+                }
+                return stateRays != null ? ArenaNav.BuildSets(stateRays, anchors, info.KillHeight, jumps, navWater, heavyFrom)
+                    : ArenaNav.Build(navRay, anchors, info.KillHeight, jumps, navWater);
+            }
             ArenaNav.Graph nav = Nav();
             info.NavNodes = nav.Nodes.Count;
             info.NavLinks = nav.Links.Count > 0 ? nav.Links : null;
@@ -578,6 +667,9 @@ namespace MphRecomp.Arenas
                 if (fxLook != null) File.WriteAllText(turretFile, JsonSerializer.Serialize(fxLook));
                 else if (File.Exists(turretFile)) File.Delete(turretFile);
                 if (fxLook == null && Directory.Exists(Path.Combine(files.HdDir, EchoesTurret.FxDir))) Directory.Delete(Path.Combine(files.HdDir, EchoesTurret.FxDir), true);
+                // Mining Plaza's pillars' effects and sounds
+                MiningPlazaPillars.ImportLook(metroid6, audio, files.HdDir, info.Notes, info.Pillars is { Count: > 0 } || info.Gate != null || info.SandCrates is { Count: > 0 }, jingle,
+                    moreFx: MiningPlaza.CrateFx(info));
                 // the multiplayer menu's ARENA picture (Vanilla multiplayer menu M5): rendered from the HD look just
                 // written, aimed at the spawns and pickups (thumb.png beside it)
                 progress?.Invoke(0.75f, $"{def.InGameName}: the arena's picture");
@@ -675,7 +767,7 @@ namespace MphRecomp.Arenas
             var checkedNotes = new List<string>();
             foreach (Mrea.ScriptObject o in scripts.Where(o => o.Active && o.Layer == 0 && o.Type is "ACTR" or "PLAT"))
             {
-                if (NotStatic.Any(n => o.Name.Contains(n)) || BreakDefs.Any(b => b.Type == o.Type && b.Name == o.Name)) continue;
+                if (NotStatic.Any(n => o.Name.Contains(n)) || BreakDefs.Any(b => b.Type == o.Type && b.Name == o.Name) || MiningPlaza.OwnsObject(o.Id)) continue;
                 if (o.Root.Find(ActorModelId) is not { Data.Length: >= 4 } mp) continue;
                 uint id = mp.U32;
                 if (id == uint.MaxValue || !pak.Contains(id)) continue;
@@ -968,6 +1060,9 @@ namespace MphRecomp.Arenas
                 EchoesCrates.SetRoom(d.Id, info);
                 EchoesBreakables.SetRoom(d.Id, info);
                 EchoesTurret.SetRoom(d.Id, info);
+                MiningPlazaPillars.SetRoom(d.Id, info);
+                MiningPlazaCrates.SetRoom(d.Id, info);
+                MiningPlazaGate.SetRoom(d.Id, info);
                 EchoesStatics.SetRoom(d.Id, info);
                 EchoesMovement.SetRoom(d.Id, info);
                 ArenaNav.SetRoom(d.Id, info);
@@ -1054,6 +1149,9 @@ namespace MphRecomp.Arenas
                 EchoesCrates.SetRoom(d.Id, null);
                 EchoesBreakables.SetRoom(d.Id, null);
                 EchoesTurret.SetRoom(d.Id, null);
+                MiningPlazaPillars.SetRoom(d.Id, null);
+                MiningPlazaCrates.SetRoom(d.Id, null);
+                MiningPlazaGate.SetRoom(d.Id, null);
                 EchoesStatics.SetRoom(d.Id, null);
                 EchoesMovement.SetRoom(d.Id, null);
                 ArenaNav.SetRoom(d.Id, null);

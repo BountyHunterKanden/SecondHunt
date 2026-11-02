@@ -108,6 +108,9 @@ namespace MphRecomp.Arenas
         // 3 (2026-10-10, T7, owner: "Do bots know they have double jump and gravity boost in echoes maps"): links a bot
         // takes with Echoes' double jump (a ledge up to DoubleRise, a gap up to GapMax across) or the Gravity Boost (up
         // out of water), listed by kind in arena.json NavLinks for the bots' link following (PlayerAiUnstick)
+        // (2026-10-31, still 3: a jump up a ledge may leave from a step back when the ledge overhangs its foot
+        // (TakeOff), pockets retried with long walks along walkways narrower than the grid; owner "bots are never going
+        // above the first floor" in Mining Plaza)
         public const int Version = 3;
         public const float Spacing = 4.5f;     // MPH graphs: edges 3-16 units, median 4-6
         const float Height = 1.6f;             // a hunter, -0.5..1.1 around its position
@@ -117,10 +120,15 @@ namespace MphRecomp.Arenas
         const float JumpRise = 1.9f, JumpCost = 3f;
         // measured (Tools -echoesarena jumpreach, every hunter alike): a jump rises 2.54, Echoes' double jump (second press
         // at the top) 4.75; running (0.24 a step) a double jump carries ~10 across before it is back down to its take-off
-        // height (9.7 landing 2 higher); the Gravity Boost held 60 steps lifts 5.6 out of Pipeline's cave (9.5 held long)
-        const float DoubleRise = 3.9f, GapMax = 4.5f, GapRise = 1.5f, GapDrop = 3f, BoostRise = 7f, MoveCost = 6f;
+        // height (9.7 landing 2 higher); the Gravity Boost held 60 steps lifts 5.6 out of Pipeline's cave (9.5 held long).
+        // DoubleRise 3.9 -> 3.6 (2026-10-31, owner: a Noxus bot "stuck trying to jump up a ledge" in Mining Plaza):
+        // a bot jumps at the ledge's foot, against the wall, with no run-up; -botprobe linkforce there: every double link up
+        // to 3.6 made it, all of 3.7-3.9 bounced off the lip
+        const float DoubleRise = 3.6f, GapMax = 4.5f, GapRise = 1.5f, GapDrop = 3f, BoostRise = 7f, MoveCost = 6f;
         // a pad's trigger (ArenaCannons.PadRadius 1.5) plus a hunter's body
         const float PadKeepOut = 2f;
+        // how far back from the foot of a ledge a jump up it may leave (TakeOff)
+        const float TakeOffBack = 1.2f;
 
         // how a link is taken (arena.json NavLinks; walking links aren't listed)
         public const int LinkJump = 1, LinkDouble = 2, LinkGap = 3, LinkBoost = 4;
@@ -153,6 +161,12 @@ namespace MphRecomp.Arenas
             // the links taken with a jump, double jump, gap jump or boost: [from, to, kind] (node ids of the written file)
             public List<int[]> Links = new();
             internal Dictionary<(int, int), int> Kinds = new();
+            // per room state, over the same Nodes (BuildSets): the next hops of each, written as MPH's node data sets
+            // (null: one set, Next)
+            public List<int[,]>? Sets;
+            // the top set bit is "carrying an octolith" (the second half of Sets avoids the placed pads), not a room state:
+            // written flagged in the set index list (0x8000), PlayerAi sets it per bot
+            public bool Carrier;
         }
 
         // the bots' link kinds per room (arena.json NavLinks): (from, to) -> kind; null = none listed
@@ -164,10 +178,12 @@ namespace MphRecomp.Arenas
         }
 
         // jumps: one-way flights (jump pads: pad -> landing); the pad's node leaves only by its flight. water: boxes (min,
-        // max) whose floors a bot leaves with the Gravity Boost (Pipeline's flooded cave)
+        // max) whose floors a bot leaves with the Gravity Boost (Pipeline's flooded cave). heavyFrom: jumps from this index on
+        // are the map editor's placed pads, which an octolith carrier is too heavy to ride (JumpPadEntity.HostHeavyCarry);
+        // carrier: the graph for a bot carrying one, which never steps on those pads nor crosses them (owner 2026-11-01)
         public static Graph Build(ArenaRaycaster ray, IReadOnlyList<Vector3> anchors, float killHeight,
             IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null,
-            Vector2? gridOrigin = null, bool echoesMoves = true, float padReach = 0)
+            Vector2? gridOrigin = null, bool echoesMoves = true, float padReach = 0, int heavyFrom = int.MaxValue, bool carrier = false)
         {
             var g = new Graph();
             bool Wet(Vector3 p) => water?.Any(w => p.X >= w.Min.X && p.X <= w.Max.X && p.Z >= w.Min.Z && p.Z <= w.Max.Z
@@ -200,12 +216,15 @@ namespace MphRecomp.Arenas
                     }
                 }
             }
+            // pads: the ones ridden; blocked: the carrier's placed pads, kept as nodes (same ids either way) but never walked onto
             var pads = new List<(int From, int To)>();
+            var blocked = new List<(int From, int To)>();
+            int jumpIndex = 0;
             foreach ((Vector3 from, Vector3 to) in jumps ?? Array.Empty<(Vector3, Vector3)>())
             {
                 g.Nodes.Add(from);
                 g.Nodes.Add(to);
-                pads.Add((g.Nodes.Count - 2, g.Nodes.Count - 1));
+                (carrier && jumpIndex++ >= heavyFrom ? blocked : pads).Add((g.Nodes.Count - 2, g.Nodes.Count - 1));
             }
             // 2. walk links to nearby nodes (one-way where it's a drop), and jumps up a ledge
             int n = g.Nodes.Count;
@@ -269,7 +288,9 @@ namespace MphRecomp.Arenas
                 return OnPad(Vector3.Lerp(a, b, t), pad);
             }
             // i -> j would walk over a pad that isn't j (pads themselves leave only by their flight)
-            bool PadInWay(int i, int j) => pads.Any(q => q.From != j && (q.From == i || OnPad(g.Nodes[i], q.From) || Crosses(g.Nodes[i], g.Nodes[j], q.From)));
+            // (a carrier's blocked pad isn't a way even to itself; off one it was standing on, it walks)
+            bool PadInWay(int i, int j) => pads.Any(q => q.From != j && (q.From == i || OnPad(g.Nodes[i], q.From) || Crosses(g.Nodes[i], g.Nodes[j], q.From)))
+                || blocked.Any(q => q.From == j || q.From != i && (OnPad(g.Nodes[i], q.From) || Crosses(g.Nodes[i], g.Nodes[j], q.From)));
             for (int i = 0; i < n; i++)
             {
                 if (pads.Any(q => q.From == i)) continue;
@@ -309,19 +330,27 @@ namespace MphRecomp.Arenas
                     {
                         if (i == j || keep[i] && keep[j] || pads.Any(q => q.From == i) || PadInWay(i, j)) continue;
                         Vector3 a = g.Nodes[i], b = g.Nodes[j];
-                        if ((a.Xz - b.Xz).LengthSquared <= reach * reach || (a.Xz - b.Xz).LengthSquared > far * far || a.Y - b.Y < StepUp) continue;
-                        if (Walkable(ray, a, b, LongDrop) == false) { g.Edges[i].Add((j, (b - a).Length)); added = true; }
+                        if ((a.Xz - b.Xz).LengthSquared <= reach * reach || (a.Xz - b.Xz).LengthSquared > far * far) continue;
+                        if (a.Y - b.Y >= StepUp && Walkable(ray, a, b, LongDrop) == false) { g.Edges[i].Add((j, (b - a).Length)); added = true; }
+                        // a walkway narrower than the grid, which no row of nodes lands on (Mining Plaza's east bridge,
+                        // ~3 wide on a slant between rows 4.5 apart): walked end to end
+                        else if (MathF.Abs(a.Y - b.Y) < StepUp && Walkable(ray, a, b) == false) { g.Edges[i].Add((j, (b - a).Length)); added = true; }
                     }
                 }
                 if (added) keep = StrongComponentOf(g, starts);
             }
             Compact(g, keep);
             // 4. next hops: shortest paths to each destination over the reversed graph
-            n = g.Nodes.Count;
-            g.Next = new int[n, n];
+            g.Next = Hops(g.Nodes.Count, g.Edges);
+            return g;
+        }
+
+        static int[,] Hops(int n, List<List<(int To, float Cost)>> edges)
+        {
+            var next = new int[n, n];
             var rev = new List<List<(int, float)>>();
             for (int i = 0; i < n; i++) rev.Add(new List<(int, float)>());
-            for (int i = 0; i < n; i++) foreach ((int j, float c) in g.Edges[i]) rev[j].Add((i, c));
+            for (int i = 0; i < n; i++) foreach ((int j, float c) in edges[i]) rev[j].Add((i, c));
             var dist = new float[n];
             for (int dst = 0; dst < n; dst++)
             {
@@ -343,14 +372,87 @@ namespace MphRecomp.Arenas
                     if (src != dst && dist[src] < float.MaxValue)
                     {
                         float best = float.MaxValue;
-                        foreach ((int v, float c) in g.Edges[src])
+                        foreach ((int v, float c) in edges[src])
                         {
                             if (dist[v] < float.MaxValue && c + dist[v] < best) { best = c + dist[v]; hop = v; }
                         }
                     }
-                    g.Next[src, dst] = hop;
+                    next[src, dst] = hop;
                 }
             }
+            return next;
+        }
+
+        // a room whose collision changes during a match (Mining Plaza's pillars: 2^k states, bit i = pillar i down): one
+        // graph per state, on one list of nodes (each state's kept nodes, merged), so MPH's node data sets switch the bots'
+        // routes when the room changes (PlayerAi.UpdateNodeDataSetSelection, Room.NodeData.SetSelector). A node a state
+        // lacks (a floor the rubble covers, the top of the fallen column while it stands) routes to the nearest one it has.
+        public static Graph BuildSets(IReadOnlyList<ArenaRaycaster> rays, IReadOnlyList<Vector3> anchors, float killHeight,
+            IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null,
+            int heavyFrom = int.MaxValue)
+        {
+            // placed pads (heavyFrom): the states again as an octolith carrier walks them, one more set bit on top (Carrier)
+            bool carrier = jumps != null && heavyFrom < jumps.Count;
+            Graph[] states = rays.Select(r => Build(r, anchors, killHeight, jumps, water))
+                .Concat(carrier ? rays.Select(r => Build(r, anchors, killHeight, jumps, water, heavyFrom: heavyFrom, carrier: true)) : Enumerable.Empty<Graph>())
+                .ToArray();
+            var g = new Graph { Carrier = carrier };
+            var maps = new List<int[]>();
+            foreach (Graph st in states)
+            {
+                var map = new int[st.Nodes.Count];
+                for (int k = 0; k < st.Nodes.Count; k++)
+                {
+                    int u = g.Nodes.FindIndex(p => (p - st.Nodes[k]).LengthSquared < 0.01f);
+                    if (u < 0) { u = g.Nodes.Count; g.Nodes.Add(st.Nodes[k]); }
+                    map[k] = u;
+                }
+                maps.Add(map);
+            }
+            int n = g.Nodes.Count;
+            g.Sets = new List<int[,]>();
+            for (int s = 0; s < states.Length; s++)
+            {
+                Graph st = states[s];
+                int[] map = maps[s];
+                var has = new bool[n];
+                foreach (int u in map) has[u] = true;
+                var edges = new List<List<(int To, float Cost)>>();
+                for (int u = 0; u < n; u++) edges.Add(new List<(int, float)>());
+                for (int k = 0; k < st.Nodes.Count; k++)
+                {
+                    foreach ((int to, float c) in st.Edges[k]) edges[map[k]].Add((map[to], c));
+                }
+                // (Links are in the compacted ids; Kinds still has the grid's)
+                foreach (int[] l in st.Links) g.Kinds.TryAdd((map[l[0]], map[l[1]]), l[2]);
+                int[,] next = Hops(n, edges);
+                // the nodes this state lacks: leave toward the nearest node it has; routes to them go to that node
+                var sub = new int[n];
+                for (int u = 0; u < n; u++)
+                {
+                    sub[u] = u;
+                    if (has[u]) continue;
+                    float best = float.MaxValue;
+                    for (int v = 0; v < n; v++)
+                    {
+                        float d = (g.Nodes[v] - g.Nodes[u]).LengthSquared;
+                        if (has[v] && d < best) { best = d; sub[u] = v; }
+                    }
+                }
+                for (int u = 0; u < n; u++)
+                {
+                    for (int dst = 0; dst < n; dst++)
+                    {
+                        if (u == dst) next[u, dst] = u;
+                        else if (!has[u]) next[u, dst] = sub[u];
+                        else if (!has[dst]) next[u, dst] = sub[dst] == u ? u : next[u, sub[dst]];
+                    }
+                }
+                g.Sets.Add(next);
+            }
+            g.Next = g.Sets[0];
+            g.Edges = Enumerable.Range(0, n).Select(_ => new List<(int, float)>()).ToList();
+            g.Links = g.Kinds.Select(kv => new[] { kv.Key.Item1, kv.Key.Item2, kv.Value }).ToList();
             return g;
         }
 
@@ -362,6 +464,7 @@ namespace MphRecomp.Arenas
         {
             int steps = Math.Max(1, (int)MathF.Ceiling((b.Xz - a.Xz).Length / Sample));
             Vector3 prev = a;
+            var trail = new List<Vector3> { a };
             bool jumped = false, lip = false;
             Vector3 chest = Vector3.UnitY * 0.8f;
             for (int s = 1; s <= steps; s++)
@@ -417,8 +520,7 @@ namespace MphRecomp.Arenas
                     if (ray.Cast(prev + chest, f + chest) != null) return null;
                 }
                 else if (!jumped && !lip && !gap && FloorAt(ray, p, prev.Y + rise) is { Lip: false } up && up.F.Y - prev.Y > StepUp
-                    && ray.Cast(prev + chest, new Vector3(prev.X, up.F.Y + Height + 0.3f, prev.Z)) == null   // room to jump
-                    && ray.Cast(new Vector3(prev.X, up.F.Y, prev.Z) + chest, up.F + chest) == null)           // and over
+                    && TakeOff(ray, trail, p, up.F, rise))
                 {
                     jumped = true;
                     f = up.F;
@@ -428,8 +530,30 @@ namespace MphRecomp.Arenas
                     return null;
                 }
                 prev = f;
+                trail.Add(f);
             }
             return MathF.Abs(prev.Y - b.Y) < 0.3f ? jumped : null;
+        }
+
+        // where a jump up onto `top` (first floor found at p) leaves from: the last floor walked, or one a little further
+        // back when that is tucked under the ledge (Mining Plaza's slabs lean out and overhang their foot, so no jump from
+        // the wall's foot had room and the whole upper half of the room was cut off, owner 10-31 "bots are never going
+        // above the first floor"); within the reach of the bot's wall check (PlayerAiUnstick.BotWallAhead, 1.2)
+        static bool TakeOff(ArenaRaycaster ray, List<Vector3> trail, Vector3 p, Vector3 top, float rise)
+        {
+            Vector3 chest = Vector3.UnitY * 0.8f;
+            for (int k = trail.Count - 1; k >= 0; k--)
+            {
+                Vector3 t = trail[k];
+                if ((t.Xz - p.Xz).Length > TakeOffBack + Sample) break;
+                if (top.Y - t.Y > rise) continue;
+                if (ray.Cast(t + chest, new Vector3(t.X, top.Y + Height + 0.3f, t.Z)) == null     // room to jump
+                    && ray.Cast(new Vector3(t.X, top.Y, t.Z) + chest, top + chest) == null)      // and over
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // the walkable floor under p from at most `top` down (a step + MaxDrop); Lip = no floor there but a steep strip
@@ -541,39 +665,53 @@ namespace MphRecomp.Arenas
         public static byte[] Write(Graph g, float maxDistance = 1.2f)
         {
             int n = g.Nodes.Count;
+            // one set (every arena but a changing room) keeps the original layout byte for byte; S = 2^bits sets add
+            // the set index list (the bits PlayerAi reads from Room.NodeData.SetSelector) and a node table per set
+            List<int[,]> sets = g.Sets ?? new List<int[,]> { g.Next };
+            int count = sets.Count, bits = 0;
+            while ((1 << bits) < count) bits++;
+            System.Diagnostics.Debug.Assert(1 << bits == count);
             using var ms = new MemoryStream();
             using var w = new BinaryWriter(ms);
-            const int header = 14, indexOffset = 14, dataOffset = 16, set2 = 24, nodes = 32;
-            w.Write((ushort)6); w.Write((ushort)1); w.Write((uint)indexOffset); w.Write((uint)dataOffset); w.Write((ushort)0);
-            w.Write((ushort)0);                                    // the (empty) set index list, 2 bytes before the data
-            w.Write((uint)set2); w.Write((ushort)1); w.Write((ushort)0x5C);
-            w.Write((uint)nodes); w.Write((ushort)n); w.Write((ushort)0x5C);
-            System.Diagnostics.Debug.Assert(ms.Position == nodes && header == indexOffset);
-            // the route runs, after the node table
+            const int indexOffset = 14;
+            int dataOffset = indexOffset + 2 * Math.Max(1, bits);
+            int set2 = dataOffset + 8 * count, nodes = set2 + 8 * count;
+            w.Write((ushort)6); w.Write((ushort)count); w.Write((uint)indexOffset); w.Write((uint)dataOffset); w.Write((ushort)bits);
+            if (bits == 0) w.Write((ushort)0);                     // the (empty) set index list, 2 bytes before the data
+            for (int b = 0; b < bits; b++) w.Write((ushort)(g.Carrier && b == bits - 1 ? 0x8000 | b : b));
+            for (int s = 0; s < count; s++) { w.Write((uint)(set2 + 8 * s)); w.Write((ushort)1); w.Write((ushort)0x5C); }
+            for (int s = 0; s < count; s++) { w.Write((uint)(nodes + 36 * n * s)); w.Write((ushort)n); w.Write((ushort)0x5C); }
+            System.Diagnostics.Debug.Assert(ms.Position == nodes);
+            // the route runs, after the node tables
             var runs = new List<List<(ushort Run, ushort Hop)>>();
-            for (int src = 0; src < n; src++)
+            foreach (int[,] next in sets)
             {
-                var list = new List<(ushort, ushort)>();
-                int dst = 0;
-                while (dst < n)
+                for (int src = 0; src < n; src++)
                 {
-                    int hop = g.Next[src, dst], run = 1;
-                    while (dst + run < n && g.Next[src, dst + run] == hop) run++;
-                    list.Add(((ushort)run, (ushort)hop));
-                    dst += run;
+                    var list = new List<(ushort, ushort)>();
+                    int dst = 0;
+                    while (dst < n)
+                    {
+                        int hop = next[src, dst], run = 1;
+                        while (dst + run < n && next[src, dst + run] == hop) run++;
+                        list.Add(((ushort)run, (ushort)hop));
+                        dst += run;
+                    }
+                    runs.Add(list);
                 }
-                runs.Add(list);
             }
-            int values = nodes + 36 * n;
-            int offset = values;
-            for (int i = 0; i < n; i++)
+            int offset = nodes + 36 * n * count;
+            for (int s = 0; s < count; s++)
             {
-                Vector3 p = g.Nodes[i];
-                w.Write((ushort)0); w.Write((ushort)i); w.Write((ushort)0); w.Write((ushort)0);   // navigation, id, field4, no neighbours
-                w.Write(Fx(p.X)); w.Write(Fx(p.Y)); w.Write(Fx(p.Z));
-                w.Write(Fx(maxDistance));
-                w.Write((uint)offset); w.Write((uint)offset); w.Write(0u);
-                offset += 4 * runs[i].Count;
+                for (int i = 0; i < n; i++)
+                {
+                    Vector3 p = g.Nodes[i];
+                    w.Write((ushort)0); w.Write((ushort)i); w.Write((ushort)0); w.Write((ushort)0);   // navigation, id, field4, no neighbours
+                    w.Write(Fx(p.X)); w.Write(Fx(p.Y)); w.Write(Fx(p.Z));
+                    w.Write(Fx(maxDistance));
+                    w.Write((uint)offset); w.Write((uint)offset); w.Write(0u);
+                    offset += 4 * runs[s * n + i].Count;
+                }
             }
             foreach (List<(ushort Run, ushort Hop)> list in runs)
             {

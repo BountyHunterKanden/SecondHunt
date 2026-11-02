@@ -311,7 +311,7 @@ namespace MphRecomp.Arenas
 
         // an Echoes DCLN's first mesh: its vertices (Echoes metres, as stored) and triangles (vertex indices). The collision
         // index layout is the area collision's (Mrea.ReadCollision) after its own 12-byte header
-        static (float[] Verts, int[] Tris)? ReadDcln(byte[] s)
+        internal static (float[] Verts, int[] Tris)? ReadDcln(byte[] s)
         {
             if (s.Length < 16 || Be.U32(s, 0) == 0 || Be.U32(s, 4) != 0xDEAFBABE) return null;
             int o = 16;
@@ -839,7 +839,7 @@ namespace MphRecomp.Arenas
         // a DebrisExtended as a "debris" effect (MP2 DebrisExtended.xml's properties by id): its model (Id), its own turn
         // into our axes (At: x, y, z axes then a zero translation; unscaled: the placed model is already at the arena's
         // scale), Debris (EchoesTurret.Debris*), its death particle (Death, a PART)
-        static TurretFx? GrateDebris(Mrea.ScriptObject o)
+        internal static TurretFx? GrateDebris(Mrea.ScriptObject o)
         {
             Mrea.Property r = o.Root;
             static float F(Mrea.Property? p, float or) => p is { Data.Length: >= 4 } ? p.F32 : or;

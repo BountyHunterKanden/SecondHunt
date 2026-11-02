@@ -1578,6 +1578,16 @@ namespace MphRead
             return path;
         }
 
+        // recomp: a replay recorded on an arena file that a later import changed plays on the kept copy of that file
+        // (ReplayData.Use): the room's relative path (as metadata names it) -> the kept file, only while its scene loads
+        public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Redirects = new();
+
+        public static string Redirected(string path) => Redirects.IsEmpty
+            ? path
+            : Redirects.TryGetValue(RedirectKey(path), out string? kept) ? kept : path;
+
+        public static string RedirectKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
+
         public static string Combine(string path1, string path2)
         {
             return ResolveCase(Path.Combine(Replace(path1), Replace(path2)));

@@ -1229,6 +1229,15 @@ namespace MphRead.Entities
             {
                 _soundSource.PlaySfx(SfxId.JUMP_PAD);
             }
+            // recomp: an octolith carrier on a placed pad is too heavy: a small hop off it toward the pad's
+            // aim, a fifth of its push across and a quarter up (at most a jump), and the stick back after MPH's minimum
+            bool heavy = jumpPad.HostHeavyCarry && OctolithFlag != null;
+            if (heavy)
+            {
+                float jump = Fixed.ToFloat(Values.JumpSpeed);
+                vector = new Vector3(vector.X * 0.2f, MathF.Min(MathF.Max(vector.Y, 0) * 0.25f, jump), vector.Z * 0.2f);
+                lockTime = 0;
+            }
             Speed = vector;
             NetHostMoved(NetHostMove.Pad); // recomp: a jump pad launched a remote seat on the host (PlayerNetPosition.cs)
             _jumpPadAccel = vector;
@@ -1242,7 +1251,7 @@ namespace MphRead.Entities
             Flags1 |= PlayerFlags1.Standing;
             // host hook (Echoes arenas): a same-arc pad flies the alt forms on the biped's arc (biped gravity in
             // PlayerInput, so no lock extension); false for every MPH pad
-            _jumpPadSameArc = jumpPad.SameArc;
+            _jumpPadSameArc = jumpPad.SameArc && !heavy;
             _jumpPadKeepPush = jumpPad.KeepPush;
             if (_jumpPadSameArc && JumpPadEntity.HostSameArcSteer)
             {
@@ -1257,7 +1266,7 @@ namespace MphRead.Entities
                 _jumpPadControlLockMin = 0;
             }
             // (a First Hunt pad, KeepPush: FH adds no lock for the alt form)
-            if (IsAltForm && !_jumpPadSameArc && !_jumpPadKeepPush)
+            if (IsAltForm && !_jumpPadSameArc && !_jumpPadKeepPush && !heavy)
             {
                 float accelY = _jumpPadAccel.Y;
                 float altGrav = Fixed.ToFloat(Values.AltAirGravity);

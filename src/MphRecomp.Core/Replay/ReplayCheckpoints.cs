@@ -88,8 +88,7 @@ namespace MphRecomp.Replay
         {
             SetUpOnce();
             ResetProcessHistory();
-            var kb = new SimSnapshot.KeyframeBase(SimSnapshot.Take(0, Roots(host)));
-            return kb;
+            return new SimSnapshot.KeyframeBase(SimSnapshot.Take(0, Roots(host)));
         }
 
         // statics that still hold the last match's objects but are always set before they're read: cleared, so the match is
@@ -203,7 +202,11 @@ namespace MphRecomp.Replay
                 (typeof(Scene), "_textureCount"), (typeof(Scene), "_shaderProgramId"), (typeof(Scene), "_rttShaderProgramId"),
                 (typeof(Scene), "_shiftShaderProgramId"), (typeof(Scene), "_frameBuffer"), (typeof(Scene), "_screenTexture"),
                 (typeof(Scene), "_renderBuffer"),
-                (typeof(Model), "_nextId"), (typeof(Read), "_modelCache"), (typeof(Read), "_fhModelCache"),
+                (typeof(Model), "_nextId"),
+                // (a model's id: numbered in load order per process, and only the renderer's texture tables use it. Restored
+                // from the preparing copy it pointed a model at another model's textures: a beam's hit effect crashed after
+                // an early seek; 10-31)
+                (typeof(Model), "Id"), (typeof(Read), "_modelCache"), (typeof(Read), "_fhModelCache"),
                 // (thread B keyframes) caches and scratch pools that keep whatever earlier matches in this process left in
                 // them: not match state, and they made two copies of one match walk differently. The pools' items are
                 // reset before each use (CollisionDetection clears its candidates per query, _seenData per check); a
@@ -218,6 +221,9 @@ namespace MphRecomp.Replay
                 (typeof(MphRead.Formats.Collision.Collision), "_cache"), (typeof(MphRead.Formats.Collision.Collision), "_fhCache"),
                 (typeof(MphRead.Hud.HudElements), "AmmoBars"), (typeof(MphRead.Hud.HudElements), "MainHealthbars"),
                 (typeof(MphRead.Hud.HudElements), "SubHealthbars"),
+                // (shared meters the drawn HUD hangs its bar picture on: kept into the next match of this process, so a
+                // replay viewed twice refused its prepared keyframes, one object more; 10-31)
+                (typeof(MphRead.Hud.HudElements), "EnemyHealthbar"), (typeof(MphRead.Hud.HudElements), "NodeProgressBar"),
                 (typeof(MphRead.Text.Strings), "_cache"), (typeof(FirstHuntHud), "_cache"),
                 // (an Echoes arena's intro view, cached by wall-clock time; the menu thumbnails' refresh queue)
                 (typeof(MphRecomp.Arenas.EchoesArena), "_views"),
@@ -273,6 +279,17 @@ namespace MphRecomp.Replay
                 (typeof(MphRead.Entities.PlayerEntity), "_helmetBindingId"), (typeof(MphRead.Entities.PlayerEntity), "_helmetDropBindingId"),
                 (typeof(MphRead.Entities.PlayerEntity), "_visorBindingId"), (typeof(MphRead.Entities.PlayerEntity), "_scanBindingId"),
                 (typeof(MphRead.Entities.PlayerEntity), "s_hostHudFields"),
+                // (11-01) what a network match just played in this process leaves behind: the net listeners each message
+                // class hangs on its session (the live session's whole object graph), the lazy placed-pickup cache, and the
+                // guest's form-forced log hook. The headless prepare has none of them, so the viewer's walk had ~600 more
+                // objects and refused every prepared keyframe of an online replay ("started differently"); not match state
+                (typeof(MphRecomp.Multiplayer.Net.HitClaims), "_listening"), (typeof(MphRecomp.Multiplayer.Net.ShotReport), "_listening"),
+                (typeof(MphRecomp.Multiplayer.Net.ShotCheck), "_listening"), (typeof(MphRecomp.Multiplayer.Net.SeatPings), "_listening"),
+                (typeof(MphRecomp.Multiplayer.ExtraArenas), "s_placed"), (typeof(MphRecomp.Multiplayer.ExtraArenas), "s_prints"),
+                // (the host's per-seat position-check state: cleared by Start, so a prepare has none)
+                (typeof(MphRecomp.Multiplayer.Net.ClientPosition), "_seats"),
+                (typeof(MphRecomp.Multiplayer.Net.ShotCheck), "_seats"), (typeof(MphRecomp.Multiplayer.Net.HitClaims), "_seats"),
+                (typeof(MphRead.Entities.PlayerEntity), "NetFormForced"),
                 (typeof(Scene), "HostFovScale"), (typeof(Scene), "HostFramingAspect"),
                 (typeof(MphRead.Entities.PlayerEntity), "HostHideMainPlayer"), (typeof(MphRead.Entities.PlayerEntity), "HostHideSeat"),
                 (typeof(MphRead.Entities.PlayerEntity), "HostFirstPersonSeat"), (typeof(MphRead.Entities.PlayerEntity), "HostFirstPersonTurn"),

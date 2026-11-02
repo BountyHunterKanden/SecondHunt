@@ -22,7 +22,7 @@ namespace MphRead
             }
             try
             {
-                foreach (string gun in new[] { "mp1", "MP1PowerSuit", "MP2DarkSuit" })
+                foreach (string gun in new[] { "mp1", "MP1PowerSuit", "MP2DarkSuit", "MP4Sylux", "MP2DarkSamus" })
                 {
                     Directory.CreateDirectory(Path.Combine(root, "guns", gun));
                     File.WriteAllBytes(Path.Combine(root, "guns", gun, "gun.bin"), new byte[] { 0 });
@@ -38,6 +38,8 @@ namespace MphRead
                 Console.WriteLine($"  suit row: {String.Join(", ", suits)}");
                 Check("guns/mp1 isn't offered; P1 PWR, P2 DRK and ORIGINAL are",
                     !suits.Contains("mp1") && suits.Contains("MP1PowerSuit") && suits.Contains("MP2DarkSuit") && suits[^1] == "original");
+                // owner 2026-11-01: Samus's suits only; Beyond's Sylux and Dark Samus are new-file hunters
+                Check("guns/MP4Sylux and guns/MP2DarkSamus aren't offered", !suits.Contains("MP4Sylux") && !suits.Contains("MP2DarkSamus"));
                 settings.SamusSuit = "MP2DarkSuit";
                 Check("other suits are kept as set", settings.SamusSuit == "MP2DarkSuit");
             }

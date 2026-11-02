@@ -1714,6 +1714,8 @@ namespace MphRead.Entities
         // recomp (2026-10-16): the Shock Coil's ramp is dropped after 2 ticks without a hit, as the game does (PlayerProcess.cs);
         // off = MphRead's half of that, for replays recorded before it (MphRecomp MatchSettings.ShockCoilGrace)
         public bool HostShockCoilGrace { get; set; } = true;
+        // homing shots turn at the game's rate (BeamProjectileEntity.Spawn); off only for replays before format 76
+        public bool HostVanillaHoming { get; set; } = true;
 
         public void TakeDamage(uint damage, DamageFlags flags, Vector3? direction, EntityBase? source)
         {

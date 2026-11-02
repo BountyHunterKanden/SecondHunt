@@ -276,6 +276,9 @@ namespace MphRecomp.Multiplayer
         // PlayerEntity.HostShockCoilGrace): null = on (not on the wire: the host decides damage); replays recorded before it
         // (format < 40) read as off, so they play exactly
         public bool? ShockCoilGrace { get; set; }
+        // homing shots (missiles) turn at the game's rate, not twice it (PlayerEntity.HostVanillaHoming): null = on (not on the
+        // wire: the host runs the shots); replays recorded before it (format < 76) read as off, so they play exactly
+        public bool? VanillaHoming { get; set; }
         // the zoom (Imperialist) as the game does it (2026-10-16, owner: the zoom felt bad; PlayerEntity.HostVanillaZoom):
         // the zoomed aim speed, the zoom's step in and ease out, the facing's catch-up. null = on (not on the wire: each
         // device plays its own seat's aim); replays recorded before it (format < 39) read as off, so they play exactly

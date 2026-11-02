@@ -52,6 +52,7 @@ namespace MphRecomp.Replay
             scene.HostDrawFreeSim = true;
             CaptureOptions(File.Options);
             File.Data = ReplayData.Fingerprint(File.Settings.Arena, File.Settings.Mode);
+            ReplayData.Keep(File.Settings.Arena, File.Settings.Mode, File.Data);
         }
 
         // a LAN / online host's match (net: "LAN" / "online"): also keep what the network does to its remote seats
@@ -200,8 +201,14 @@ namespace MphRecomp.Replay
             {
                 return $"the arena {file.Settings.Arena} isn't on this device (import it first)";
             }
+            if (file.Mods.Count > 0)
+            {
+                // format 75: a gameplay mod was on in this match, and this build has no mods to play it back with
+                return $"missing mod {file.Mods[0].Id} {file.Mods[0].Version}";
+            }
             return null;
         }
+
 
         // Starts the recorded match exactly as it started: the same settings, both RNG streams where they were, and no
         // save-slot reset in between (see ReplayRecorder.RngAtStart).
@@ -217,8 +224,12 @@ namespace MphRecomp.Replay
             Position = 0;
             FailedAt = -1;
             Failure = null;
-            CampaignHost host = CampaignHost.StartMatch(ReplayFile.CopySettings(File.Settings), collectDrawItems,
-                viewWidth, viewHeight);
+            CampaignHost host;
+            // (arena files changed since the recording: their kept copies, ReplayData.Use)
+            using (ReplayData.Use(File.Data, File.Settings.Arena, File.Settings.Mode))
+            {
+                host = CampaignHost.StartMatch(ReplayFile.CopySettings(File.Settings), collectDrawItems, viewWidth, viewHeight);
+            }
             host.Scene.HostDrawFreeSim = true; // as recorded (ReplayRecorder.Started)
             // STREAMING (SHOW NAME off): the HUD's own seat is this device's player in the file, not the recorder's
             for (int i = 0; i < File.Settings.Players.Count && i < GameState.HiddenNames.Length; i++)

@@ -214,7 +214,8 @@ namespace MphRecomp.Frontend
                 try
                 {
                     foreach (string d in System.IO.Directory.GetDirectories(gunsRoot))
-                        if (System.IO.File.Exists(System.IO.Path.Combine(d, "gun.bin")) && !NotSuits.Contains(System.IO.Path.GetFileName(d)))
+                        if (System.IO.File.Exists(System.IO.Path.Combine(d, "gun.bin")) && !NotSuits.Contains(System.IO.Path.GetFileName(d))
+                            && MphRecomp.Multiplayer.Characters.IsSamusSuit(System.IO.Path.GetFileName(d)))
                             _suits.Add(System.IO.Path.GetFileName(d));
                 }
                 catch (Exception ex) when (ex is UnauthorizedAccessException or System.IO.IOException)
@@ -234,7 +235,7 @@ namespace MphRecomp.Frontend
                     string id = System.IO.Path.GetFileName(d);
                     if (_suits.Contains(id, StringComparer.OrdinalIgnoreCase) || id.EndsWith("Rest", StringComparison.OrdinalIgnoreCase)
                         || id.EndsWith("Tpose", StringComparison.OrdinalIgnoreCase) || NotSuits.Contains(id)) continue;
-                    if (!MphRecomp.Anim.TrophyRigs.TryHunterFor(id, out MphRead.Hunter rig) || rig != MphRead.Hunter.Samus) continue;
+                    if (!MphRecomp.Multiplayer.Characters.IsSamusSuit(id)) continue; // no Dark Samus (her own hunter)
                     // only imported, up-to-date models (a public build lists nothing hand-dropped: no Brawl trophies)
                     if (!MphRecomp.Import.ImportedContent.Usable(hdRoot, id)) continue;
                     try

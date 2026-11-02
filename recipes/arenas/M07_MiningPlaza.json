@@ -1,0 +1,13 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "pak": "Metroid3.pak",
+  "pakSha1": "3fe80043934f16d7fd496ba1c975930ff06375b0",
+  "scale": 0.5925926,
+  "audioPak": "AudioGrp.pak",
+  "audioPakSha1": "8d0282eec11ea74288772bd4b7ee795ca913bab1",
+  "jingle": "Audio/evt_x_event_00.dsp",
+  "jingleSha1": "accd2e39ae119bcedd660608930dfe330e079e4e",
+  "crates": [],
+  "pads": []
+}

@@ -52,6 +52,24 @@ namespace MphRecomp.Arenas
             public uint Skin { get; init; } = uint.MaxValue;
             public uint? Bone { get; init; }
             public Vector3 Origin { get; init; }
+            // a skinned model written in one fixed pose (Mining Plaza's sealed doors, MiningPlaza.Seals): each bone's skin
+            // matrix (T(-bind) * world, Echoes model space), applied before Transform; needs Skin
+            public Dictionary<uint, Matrix4>? Pose { get; init; }
+        }
+
+        // a skinned vertex in a fixed pose: its bones' skin matrices blended by weight (Placed.Pose)
+        static (Vector3 P, Vector3 N) Posed(Dictionary<uint, Matrix4> pose, (uint Bone, float Weight)[] weights, Vector3 p, Vector3 n)
+        {
+            Vector3 ap = Vector3.Zero, an = Vector3.Zero;
+            float ws = 0;
+            foreach ((uint b, float w) in weights)
+            {
+                if (!pose.TryGetValue(b, out Matrix4 m)) continue;
+                ap += w * (new Vector4(p, 1) * m).Xyz;
+                an += w * (new Vector4(n, 0) * m).Xyz;
+                ws += w;
+            }
+            return ws > 1e-6f ? (ap / ws, an) : (p, n);
         }
 
         // the bone a skinned model's triangle follows: its first corner's heaviest (uint.MaxValue: not skinned)
@@ -108,7 +126,8 @@ namespace MphRecomp.Arenas
             Vector2 Uv(float[]? a, int i) => a != null && i >= 0 && 2 * i + 1 < a.Length ? new Vector2(a[2 * i], a[2 * i + 1]) : Vector2.Zero;
             // triangles grouped by (pass, material); a sky's (a prop's) triangles all go to the sky (prop) pass, opaque
             // materials first
-            int Emit(Cmdl g, int matBase, int? onePass, float posScale = 1, float[]? place = null, uint? bone = null, Vector3 origin = default)
+            int Emit(Cmdl g, int matBase, int? onePass, float posScale = 1, float[]? place = null, uint? bone = null, Vector3 origin = default,
+                Dictionary<uint, Matrix4>? pose = null)
             {
                 var order = Enumerable.Range(0, g.TriangleCount).Where(t => bone == null || TriangleBone(g, t) == bone)
                     .OrderBy(t => Pass(g.Materials[g.TriangleMaterial[t]])).ThenBy(t => g.TriangleMaterial[t]).ToList();
@@ -125,6 +144,7 @@ namespace MphRecomp.Arenas
                         Cmdl.Corner c = g.Triangles[3 * t + k];
                         var mp = new Vector3(g.Positions[3 * c.P], g.Positions[3 * c.P + 1], g.Positions[3 * c.P + 2]);
                         var mn = 3 * c.N + 2 < g.Normals.Length ? new Vector3(g.Normals[3 * c.N], g.Normals[3 * c.N + 1], g.Normals[3 * c.N + 2]) : Vector3.UnitZ;
+                        if (pose != null && g.Skin != null && c.P < g.Skin.Count) (mp, mn) = Posed(pose, g.Skin[c.P], mp, mn);
                         if (bone != null) mp -= origin;
                         else if (place != null) { mp = Place(place, mp); mn = PlaceNormal(place, mn); }
                         Vector3 p = map(mp.X, mp.Y, mp.Z) * posScale;
@@ -195,7 +215,7 @@ namespace MphRecomp.Arenas
                         placedBase + placedModels.Sum(m => m.Model.Materials.Length)));
                     k = placedModels.Count - 1;
                 }
-                res.PlacedTriangles += Emit(placedModels[k].Model, placedModels[k].MatBase, pl.Pass, place: pl.Transform, bone: pl.Bone, origin: pl.Origin);
+                res.PlacedTriangles += Emit(placedModels[k].Model, placedModels[k].MatBase, pl.Pass, place: pl.Transform, bone: pl.Bone, origin: pl.Origin, pose: pl.Pose);
             }
             res.Batches = batches.Count;
 

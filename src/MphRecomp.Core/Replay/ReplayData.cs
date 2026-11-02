@@ -31,6 +31,12 @@ namespace MphRecomp.Replay
             {
                 parts.Add(Part("nodes", Paths.Combine(Paths.FileSystem, nodePath)));
             }
+            // the owner's placed spawns, pads and pickups (Arenas/Placements, shipped in the library) change the match
+            // as the room loads: another file is another match (Mining Plaza 2026-11-01: a replay stopped at 0:00)
+            if (MphRecomp.Arenas.PlacedPickups.FileFingerprint(meta.Id) is string placed)
+            {
+                parts.Add("placed=" + placed);
+            }
             return String.Join(';', parts);
         }
 
@@ -40,12 +46,13 @@ namespace MphRecomp.Replay
             Dictionary<string, string> now = Parse(here);
             foreach ((string what, string value) in Parse(recorded))
             {
-                if (!now.TryGetValue(what, out string? current) || current != value)
+                if ((!now.TryGetValue(what, out string? current) || current != value) && KeptFile(what, value) == null)
                 {
                     string label = what switch
                     {
                         "entities" => "objects",
                         "nodes" => "bot paths",
+                        "placed" => "placed spawns and pickups",
                         _ => what
                     };
                     return current == "missing"
@@ -55,6 +62,103 @@ namespace MphRecomp.Replay
             }
             return null;
         }
+
+        // Kept copies (owner 2026-11-01: two pinned replays stopped playing after Mining Plaza was re-imported): each match
+        // recorded keeps the collision and node files it ran on under <data>/replaydata as <what>_<crc>_<length>.bin
+        // (once per distinct file, ~1 MB an arena), and a replay whose arena files changed since plays on those copies
+        // (Use, around its scene's setup). Objects (entities) aren't kept: their reads go through the repack hook.
+        // next to the replays (<data>/replays/data, set by ReplayLibrary's List and Save: on Android the external data
+        // folder, reachable over adb), else beside the game files; copies are looked up in both
+        public static string? ReplaysRoot;
+
+        public static string KeepDir => ReplaysRoot != null ? Path.Combine(ReplaysRoot, "replays", "data") : InternalKeepDir;
+
+        private static string InternalKeepDir => Path.Combine(Path.GetDirectoryName(Paths.FileSystem.TrimEnd('/', '\\'))
+            ?? Paths.FileSystem, "replaydata");
+
+        private static readonly string[] s_kept = { "collision", "nodes" };
+
+        private static string? KeptFile(string what, string value)
+        {
+            if (Array.IndexOf(s_kept, what) < 0 || value == "missing")
+            {
+                return null;
+            }
+            string name = $"{what}_{value.Replace('/', '_')}.bin";
+            foreach (string dir in new[] { KeepDir, InternalKeepDir })
+            {
+                string file = Path.Combine(dir, name);
+                if (File.Exists(file))
+                {
+                    return file;
+                }
+            }
+            return null;
+        }
+
+        // (ReplayRecorder.Started) copy this match's collision and node files in, if not kept already
+        public static void Keep(string arena, GameMode mode, string print)
+        {
+            (RoomMetadata? meta, _) = Metadata.GetRoomByName(arena);
+            if (meta == null)
+            {
+                return;
+            }
+            Dictionary<string, string> parts = Parse(print);
+            try
+            {
+                foreach ((string what, string? rel) in RelPaths(meta, mode))
+                {
+                    if (rel == null || !parts.TryGetValue(what, out string? value) || value == "missing" || KeptFile(what, value) != null)
+                    {
+                        continue;
+                    }
+                    Directory.CreateDirectory(KeepDir);
+                    string to = Path.Combine(KeepDir, $"{what}_{value.Replace('/', '_')}.bin");
+                    File.Copy(Source(meta, what, rel), to + ".tmp", overwrite: true);
+                    File.Move(to + ".tmp", to, overwrite: true);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        // ReplayPlayer.Start, around the scene's setup: the files that changed since the recording read from the kept
+        // copies (Paths.Redirects); disposing clears them
+        public static IDisposable Use(string recorded, string arena, GameMode mode)
+        {
+            Paths.Redirects.Clear();
+            (RoomMetadata? meta, _) = Metadata.GetRoomByName(arena);
+            if (meta != null && recorded.Length > 0)
+            {
+                Dictionary<string, string> was = Parse(recorded), now = Parse(Fingerprint(arena, mode));
+                foreach ((string what, string? rel) in RelPaths(meta, mode))
+                {
+                    if (rel != null && was.TryGetValue(what, out string? value) && (!now.TryGetValue(what, out string? cur) || cur != value)
+                        && KeptFile(what, value) is string kept)
+                    {
+                        Paths.Redirects[Paths.RedirectKey(rel)] = kept;
+                    }
+                }
+            }
+            return new Clear();
+        }
+
+        private sealed class Clear : IDisposable
+        {
+            public void Dispose() => Paths.Redirects.Clear();
+        }
+
+        private static IEnumerable<(string What, string? Rel)> RelPaths(RoomMetadata meta, GameMode mode)
+        {
+            yield return ("collision", meta.CollisionPath);
+            yield return ("nodes", NodePath(meta, mode));
+        }
+
+        private static string Source(RoomMetadata meta, string what, string rel) => what == "collision"
+            ? Paths.Combine(meta.FirstHunt || meta.Hybrid ? Paths.FhFileSystem : Paths.FileSystem, rel)
+            : Paths.Combine(Paths.FileSystem, rel);
 
         // the node file a match in this mode loads (SceneSetup.LoadNodeData's overrides for multiplayer modes)
         private static string? NodePath(RoomMetadata meta, GameMode mode)

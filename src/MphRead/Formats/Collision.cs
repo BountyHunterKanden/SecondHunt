@@ -60,11 +60,14 @@ namespace MphRead.Formats.Collision
         private static CollisionInstance GetCollision(string path, string name, bool firstHunt, int roomLayerMask, bool isEntity)
         {
             Dictionary<string, CollisionInfo> cache = firstHunt ? _fhCache : _cache;
-            if (roomLayerMask == -1 && cache.TryGetValue(path, out CollisionInfo? info))
+            // (a replay's kept copy, Paths.Redirects: read fresh, never cached under the room's path)
+            string file = Paths.Redirected(path);
+            bool kept = !ReferenceEquals(file, path);
+            if (roomLayerMask == -1 && !kept && cache.TryGetValue(path, out CollisionInfo? info))
             {
                 return new CollisionInstance(name, info, isEntity);
             }
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(firstHunt ? Paths.FhFileSystem : Paths.FileSystem, path)));
+            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(firstHunt ? Paths.FhFileSystem : Paths.FileSystem, file)));
             CollisionHeader header = Read.ReadStruct<CollisionHeader>(bytes);
             if (header.Type.MarshalString() is "wc01" or "wc32")
             {
@@ -74,7 +77,7 @@ namespace MphRead.Formats.Collision
             {
                 info = ReadFhCollision(bytes);
             }
-            if (roomLayerMask == -1)
+            if (roomLayerMask == -1 && !kept)
             {
                 cache.Add(path, info);
             }
@@ -200,7 +203,9 @@ namespace MphRead.Formats.Collision
     }
 
     // size: 16
-    public readonly struct CollisionData
+    // IEquatable: CollisionDetection keeps a HashSet<CollisionData> per query; without it every Contains/Add boxed the struct
+    // (Mono's field-by-field ValueType.Equals boxes more) -> ~55 MB/s of sim garbage with 7 bots, a gen0 GC dip every second
+    public readonly struct CollisionData : IEquatable<CollisionData>
     {
         public readonly int Counter; // only set at runtime
         public readonly ushort PlaneIndex;
@@ -224,6 +229,16 @@ namespace MphRead.Formats.Collision
 
         // bits 0-1
         public int Axis => LayerMask & 3;
+
+        public bool Equals(CollisionData other)
+        {
+            return Counter == other.Counter && PlaneIndex == other.PlaneIndex && Flags == other.Flags && LayerMask == other.LayerMask
+                && PaddingA == other.PaddingA && PointIndexCount == other.PointIndexCount && PointStartLow == other.PointStartLow;
+        }
+
+        public override bool Equals(object? obj) => obj is CollisionData other && Equals(other);
+
+        public override int GetHashCode() => HashCode.Combine(Counter, PlaneIndex, PointStartLow, PaddingA);
     }
 
     // size: 4

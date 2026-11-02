@@ -112,7 +112,8 @@ internal sealed partial class CampaignRenderer
         {
             // here, not in ConfigureReplay: MatchArenas knows the imported (Echoes) arenas only after Paths is set up,
             // so a replay of one was refused as "not on this device" (Odin 2026-10-08 01:01)
-            if (ReplayPlayer.CheckBeforeStart(_replayPlayer.File) is string refused)
+            if ((ReplayPlayer.CheckBeforeStart(_replayPlayer.File)
+                ?? (_replayPath != null ? ReplayVerdict.Refused(_replayPath, _replayPlayer.File) : null)) is string refused)
             {
                 _error = "REPLAY REFUSED: " + refused;
                 Log.Warn("MPHReplay", $"refused {_replayPath}: {refused}");
@@ -258,6 +259,8 @@ internal sealed partial class CampaignRenderer
             // it stops here, the bar live (back, scrub, play again); nothing plays past this step (ReplaySeek)
             ReplayHoldEnd($"REPLAY STOPPED AT {ReplayClock(_replayPlayer.FailedAt)}: PAST HERE IT WOULDN'T PLAY EXACTLY AS RECORDED");
             Log.Warn("MPHReplay", $"step {_replayPlayer.FailedAt} of {_replayPlayer.File.Steps.Count} differs from the recording");
+            // from now on the REPLAYS list refuses it up front (ReplayVerdict)
+            if (_replayPath != null) ReplayVerdict.MarkFailed(_replayPath, _replayPlayer.File, _replayPlayer.FailedAt);
         }
     }
 
@@ -267,6 +270,12 @@ internal sealed partial class CampaignRenderer
         PlayerEntity.HostNoRespawnPrompt = false;
         ResetReplayViewHooks();
         if (_host != null) _host.Scene.HostBeforeCamera = null;
+        if (_netSession != null && _replayPlayer == null)
+        {
+            Log.Info("MPHReplay", $"match ending (complete {complete}): {(_netSession.IsHost ? "host" : "guest")}, frame {_host?.Frame ?? 0}, "
+                + $"peer gone {_netDriver?.PeerGone == true}, link {(_replayLink != null ? "up" : "none")}, wanted {_replayWanted}, "
+                + $"results {(_matchResults != null)}");
+        }
         // a guest waits for the host's recording after a match that ran to its end with the host still there, and (0.3.6,
         // 2026-10-19) after leaving one still going, having asked for the
         // recording so far (a host before 0.3.6 ignores the ask: the hold then gives up after its limit)
@@ -362,8 +371,31 @@ internal sealed partial class CampaignRenderer
             Log.Info("MPHReplay", $"saved {Path.GetFileName(path)}: {steps} steps{(complete ? "" : " (incomplete)")}, "
                 + $"{recorder.File.Identities.Count} identities, {recorder.File.NetEvents.Count} network events, "
                 + $"{new FileInfo(path).Length / 1024} KB in {sw.ElapsedMilliseconds} ms");
-            if (_netSession == null || complete) PrepareAfter(dir, path, recorder.File);
+            // (an online match isn't fed live keyframes, so every saved one, cut short or not, is prepared now: seeking is instant)
+            PrepareAfter(dir, path, recorder.File);
             // a network match's host: its recording to each guest that keeps replays (a complete match only)
+            if (_replayLink != null && !complete)
+            {
+                // a guest that left asked for the recording so far, and the host left before it was answered between steps
+                byte[]? cut = null;
+                while (_replayAsked.TryDequeue(out int seat))
+                {
+                    if (_replayGiven.Contains(seat)) continue;
+                    cut ??= File.ReadAllBytes(path);
+                    _replayLink.SendReplay(seat, cut);
+                    _replayGiven.Add(seat);
+                    Log.Info("MPHReplay", $"seat {seat} had asked for the recording: sent it as the match ended ({steps} steps)");
+                }
+                // the host leaving first: a guest that keeps replays can't ask any more (it carries on as the new host, with
+                // nothing recorded), so it gets the cut-short recording unasked (2026-11-01: Odin hosted, quit 4 s before the Samsung)
+                foreach (int seat in _replayLink.SeatsWantingReplay.Where(s => !_replayGiven.Contains(s)).ToList())
+                {
+                    cut ??= File.ReadAllBytes(path);
+                    _replayLink.SendReplay(seat, cut);
+                    _replayGiven.Add(seat);
+                    Log.Info("MPHReplay", $"seat {seat} keeps replays: sent the recording so far as the host left ({steps} steps)");
+                }
+            }
             if (_replayLink != null && complete)
             {
                 byte[] bytes = File.ReadAllBytes(path);
@@ -390,7 +422,11 @@ internal sealed partial class CampaignRenderer
     // replays); the match screen's hold on the session then stays up a moment past the end while the recording goes across
     void StartReplayLink(MphRecomp.Multiplayer.MatchSettings settings, bool keep)
     {
-        if (_netSession == null || ReplayDataDir is not string dir) return;
+        if (_netSession == null || ReplayDataDir is not string dir)
+        {
+            Log.Info("MPHReplay", $"no replay link: {(_netSession == null ? "no session" : "no replay folder")}");
+            return;
+        }
         ReplayLink link;
         try
         {

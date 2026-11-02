@@ -26,10 +26,18 @@ public static class ReplayPrepHost
             Paths.UpdatePaths();
             Paths.ChooseMphPath();
             MphRecomp.Arenas.EchoesArena.ImportRoot = dataDir;
+            MphRecomp.Replay.ReplayData.ReplaysRoot = dataDir; // (kept arena files: ReplayData.Use)
             ReplayFile file = ReplayFile.Load(replayPath);
             ReplayFeed.Follower? feed = ReplayFeed.IsLive(replayPath) ? ReplayFeed.Follow(file, replayPath, cancel) : null; // (a match still being played)
             string? why = ReplayPrep.Run(file, sidecar, cancel, feed == null ? null : feed.More, log: l => Log.Info("MPHReplayPrep", l));
             feed?.Close(drain: why == null);
+            // a replay seen not to play exactly is refused up front from now on (ReplayVerdict); a match still being played has no file to mark
+            const string differs = "differs from the recording at step ";
+            if (feed == null && why != null && why.StartsWith(differs, StringComparison.Ordinal)
+                && int.TryParse(why.AsSpan(differs.Length), out int failedAt))
+            {
+                ReplayVerdict.MarkFailed(replayPath, file, failedAt);
+            }
             Log.Info("MPHReplayPrep", (why == null ? "done" : "stopped: " + why) + $" in {sw.Elapsed.TotalSeconds:0.0} s, "
                 + Path.GetFileName(replayPath));
             return why;

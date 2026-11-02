@@ -215,6 +215,8 @@ internal sealed partial class CampaignRenderer
     }
 
     readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _crates = new();
+    // one Mining Plaza piece list, reused (its pillars/gate/crates fill it: no per-frame iterators, 11-01)
+    readonly List<(Matrix4 Model, int Pass, CrateLight? Light, float Fade)> _pieces = new();
     // the turret as its occupant sees it (see-through, no depth write): drawn last, with the blended pass (DrawArena)
     readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _seatShell = new();
     // the turret effects' model particles: drawn after the blended pass too (DrawArena)
@@ -247,16 +249,42 @@ internal sealed partial class CampaignRenderer
             {
                 _crates.Add((Matrix4.Identity, br.Flash, br.Light, br.Pass, 1, null));
             }
+            else if (e is MiningPlazaPillarEntity pl && hd.HasPlaced)
+            {
+                // Mining Plaza's pillars: each piece standing, falling or fallen (its model placed standing)
+                _pieces.Clear();
+                pl.AddPieces(_pieces);
+                foreach ((Matrix4 m, int pass, CrateLight? light, float fade) in _pieces) _crates.Add((m, false, light, pass, fade, null));
+            }
+            else if (e is MiningPlazaGateEntity gt && hd.HasPlaced)
+            {
+                // Mining Plaza's Luminoth gate: shut, lowering or open, and its holograms spinning until it opens
+                _pieces.Clear();
+                gt.AddPieces(_pieces);
+                foreach ((Matrix4 m, int pass, CrateLight? light, float fade) in _pieces) _crates.Add((m, false, light, pass, fade, null));
+            }
+            else if (e is MiningPlazaCrateEntity sc && hd.HasPlaced)
+            {
+                // Mining Plaza's sand crates: swaying, flinching (red flash) or growing back
+                _pieces.Clear();
+                sc.AddPieces(_pieces);
+                foreach ((Matrix4 m, int pass, CrateLight? light, float fade) in _pieces) _crates.Add((m, sc.Flash, light, pass, fade, null));
+            }
         }
         // the arena's static actor models (Spires' pillars: solid in the collision, not in the render mesh; T6 N3)
         if (hd.HasPlaced && _host != null)
         {
-            foreach ((int pass, CrateLight? light) in EchoesStatics.For(_host.RoomId)) _crates.Add((Matrix4.Identity, false, light, pass, 1, null));
+            foreach ((int pass, CrateLight? light, EchoesArena.StaticSpot? spin) in EchoesStatics.For(_host.RoomId))
+            {
+                _crates.Add((spin != null ? EchoesStatics.Model(spin, _clock.Elapsed.TotalSeconds) : Matrix4.Identity, false, light, pass, 1, null));
+            }
         }
         // the turret off (LAN and online until it syncs): drawn lowered, as it waits
         if (!turret && hd.HasPlaced && _turretLook is { } idle) AddTurret(idle, null);
         // the turret effects' model particles (CampaignRenderer.TurretFx.cs)
         if (hd.HasPlaced) AddTurretModels(_crates, _turretFxProps);
+        // the sand crates' flying pieces (CampaignRenderer.SandCrateFx.cs)
+        if (hd.HasPlaced) AddSandBits(_crates);
         if (_crates.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _crates);
     }
 
@@ -312,7 +340,11 @@ internal sealed partial class CampaignRenderer
         {
             int n = _arenaFrames;
             Log.Info("MPHArena", $"arena CPU {(_arenaMs[0] + _arenaMs[1] + _arenaMs[2]) / n:0.00} ms/frame (opaque {_arenaMs[0] / n:0.00} + depth rebuild "
-                + $"{_arenaMs[1] / n:0.00} + blended {_arenaMs[2] / n:0.00}), max {_arenaMaxMs:0.0} ms; {n} frames");
+                + $"{_arenaMs[1] / n:0.00} + blended {_arenaMs[2] / n:0.00}), max {_arenaMaxMs:0.0} ms; {n} frames"
+                + (_arenaHd is { } ph && ph.PropsDrawn + ph.PropsCulled > 0 ? $"; props {ph.PropsDrawn / n} drawn, {ph.PropsCulled / n} out of view a frame" : "")
+                + (OccFrames > 0 ? $"; occlusion {OccTestedSum / OccFrames} boxes, {OccCulledSum / OccFrames} hidden a frame" : ""));
+            OccTestedSum = OccCulledSum = OccFrames = 0;
+            if (_arenaHd is { } pc) pc.PropsDrawn = pc.PropsCulled = 0;
             if (_arenaHd is { } watched) ArenaCheckShared(watched);
             Array.Clear(_arenaMs);
             _arenaMaxMs = 0;
@@ -418,6 +450,13 @@ internal sealed class ArenaHdDraw
 
     readonly string _dir;
     readonly List<Batch> _batches = new();
+    // each pass's batches in arena.bin order: a prop draws its pass's few, not a walk over all ~600 (Mining Plaza's ~170
+    // prop draws a frame took 2.2 ms of the Odin's GL thread that way)
+    readonly Dictionary<int, Batch[]> _byPass = new();
+    // each pass's box in its model's space (DrawProps skips a prop whose box is out of the view: Mining Plaza's ~170 prop
+    // draws a frame were all drawn wherever the camera looked)
+    readonly Dictionary<int, (Vector3 Lo, Vector3 Hi)> _passBox = new();
+    public int PropsDrawn, PropsCulled; // since the last MPHArena line
     float[] _verts = Array.Empty<float>();
     int _floats;
     float[]? _vertBuf;
@@ -489,11 +528,11 @@ internal sealed class ArenaHdDraw
         "void main(){ vec3 c = clamp(texture(uLm, vUv0).rgb, 0.0, 1.0) * texture(uTex, vUv1).rgb;\n" +
         "  if (uGlow == 1) c += texture(uGlowTex, vUv1).rgb;\n" +
         "  o = vec4(clamp(c, 0.0, 1.0), 1.0); }\n";
-    const string DepthVert = "#version 300 es\n" +
+    internal const string DepthVert = "#version 300 es\n" +
         "layout(location=0) in vec3 aPos; uniform mat4 uMvp;\n" +
         "invariant gl_Position;\n" +
         "void main(){ gl_Position = uMvp * vec4(aPos, 1.0); }\n";
-    const string DepthFrag = "#version 300 es\n" +
+    internal const string DepthFrag = "#version 300 es\n" +
         "precision mediump float; out vec4 o; void main(){ o = vec4(0.0); }\n";
 
     // which materials the fast path draws as GX would: opaque, lit (no light reaches it), no alpha test, the exact
@@ -628,6 +667,7 @@ internal sealed class ArenaHdDraw
             }
             _batches.Add(b);
         }
+        foreach (IGrouping<int, Batch> g in _batches.GroupBy(b => b.Pass)) _byPass[g.Key] = g.ToArray();
         // the fast batches' vertex ranges, neighbours merged, for the depth-only passes
         foreach (Batch b in _batches)
         {
@@ -639,6 +679,18 @@ internal sealed class ArenaHdDraw
         byte[] raw = r.ReadBytes(_verts.Length * 4);
         Buffer.BlockCopy(raw, 0, _verts, 0, raw.Length);
         _vertBuf = _verts;
+        foreach (Batch b in _batches)
+        {
+            if (b.Pass < ArenaHdWriter.PropPass || b.Count == 0) continue;
+            (Vector3 lo, Vector3 hi) = _passBox.TryGetValue(b.Pass, out var box) ? box : (new Vector3(float.MaxValue), new Vector3(float.MinValue));
+            for (int v = b.Start; v < b.Start + b.Count; v++)
+            {
+                var pos = new Vector3(_verts[v * _floats], _verts[v * _floats + 1], _verts[v * _floats + 2]);
+                lo = Vector3.ComponentMin(lo, pos);
+                hi = Vector3.ComponentMax(hi, pos);
+            }
+            _passBox[b.Pass] = (lo, hi);
+        }
     }
 
     void DecodeAll()
@@ -867,8 +919,14 @@ internal sealed class ArenaHdDraw
         bool exposed = false; // the interpreter's uExposure left below 1 (a fading prop)
         foreach ((Matrix4 model, bool flash, CrateLight? light, int pass, float fade, Vector3? tint) in props)
         {
-            Matrix4 mv = model * view;
-            HunterRig.ToArray(mv * proj, _propMvp);
+            Matrix4 mv = model * view, mvp = mv * proj;
+            if (_passBox.TryGetValue(pass, out var box) && OutOfView(mvp, box.Lo, box.Hi))
+            {
+                PropsCulled++;
+                continue;
+            }
+            PropsDrawn++;
+            HunterRig.ToArray(mvp, _propMvp);
             // the normal's way to the camera through the model's turn (as _viewRot holds the view's)
             _propRot[0] = mv.M11; _propRot[1] = mv.M12; _propRot[2] = mv.M13;
             _propRot[3] = mv.M21; _propRot[4] = mv.M22; _propRot[5] = mv.M23;
@@ -888,9 +946,9 @@ internal sealed class ArenaHdDraw
             if (see) GLES30.GlBlendColor(0, 0, 0, -fade);
             float exposure = fade < 1 && !see ? fade : 1; // (a fading additive prop: its colour scaled)
             bool progSet = false; // this prop's uniforms on the interpreter
-            foreach (Batch b in _batches)
+            if (!_byPass.TryGetValue(pass, out Batch[]? passBatches)) continue;
+            foreach (Batch b in passBatches)
             {
-                if (b.Pass != pass) continue;
                 if (fade < 1 && !see && tint == null && _fadeLogged.Add(pass))
                     Log.Info("MPHArena", $"faded prop pass {pass}: blend {b.P.Blend} {b.P.BlendSrc}/{b.P.BlendDst} (additive fades by colour)");
                 if ((want.W != 0 ? b.PropTintSpec : b.PropSpec) is Spec s)
@@ -961,6 +1019,26 @@ internal sealed class ArenaHdDraw
         ArenaGl.Uniform1i(U("uNumLights"), 0); // the world draws with no lights (its lightmaps)
         _progStamp = -1; // the world's MVP, view turn and ambient go back on with its next draw
         ArenaGl.Disable(0x0B44);
+    }
+
+    // a box (model space) all outside one of the view's six clip planes; a box around the camera never is
+    static bool OutOfView(in Matrix4 mvp, Vector3 lo, Vector3 hi)
+    {
+        int all = 0x3F;
+        for (int i = 0; i < 8; i++)
+        {
+            Vector4 c = new Vector4((i & 1) != 0 ? hi.X : lo.X, (i & 2) != 0 ? hi.Y : lo.Y, (i & 4) != 0 ? hi.Z : lo.Z, 1) * mvp;
+            int o = 0;
+            if (c.X < -c.W) o |= 1;
+            if (c.X > c.W) o |= 2;
+            if (c.Y < -c.W) o |= 4;
+            if (c.Y > c.W) o |= 8;
+            if (c.Z < -c.W) o |= 16;
+            if (c.Z > c.W) o |= 32;
+            all &= o;
+            if (all == 0) return false;
+        }
+        return true;
     }
 
     // Retro's sky: the area's sky model around the camera (translation only), lights off and the ambient white (its lit

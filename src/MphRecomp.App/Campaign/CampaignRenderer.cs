@@ -901,6 +901,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
                     break;
                 }
             }
+            if (_host.Ended) StopPillarFx(); // TickSkins stops at the match's end, so the gate's loops stop here
             if (steps == 0 && ReplayFreeCam && !_host.Ended && _error == null)
             {
                 // a replay's free cam flies every picture (MatchReplay.cs), not only on the steps: between steps and paused
@@ -1551,6 +1552,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         // the gun's depth first: the room behind it and its own hidden faces skip their shading (CampaignGun.GunPass)
         if (_gunActive) DrawPrimeGun(scene, GLES30.GlLess, CampaignGun.GunPass.Prepass);
         DrawArena(scene, 0, GLES30.GlLess); // an imported Echoes arena's own look (CampaignArena.cs)
+        OccQuery(scene); // pickups, pads and flags behind its walls (CampaignRenderer.OcclusionCull.cs)
         layers.DrawSolidItems(opaque);
         if (_gunActive) DrawPrimeGun(scene, GLES30.GlLess, CampaignGun.GunPass.AfterPrepass);
         DrawSuit(scene, SuitPass.Opaque);
@@ -1780,6 +1782,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
             return; // drawn by the Prime gun instead
         }
         if (CannonHidesItem(scene, item)) return; // drawn by the body's arm cannon instead (MatchArmCannon.cs)
+        if (PickupOffscreen(item, scene)) return; // a pickup outside the view (CampaignRenderer.PickupCull.cs)
+        if (OccHidden(item)) return; // behind the arena's walls (CampaignRenderer.OcclusionCull.cs)
         bool mesh = item.Type == RenderItemType.Mesh;
         if (!mesh && !IsQuadItem(item.Type))
         {

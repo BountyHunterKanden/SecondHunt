@@ -30,6 +30,21 @@ namespace MphRecomp.Import
     //   arenas     9  2026-10-17: Sidehopper Station's grates break the same way (a turret.json of no pieces: grate Fx + sound
     //                 only); the turret's animation events' real durations (ball glow on while raised + ballglowdown, muzzle 2,
     //                 smoke 10 frames)
+    //   arenas    11  2026-10-31: ArenaNav jumps up overhanging ledges (TakeOff) + long pocket walks: Mining Plaza's upper floors
+    //                 and east bridge in the bots' graph (141 -> 195 nodes), Spider Complex +94 walk links, rest unchanged
+    //   arenas    12  2026-10-31: ArenaNav DoubleRise 3.9 -> 3.6 (double-jump ledge links a bot can't make dropped; a Noxus
+    //                 bot stuck at Mining Plaza's 3.7 ledge), Mining Plaza 195 -> 199 nodes
+    //   arenas    13  2026-10-31: collision marks faces that aren't Echoes floor material (CollisionFlags.Bit12), which a
+    //                 player can't stand on below a 0.85 slope (Mining Plaza's centre structure was climbable)
+    //   arenas    14  2026-10-31: Mining Plaza's Luminoth gate opens mid-match (arena.json Gate: gate/hologram/glow passes, collision,
+    //                 Echoes' Gate Control timeline; pillar.json the gate's dust + sounds)
+    //   arenas    15  2026-10-31: Mining Plaza's gate jingle (recipe "jingle": Audio/evt_x_event_00.dsp -> pillar_gate_jingle.wav)
+    //   arenas    16  2026-11-01: Mining Plaza's lore hologram and translator rings spin (arena.json Statics SpinXf/Axis/Degrees/Period)
+    //   arenas    17  2026-11-01: Mining Plaza's sand crates (arena.json SandCrates: ready/flinch frame passes, collision, debris
+    //                 pieces; pillar.json the crates' trail/flash/dust/debris effects + break/bounce sounds)
+    //   arenas    18  2026-11-01: Mining Plaza's bot graph rides the shipped placement file's jump pads (and its spawns anchor it)
+    //   arenas    19  2026-11-01: Mining Plaza's graph adds node data sets for octolith carriers, never routed over the placed jump pads
+    //   arenas    20  2026-11-01: Mining Plaza's sand crates baked at 30 fps (was 12): smoother sway and flinch
     //   bodies     2  2026-10-19: the Scout Drone bodies' Prime deploy alert (fx/sfx_632.wav; MusyX Loop renders its four beeps)
     public static class ImporterVersions
     {
@@ -38,7 +53,7 @@ namespace MphRecomp.Import
             ["guns"] = 1,
             ["hd"] = 1,
             ["bodies"] = 2,
-            ["arenas"] = 9,
+            ["arenas"] = 20,
             ["music"] = 1,
         };
 

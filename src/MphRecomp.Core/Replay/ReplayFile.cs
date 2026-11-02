@@ -209,6 +209,11 @@ namespace MphRecomp.Replay
     //   until she lands, PlayerAiEdgeJump.EdgeHold); older files read it as off, so they play exactly.
     //   Format 74 adds each seat's MatchPlayer.ColourPick after BotEdgeHold (an sbyte per seat, -1 = auto: the lobby's colour
     //   pick, LookAlikes.CopyIndices); drawn only, so older files read them as auto and look as they did.
+    //   Format 75 adds the gameplay mods the match ran with after the ColourPicks: ModSeed (their
+    //   random streams' seed), then a count and per mod its id, version, files' sha256, settings and mod.save data (JSON)
+    //   as the match started. Playback needs the same mods (ReplayPlayer.CheckBeforeStart); older files read none.
+    //   Format 76: the same layout; homing shots turn at the game's rate, homing / 4 per frame, not MphRead's / 2
+    //   (Settings.VanillaHoming, PlayerEntity.HostVanillaHoming); older files read it as off, so they play exactly.
     //   Format 46: the same layout; an online host's lag compensation no longer shifts a homing beam (the Shock Coil, homing
     //   missiles) off its own target or Weavel's turret's shots, and shifts bombs, Lockjaw's lines + snare and the drone's laser
     //   (Settings.LagCompFix, PlayerEntity.HostLagFix);
@@ -220,7 +225,7 @@ namespace MphRecomp.Replay
     //   MatchSettings.Validate refuses at the start, so it saves the file and refuses to play it, never plays it wrong.
     public sealed class ReplayFile
     {
-        public const int FormatVersion = 74;
+        public const int FormatVersion = 76;
         // Bump when a code change alters how a match plays: an old replay then is refused instead of drifting.
         // (R2c: golden replays checked on every build say when.)
         // 2 (R1): matches play with Scene.HostDrawFreeSim (Spire's rocks placed whether or not a frame draws).
@@ -231,7 +236,10 @@ namespace MphRecomp.Replay
         //    and the morph's gun UpDown, no longer block the pickup's equip; owner QoL, PlayerProcess.cs).
         // 6 (2026-10-27): a morph ball under a ceiling keeps vanilla's 1x push-out (the 4x hack pushed Trace/Sylux through
         //    Data Shrine's ramp tunnels, PlayerCollision.cs); docs/ACCURACY.md A10.
-        public const int CurrentSimVersion = 6;
+        // 7 (2026-10-31): in an Echoes arena a face too steep to stand on pushes a player out sideways only (no lift up it,
+        //    PlayerCollision.cs; Mining Plaza's centre structure was climbable in jumps); steep = normal Y 0.1..0.5, or up to 0.85 on a face
+        //    that isn't Echoes floor material (Prime's floor rule; arenas importer 13).
+        public const int CurrentSimVersion = 7;
         private static ReadOnlySpan<byte> Magic => "MPHRPLY\0"u8;
 
         public int SimVersion { get; set; } = CurrentSimVersion;
@@ -269,6 +277,9 @@ namespace MphRecomp.Replay
         public int OwnSeat { get; set; } = -1;
         public List<ReplayNetEvent> NetEvents { get; } = new();
         public List<ReplayShotCheck> ShotChecks { get; } = new();
+        // format 75: the gameplay mods the match ran with (cosmetic mods aren't recorded), and their random seed
+        public List<ReplayMod> Mods { get; } = new();
+        public ulong ModSeed { get; set; }
         // a network input of another size than this build's (NetInput.RecordSize), or an event it doesn't know: refused by ReplayPlayer.CheckBeforeStart
         public bool OldNetInput { get; private set; }
 
@@ -379,6 +390,21 @@ namespace MphRecomp.Replay
                 w.Write(Settings.BotArriveTick ?? true); // format 72
                 w.Write(Settings.BotEdgeHold ?? true); // format 73: as MatchStart started it
                 foreach (MatchPlayer p in Settings.Players) w.Write((sbyte)Math.Clamp(p.ColourPick, -1, LookAlikes.Colours - 1)); // format 74
+                w.Write(ModSeed); // format 75
+                w.Write(Mods.Count);
+                foreach (ReplayMod m in Mods)
+                {
+                    w.Write(m.Id);
+                    w.Write(m.Version);
+                    w.Write(m.Sha);
+                    w.Write(m.Settings.Count);
+                    foreach (var kv in m.Settings)
+                    {
+                        w.Write(kv.Key);
+                        w.Write(kv.Value);
+                    }
+                    w.Write(m.Data);
+                }
                 w.Write(Steps.Count);
                 foreach (ReplayStep step in Steps)
                 {
@@ -551,6 +577,7 @@ namespace MphRecomp.Replay
             file.Settings.ContinuousHeadshots = format >= 38 ? null : false; // not written: on from format 38
             file.Settings.VanillaZoom = format >= 39 ? null : false; // not written: on from format 39
             file.Settings.ShockCoilGrace = format >= 40 ? null : false; // not written: on from format 40
+            file.Settings.VanillaHoming = format >= 76 ? null : false; // not written: on from format 76
             file.Settings.EchoesTurretBots = format >= 41 ? null : false; // not written: on from format 41
             file.Settings.RecolorPerSkin = format >= 43 ? null : false; // not written: on from format 43
             file.Settings.NoBallJump = format >= 44 ? null : false; // not written: on from format 44
@@ -665,6 +692,21 @@ namespace MphRecomp.Replay
                     int pick = r.ReadSByte();
                     p.ColourPick = pick >= 0 && pick < LookAlikes.Colours ? pick : -1;
                 }
+            if (format >= 75)
+            {
+                file.ModSeed = r.ReadUInt64();
+                int mods = r.ReadInt32();
+                if (mods < 0 || mods > 1000) throw new InvalidDataException("damaged replay file (mods)");
+                for (int i = 0; i < mods; i++)
+                {
+                    var m = new ReplayMod { Id = r.ReadString(), Version = r.ReadString(), Sha = r.ReadString() };
+                    int count = r.ReadInt32();
+                    if (count < 0 || count > 10000) throw new InvalidDataException("damaged replay file (mod settings)");
+                    for (int j = 0; j < count; j++) m.Settings[r.ReadString()] = r.ReadString();
+                    m.Data = r.ReadString();
+                    file.Mods.Add(m);
+                }
+            }
             steps = r.ReadInt32();
             // (each step is at least its 4-byte checksum: a count past what's left is a made-up file)
             if (steps < 0 || r.BaseStream.CanSeek && steps > (r.BaseStream.Length - r.BaseStream.Position) / 4)
@@ -753,6 +795,7 @@ namespace MphRecomp.Replay
             copy.ContinuousHeadshots = s.ContinuousHeadshots; // format 38 (not written)
             copy.VanillaZoom = s.VanillaZoom; // format 39 (not written)
             copy.ShockCoilGrace = s.ShockCoilGrace; // format 40 (not written)
+            copy.VanillaHoming = s.VanillaHoming; // format 76 (not written)
             copy.EchoesTurretBots = s.EchoesTurretBots; // format 41 (not written)
             copy.RecolorPerSkin = s.RecolorPerSkin; // format 43 (not written)
             copy.NoBallJump = s.NoBallJump; // format 44 (not written)
@@ -943,5 +986,17 @@ namespace MphRecomp.Replay
             }
             return ~crc;
         }
+    }
+    // a gameplay mod a match ran with (ReplayFile format 75): what playback needs to bring back the same mod
+    public sealed class ReplayMod
+    {
+        public string Id { get; set; } = "";
+        public string Version { get; set; } = "";
+        // sha256 of the mod's files (Mods/ModEntry.ComputeSha): playback refuses a changed mod
+        public string Sha { get; set; } = "";
+        // its settings' values as the match started
+        public SortedDictionary<string, string> Settings { get; } = new(StringComparer.Ordinal);
+        // its mod.save data as the match started (a JSON object)
+        public string Data { get; set; } = "{}";
     }
 }

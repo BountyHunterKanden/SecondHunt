@@ -88,6 +88,15 @@ namespace MphRecomp.Multiplayer
 
         public static readonly IReadOnlyList<Character> All = new[] { Samus, Trooper, DarkSamus, ZeroSuit, Sylux };
 
+        // the campaign's SAMUS SUIT row: Samus's own suits only, never another hunter (Beyond's Sylux had a guns/ folder), Dark
+        // Samus or the Zero Suit; those are new-file hunters
+        public static bool IsSamusSuit(string id) =>
+            id is "original" or "none"
+            || (TrophyRigs.TryHunterFor(id, out Hunter h) && h == Hunter.Samus
+                && !DarkSamus.Claims(id) && !ZeroSuit.Claims(id)
+                && !id.EndsWith("Rest", StringComparison.OrdinalIgnoreCase) && !id.EndsWith("Tpose", StringComparison.OrdinalIgnoreCase)
+                && !id.Equals("MP1FusionTubes", StringComparison.OrdinalIgnoreCase));
+
         // the character id a seat records (MatchPlayer.Character): set for the characters that aren't a hunter's own
         // (TROOPER, DARK SAMUS), null for a hunter in one of its own skins
         public static string? IdFor(Hunter hunter, string? skin) => Of(hunter, skin) is { HasOriginal: false } c ? c.Id : null;

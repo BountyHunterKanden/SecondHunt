@@ -103,6 +103,7 @@ namespace MphRecomp.Campaign
                 player.HostDroneBodySplash = settings.DroneBodySplash ?? true;
                 player.HostContinuousHeadshots = settings.ContinuousHeadshots ?? true;
                 player.HostShockCoilGrace = settings.ShockCoilGrace ?? true;
+                player.HostVanillaHoming = settings.VanillaHoming ?? true;
                 player.HostVanillaZoom = settings.VanillaZoom ?? true;
                 player.HostHoverWalk = Characters.IsDarkSamus(seat) && (settings.HoverWalk ?? true);
                 // her ball hop + Hyper Ball; null = on in a dev build, off in a public one (owner 2026-10-18: "I never wanted it

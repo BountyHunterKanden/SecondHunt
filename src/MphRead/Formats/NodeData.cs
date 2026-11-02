@@ -24,7 +24,7 @@ namespace MphRead.Formats
 
         public static NodeData ReadData(string path)
         {
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, path)));
+            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, Paths.Redirected(path))));
             ushort version = Read.SpanReadUshort(bytes, 0);
             if (version == 0)
             {
@@ -41,8 +41,9 @@ namespace MphRead.Formats
             int setIndexCount = header.IndexCount;
             // todo: when there are multiple sets and when the sets contain multiple lists,
             // we should allow toggling which one is displayed in the room (sub-volume display)
-            Debug.Assert(setIndexCount == 0 || setIndexCount == 1);
-            Debug.Assert(header.DataOffset == header.IndexOffset + 2);
+            // the retail files have 0 or 1 set bits; arenas we build for a changing room have more (ArenaNav.BuildSets)
+            Debug.Assert(setIndexCount <= 4);
+            Debug.Assert(header.DataOffset == header.IndexOffset + 2 * Math.Max(1, setIndexCount));
             var types = new HashSet<uint>();
             // track the minimum Offset1 so each data3's Offset1/Offset2 can be converted to an index
             uint min = UInt32.MaxValue;

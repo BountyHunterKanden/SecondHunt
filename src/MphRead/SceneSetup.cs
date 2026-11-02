@@ -1077,7 +1077,9 @@ namespace MphRead
             }
         }
 
-        private static void LoadItem(ItemType item, Scene scene)
+        // recomp: public so placed pickups (PlacedPickups.cs) load an item's effects too, not only its model: without it a
+        // placed Death Alt had no halo and a placed double damage no gun glow (the effects were never loaded, 2026-10-31)
+        public static void LoadItem(ItemType item, Scene scene)
         {
             if (item == ItemType.None)
             {

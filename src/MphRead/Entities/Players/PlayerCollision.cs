@@ -410,12 +410,16 @@ namespace MphRead.Entities
             }
         }
 
+        private readonly CollisionResult[] _checkResults = new CollisionResult[40];
+
         private void CheckCollision()
         {
             _standingEntCol = null;
             _collidedEntCol = null;
             _terrainDamage = false;
-            var results = new CollisionResult[40];
+            // reused + cleared (same contents as a fresh array): a new one per player per tick was ~1.4 MB/s of sim garbage with 7 bots
+            CollisionResult[] results = _checkResults;
+            Array.Clear(results);
             CollisionVolume altVolume = PlayerVolumes[(int)Hunter, 2];
             Vector3 point1;
             Vector3 point2;
@@ -606,6 +610,19 @@ namespace MphRead.Entities
                 TakeDamage(dmgRes.Damage, DamageFlags.IgnoreInvuln, direction: null, source: null);
             }
             _volume = CollisionVolume.Move(_volumeUnxf, Position);
+        }
+
+        // recomp: in an Echoes arena a face a player can't stand on: steeper than MPH's 0.5 floor slope but not a wall, or
+        // (Prime's rule) below a 0.85 slope without Echoes' floor material (CollisionFlags.Bit12, EchoesArena's import).
+        // Spire's ball climbs walls on purpose.
+        private bool EchoesSteep(in CollisionResult result)
+        {
+            if (!HostEchoesMoves || result.Field0 != 0 || (IsAltForm && Hunter == Hunter.Spire))
+            {
+                return false;
+            }
+            float y = result.Plane.Y;
+            return y >= 0.1f && (y <= 0.5f || y <= 0.85f && result.Flags.TestFlag(CollisionFlags.Bit12));
         }
 
         public void HandleCollision(CollisionResult result)
@@ -834,7 +851,20 @@ namespace MphRead.Entities
             }
             if (v2 > 0)
             {
-                if (result.Plane.Y < 0.1f && result.Plane.Y > -0.1f)
+                // recomp: in an Echoes arena a face too steep to stand on (normal Y 0.1..0.5) pushes out sideways only, like a
+                // wall. MPH's push-out along the slanted normal (and the speed bounced off it) lifted a player who kept pushing
+                // into it, so they climbed Mining Plaza's centre structure in jumps (owner 2026-10-31, sambot replay); MPH's
+                // own rooms barely have such faces. Spire's ball climbs walls on purpose and keeps the old response.
+                // Faces that aren't Echoes floor material count up to Prime's 0.85 floor slope (EchoesSteep).
+                Vector3 normal = result.Plane.Xyz;
+                float depth = v2;
+                if (EchoesSteep(result))
+                {
+                    float hMag = MathF.Sqrt(normal.X * normal.X + normal.Z * normal.Z);
+                    depth = v2 / hMag;
+                    normal = new Vector3(normal.X / hMag, 0, normal.Z / hMag);
+                }
+                if (normal.Y < 0.1f && normal.Y > -0.1f)
                 {
                     if (Cheats.WalkThroughWalls && !IsAltForm)
                     {
@@ -844,12 +874,12 @@ namespace MphRead.Entities
                     Flags1 |= PlayerFlags1.CollidingLateral;
                     if (HostWallCling)
                     {
-                        WallClingTouch(result.Plane.Xyz, face: result.Field0 == 0); // recomp: the Trooper's Wall Cling (PlayerWallCling.cs)
+                        WallClingTouch(normal, face: result.Field0 == 0); // recomp: the Trooper's Wall Cling (PlayerWallCling.cs)
                     }
                 }
                 // walking into a wall, jumping into a wall/ceiling, or landing/slopes/etc. -- update x/z
-                position.X += result.Plane.X * v2;
-                position.Z += result.Plane.Z * v2;
+                position.X += normal.X * depth;
+                position.Z += normal.Z * depth;
                 if (!v163 || !Flags1.TestFlag(PlayerFlags1.StandingPrevious))
                 {
                     // jumping into a wall/ceiling or landing/slopes/etc. -- update y
@@ -866,18 +896,18 @@ namespace MphRead.Entities
                     // tunnels (ceiling y 2.96) the 4x push shoved Trace's/Sylux's ball through the ramp below (player report
                     // 2026-10-27, docs/ACCURACY.md A10)
                     float factor = 1;
-                    if (result.Plane.Y > 0 && result.Plane.Y < 0.9f
-                        && (IsAltForm || result.Field0 != 0 || result.Plane.Y <= 0.5f))
+                    if (normal.Y > 0 && normal.Y < 0.9f
+                        && (IsAltForm || result.Field0 != 0 || normal.Y <= 0.5f))
                     {
                         factor = 0.5f / 2; // todo: FPS stuff
                     }
-                    else if (result.Plane.Y < 0 && !IsAltForm)
+                    else if (normal.Y < 0 && !IsAltForm)
                     {
                         factor = 2 * 2; // todo: FPS stuff
                     }
-                    position.Y += result.Plane.Y * v2 * factor;
+                    position.Y += normal.Y * depth * factor;
                 }
-                float dot = Vector3.Dot(Speed, result.Plane.Xyz);
+                float dot = Vector3.Dot(Speed, normal);
                 if (dot < 0)
                 {
                     // floor collision
@@ -910,13 +940,13 @@ namespace MphRead.Entities
                             Speed = Speed.AddX(axis.X * (-magSqr / 2)).AddZ(axis.Z * (-magSqr / 2));
                         }
                     }
-                    Speed += result.Plane.Xyz * -dot;
+                    Speed += normal * -dot;
                     if (!v163 && !IsAltForm && result.Field0 != 1)
                     {
                         float hMagSqr = Speed.X * Speed.X + Speed.Z * Speed.Z;
                         if (hMagSqr > 0)
                         {
-                            float div = (result.Plane.X * Speed.X + result.Plane.Z * Speed.Z) / MathF.Sqrt(hMagSqr);
+                            float div = (normal.X * Speed.X + normal.Z * Speed.Z) / MathF.Sqrt(hMagSqr);
                             if (div < 0)
                             {
                                 Speed *= div + 1;
@@ -1088,7 +1118,7 @@ namespace MphRead.Entities
                         Flags1 |= PlayerFlags1.OnLava;
                     }
                     // solid landing
-                    if (result.Field0 == 0 && result.Plane.Y > 0.5f)
+                    if (result.Field0 == 0 && result.Plane.Y > 0.5f && !EchoesSteep(result))
                     {
                         Flags1 |= PlayerFlags1.Standing;
                         _timeSinceStanding = 0;

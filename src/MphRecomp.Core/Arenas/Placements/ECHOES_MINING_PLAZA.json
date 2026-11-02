@@ -1,0 +1,509 @@
+{
+  "Room": "ECHOES MINING PLAZA",
+  "RoomId": 1007,
+  "Arena": "Mining Plaza",
+  "Saved": "2026-11-01 10:49:02",
+  "Pickups": [
+    {
+      "Item": "HealthMedium",
+      "Pos": [
+        -229,
+        -12.89,
+        48
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "HealthMedium",
+      "Pos": [
+        -185,
+        -10.35,
+        10
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "MissileSmall",
+      "Pos": [
+        -245,
+        -18.8,
+        28
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "MissileSmall",
+      "Pos": [
+        -208,
+        -16.76,
+        12
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "MissileSmall",
+      "Pos": [
+        -172,
+        -8.44,
+        48
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "UASmall",
+      "Pos": [
+        -197,
+        -8.32,
+        3
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -238,
+        -19.09,
+        17
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -187,
+        -15.89,
+        52
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "Imperialist",
+      "Pos": [
+        -202.949,
+        -8.462,
+        16.629
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -201.899,
+        -8.457,
+        15.677
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "PirateBlaster",
+      "Pos": [
+        -201.128,
+        -8.444,
+        43.178
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -199.364,
+        -8.353,
+        42.336
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "Battlehammer",
+      "Pos": [
+        -239.014,
+        -18.947,
+        15.697
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "Judicator",
+      "Pos": [
+        -195.399,
+        -17.379,
+        23.735
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -195.908,
+        -17.345,
+        21.656
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "Magmaul",
+      "Pos": [
+        -205.628,
+        -18.752,
+        55.622
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -207.702,
+        -18.696,
+        55.334
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "VoltDriver",
+      "Pos": [
+        -170.841,
+        -8.387,
+        34.91
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -171.278,
+        -8.338,
+        32.639
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "ShockCoil",
+      "Pos": [
+        -197.602,
+        -12.716,
+        60.186
+      ],
+      "RespawnSeconds": 5
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -195.822,
+        -12.908,
+        58.989
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "Deathalt",
+      "Pos": [
+        -195.943,
+        -17.392,
+        6.361
+      ],
+      "RespawnSeconds": 270
+    },
+    {
+      "Item": "MissileBig",
+      "Pos": [
+        -198.645,
+        -13.117,
+        65.249
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "HealthSmall",
+      "Pos": [
+        -174.253,
+        -18.848,
+        21.817
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "UASmall",
+      "Pos": [
+        -167.431,
+        -17.348,
+        32.506
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "MissileSmall",
+      "Pos": [
+        -176.094,
+        -15.896,
+        47.819
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "UABig",
+      "Pos": [
+        -174.309,
+        -8.437,
+        52.937
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "MissileBig",
+      "Pos": [
+        -230.495,
+        -12.805,
+        46.548
+      ],
+      "RespawnSeconds": 10
+    },
+    {
+      "Item": "UASmall",
+      "Pos": [
+        -236.305,
+        -15.871,
+        38.84
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "HealthSmall",
+      "Pos": [
+        -235.23,
+        -20.328,
+        37.652
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "HealthSmall",
+      "Pos": [
+        -203.359,
+        -18.476,
+        46.541
+      ],
+      "RespawnSeconds": 15
+    },
+    {
+      "Item": "HealthSmall",
+      "Pos": [
+        -210.364,
+        -17.054,
+        13.491
+      ],
+      "RespawnSeconds": 15
+    }
+  ],
+  "Crates": [],
+  "RemovedItems": [],
+  "RemovedCrates": [],
+  "Spawns": [
+    {
+      "Pos": [
+        -213.44,
+        -12.939,
+        35.03
+      ],
+      "Facing": [
+        -0.94,
+        0,
+        -0.34
+      ]
+    },
+    {
+      "Pos": [
+        -169.351,
+        -8.359,
+        52.722
+      ],
+      "Facing": [
+        -0.616,
+        0,
+        -0.788
+      ]
+    },
+    {
+      "Pos": [
+        -196.346,
+        -18.625,
+        58.912
+      ],
+      "Facing": [
+        -0.452,
+        0,
+        -0.892
+      ]
+    },
+    {
+      "Pos": [
+        -247.685,
+        -17.396,
+        21.763
+      ],
+      "Facing": [
+        0.996,
+        0,
+        0.085
+      ]
+    },
+    {
+      "Pos": [
+        -189.715,
+        -8.367,
+        2.312
+      ],
+      "Facing": [
+        -0.499,
+        0,
+        0.866
+      ]
+    },
+    {
+      "Pos": [
+        -208.907,
+        -13.303,
+        66.956
+      ],
+      "Facing": [
+        0.533,
+        0,
+        -0.846
+      ]
+    },
+    {
+      "Pos": [
+        -203.012,
+        -17.186,
+        9.177
+      ],
+      "Facing": [
+        -0.167,
+        0,
+        0.986
+      ]
+    },
+    {
+      "Pos": [
+        -165.28,
+        -17.368,
+        38.185
+      ],
+      "Facing": [
+        -0.752,
+        0,
+        -0.66
+      ]
+    }
+  ],
+  "JumpPads": [
+    {
+      "Pos": [
+        -173.433,
+        -8.405,
+        33.814
+      ],
+      "Target": [
+        -200.364,
+        -8.566,
+        16.937
+      ]
+    },
+    {
+      "Pos": [
+        -202.623,
+        -13.055,
+        65.797
+      ],
+      "Target": [
+        -173.433,
+        -8.405,
+        33.814
+      ]
+    },
+    {
+      "Pos": [
+        -222.708,
+        -15.806,
+        18.236
+      ],
+      "Target": [
+        -202.623,
+        -13.055,
+        65.797
+      ]
+    }
+  ],
+  "Modes": [
+    {
+      "Kind": "Capture",
+      "Team": 0,
+      "Pos": [
+        -174.884,
+        -20.255,
+        35.107
+      ]
+    },
+    {
+      "Kind": "Capture",
+      "Team": 1,
+      "Pos": [
+        -232.695,
+        -20.333,
+        28.326
+      ]
+    },
+    {
+      "Kind": "Drop",
+      "Team": 0,
+      "Pos": [
+        -171.682,
+        -8.475,
+        45.481
+      ]
+    },
+    {
+      "Kind": "Octolith",
+      "Team": 0,
+      "Pos": [
+        -245.096,
+        -17.394,
+        23.603
+      ]
+    },
+    {
+      "Kind": "Node",
+      "Team": 0,
+      "Pos": [
+        -206.347,
+        -13.109,
+        63.9
+      ]
+    },
+    {
+      "Kind": "Node",
+      "Team": 0,
+      "Pos": [
+        -193.543,
+        -8.366,
+        4.674
+      ]
+    },
+    {
+      "Kind": "Node",
+      "Team": 0,
+      "Pos": [
+        -210.976,
+        -20.551,
+        32.556
+      ]
+    },
+    {
+      "Kind": "Defend",
+      "Team": 0,
+      "Pos": [
+        -202.552,
+        -12.073,
+        28.481
+      ]
+    }
+  ]
+}

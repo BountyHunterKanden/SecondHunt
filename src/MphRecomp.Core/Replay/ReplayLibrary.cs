@@ -25,6 +25,7 @@ namespace MphRecomp.Replay
         // name), then drops the oldest unpinned ones past KeepRecent. Returns the new file's path.
         public static string Save(string dataDir, ReplayFile file, DateTime when)
         {
+            ReplayData.ReplaysRoot = dataDir;
             string dir = RecentDir(dataDir);
             Directory.CreateDirectory(dir);
             string arena = MphRecomp.Multiplayer.MatchArenas.Find(file.Settings.Arena)?.InGameName ?? file.Settings.Arena;
@@ -127,6 +128,7 @@ namespace MphRecomp.Replay
 
         public static IReadOnlyList<ReplayInfo> List(string dataDir)
         {
+            ReplayData.ReplaysRoot = dataDir;
             var list = new List<ReplayInfo>();
             foreach ((string path, bool pinned) in Recent(dataDir).Select(p => (p, false)).Concat(Pinned(dataDir).Select(p => (p, true))))
             {
@@ -176,6 +178,7 @@ namespace MphRecomp.Replay
                 {
                     refused = ReplayData.Compare(header.Data, ReplayData.Fingerprint(header.Settings.Arena, header.Settings.Mode));
                 }
+                refused ??= ReplayVerdict.Refused(path, header);
                 return new ReplayInfo(path, pinned, when, title, header, steps, refused);
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)

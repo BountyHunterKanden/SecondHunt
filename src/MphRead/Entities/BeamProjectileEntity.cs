@@ -1619,7 +1619,12 @@ namespace MphRead.Entities
             ushort speedInterpolation = weapon.SpeedInterpolations[charged ? 1 : 0];
             float gravity = GetAmount(weapon.UnchargedGravity, weapon.MinChargeGravity, weapon.ChargedGravity) / 4096f;
             Vector3 acceleration = new Vector3(0, gravity, 0) / 2;
-            float homing = GetAmount(weapon.UnchargedHoming, weapon.MinChargeHoming, weapon.ChargedHoming) / 4096f / 2;
+            // homing caps a per-tick change of velocity, like gravity, so it scales by 1/4 at 60 Hz (the game steers once per
+            // 30 Hz tick by up to the raw spawn value). The old 1/2 turned homing shots twice as fast as the game. Off: replays
+            // before format 76
+            bool vanillaHoming = owner is not PlayerEntity ownerHm || ownerHm.HostVanillaHoming;
+            float homing = GetAmount(weapon.UnchargedHoming, weapon.MinChargeHoming, weapon.ChargedHoming) / 4096f
+                / (vanillaHoming ? 4 : 2);
             if (homing > 0)
             {
                 flags |= BeamFlags.Homing;
