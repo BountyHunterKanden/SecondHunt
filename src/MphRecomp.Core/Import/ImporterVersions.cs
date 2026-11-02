@@ -45,6 +45,7 @@ namespace MphRecomp.Import
     //   arenas    18  2026-11-01: Mining Plaza's bot graph rides the shipped placement file's jump pads (and its spawns anchor it)
     //   arenas    19  2026-11-01: Mining Plaza's graph adds node data sets for octolith carriers, never routed over the placed jump pads
     //   arenas    20  2026-11-01: Mining Plaza's sand crates baked at 30 fps (was 12): smoother sway and flinch
+    //   arenas    21  2026-11-01: the sand crates' effects import (vector KEYF keys were unreadable, so the crate and pillar effects were left half written)
     //   bodies     2  2026-10-19: the Scout Drone bodies' Prime deploy alert (fx/sfx_632.wav; MusyX Loop renders its four beeps)
     public static class ImporterVersions
     {
@@ -53,7 +54,7 @@ namespace MphRecomp.Import
             ["guns"] = 1,
             ["hd"] = 1,
             ["bodies"] = 2,
-            ["arenas"] = 20,
+            ["arenas"] = 21,
             ["music"] = 1,
         };
 

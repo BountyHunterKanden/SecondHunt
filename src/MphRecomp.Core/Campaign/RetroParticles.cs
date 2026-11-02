@@ -103,6 +103,7 @@ namespace MphRecomp.Campaign
         readonly Part _part;
         readonly Random _rand;
         readonly List<Particle> _live = new();
+        readonly Stack<Particle> _free = new(); // spent particles for the next ones (each held a dictionary: garbage per spawn)
         readonly List<RetroParticleSystem> _kids = new();
         readonly RetroParticleSystem? _parent;
         float _remainder;
@@ -204,6 +205,7 @@ namespace MphRecomp.Campaign
                 if (p.Age > p.Life)
                 {
                     _live.RemoveAt(i);
+                    Free(p);
                     continue;
                 }
                 p.Vel += ModVelocity(p);
@@ -224,7 +226,7 @@ namespace MphRecomp.Campaign
 
         void Emit()
         {
-            var p = new Particle();
+            Particle p = NewParticle();
             var c = new Ctx(p, _frame, 1);
             p.Life = Math.Max(1, EvalInt(_part["LTME"], c, 1));
             c.Life = p.Life;
@@ -291,7 +293,21 @@ namespace MphRecomp.Campaign
         // places itself (Corruption's PhazonBallContactPoints has no rate of its own and takes its life from code)
         public void EmitAt(Vector3 at, int life)
         {
-            if (_live.Count < SysInt("MAXP", 256)) _live.Add(new Particle { Pos = at, Life = Math.Max(1, life) });
+            if (_live.Count >= SysInt("MAXP", 256)) return;
+            Particle p = NewParticle();
+            p.Pos = at;
+            p.Life = Math.Max(1, life);
+            _live.Add(p);
+        }
+
+        Particle NewParticle() => _free.Count > 0 ? _free.Pop() : new Particle();
+
+        void Free(Particle p)
+        {
+            p.Pos = p.Vel = Vector3.Zero;
+            p.Age = p.Life = 0;
+            p.Init.Clear();
+            _free.Push(p);
         }
 
         Vector3 RandomDir()
@@ -304,18 +320,19 @@ namespace MphRecomp.Campaign
             }
         }
 
+        static readonly string[] AdvTags = { "ADV1", "ADV2", "ADV3", "ADV4", "ADV5", "ADV6", "ADV7", "ADV8" };
+
         static readonly string[] ModTags = { "PSVM", "VEL1", "VEL2", "VEL3", "VEL4" };
 
         // PSVM / VEL1-4: the constant, gravity and wind kinds (the others are left out)
         Vector3 ModVelocity(Particle p)
         {
             Vector3 d = Vector3.Zero;
-            Ctx? c = null;
+            Ctx c = Of(p);
             foreach (string tag in ModTags)
             {
                 Part.Elem? m = _part[tag];
                 if (m == null) continue;
-                c ??= Of(p);
                 // CHAN (CMVETimeChain): the first until the switch frame, then the second
                 for (int n = 0; _part.Echoes && m != null && m.Kind == "CHAN" && n < 8; n++) m = c.Frame < EvalInt(m.Kid(2), c, 0) ? m.Kid(0) : m.Kid(1);
                 if (m == null) continue;
@@ -476,14 +493,16 @@ namespace MphRecomp.Campaign
         }
 
         // KEYF (Corruption): its keys looked up by the driver's value (the header's value at the last key)
-        float KeyedBy(Part.Elem e, Ctx c)
+        // (a vector's keys: `width` floats each, `comp` the one wanted)
+        float KeyedBy(Part.Elem e, Ctx c, int width = 1, int comp = 0)
         {
             float[] k = e.Keys!;
-            if (k.Length == 0) return 0;
-            float span = e.F > 1e-6f ? e.F : k.Length - 1;
-            float x = Math.Clamp(EvalReal(e.Kid(0), c, 0) / span, 0, 1) * (k.Length - 1);
-            int i = Math.Min((int)x, k.Length - 1);
-            return i >= k.Length - 1 ? k[^1] : Lerp(k[i], k[i + 1], x - i);
+            int n = k.Length / width;
+            if (n == 0) return 0;
+            float span = e.F > 1e-6f ? e.F : n - 1;
+            float x = Math.Clamp(EvalReal(e.Kid(0), c, 0) / span, 0, 1) * (n - 1);
+            int i = Math.Min((int)x, n - 1);
+            return i >= n - 1 ? k[(n - 1) * width + comp] : Lerp(k[i * width + comp], k[(i + 1) * width + comp], x - i);
         }
 
         // the cycle's frames for one particle: Metaforce's GetValueUV evaluates it each time, at the particle's age and
@@ -503,13 +522,14 @@ namespace MphRecomp.Campaign
 
         // Frame: the particle's age (system-level values: the system's frame); Life: the particle's lifetime; Emitter:
         // the system's frame where a frame-keyed KEYE reads it (Echoes' effects; -1: Frame)
-        sealed class Ctx
+        // (a struct: one per particle per pass was most of the Odin's Mining Plaza effect garbage, 2026-11-01)
+        struct Ctx
         {
             public readonly Particle? P;    // null: a system-level value
             public readonly int Frame;
             public int Life;
-            public int Emitter = -1;
-            public Ctx(Particle? p, int frame, int life) { P = p; Frame = frame; Life = life; }
+            public int Emitter;
+            public Ctx(Particle? p, int frame, int life) { P = p; Frame = frame; Life = life; Emitter = -1; }
         }
 
         // a particle's context. Retro's frame-keyed KEYE (CREKeyframeEmitter, not percent) reads the emitter's own time
@@ -525,11 +545,17 @@ namespace MphRecomp.Campaign
 
         static float Lerp(float a, float b, float t) => a + (b - a) * t;
 
-        // IRND: once per particle (system-level: each time)
-        float Initial(Part.Elem e, Ctx c, Func<float> make)
+        // IRND: once per particle (system-level: each time): the particle's kept value, else the caller works one out and
+        // keeps it (no Func: a lambda capturing the Ctx parameter allocated a closure on every EvalReal call)
+        static bool HasInitial(Part.Elem e, Ctx c, out float v)
         {
-            if (c.P == null) return make();
-            if (!c.P.Init.TryGetValue(e, out float v)) c.P.Init[e] = v = make();
+            v = 0;
+            return c.P != null && c.P.Init.TryGetValue(e, out v);
+        }
+
+        static float KeepInitial(Part.Elem e, Ctx c, float v)
+        {
+            if (c.P != null) c.P.Init[e] = v;
             return v;
         }
 
@@ -576,7 +602,7 @@ namespace MphRecomp.Campaign
                 case "IRND":
                 {
                     int a = EvalInt(e.Kid(0), c, 0), b = EvalInt(e.Kid(1), c, 0);
-                    return (int)Initial(e, c, () => a + (int)(Rnd() * (b - a + 1)));
+                    return (int)(HasInitial(e, c, out float iv) ? iv : KeepInitial(e, c, a + (int)(Rnd() * (b - a + 1))));
                 }
                 case "ADD_": return EvalInt(e.Kid(0), c, 0) + EvalInt(e.Kid(1), c, 0);
                 case "SUB_": return EvalInt(e.Kid(0), c, 0) - EvalInt(e.Kid(1), c, 0);
@@ -606,7 +632,7 @@ namespace MphRecomp.Campaign
                 case "IRND":
                 {
                     float a = EvalReal(e.Kid(0), c, 0), b = EvalReal(e.Kid(1), c, 0);
-                    return Initial(e, c, () => Lerp(a, b, Rnd()));
+                    return HasInitial(e, c, out float iv) ? iv : KeepInitial(e, c, Lerp(a, b, Rnd()));
                 }
                 case "LFTW": case "ISWT":
                     return Lerp(EvalReal(e.Kid(0), c, 0), EvalReal(e.Kid(1), c, 0), Math.Min(1f, c.Frame / (float)Math.Max(1, c.Life)));
@@ -632,11 +658,11 @@ namespace MphRecomp.Campaign
                 case "CHAN" when _part.Echoes: return c.Frame < EvalInt(e.Kid(2), c, 0) ? EvalReal(e.Kid(0), c, 0) : EvalReal(e.Kid(1), c, 0);
                 // Corruption
                 case "KEYF": return KeyedBy(e, c);
-                case "KPIN": { Part.Elem? k = e.Kid(0); return Initial(e, c, () => EvalReal(k, c, 0)); } // its value at birth
+                case "KPIN": return HasInitial(e, c, out float kv) ? kv : KeepInitial(e, c, EvalReal(e.Kid(0), c, 0)); // its value at birth
                 case "GTCP": return LiveParticles;
                 // a particle's advanced value n (ADVn, kept per particle: its IRNDs once at birth)
                 case "PAP1": case "PAP2": case "PAP3": case "PAP4": case "PAP5": case "PAP6": case "PAP7": case "PAP8":
-                    return c.P != null && _part["ADV" + e.Kind[3]] is Part.Elem adv ? EvalReal(adv, c, 0) : 0;
+                    return c.P != null && _part[AdvTags[e.Kind[3] - '1']] is Part.Elem adv ? EvalReal(adv, c, 0) : 0;
             }
             return dflt;
         }
@@ -648,6 +674,7 @@ namespace MphRecomp.Campaign
             {
                 case "CNST": return new Vector3(EvalReal(e.Kid(0), c, 0), EvalReal(e.Kid(1), c, 0), EvalReal(e.Kid(2), c, 0));
                 case "KEYE": case "KEYP": return new Vector3(Keyed(e, c, 3, 0), Keyed(e, c, 3, 1), Keyed(e, c, 3, 2));
+                case "KEYF": return new Vector3(KeyedBy(e, c, 3, 0), KeyedBy(e, c, 3, 1), KeyedBy(e, c, 3, 2));
                 case "ADD_": return EvalVec(e.Kid(0), c) + EvalVec(e.Kid(1), c);
                 case "SUB_": return EvalVec(e.Kid(0), c) - EvalVec(e.Kid(1), c);
                 case "MULT": return EvalVec(e.Kid(0), c) * EvalVec(e.Kid(1), c);

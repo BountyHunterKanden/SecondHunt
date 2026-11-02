@@ -432,6 +432,7 @@ internal sealed partial class CampaignRenderer
         TickBlasterFx(); // the Pirate Blaster's shots in Prime 1's look (CampaignRenderer.BlasterFx.cs; its systems step in TickDroneFx)
         TickHyperBeamFx(); // the Hyper Beam's shots in Corruption's look (CampaignRenderer.HyperBeamFx.cs; its systems step in TickDroneFx)
         TickTurretFx(); // Shooting Gallery turret's Echoes effects (CampaignRenderer.TurretFx.cs; its systems step in TickDroneFx)
+        TickPillarFx(); // Mining Plaza's collapsing pillars in Echoes' look and sound (CampaignRenderer.PillarFx.cs; its systems step in TickDroneFx)
         TickDroneFx(); // the Scout Drone's Prime 1 effects (CampaignRenderer.DroneFx.cs)
         TickDroneFallback(); // ... or MPH's own where the import has none (CampaignRenderer.DroneFallback.cs)
         ChainHyperBeamImpact(); // the Hyper Beam's hits (after the two above set HostImpact, before the Paralyzer chains in)

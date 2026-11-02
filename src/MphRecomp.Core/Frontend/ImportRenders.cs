@@ -94,6 +94,9 @@ namespace MphRecomp.Frontend
         {
             string key = "arena " + name;
             if (s_known.TryGetValue(key, out string? known)) return known.Length > 0 ? known : null;
+            // (registered first: right after an import, or before the multiplayer menu ran MatchArenas.All, the room isn't yet
+            // and its picture was remembered as none until the app restarted, owner 2026-11-01)
+            MphRecomp.Arenas.EchoesArena.EnsureRegistered();
             MphRecomp.Arenas.EchoesArena.Def? def = MphRecomp.Arenas.EchoesArena.Find(name);
             string? dir = def == null ? null : MphRecomp.Arenas.EchoesArena.HdDir(def.Room);
             string? file = dir == null ? null : Path.Combine(dir, MphRecomp.Arenas.ArenaThumbnail.FileName);

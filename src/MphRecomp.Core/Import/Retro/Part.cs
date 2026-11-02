@@ -225,13 +225,14 @@ namespace MphRecomp.Import.Retro
             }
 
             // KEYF (Corruption): keys looked up by a driver element's value: a header (26 bytes; its last float = the
-            // driver value at the last key), the key count, the keys (floats, even in an int slot), then the driver
-            Elem KeyF(Cat c)
+            // driver value at the last key), the key count, the keys (floats, even in an int slot; a vector's 3 per key),
+            // then the driver
+            Elem KeyF(Cat c, int width = 1)
             {
                 int st = O, hl = 0x16;
                 for (int h = 0x14; h <= 0x22; h += 2)
                 {
-                    int n0 = Be.I32(_b, st + h), end = st + h + 4 + 4 * n0;
+                    int n0 = Be.I32(_b, st + h), end = st + h + 4 + 4 * n0 * width;
                     if (n0 > 0 && n0 < 5000 && end + 4 <= _b.Length && IsTag(end))
                     {
                         hl = h;
@@ -241,8 +242,8 @@ namespace MphRecomp.Import.Retro
                 var e = new Elem { Cat = c, Kind = "KEYF", F = Be.F32(_b, st + hl - 4) };
                 O = st + hl;
                 int n = I32();
-                e.Keys = new float[n];
-                for (int i = 0; i < n; i++) e.Keys[i] = F32();
+                e.Keys = new float[n * width];
+                for (int i = 0; i < e.Keys.Length; i++) e.Keys[i] = F32();
                 e.Kids = new[] { Real() };
                 return e;
             }
@@ -355,6 +356,7 @@ namespace MphRecomp.Import.Retro
                     case "PLOC": case "PLCO": case "PVEL": case "PSOF": case "PSOU": case "PSOR": case "PSTR": return E(Cat.Vector, k);
                     case "CTVC": return E(Cat.Vector, k, Color());
                     case "RNDV" when Ext: return E(Cat.Vector, k, Real());
+                    case "KEYF" when Ext: return KeyF(Cat.Vector, 3);
                 }
                 throw new InvalidDataException($"vector element {k} at {O - 4:x} is not known");
             }
