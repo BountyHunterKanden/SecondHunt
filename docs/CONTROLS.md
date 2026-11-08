@@ -1,4 +1,5 @@
-<p><img src="images/hy-h2-controls.png" width="100%" alt="Controls"></p>
+<a name="controls"></a>
+<p><a href="#controls"><img src="images/hy-h2-controls.webp" width="100%" alt="Controls"></a></p>
 
 These are the defaults. Change them under OPTIONS > CONTROLS (or SECOND HUNT SETTINGS > CONTROLS). The sub-tabs are
 BUTTONS, AIM, GYRO and TOUCH, and the last two only show on devices that have them. On a PC, the CONTROLS FOR row

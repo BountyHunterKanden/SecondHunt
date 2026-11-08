@@ -1,4 +1,5 @@
-<p><img src="images/hy-h2-acknowledgements.png" width="100%" alt="Acknowledgements"></p>
+<a name="acknowledgements"></a>
+<p><a href="#acknowledgements"><img src="images/hy-h2-acknowledgements.webp" width="100%" alt="Acknowledgements"></a></p>
 
 Second Hunt is built on **[MphRead](https://github.com/NoneGiven/MphRead)** by NoneGiven, a C# recreation of
 _Metroid Prime Hunters_ from reverse engineering. None of this would exist without it.

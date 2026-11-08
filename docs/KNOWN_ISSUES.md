@@ -1,4 +1,5 @@
-<p><img src="images/hy-h2-known-issues-and-plans.png" width="100%" alt="Known issues and plans"></p>
+<a name="known-issues-and-plans"></a>
+<p><a href="#known-issues-and-plans"><img src="images/hy-h2-known-issues-and-plans.webp" width="100%" alt="Known issues and plans"></a></p>
 
 - [Missing for now](#missing-for-now)
 - [Multiplayer](#multiplayer)

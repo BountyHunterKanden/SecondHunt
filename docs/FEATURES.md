@@ -1,4 +1,5 @@
-<p><img src="images/hy-h2-features.png" width="100%" alt="Features"></p>
+<a name="features"></a>
+<p><a href="#features"><img src="images/hy-h2-features.webp" width="100%" alt="Features"></a></p>
 
 Everything Second Hunt adds to _Metroid Prime Hunters_. The short version is on the [front page](../README.md).
 Anything from the Prime games needs your own disc, imported from OPTIONS > SECOND HUNT SETTINGS > IMPORT GAMES.

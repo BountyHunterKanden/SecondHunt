@@ -23,9 +23,10 @@ Nintendo.
 
 <p align="center"><a href="https://github.com/BountyHunterKanden/SecondHunt/releases/latest"><img src="docs/images/hy-download.png" width="480" alt="Download the latest release"></a><br>Android APK or Windows zip</p>
 
-https://github.com/user-attachments/assets/8422931f-ccab-4233-9b66-8d18b16d5642
+<p align="center"><a href="https://github.com/user-attachments/assets/8422931f-ccab-4233-9b66-8d18b16d5642"><img src="docs/images/reel.webp" width="640" alt="Second Hunt gameplay"></a></p>
 
-<p><img src="docs/images/hy-h2-contents.png" width="100%" alt="Contents"></p>
+<a name="contents"></a>
+<p><a href="#contents"><img src="docs/images/hy-h2-contents.webp" width="100%" alt="Contents"></a></p>
 
 
 - [Getting started](#getting-started)
@@ -42,7 +43,7 @@ More pages: [Features](https://github.com/BountyHunterKanden/SecondHunt/blob/mas
 [Acknowledgements](https://github.com/BountyHunterKanden/SecondHunt/blob/master/docs/ACKNOWLEDGEMENTS.md)
 
 <a name="getting-started"></a>
-<p><img src="docs/images/hy-h2-getting-started.png" width="100%" alt="Getting started"></p>
+<p><a href="#getting-started"><img src="docs/images/hy-h2-getting-started.webp" width="100%" alt="Getting started"></a></p>
 
 
 **Android** (Android 8.0 or newer with OpenGL ES 3.0. A controller is recommended, but touch works too.)
@@ -65,11 +66,11 @@ kept. Firewall help, portable mode and more are on the
 [installing page](https://github.com/BountyHunterKanden/SecondHunt/blob/master/docs/INSTALLING.md).
 
 <a name="features"></a>
-<p><img src="docs/images/hy-h2-features.png" width="100%" alt="Features"></p>
+<p><a href="#features"><img src="docs/images/hy-h2-features.webp" width="100%" alt="Features"></a></p>
 
 
 <a name="echoes-arenas-with-echoes-own-lighting"></a>
-<p><img src="docs/images/hy-h3-echoes-arenas-with-echoes-own-lighting.png" width="100%" alt="Echoes arenas, with Echoes' own lighting"></p>
+<p><a href="#echoes-arenas-with-echoes-own-lighting"><img src="docs/images/hy-h3-echoes-arenas-with-echoes-own-lighting.png" width="100%" alt="Echoes arenas, with Echoes' own lighting"></a></p>
 
 
 Fight in _Metroid Prime 2: Echoes_ arenas made from your own disc: Sidehopper Station, Spires, Crossfire Chaos,
@@ -90,7 +91,7 @@ _Echoes_' campaign into a full arena, with its doors sealed shut, new pickups an
 plaza.
 
 <a name="new-hunters"></a>
-<p><img src="docs/images/hy-h3-new-hunters.png" width="100%" alt="New hunters"></p>
+<p><a href="#new-hunters"><img src="docs/images/hy-h3-new-hunters.png" width="100%" alt="New hunters"></a></p>
 
 
 - **The Trooper** from _Metroid Prime_: a Space Pirate with four skins, a wall cling and a Scout Drone alt form. His
@@ -110,7 +111,7 @@ plaza.
 </p>
 
 <a name="online-for-up-to-8-players"></a>
-<p><img src="docs/images/hy-h3-online-for-up-to-8-players.png" width="100%" alt="Online, for up to 8 players"></p>
+<p><a href="#online-for-up-to-8-players"><img src="docs/images/hy-h3-online-for-up-to-8-players.png" width="100%" alt="Online, for up to 8 players"></a></p>
 
 
 - **8 players in every mode**, any mix of people and bots. Matches of 4 or fewer play exactly like the original.
@@ -127,7 +128,7 @@ plaza.
 - **STREAMING** switches hide your IP address, name and friend code on screen
 
 <a name="and-more"></a>
-<p><img src="docs/images/hy-h3-and-more.png" width="100%" alt="And more"></p>
+<p><a href="#and-more"><img src="docs/images/hy-h3-and-more.png" width="100%" alt="And more"></a></p>
 
 
 - **The whole campaign**, from the opening to Gorea, with the game's own menus, gunship, cutscenes, scans and both
@@ -146,7 +147,7 @@ plaza.
   against it and fixed
 
 <a name="in-the-works"></a>
-<p><img src="docs/images/hy-h3-in-the-works.png" width="100%" alt="In the works"></p>
+<p><a href="#in-the-works"><img src="docs/images/hy-h3-in-the-works.png" width="100%" alt="In the works"></a></p>
 
 
 - **_First Hunt_**, the demo that came with the DS, as its own mode from your own cart: its menus, the Regulator and
@@ -167,7 +168,7 @@ Everything in detail: [Features](https://github.com/BountyHunterKanden/SecondHun
 > projects with other players! [Click here to join!](https://discord.gg/WkvJ5ddjye)
 
 <a name="known-issues"></a>
-<p><img src="docs/images/hy-h2-known-issues.png" width="100%" alt="Known issues"></p>
+<p><a href="#known-issues"><img src="docs/images/hy-h2-known-issues.webp" width="100%" alt="Known issues"></a></p>
 
 
 - Only USA ROMs (1.0 and 1.1) work for now.
@@ -179,7 +180,7 @@ The full list, and what's planned next:
 [Known issues and plans](https://github.com/BountyHunterKanden/SecondHunt/blob/master/docs/KNOWN_ISSUES.md)
 
 <a name="help-and-bug-reports"></a>
-<p><img src="docs/images/hy-h2-help-and-bug-reports.png" width="100%" alt="Help and bug reports"></p>
+<p><a href="#help-and-bug-reports"><img src="docs/images/hy-h2-help-and-bug-reports.webp" width="100%" alt="Help and bug reports"></a></p>
 
 
 If the game crashes, go to SECOND HUNT SETTINGS > APP > HELP > SHARE CRASH LOG (OPEN CRASH LOG on Windows) and attach
@@ -188,14 +189,14 @@ device and what you were doing. It has no personal data in it. For a bad online 
 (SAVE LOG on Windows) sends the game's log. You can also ask on the Discord above.
 
 <a name="credits"></a>
-<p><img src="docs/images/hy-h2-credits.png" width="100%" alt="Credits"></p>
+<p><a href="#credits"><img src="docs/images/hy-h2-credits.webp" width="100%" alt="Credits"></a></p>
 
 
 Second Hunt is built on **[MphRead](https://github.com/NoneGiven/MphRead)** by NoneGiven, a C# recreation of the game
 from reverse engineering.
 
 <a name="thanks"></a>
-<p><img src="docs/images/hy-h3-thanks.png" width="100%" alt="Thanks"></p>
+<p><a href="#thanks"><img src="docs/images/hy-h3-thanks.png" width="100%" alt="Thanks"></a></p>
 
 
 Second Hunt wouldn't be where it is without these people:
@@ -221,7 +222,7 @@ Second Hunt wouldn't be where it is without these people:
   replays, screenshots and videos. Second Hunt is a lot better for it.
 
 <a name="upstream-projects"></a>
-<p><img src="docs/images/hy-h3-upstream-projects.png" width="100%" alt="Upstream projects"></p>
+<p><a href="#upstream-projects"><img src="docs/images/hy-h3-upstream-projects.png" width="100%" alt="Upstream projects"></a></p>
 
 
 Second Hunt also uses code and file format research from these projects:

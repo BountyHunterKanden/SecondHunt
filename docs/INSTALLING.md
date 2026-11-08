@@ -1,4 +1,5 @@
-<p><img src="images/hy-h2-installing.png" width="100%" alt="Installing"></p>
+<a name="installing"></a>
+<p><a href="#installing"><img src="images/hy-h2-installing.webp" width="100%" alt="Installing"></a></p>
 
 - [Android](#android)
 - [Windows](#windows)
