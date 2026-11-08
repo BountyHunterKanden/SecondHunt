@@ -14,6 +14,7 @@ also read it in the app, under SECOND HUNT SETTINGS > APP > HELP > CREDITS.
   compensation rewind.
 - **Limoki**, for the low-poly Dark Samus and her morph ball. Dark Samus seats wear them when no Dark Samus is
   imported. The app builds them from your own game files plus Limoki's edits, so none of the game's art ships with it.
+  Limoki also helped with the Second Hunt logo.
 - **Everyone who opened an issue on GitHub** that has since been fixed or added:
   - [@MusicGoat91](https://github.com/MusicGoat91): QUIT SECOND HUNT? on the title screen
     ([#3](https://github.com/BountyHunterKanden/SecondHunt/issues/3)), typing on the on-screen keyboards with a PC

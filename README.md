@@ -207,7 +207,7 @@ Second Hunt wouldn't be where it is without these people:
   and a longer lag compensation rewind.
 - **Limoki**, for the low-poly Dark Samus model that Dark Samus seats wear when no Dark Samus is imported, and the
   morph ball to match. The app builds them from your own game files plus Limoki's edits, so none of the
-  game's art ships with it.
+  game's art ships with it. Limoki also helped with the Second Hunt logo.
 - **Everyone who reported issues on GitHub** that have since been fixed or added:
   - [@MusicGoat91](https://github.com/MusicGoat91): QUIT SECOND HUNT? on the title screen ([#3](https://github.com/BountyHunterKanden/SecondHunt/issues/3)),
     typing on the on-screen keyboards with a PC keyboard ([#4](https://github.com/BountyHunterKanden/SecondHunt/issues/4)), and side mouse buttons repeating
