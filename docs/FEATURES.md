@@ -21,8 +21,8 @@ Nothing from any game ships with Second Hunt.
 - _Echoes_ arenas from your own _Metroid Prime 2: Echoes_ disc: Sidehopper Station, Spires, Crossfire Chaos, Pipeline,
   Spider Complex and Shooting Gallery, in every mode
 - Drawn like _Echoes_, in HD, with its real lighting, materials, effects, glass, water and skies
-- Played like _Echoes_, with double jump, Gravity Boost, swimming in Pipeline's water, jump pads that launch you across
-  the map, and each arena's own music
+- Played like _Echoes_, with double jump, Gravity Boost in Pipeline's water, jump pads that replace morph ball
+  cannons, and _Echoes_' multiplayer music
 - Shooting Gallery's turret works just like it does in _Echoes_. Climb in and fire on the arena, or roll into the slot
   behind it in any alt form and bomb it.
 - Mining Plaza, a brand new arena made from the Mining Plaza room in _Echoes_' campaign, with its doors sealed, new
@@ -40,7 +40,7 @@ Nothing from any game ships with Second Hunt.
 - Sylux in his _Metroid Prime 4: Beyond_ suit, with his own arm cannon
 - Flourishes when hunters stand still. Sylux has two.
 - Stand-ins for players who haven't imported a hunter. They still see the Trooper in his skin's colors, Dark Samus as
-  Limoki's low-poly Dark Samus, and an HD suit or Sylux as the MPH original.
+  Limoki's low-poly Dark Samus, and HD Samus or _Beyond_ Sylux as the original MPH Samus or Sylux.
 - HUD portraits for the Trooper and Dark Samus in the hit box and on the scoreboard
 - Team and same-hunter colors for the new hunters, like the original's
 - A color picker that shows your hunter in each color

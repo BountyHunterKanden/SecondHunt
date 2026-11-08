@@ -79,8 +79,8 @@ kept. Firewall help, portable mode and more are on the
 
 Fight in _Metroid Prime 2: Echoes_ arenas made from your own disc: Sidehopper Station, Spires, Crossfire Chaos,
 Pipeline, Spider Complex and Shooting Gallery. They're drawn the way _Echoes_ draws them, in HD, with its real
-lighting, materials, effects, glass, water and skies. They play like _Echoes_ too, with double jump, Gravity Boost,
-swimming in Pipeline's water, jump pads that launch you across the map, and each arena's own music.
+lighting, materials, effects, glass, water and skies. They play like _Echoes_ too, with double jump, Gravity Boost in
+Pipeline's water, jump pads that replace morph ball cannons, and _Echoes_' multiplayer music.
 
 **Shooting Gallery's turret works just like _Echoes_.** Climb in and rain fire on the arena, or roll into the slot
 behind it in any alt form and blow it up.
@@ -105,7 +105,8 @@ plaza.
 - **HD Samus suits** from every Prime game you import, the beta Phazon Suit included, and **Sylux in his _Metroid Prime 4:
   Beyond_ suit**
 - Playing with someone who hasn't imported a hunter? They still see you as a stand-in: the Trooper in his skin's
-  colors, Dark Samus as Limoki's low-poly Dark Samus, and an HD suit or Sylux as the MPH original.
+  colors, Dark Samus as Limoki's low-poly Dark Samus, and HD Samus or _Beyond_ Sylux as the original MPH Samus
+  or Sylux.
 
 <p align="center">
   <img src="docs/images/trooper.webp" width="400" alt="The Trooper wall clinging and firing the Pirate Blaster">
