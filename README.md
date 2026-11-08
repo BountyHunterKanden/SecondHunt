@@ -25,6 +25,10 @@ Nintendo.
 
 <p align="center"><a href="https://github.com/BountyHunterKanden/SecondHunt/releases/latest"><img src="docs/images/reel.webp" width="640" alt="Second Hunt gameplay"></a></p>
 
+> <a href="https://discord.gg/WkvJ5ddjye"><img src="docs/images/hunters-outpost.png" width="48" height="48" align="left" alt="Hunters Outpost"></a> <a href="https://discord.gg/WkvJ5ddjye"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FWkvJ5ddjye%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&logo=discord&logoColor=white&style=flat-square&labelColor=000000&color=E66308" alt="Discord: players online"></a>
+> **Join the Hunters Outpost Discord** for Second Hunt support or to discuss and play Second Hunt and related
+> projects with other players! [Click here to join!](https://discord.gg/WkvJ5ddjye)
+
 <a name="contents"></a>
 <p><a href="#contents"><img src="docs/images/hy-h2-contents.webp" width="100%" alt="Contents"></a></p>
 
@@ -162,10 +166,6 @@ plaza.
 
 Everything in detail: [Features](https://github.com/BountyHunterKanden/SecondHunt/blob/master/docs/FEATURES.md) ·
 [Controls](https://github.com/BountyHunterKanden/SecondHunt/blob/master/docs/CONTROLS.md)
-
-> <a href="https://discord.gg/WkvJ5ddjye"><img src="docs/images/hunters-outpost.png" width="48" height="48" align="left" alt="Hunters Outpost"></a> <a href="https://discord.gg/WkvJ5ddjye"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FWkvJ5ddjye%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&logo=discord&logoColor=white&style=flat-square&labelColor=000000&color=E66308" alt="Discord: players online"></a>
-> **Join the Hunters Outpost Discord** for Second Hunt support or to discuss and play Second Hunt and related
-> projects with other players! [Click here to join!](https://discord.gg/WkvJ5ddjye)
 
 <a name="known-issues"></a>
 <p><a href="#known-issues"><img src="docs/images/hy-h2-known-issues.webp" width="100%" alt="Known issues"></a></p>
