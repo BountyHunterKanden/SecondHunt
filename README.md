@@ -23,7 +23,7 @@ Nintendo.
 
 <p align="center"><a href="https://github.com/BountyHunterKanden/SecondHunt/releases/latest"><img src="docs/images/hy-download.png" width="480" alt="Download the latest release"></a><br>Android APK or Windows zip</p>
 
-<p align="center"><a href="https://github.com/user-attachments/assets/8422931f-ccab-4233-9b66-8d18b16d5642"><img src="docs/images/reel.webp" width="640" alt="Second Hunt gameplay"></a></p>
+<p align="center"><a href="https://github.com/BountyHunterKanden/SecondHunt/releases/latest"><img src="docs/images/reel.webp" width="640" alt="Second Hunt gameplay"></a></p>
 
 <a name="contents"></a>
 <p><a href="#contents"><img src="docs/images/hy-h2-contents.webp" width="100%" alt="Contents"></a></p>
