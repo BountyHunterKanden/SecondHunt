@@ -83,8 +83,6 @@ namespace MphRecomp.Campaign
         // how long a chain's next part takes to blend in from where the last one stopped (seconds)
         public const float JoinBlend = 0.3f;
 
-        // the set's made clips on this body, once (BodyClips' map makers, at load: the clip table is only read after);
-        // idle: the map's idle clip (an Upper candidate's legs), torsoRoot: where its upper body starts
         public static Set Prepare(NativeBody body, Set set, string idle, string torsoRoot = "Spine_1")
         {
             foreach (Candidate c in set.List)

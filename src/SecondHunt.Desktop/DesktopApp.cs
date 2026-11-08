@@ -41,7 +41,6 @@ internal sealed class DesktopApp : IDisposable
     // the centred panel's line under a click (DesktopInput: the ship's save prompt / game over rows)
     public (string Text, int Line)? PanelLineAt(float x, float y) => _panel.LineAt(x, y);
     double _noteUntil;
-    MapEditorHost? _mapMaker; // --screen mapmaker (MAP MAKER E0, dev builds): the editor, and where a played map comes back to
     readonly Stopwatch _clock = Stopwatch.StartNew();
     bool _minimized, _audioPausedForMinimize;
     int _frames;
@@ -80,30 +79,6 @@ internal sealed class DesktopApp : IDisposable
         else if (options.Launch is { } launch && launch.TryGetValue("screen", out string? screen))
         {
             // --screen credits|lobby: one of this host's own screens on its own (dev builds; testing)
-            if (screen == "mapmaker")
-            {
-                Directory.SetCurrentDirectory(DesktopPaths.Game);
-                MphRead.Paths.UpdatePaths();
-                MphRead.Paths.ChooseMphPath();
-                _mapMaker = new MapEditorHost(w, new MapEditorScreen(Path.Combine(DesktopPaths.Root, "mapmaker", "map.shmap")));
-                if (launch.TryGetValue("mmscript", out string? mm)) _mapMaker.SetScript(mm);
-                Push(_mapMaker.Screen);
-                return;
-            }
-            // --screen mapperf --target 42000 (dev builds): the Odin's map maker perf test map, built here and played solo
-            if (screen == "mapperf")
-            {
-                Directory.SetCurrentDirectory(DesktopPaths.Game);
-                MphRead.Paths.UpdatePaths();
-                MphRead.Paths.ChooseMphPath();
-                int target = launch.TryGetValue("target", out string? t) && int.TryParse(t, out int n) ? n : 30000;
-                var (world, tris) = MphRecomp.Arenas.Editor.MapCompiler.PerfWorld(target);
-                string room = MphRecomp.Arenas.Editor.MapCompiler.Compile(world, Path.Combine(DesktopPaths.Root, "mapperf"),
-                    new OpenTK.Mathematics.Vector3(0, 2, 0), 0, null, perfRenderOnly: true);
-                Log.Info("MapMaker", $"mapperf target {target}: {tris} triangles");
-                StartGame(new Dictionary<string, string> { ["match"] = "Battle", ["arena"] = room, ["solo"] = "1", ["fp"] = "1", ["spawnnow"] = "1" });
-                return;
-            }
             OpenFrontend(18);
             if (screen == "credits") PushOver(new CreditsScreen(() => Defer(PopBack)));
             else PushOver(new LobbyScreen(DesktopPaths.Game, Path.Combine(DesktopPaths.Root, "lobby.json"),
@@ -184,7 +159,6 @@ internal sealed class DesktopApp : IDisposable
             NativeWindow.ProcessWindowEvents(false);
             if (w.IsExiting) break;
             _input.Poll();
-            if (_mapMaker != null) PollMapMaker();
             while (_deferred.TryDequeue(out Action? action)) action();
             if (_stack.Count == 0)
             {
@@ -531,46 +505,7 @@ internal sealed class DesktopApp : IDisposable
         while (_stack.Count > 0) Pop();
         _status.Set("");
         _panel.Set("");
-        if (_mapMaker != null)
-        {
-            Push(_mapMaker.Screen); // a played map: back to the editor
-            return;
-        }
         OpenFrontend(FrontendSession.ReturnPage()); // the main menu, or the multiplayer lobby after a match
-    }
-
-    // MAP MAKER E0: the editor's input and status line; F5 plays the map in Solo, F5 in the game comes back
-    void PollMapMaker()
-    {
-        string? action = _mapMaker!.Scripted();
-        if (TopScreen == _mapMaker.Screen)
-        {
-            bool play = _mapMaker.Poll(action);
-            Note(_mapMaker.Screen.Status, 1);
-            if (play) Defer(PlayMap);
-        }
-        else if (Game != null && (action == "back" || _gl.Window.KeyboardState.IsKeyPressed(Keys.F5)))
-        {
-            Defer(ExitGame);
-        }
-    }
-
-    void PlayMap()
-    {
-        _mapMaker!.Release();
-        string? room;
-        try
-        {
-            room = _mapMaker.Screen.CompileForPlay(Path.Combine(DesktopPaths.Root, "mapmaker"));
-        }
-        catch (Exception ex)
-        {
-            Log.Warn("MapMaker", "compile failed: " + ex);
-            Note("Couldn't build the map: " + ex.Message);
-            return;
-        }
-        if (room == null) return;
-        StartGame(new Dictionary<string, string> { ["match"] = "Battle", ["arena"] = room, ["solo"] = "1", ["fp"] = "1", ["spawnnow"] = "1" });
     }
 
     // ---- window ----

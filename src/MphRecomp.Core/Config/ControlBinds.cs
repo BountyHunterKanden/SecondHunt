@@ -266,11 +266,6 @@ namespace MphRecomp.Config
         public static bool IsDefaultOne(RecompSettings s, bool keys, string id)
             => Find(keys, id) is not Function f || Get(s, keys, id).SequenceEqual(f.Defaults);
 
-        // The saved lists in today's layout (PadBindings.Load, KeyboardMouseInput.LoadBinds and the customizer call it; it
-        // only changes anything once): from before C10 (BindsVersion 0), scan / zoom (pad), zoom / scan and bombs / scan
-        // (keys) become their functions, keeping what each button did (a custom scan / zoom button: scan and zoom, the
-        // weapon menu's tap zoom kept), and a custom map / scoreboard button does both. Always: ids no longer listed (the
-        // controller's weapon buttons, C9) go, and a function keeps its first two buttons or combos (owner 2026-10-17).
         public static void Tidy(RecompSettings s)
         {
             if (s.BindsVersion < Version)

@@ -113,7 +113,7 @@ internal sealed partial class CampaignRenderer
         ConfigureZeroSuitDev(args); // --es paralyzer 1 (ZeroSuitGunTip.cs)
         _solo = true;
         PlayerEntity.HostSelfBodyHits = args.Get("selfbody") == "1";
-        if (args.Get("spawnnow") == "1") PlayerEntity.HostSpawnAtOnce = true; // MAP MAKER play: no FIRE to spawn
+        if (args.Get("spawnnow") == "1") PlayerEntity.HostSpawnAtOnce = true;
         settings.Solo = true;
         settings.Mode = GameMode.Battle;
         // vanilla never plays the expanded Transfer Lock in Battle (MultiplayerMenu's arena table: Bounty, Capture,

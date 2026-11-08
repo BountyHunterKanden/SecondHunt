@@ -4,13 +4,6 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Arenas.Editor
 {
-    // E4 jump pads: the launch that carries a hunter from a pad to the landing spot the maker clicked, worked out against
-    // MPH's own pad physics (MphRead PlayerProcess.ActivateJumpPad + PlayerInput), in the game's 30 Hz ticks:
-    //   - the pad sets the speed to its launch vector and fires again every tick the player stands in its volume (vanilla
-    //     MP pads: a cylinder of radius 1, height 1, cooldown 0), with no gravity while it does;
-    //   - after that the control lock holds gravity off for its ticks, then the biped's gravity (-77/4096 a tick) pulls;
-    //   - the sideways speed stays the pad's for the whole flight (the pad's push is kept out of the air damping).
-    // The vanilla arenas' pads launch at 0.45 - 1.0 a tick with a lock of 0 - 1 (more only on steep sideways pads).
     public static class MapPads
     {
         public const float Gravity = 77 / 4096f;

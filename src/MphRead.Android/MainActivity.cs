@@ -148,7 +148,6 @@ public class MainActivity : Activity
         _roomsShown = true;
         _selectBtn.Text = "Re-extract from another ROM…";
         AddSoloArena();
-        AddMapPerf();
         AddFirstHunt();
         AddHeader("Music");
         AddButton("Music A/B: original, original + fixes, HQ, HQ + tone (L2 / Select / Y next, L1 back)",
@@ -507,60 +506,6 @@ public class MainActivity : Activity
         ("Samus (RECOMP SETTINGS suit)", "Samus", null), ("Kanden", "Kanden", null), ("Spire", "Spire", null),
         ("Trace", "Trace", null), ("Noxus", "Noxus", null), ("Sylux", "Sylux", null), ("Weavel", "Weavel", null),
     };
-
-    // MAP MAKER E3 (dev): a flat-colour test map of about N triangles built here on the device (small pillars on the
-    // starter floor), played solo, to see where the device starts to struggle (docs/MAP_EDITOR.md section 5b)
-    static readonly int[] MapPerfTargets = { 5000, 9000, 13000, 30000, 42000, 60000 };
-    int _mapPerf = 1;
-
-    void AddMapPerf()
-    {
-        AddHeader("Map maker perf test (build a test map, play it solo)");
-        AddSelector(d =>
-        {
-            _mapPerf = Wrap(_mapPerf + d, MapPerfTargets.Length);
-            return $"Triangles: about {MapPerfTargets[_mapPerf]}";
-        });
-        var btn = new Button(this) { Text = "Build + play the test map" };
-        btn.Click += (_, _) =>
-        {
-            int target = MapPerfTargets[_mapPerf];
-            btn.Enabled = false;
-            btn.Text = "Building... (big maps take a while)";
-            System.Threading.Tasks.Task.Run(() =>
-            {
-                string result;
-                try
-                {
-                    System.IO.Directory.SetCurrentDirectory(FilesDir!.AbsolutePath);
-                    MphRead.Paths.UpdatePaths();
-                    MphRead.Paths.ChooseMphPath();
-                    var sw = System.Diagnostics.Stopwatch.StartNew();
-                    var (world, tris) = MphRecomp.Arenas.Editor.MapCompiler.PerfWorld(target);
-                    string room = MphRecomp.Arenas.Editor.MapCompiler.Compile(world,
-                        System.IO.Path.Combine(GetExternalFilesDir(null)?.AbsolutePath ?? FilesDir!.AbsolutePath, "mapperf"),
-                        new OpenTK.Mathematics.Vector3(0, 2, 0), 0, null, perfRenderOnly: true);
-                    Log($"[mapperf] target {target}: {tris} triangles, built in {sw.ElapsedMilliseconds} ms");
-                    RunOnUiThread(() =>
-                    {
-                        btn.Enabled = true;
-                        btn.Text = $"Build + play the test map (last: {tris} triangles, {sw.ElapsedMilliseconds / 1000.0:0.0} s to build)";
-                        StartActivity(new Intent(this, typeof(CampaignActivity))
-                            .PutExtra("match", "Battle").PutExtra("solo", "1").PutExtra("bots", "0")
-                            .PutExtra("arena", room).PutExtra("hunter", "Samus").PutExtra("gun", "settings"));
-                    });
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    result = ex.Message;
-                    Log("[mapperf] failed: " + ex);
-                }
-                RunOnUiThread(() => { btn.Enabled = true; btn.Text = "Build failed: " + result; });
-            });
-        };
-        _content.AddView(btn);
-    }
 
     void AddSoloArena()
     {

@@ -91,8 +91,6 @@ namespace MphRead.Formats.Collision
             IReadOnlyList<ushort> pointIdxs = Read.DoOffsets<ushort>(bytes, header.PointIndexOffset, header.PointIndexCount);
             IReadOnlyList<CollisionData> data = Read.DoOffsets<CollisionData>(bytes, header.DataOffset, header.DataCount);
             IReadOnlyList<ushort> dataIdxs = Read.DoOffsets<ushort>(bytes, header.DataIndexOffset, header.DataIndexCount);
-            // "wc32" (big maps, MapCompiler): the same file with 32-bit grid cells; a face's point start gets its high
-            // bits in PaddingA (zero in every cartridge file)
             IReadOnlyList<CollisionEntry> entries = header.Type.MarshalString() == "wc32"
                 ? Read.DoOffsets<RawCollisionEntry32>(bytes, header.EntryOffset, header.EntryCount)
                     .Select(e => new CollisionEntry((int)e.DataCount, (int)e.DataStartIndex)).ToList()

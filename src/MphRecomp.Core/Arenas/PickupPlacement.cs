@@ -94,8 +94,6 @@ namespace MphRecomp.Arenas
             // the player spawns (the editor's spawn mode, Mining Plaza 2026-10-31): when there are any, a match uses these
             // and none of the arena's own (PlacedPickups.Extra)
             public List<SpawnSpotData> Spawns { get; set; } = new();
-            // jump pads (the editor's jump pad mode, owner 2026-10-31): MPH's own pad, its launch solved to land on Target
-            // (MapPads, as the map maker's); in every multiplayer match (PlacedPickups.Extra)
             public List<JumpPadSpotData> JumpPads { get; set; } = new();
             // the modes' octoliths, bases and nodes (the editor's mode choices, owner 2026-11-01): when the file has any for
             // a match's mode, they replace the room's own (PlacedPickups.Extra; MatchArenas.Census counts them)
@@ -468,8 +466,6 @@ namespace MphRecomp.Arenas
             return e;
         }
 
-        // a placed pad as a room file would hold it (the map maker's compile, MapCompiler: vanilla MP pad, radius 1 height 1,
-        // no cooldown, biped + alt form). Echoes arenas: every form on the biped's arc, as their cannons (SameArcBit)
         internal static JumpPadEntity? MakeJumpPad(int id, Vector3 pad, Vector3 target, bool echoes, string node, Scene scene,
             out MapPads.Launch launch)
         {
@@ -574,9 +570,6 @@ namespace MphRecomp.Arenas
             return (flags, bases, nodes);
         }
 
-        // MphRead's own entities for a placed mode element in a match of `mode` (none when it isn't that mode's), as the
-        // map maker compiles them (MapCompiler): a Capture base = the team's octolith + its base at one spot (r1 h1); Bounty
-        // = an octolith, and a team-1 base as the drop-off; a node r2.5 h4; Defender's ring r4 h4
         internal static List<EntityBase> ModeEntities(ModeSpotData spot, GameMode mode, ref int id, Scene scene)
         {
             var list = new List<EntityBase>();

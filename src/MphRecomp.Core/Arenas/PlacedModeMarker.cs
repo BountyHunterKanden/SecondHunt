@@ -4,10 +4,6 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Arenas
 {
-    // What the dev placement editor's mode choices place (owner 2026-11-01, Mining Plaza: "place all of the different mode
-    // elements"): the octolith modes' octoliths and bases and the node modes' nodes. A match builds MphRead's own entities
-    // from them (PickupPlacement.ModeEntities, the map maker's sizes: MapCompiler); the solo run plays Battle, where those
-    // stay invisible, so the editor shows this stand-in with the same models instead
     public static class ModeKinds
     {
         public const string Capture = "Capture";   // a team's octolith and its base (Team 0 / 1)
@@ -32,7 +28,6 @@ namespace MphRecomp.Arenas
             _ => kind,
         };
 
-        // MapCompiler's volumes: base r1 h1, node r2.5 h4, defender ring r4 h4
         public static float Radius(string kind) => kind switch { Node => 2.5f, Defend => 4f, _ => 1f };
         public static float Height(string kind) => kind is Node or Defend ? 4f : 1f;
     }

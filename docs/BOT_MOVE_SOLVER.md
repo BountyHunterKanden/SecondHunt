@@ -15,13 +15,6 @@ unchanged. Only the way a bot crosses a link it has already chosen is new. Head-
 
 1. **Graph.**
    - Vanilla: the ROM graph as it is. The solver only labels its links, and adds and removes none.
-   - Echoes, First Hunt and custom maps: `ArenaNav.Build`, ours.
-     - Its input is any triangle soup: `FhArenaTool.Tris` reads any `_Collision.bin`, and the map maker can hand over
-       its own triangles.
-     - To add: breakable walls and solid entities in the raycaster's solid set (on 10-26, Crossfire Chaos links went
-       through walls).
-     - Ideas from Fruity Prime's MIT `MapNodePacker` (keep the notice if code is copied): thin nodes over the graph
-       rather than the room, push nodes 1.0 off walls, and drop links checked by `FloorBetween`.
 2. **Candidate filter.** `ArenaNav.Walkable`'s thresholds stay, as a cheap pre-filter only. The final decision is the
    simulation's.
 3. **Move solver (new).** For each link and each physics group of hunters, it tries a fixed menu, cheapest first:
@@ -54,11 +47,6 @@ unchanged. Only the way a bot crosses a link it has already chosen is new. Head-
    - The link is never dropped: it is used again next time. This replaces "give up after 2 climbs".
    - Group 1 v6 (stuck fix vertical) stays, as part of the backstop.
 
-## Ship rule
-
-No map data ships. The solve runs on the player's device from their own import: at ROM or Echoes import, next to
-ArenaNav, and for custom maps when the editor saves the map (in the background), cached beside the map.
-
 ## Measures (every phase)
 
 - Linkall sweep (`out/link_audit/tools/sweep.sh`, `cmp.awk`): links working and links used.
@@ -73,7 +61,6 @@ ArenaNav, and for custom maps when the editor saves the map (in the background),
 - **P2 runtime playback.** Switch, capsule sweep, backstop; linkall compare; head-on (more seeds for L1, which was
   +9.8% ttk_h on v6, CI -2..+25).
 - **P3 Echoes and First Hunt.** ArenaNav graph plus the solver, with the G3 transfer test on an untouched arena.
-- **P4 map maker.** .shmap to ArenaNav to the solver at save time; coverage report in the editor.
 - **P5 on-device bake** at import, then an Odin install (owner's OK).
 
 ## P1 results (10-26)
@@ -215,19 +202,11 @@ floor anchors, and Regulator keeps 37 nodes around one spawn (x 155-178) while i
 12 and 196 solved links are small graphs, not good ones. So either is a fair G3 only after the fix, measured on its
 new graph.
 
-**Owner 2026-10-28: PARKED.** Morph Ball and Regulator won't host bot matches for now (they'll be player races later),
-and MP5 (the unused prototype blockout, dev menu only) is left out of bot work. So the `ArenaNav.Build` component fix
-is parked: nothing bots play needs it, since MP1-3 and the Echoes arenas have sound graphs. Pick it up if bots ever go
-to oddly built maps (map maker, randomizer). G3 has no untuned real arena left; it stays open until the owner names one.
-Owner, later 10-28: First Hunt maps stay gated out of the public build, so all First Hunt bot work is parked too:
-removing MP5 from the game, and Trooper Module's 16% stuck.
-
 ## Considered and set aside for now
 
 - **DotRecast** (C#, zlib, so it could be borrowed): navmesh plus `DtJumpLinkBuilder`, which fits jump arcs off
   navmesh edges.
   - Not needed while ArenaNav covers candidates, and vanilla AI wants a node graph, not a navmesh.
-  - Revisit if ArenaNav misses jumps on custom maps: its edge-sampling idea could go into ArenaNav without the library.
 - **Fruity Prime** has no move or link solver and no unstick logic. Its bots are vanilla AI on generated `_Node.bin`
   files.
   - Its BotTour coverage metric and AltFormProbe's trial pattern (drive a non-main slot; set PrevPosition and Position

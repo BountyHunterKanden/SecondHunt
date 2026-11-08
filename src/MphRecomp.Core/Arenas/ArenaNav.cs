@@ -177,10 +177,6 @@ namespace MphRecomp.Arenas
             lock (_versions) return _links.TryGetValue(roomId, out Dictionary<(int, int), int>? l) ? l : null;
         }
 
-        // jumps: one-way flights (jump pads: pad -> landing); the pad's node leaves only by its flight. water: boxes (min,
-        // max) whose floors a bot leaves with the Gravity Boost (Pipeline's flooded cave). heavyFrom: jumps from this index on
-        // are the map editor's placed pads, which an octolith carrier is too heavy to ride (JumpPadEntity.HostHeavyCarry);
-        // carrier: the graph for a bot carrying one, which never steps on those pads nor crosses them (owner 2026-11-01)
         public static Graph Build(ArenaRaycaster ray, IReadOnlyList<Vector3> anchors, float killHeight,
             IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null,
             Vector2? gridOrigin = null, bool echoesMoves = true, float padReach = 0, int heavyFrom = int.MaxValue, bool carrier = false)

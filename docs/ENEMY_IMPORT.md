@@ -6,7 +6,6 @@ effects, to the standard of the Shooting Gallery turret. They serve three purpos
 1. **Hard Mode (priority).** A new campaign, written by the owner.
 2. **Later: a campaign randomizer.** It puts enemies in random rooms from pools the player chooses, adds new gates,
    brings back mini bosses, and adds new enemies to rooms.
-3. **Later: a custom campaign maker.** It runs on the same system as the map maker.
 
 This is the plan. Nothing is built yet. Research done for it (2026-10-26): a survey of the code we already have and a
 survey of where each game's enemy logic can be read from. The method being copied is in
@@ -76,12 +75,10 @@ discs: see section 10.
 | Script-instance import: Prime 1 MREA/SCLY reader; Corruption MREA reader | Prime 1 and Corruption values |
 | AFSM/FSM2 state-machine reader (Prime 1/2 use these for some AI) | some MP1/MP2 enemies |
 | Prime 3: ANIM3 bitstream v2, CHAR3 events, PART/ELSC/SWHC v3 | Corruption |
-| A campaign placement file + hook. Every current extra-entity hook is gated to multiplayer. | Hard Mode, randomizer, maker |
 
 ## 4. Architecture: one system for all three uses
 
 ```
- Hard Mode file   Randomizer (writes the same file)   Campaign maker (.shmap markers)
           \                    |                        /
            +------ Campaign placement data (per room) --+
                                |
@@ -103,9 +100,6 @@ discs: see section 10.
   - gates: doors locked until a group is cleared, the "mini boss" kind;
   - removals of the room's own enemies.
 
-  Hard Mode is just one such campaign file, written by the owner. The randomizer generates one. The campaign maker
-  stores the same data as markers in `.shmap`. The map maker's doc already says enemies come later and will use its
-  marker system. This file is that system.
 - **One spawn path.** The placement hook adds entities through `SceneSetup.HostExtraEntities`, as the turret does.
   MPH enemies go through MphRead's own `EnemySpawnEntity.SpawnEnemy`, so they behave exactly as vanilla.
 - **Network-ready state.** Campaign is single player, so no netcode now. But each Retro enemy keeps its state small
@@ -147,7 +141,6 @@ Hard Mode needs, in order:
 | **B1** | **Bosses as mini bosses**, per owner pick. Each is big and room-bound, so each gets its own scope. Big ones need a big enough room, or a built one later. | per boss |
 | **P4** | **Prime 4 spike.** Read the NSO for one chosen enemy and see what 1:1 costs. Effects, sound and script readers come first. | Owner decides go/no-go per enemy |
 | **Later: RZ** | Randomizer: pools UI, a seeded generator writing the placement file, a beatability check (the campaign's item and door graph, so new gates never softlock), mini-boss gate placement. | |
-| **Later: CM** | Campaign maker: catalogue ids as `.shmap` enemy markers, the same placer UI inside the map editor. | |
 
 **Effort, honestly.** The turret took one long session (owner, 10-26). A simple enemy should be about that size.
 A Space Pirate-class enemy with several attacks is likely two or three such sessions, and a boss more than that. MP1-3 hold about 150

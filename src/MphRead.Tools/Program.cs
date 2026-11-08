@@ -51,7 +51,6 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-lookalikes") { LookAlikeTest.Run(args); return; } // D5 look-alikes (Look-alikes thread)
             if (args.Length >= 1 && args[0] == "-blasterpickup") { BlasterPickupTool.Run(args); return; } // Pirate Blaster pickup art
             if (args.Length >= 1 && args[0] == "-dsstandin") { DarkSamusStandinTool.Run(args); return; } // Dark Samus stand-in recipe (Limoki)
-            if (args.Length >= 1 && args[0] == "-mmsurvey") { MapMakerSurvey.Run(args); return; } // MAP MAKER E1 survey
             if (args.Length >= 1 && args[0] == "-standinghittest") { StandingBodyHitTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-shockcoilheadtest") { ShockCoilHeadTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-bodytest") { BodyTest.Run(args); return; }
