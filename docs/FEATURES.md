@@ -73,8 +73,8 @@ Nothing from any game ships with Second Hunt.
   _Beyond_ Sylux (GAME > CAMPAIGN > SYLUX)
 - PLANET SELECT on the gunship with the hunters panel like the DS, and a logbook with each category's color, sorted
   like the original
-- Bring your DS save over (logbook, unlocks and license included, with a backup first), or export yours back out to
-  play on a DS or an emulator
+- Bring a campaign file over from your DS save (story and logbook, with a backup of the file it replaces), or export
+  yours back out to play on a DS or an emulator. Your Hunter License comes over on its own, with IMPORT LICENSE.
 - UNLOCKS ALL and LOGBOOK SCANS ALL switches, if you just want to look around
 - ALT FORM HOP: Jump hops any alt form up to bomb jump height, so every hunter can get where Samus can,
   and morph ball doors open for every hunter.
