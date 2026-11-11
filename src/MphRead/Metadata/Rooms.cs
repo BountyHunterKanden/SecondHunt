@@ -44,6 +44,9 @@ namespace MphRead
         public ColorRgb Light2Color { get; }
         public Vector3 Light2Vector { get; }
         public float KillHeight { get; set; } // (set: the host's First Hunt levels, whose table here has 0, MphRecomp FirstHuntRoom)
+        public string? HostSkyRoom { get; set; }
+        public IReadOnlyList<string>? HostSkyNodes { get; set; }
+        public Vector3 HostSkyOffset { get; set; }
         public RoomSize Size { get; }
         public bool Multiplayer { get; }
         public bool FirstHunt { get; }

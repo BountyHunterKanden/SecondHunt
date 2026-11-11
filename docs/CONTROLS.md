@@ -19,7 +19,7 @@ with A on the right.
 
 | Input | Action |
 |---|---|
-| Left stick | Move |
+| Left stick | Move. With STICK CURVE on MODERN (CONTROLS > AIM > MOVE, the default) a light tilt walks and rolls slowly and a full tilt moves at full speed; CLASSIC moves at full speed at any tilt, like the DS d-pad. |
 | Right stick | Aim |
 | R2 or B | Fire (lay bombs in morph ball) |
 | A or L1 | Jump (boost in morph ball) |
@@ -38,7 +38,7 @@ with A on the right.
 | A / B in dialogs | OK or YES / NO (the press that closes a dialog doesn't also jump or fire) |
 | Android Back (button or gesture) | Pause menu. In a menu, the map or the ship, it works like B. It never quits the game. |
 
-**Scout Drone** (the Trooper's alt form) has its own buttons, in the SCOUT DRONE section of the remapper:
+**Scout Drone** (the Pirate Trooper's alt form) has its own buttons, in the SCOUT DRONE section of the remapper:
 
 | Input | Action |
 |---|---|
@@ -57,6 +57,7 @@ Windows only. A controller works on Windows too, with the buttons above.
 | Input | Action |
 |---|---|
 | W A S D | Move |
+| Hold Left Shift | Slow move: walk and roll slower with W A S D, for careful moves on ledges and small platforms, in every alt form. How slow (25, 40 or 60%) is CONTROLS > AIM > MOVE > SLOW MOVE SPEED, with CONTROLS FOR on KEYBOARD & MOUSE. |
 | Mouse | Aim. Its sensitivity is under CONTROLS > AIM, with CONTROLS FOR on KEYBOARD & MOUSE. |
 | Left click | Fire |
 | Right click | Zoom with the Imperialist, or scan with the scan visor on |
@@ -78,6 +79,9 @@ Windows only. A controller works on Windows too, with the buttons above.
 | Space, Enter or left click in dialogs | OK or YES (Backspace or right click is NO) |
 
 With the Scout Drone out: left click fires the blasters, right click is the cutting laser and Space rises.
+
+MOUSE ROLL (CONTROLS > AIM > MOVE, off by default): in the rolling alt forms (Samus, Kanden, Spire and Noxus) moving the
+mouse rolls the ball, like dragging the stylus on the DS touch screen, and the view follows the ball. Space still boosts.
 
 In menus, the arrow keys or W A S D move, Enter or Space choose, Esc or Backspace go back, Q / E or Page Up / Page
 Down change pages, Tab is Start, Z / C are L2 / R2, and the mouse clicks anything the DS touch screen would.
@@ -110,6 +114,6 @@ Tilt the device, or a controller with a gyro (on Android or Windows), to fine-tu
 works as normal, and the gyro adds on top of it. On Windows the GYRO sub-tab shows up once a controller with a gyro
 has been connected.
 
-CONTROLS > GYRO has the speed, axis (yaw or roll), invert, deadband, smoothing and acceleration, and a separate speed
-for the Imperialist. GYRO BUTTON sets what the gyro button does: ALWAYS ON, HOLD TO AIM, HOLD TO PAUSE or TOGGLE.
-Bind the button itself under BUTTONS.
+CONTROLS > GYRO has the speed, axis (YAW, ROLL, or YAW+ROLL to turn fully at any aim height), invert, deadband,
+smoothing and acceleration, and a separate speed for the Imperialist. GYRO BUTTON sets what the gyro button does:
+ALWAYS ON, HOLD TO AIM, HOLD TO PAUSE or TOGGLE. Bind the button itself under BUTTONS.

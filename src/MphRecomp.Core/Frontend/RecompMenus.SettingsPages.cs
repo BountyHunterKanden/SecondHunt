@@ -30,7 +30,10 @@ namespace MphRecomp.Frontend
         {
             ("SAMUS", new[] { "samus\nsuit", "import\ngames", "camera" }),
             ("TROOPER", new[] { "campaign trooper\ntype" }), // owner 10-28: the campaign Trooper's type, once he has a file
+            ("SYLUX", new[] { "campaign sylux\ntype" }), // owner 11-08: the same for a Sylux campaign file
+            ("ALT FORMS", new[] { "alt form\nhop" }), // owner 11-09: the hop, or helper jump pads
             ("MAP", new[] { "map\nlook", "map\nmode" }),
+            ("LOGBOOK", new[] { "logbook\nscans" }), // owner 2026-10-31
             ("SAVES", new[] { "import/export\nds save" }), // the one DS SAVE box row (RecompMenus.DsSave.cs)
         };
         private static readonly (string Header, string[] Labels)[] MultiplayerSections =
@@ -48,9 +51,10 @@ namespace MphRecomp.Frontend
         };
         private static readonly (string Header, string[] Labels)[] LookSections =
         {
-            ("MENUS", new[] { "menu\nart" }),
+            ("MENUS", new[] { "menu\nart", "second hunt\nlogo" }),
             ("HUD", new[] { "campaign\nradar", "radar\npickups", "hud", "hud\nsway", "shot\nindicator", "helmet\nopacity", "visor\nopacity", "readout\nopacity", "lock readouts\nto visor", "line\nart" }),
             ("VIEW", new[] { "field of\nview", "aim\nview" }),
+            ("HUNTERS", new[] { "death", "vanilla\norbs" }), // (owner 2026-11-09: no ICE row, the hunters wear vanilla's ice)
             ("DISPLAY", new[] { "frame\nrate", "smooth\nframes" }),
         };
         // (owner 2026-10-17: "look and sound should be split. look should be menus/hud and sound should be its own tab")
@@ -64,6 +68,7 @@ namespace MphRecomp.Frontend
         {
             ("STARTUP", new[] { "skip boot\nlogos", "skip\nintro" }), // owner 2026-10-29
             ("UPDATES", new[] { "update\nalerts", "updates" }),
+            ("FILES", new[] { "data\nfolder" }), // Windows only (GitHub #12, owner 2026-11-04)
             ("HELP", new[] { "crash\nlog", "share\nlog", DiscordLabel, "credits" }), // owner 10-27: Discord above credits
         };
         private static readonly (string Header, string[] Labels)[] DevSections =

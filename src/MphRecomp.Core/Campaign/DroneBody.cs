@@ -55,10 +55,9 @@ namespace MphRecomp.Campaign
 
         public static bool Is(NativeBody body) => body.Clip(Ready) != null && body.Clip("B_floatloopf_drone") != null;
 
-        // a trooper skin's drone: the purple Gamma drone with the (purple) Wave Trooper, the grey/orange Alpha drone with
-        // the others
-        public static string IdFor(string? skin)
-            => String.Equals(skin, "MP1WaveTrooper", StringComparison.OrdinalIgnoreCase) ? "MP1GammaDrone" : "MP1AlphaDrone";
+        // a trooper skin's drone: the grey/orange Alpha drone with every skin, seat colours on its metal (the Gamma drone,
+        // Central Dynamo's cloaked one, is no trooper's, owner 2026-11-05)
+        public static string IdFor(string? skin) => "MP1AlphaDrone";
 
         // the point drawn on the drone's centre: its body's own centre (Skeleton_Root in its hover's first frame)
         static Vector3 Pivot(NativeBody body)

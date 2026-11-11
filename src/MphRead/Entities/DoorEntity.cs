@@ -25,6 +25,9 @@ namespace MphRead.Entities
         public CollisionInstance? ConnectorCollision { get; set; }
         public bool ConnectorInactive { get; set; }
 
+        // recomp: for a non-Samus 1P hunter, morph ball doors open on approach (no bomb or shot needed) unless a story
+        // lock holds them, and bomb-lock (palette 8) doors start unlocked
+        private readonly bool _autoOpen;
         private bool Locked => Flags.TestFlag(DoorFlags.Locked);
         private bool Unlocked => Flags.TestFlag(DoorFlags.Unlocked);
         public Vector3 LockPosition => (_transform * _lockTransform).Row3.Xyz;
@@ -71,7 +74,8 @@ namespace MphRead.Entities
             _lockTransform = Matrix4.CreateTranslation(0, meta.LockOffset, 0);
             Debug.Assert(GameState.Mode == GameMode.SinglePlayer);
             int state = GameState.StorySave.InitRoomState(_scene.RoomId, Id, active: _data.Locked != 0);
-            if (state != 0 && !Cheats.UnlockAllDoors)
+            _autoOpen = (_data.DoorType == DoorType.MorphBall || _data.PaletteId == 8) && PlayerEntity.Main.Hunter != Hunter.Samus;
+            if (state != 0 && !Cheats.UnlockAllDoors && !(_autoOpen && _data.PaletteId == 8))
             {
                 Flags |= DoorFlags.Locked;
             }
@@ -228,6 +232,10 @@ namespace MphRead.Entities
             }
             if (!GameState.InRoomTransition)
             {
+                if (_autoOpen)
+                {
+                    Flags |= DoorFlags.ShotOpen;
+                }
                 if (ShouldOpen())
                 {
                     Flags |= DoorFlags.ShouldOpen;
@@ -472,6 +480,7 @@ namespace MphRead.Entities
             }
             _lock.SetAnimation(1, AnimFlags.NoLoop);
             _scene.SpawnEffect(114, UpVector, FacingVector, LockPosition); // lockDefeat
+            if (GameEvents.Any) GameEvents.Raise("door_unlock", _scene.RoomId, Id); // recomp: mod event (GameEvents.cs)
             if (updateState)
             {
                 GameState.StorySave.SetRoomState(_scene.RoomId, Id, state: 1);

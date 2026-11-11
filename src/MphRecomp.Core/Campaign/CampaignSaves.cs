@@ -40,6 +40,15 @@ namespace MphRecomp.Campaign
         // keys). null (saves without the field) = every piece of a visited room
         public string[]? MapPieces { get; set; }
         public StorySave Story { get; set; } = null!;
+        // a file imported from a DS save: the Hunter License unlocks (arena / hunter bits, HunterLicense.StoryUnlocks) its
+        // story already had then. Only the license's own IMPORT brings a DS save's license in (owner 2026-11-07: "make
+        // sure the campaign import is not leaking into the license"), so the license counts only what's done since.
+        // null = a file made in SH (files imported before the field came in already opened theirs)
+        public int? ImportedArenas { get; set; }
+        public int? ImportedHunters { get; set; }
+        // gameplay mods' mod.campaign values, mod id -> key -> value (LiveMods.CampaignDataForSave); null (saves without
+        // the field, or no mod kept anything) = none. Builds without it skip the field.
+        public Dictionary<string, Dictionary<string, JsonElement>>? Mods { get; set; }
     }
 
     // What a file-select screen shows for one save slot (CampaignSaves.Summarize).
@@ -135,6 +144,20 @@ namespace MphRecomp.Campaign
             {
                 MarkHuntersUnlocked();
             }
+        }
+
+        // Before a DS save import replaces a file: a copy of it in before_import/, named by slot and time, that no later save
+        // touches (the .bak above goes with the slot's next save; 10-31, a player lost a file that way). Null = the slot
+        // was empty.
+        public string? KeepBeforeImport(int slot)
+        {
+            string path = PathFor(slot);
+            if (!File.Exists(path)) return null;
+            string dir = Path.Combine(Directory, "before_import");
+            System.IO.Directory.CreateDirectory(dir);
+            string copy = Path.Combine(dir, $"campaign{slot}_{DateTime.Now:yyyy-MM-dd_HHmmss}.json");
+            File.Copy(path, copy, overwrite: true);
+            return copy;
         }
 
         // The hunter pick for new files: earned by reaching an ending once. A marker file keeps it after that save is
@@ -305,6 +328,23 @@ namespace MphRecomp.Campaign
                 }
                 w.WritePropertyName("Story");
                 WriteStory(w, file.Story);
+                if (file.ImportedArenas is int importedArenas) w.WriteNumber("ImportedArenas", importedArenas);
+                if (file.ImportedHunters is int importedHunters) w.WriteNumber("ImportedHunters", importedHunters);
+                if (file.Mods is { Count: > 0 } mods)
+                {
+                    w.WriteStartObject("Mods");
+                    foreach (var mod in mods)
+                    {
+                        w.WriteStartObject(mod.Key);
+                        foreach (var kv in mod.Value)
+                        {
+                            w.WritePropertyName(kv.Key);
+                            kv.Value.WriteTo(w);
+                        }
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndObject();
+                }
                 w.WriteEndObject();
             }
             return Encoding.UTF8.GetString(stream.ToArray());
@@ -338,8 +378,25 @@ namespace MphRecomp.Campaign
                     ? cons.EnumerateArray().Select(e => e.GetUInt32()).ToArray() : null,
                 MapPieces = root.TryGetProperty("MapPieces", out JsonElement pieces) && pieces.ValueKind == JsonValueKind.Array
                     ? pieces.EnumerateArray().Select(e => e.GetString() ?? "").ToArray() : null,
-                Story = story
+                Story = story,
+                ImportedArenas = root.TryGetProperty("ImportedArenas", out JsonElement importedArenas) ? importedArenas.GetInt32() : null,
+                ImportedHunters = root.TryGetProperty("ImportedHunters", out JsonElement importedHunters) ? importedHunters.GetInt32() : null,
+                Mods = root.TryGetProperty("Mods", out JsonElement mods) ? ReadMods(mods) : null
             };
+        }
+
+        static Dictionary<string, Dictionary<string, JsonElement>>? ReadMods(JsonElement mods)
+        {
+            if (mods.ValueKind != JsonValueKind.Object) return null;
+            var result = new Dictionary<string, Dictionary<string, JsonElement>>();
+            foreach (JsonProperty mod in mods.EnumerateObject())
+            {
+                if (mod.Value.ValueKind != JsonValueKind.Object) continue;
+                var values = new Dictionary<string, JsonElement>();
+                foreach (JsonProperty kv in mod.Value.EnumerateObject()) values[kv.Name] = kv.Value.Clone();
+                result[mod.Name] = values;
+            }
+            return result;
         }
 
         // Saves made with MphRead's old new-game setup (fixed 2026-10-01) carry the starting equipment by table position

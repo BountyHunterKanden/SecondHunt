@@ -1,5 +1,6 @@
 using System;
 using MphRead.Entities;
+using MphRecomp.Config;
 using MphRecomp.Input;
 
 namespace MphRecomp.App;
@@ -8,13 +9,34 @@ namespace MphRecomp.App;
 // camera exactly as before; the gyro is for fine aim). The math lives in MphRecomp.Core (Input/GyroAim.cs); the
 // sensor is the host's (Android: MphRead.Android/CampaignGyro.cs, which sets Gyro). BuildInput calls GyroAimDelta once
 // per sim step. While zoomed the gyro also gets focal-length scaling (GyroMph.ZoomScale) so the Imperialist's zoom
-// stays steady.
+// stays steady. The GYRO button (CONTROLS > GYRO, RecompSettings.GyroButton) can hold, pause or toggle it.
 internal sealed partial class CampaignRenderer
 {
     // the host's gyroscope, if it has one
     public IGyroAimSource? Gyro { get => _gyro; set => _gyro = value; }
     IGyroAimSource? _gyro;
     double _gyroLastTake = -1;
+    string _gyroButton = "always"; // RecompSettings.GyroButton (ReloadAimFromSettings)
+    bool _gyroToggledOff; // "toggle": a press of the GYRO button turned it off
+
+    // the GYRO button's say this step: is gyro aim on (always, with no button bound)
+    bool GyroButtonOn()
+    {
+        if (_gyroButton == "always" || !_padBinds.Bound(ControlBinds.Gyro))
+        {
+            _gyroToggledOff = false;
+            return true;
+        }
+        bool held = _padBinds.Held(ControlBinds.Gyro);
+        switch (_gyroButton)
+        {
+            case "hold": return held;
+            case "pause": return !held;
+            default: // "toggle"
+                if (_padBinds.Pressed(ControlBinds.Gyro)) _gyroToggledOff = !_gyroToggledOff;
+                return !_gyroToggledOff;
+        }
+    }
 
     // Aim to add this sim step, in MphRead's mouse units (see GyroAim.ToMphAim). Motion from while the game wasn't
     // taking input (a dialog, the pause menu, the ship) is dropped, not delivered late as a jump.
@@ -34,6 +56,11 @@ internal sealed partial class CampaignRenderer
         if (stale)
         {
             g.Aim.Reset();
+            return default;
+        }
+        // (after the take, so motion while it's off is dropped, not saved up for when it's back on)
+        if (!GyroButtonOn())
+        {
             return default;
         }
         if (g.OnlyWhenZoomed && !player.EquipInfo.Zoomed && !player.ScanVisor)

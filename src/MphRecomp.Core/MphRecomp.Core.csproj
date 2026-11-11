@@ -33,6 +33,7 @@
     <!-- The owner's pickup placements for real matches under EXTRA PICKUPS (Arenas/PlacedPickups.cs, 0.2.0): spots only
          (item names + positions), made with the dev placement editor. -->
     <EmbeddedResource Include="Arenas\Placements\*.json" LogicalName="placements/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Frontend\Art\second_hunt_logo.png" LogicalName="second_hunt_logo.png" />
   </ItemGroup>
 
   <ItemGroup>

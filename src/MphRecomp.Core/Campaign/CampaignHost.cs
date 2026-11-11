@@ -27,6 +27,9 @@ namespace MphRecomp.Campaign
         ZoomIn = 1 << 12,
         ZoomOut = 1 << 13,
         ZoomStep = 1 << 14,
+        // SPIDER BALL (owner 2026-11-06, docs/SPIDER_BALL.md; MphRead PlayerEntity.HostSpiderButton): held in alt form on an
+        // Echoes spider track (the online input's last bit; replays from before never set it)
+        Spider = 1 << 15,
     }
 
     // One frame of player intent for the campaign sim. Movement is digital like the DS d-pad the game was built
@@ -48,8 +51,17 @@ namespace MphRecomp.Campaign
         // moved since the last step: vanilla's touch roll, flick boost and double-tap jump (PlayerEntity PlayerTouch.cs)
         public bool TouchDown;
         public sbyte TouchDx, TouchDy;
+        // how far the move stick is pushed (Input/StickCurve.cs): 0 = all the way, vanilla's digital press (keys, d-pad,
+        // CLASSIC, bots, old replays); 1..15 = that many 16ths of the press, so a part tilt walks or rolls gentler.
+        // Move then holds only the digital direction; full tilt stays exactly vanilla
+        public byte MovePush;
+        // the move stick's own direction (Input/StickCurve.cs MoveDir, owner 2026-11-08 "360 movement"): 0 = none, the
+        // d-pad's bits in Move steer as vanilla (keys, d-pad, CLASSIC, old replays); 1..120 = its angle in 3-degree steps
+        public byte MoveDir;
 
         public const float MoveDeadZone = 0.35f;
+
+        public static float PushScale(byte push) => push == 0 || push >= 16 ? 1 : push / 16f;
     }
 
     // Hosts MphRead's own adventure simulation (Scene + RoomEntity transitions + GameState/StorySave + all entity
@@ -111,6 +123,15 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotStuckSight = false;
             PlayerEntity.HostBotBreakWalls = false;
             PlayerEntity.HostBotStuckVertical = false;
+            PlayerEntity.HostBotLedgeLand = false;
+            PlayerEntity.HostBotEdgeGuard = false;
+            PlayerEntity.HostBotCrateNeed = false;
+            PlayerEntity.HostBotItemWalled = false;
+            PlayerEntity.HostBotOutOfReach = false;
+            PlayerEntity.HostBotUnderGiveUp = false;
+            PlayerEntity.HostBotGrateItems = false;
+            PlayerEntity.HostBotItemNoGain = false;
+            PlayerEntity.HostBotNodeOccupied = false;
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = true; // vanilla: one button set, nothing left held across a morph
@@ -147,28 +168,10 @@ namespace MphRecomp.Campaign
                 GameState.UpdateCleanSave(force: true);
             }
             scene.AddPlayer(hunter);
-            // the seats are reused from a match: none of Second Hunt's extras in the adventure (hunter encounters' bots
-            // included), then the Trooper's own two on the main player
-            PlayerEntity.HostAnyShieldWall = false;
-            PlayerEntity.HostSevenWeaponSlots = false;
-            foreach (PlayerEntity seat in PlayerEntity.Players)
-            {
-                if (seat == null) continue;
-                seat.HostShieldWall = seat.HostWallCling = seat.HostHoverWalk = seat.HostBallJump = false;
-                seat.HostHyperBall = seat.HostHyperBallCorruption = seat.HostScoutDrone = seat.HostSoloUa = false;
-                seat.HostWallClingJumpRule = seat.HostWallClingOnce = seat.HostWallClingHold = true;
-                seat.HostDronePadArc = seat.HostDroneSwitchRule = seat.HostDroneWaitsOnFoot = true;
-                seat.HostDroneBodyHeadshots = seat.HostDroneBodySplash = true;
-                seat.HostAffinityBeam = null;
-                seat.HostHealthPercent = 100;
-            }
-            if (hunter == MphRecomp.Multiplayer.Characters.Trooper.Base
-                && string.Equals(character, MphRecomp.Multiplayer.Characters.Trooper.Id, StringComparison.OrdinalIgnoreCase))
-            {
-                PlayerEntity me = PlayerEntity.Players[0];
-                me.HostWallCling = true;
-                me.HostScoutDrone = MphRecomp.Multiplayer.Characters.ScoutDroneOn;
-            }
+            host._seatRules = true;
+            host._hunter = hunter;
+            host._character = character;
+            host.ApplySeatRules();
             bool skipBefore = Cheats.SkipPlanetIntros;
             Cheats.SkipPlanetIntros = !arriving;
             scene.AddRoom(roomName, GameMode.SinglePlayer);
@@ -178,11 +181,65 @@ namespace MphRecomp.Campaign
             return host;
         }
 
+        private bool _seatRules; // (Start only: matches and First Hunt set their own seats through this host)
+        private Hunter _hunter;
+        private string? _character;
+        private PlayerEntity? _ruledSeat;
+
+        // the campaign's per-seat rules. Run at the start and again whenever MphRead builds new seats: a room load that
+        // isn't a resume (a teleporter to another room, a reload) resets the player table (RoomEntity.LoadRoom), and the
+        // new seats came up without the alt hop, camera-relative alt moves or the Trooper's two (owner 2026-11-09:
+        // "why does alt jump stop working when i go back in")
+        private void ApplySeatRules()
+        {
+            // the seats are reused from a match: none of Second Hunt's extras in the adventure (hunter encounters' bots
+            // included), then the Trooper's own two on the main player
+            PlayerEntity.HostAnyShieldWall = false;
+            PlayerEntity.HostSevenWeaponSlots = false;
+            foreach (PlayerEntity seat in PlayerEntity.Players)
+            {
+                if (seat == null) continue;
+                seat.HostShieldWall = seat.HostWallCling = seat.HostHoverWalk = seat.HostBallJump = seat.HostAltHop = seat.HostAltCamMove = false;
+                seat.HostHyperBall = seat.HostHyperBallCorruption = seat.HostScoutDrone = seat.HostSoloUa = false;
+                seat.HostWallClingJumpRule = seat.HostWallClingOnce = seat.HostWallClingHold = true;
+                seat.HostDronePadArc = seat.HostDroneSwitchRule = seat.HostDroneWaitsOnFoot = true;
+                seat.HostDroneBodyHeadshots = seat.HostDroneBodySplash = true;
+                seat.HostAffinityBeam = null;
+                seat.HostHealthPercent = 100;
+                seat.HostMovePush = 1;
+                seat.HostMoveAnalog = false;
+            }
+            if (_hunter == MphRecomp.Multiplayer.Characters.Trooper.Base
+                && string.Equals(_character, MphRecomp.Multiplayer.Characters.Trooper.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                PlayerEntity me = PlayerEntity.Players[0];
+                me.HostWallCling = true;
+                me.HostScoutDrone = MphRecomp.Multiplayer.Characters.ScoutDroneOn;
+            }
+            // the alt forms' hop: the other hunters have no bombs for the bomb-jump ledges; Samus gets it too (owner 11-07).
+            // SETTINGS > GAME > CAMPAIGN "alt form hop" turns it off, and the rooms get MphRead's jump pads back (owner 11-09)
+            if (PlayerEntity.Players[0] is PlayerEntity main)
+            {
+                main.HostAltHop = SceneSetup.CampaignAltHop;
+                main.HostAltCamMove = true; // strafe alt forms move relative to a room's fixed camera (PlayerAltCamMove.cs)
+            }
+            _ruledSeat = PlayerEntity.Players[0];
+        }
+
         public void Step(in CampaignInput input)
         {
             if (Ended)
             {
                 return;
+            }
+            if (_seatRules && !ReferenceEquals(PlayerEntity.Players[0], _ruledSeat))
+            {
+                ApplySeatRules();
+            }
+            // (ALT FORM HOP changed in the pause: the hop follows at once, the rooms' pads at the next room load)
+            if (_seatRules && PlayerEntity.Players[0] is PlayerEntity hopSeat && hopSeat.HostAltHop != SceneSetup.CampaignAltHop)
+            {
+                hopSeat.HostAltHop = SceneSetup.CampaignAltHop;
             }
             // a served match host (docs/DEDICATED_SERVERS.md) has no player of its own: seat 0 is a remote player whose
             // relayed input SetRemoteInput already set, so this device's (empty) input mustn't overwrite it
@@ -209,6 +266,23 @@ namespace MphRecomp.Campaign
             Frame++;
         }
 
+        // an alt form held into a direction that hasn't moved for half a second: where (logcat "[altstuck]", owner
+        // 2026-11-08: Sylux stops on platform edges in the Ice Hive), at most every 2 s
+        private int _altStuckFrames;
+        private long _altStuckLogged = -999;
+
+        private void LogAltStuck(System.Numerics.Vector2 move)
+        {
+            PlayerEntity p = Player;
+            bool held = p.IsAltForm && !p.IsMorphing && move.Length() > CampaignInput.MoveDeadZone;
+            _altStuckFrames = held && p.Speed.Xz.Length < 0.01f ? _altStuckFrames + 1 : 0;
+            if (_altStuckFrames >= 30 && Frame - _altStuckLogged >= 120)
+            {
+                _altStuckLogged = Frame;
+                Console.WriteLine($"[altstuck] {p.Hunter} pos {p.Position.X:0.00},{p.Position.Y:0.00},{p.Position.Z:0.00} speed {p.Speed.X:0.000},{p.Speed.Y:0.000},{p.Speed.Z:0.000} stick {move.X:0.00},{move.Y:0.00} facing {p.FacingVector.X:0.00},{p.FacingVector.Z:0.00}");
+            }
+        }
+
         // this device's own player: its buttons, aim, touch and dialog presses for the next frame
         private void ApplyLocalInput(in CampaignInput input)
         {
@@ -217,6 +291,8 @@ namespace MphRecomp.Campaign
             c.MoveDown.HostDown = input.Move.Y < -CampaignInput.MoveDeadZone;
             c.MoveRight.HostDown = input.Move.X > CampaignInput.MoveDeadZone;
             c.MoveLeft.HostDown = input.Move.X < -CampaignInput.MoveDeadZone;
+            MphRecomp.Input.StickCurve.ToPlayer(Player, input.MovePush, input.MoveDir); // a part push, any direction (PlayerStickPush.cs)
+            LogAltStuck(input.Move);
             // the morph ball reads its own roll controls (MphRead binds them to the same keys as walking)
             c.RollUp.HostDown = c.MoveUp.HostDown;
             c.RollDown.HostDown = c.MoveDown.HostDown;
@@ -236,6 +312,7 @@ namespace MphRecomp.Campaign
             c.WeaponMenu.HostDown = (b & CampaignButtons.WeaponMenu) != 0;
             c.AffinitySlot.HostDown = (b & CampaignButtons.AffinitySlot) != 0;
             Player.HostZoomButtons((b & CampaignButtons.ZoomStep) != 0, (b & CampaignButtons.ZoomIn) != 0, (b & CampaignButtons.ZoomOut) != 0);
+            Player.HostSpiderButton = (b & CampaignButtons.Spider) != 0;
             c.PowerBeam.HostDown = input.SelectWeapon == BeamType.PowerBeam;
             c.VoltDriver.HostDown = input.SelectWeapon == BeamType.VoltDriver;
             c.Missile.HostDown = input.SelectWeapon == BeamType.Missile;

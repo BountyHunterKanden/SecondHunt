@@ -29,8 +29,8 @@ mouse or a controller.
    anywhere you can write to (not Program Files).
 2. Open `SecondHunt.exe`. Windows may say it protected your PC, since the app isn't signed with a paid certificate.
    Click More info, then Run anyway.
-3. On first launch, choose where to keep your files: on this PC (`%LOCALAPPDATA%\Second Hunt`) or in a `data` folder
-   next to the game, for a portable copy. That folder holds your settings, saves, replays and online identity. You can
+3. On first launch, choose where to keep your files: APPDATA (`%LOCALAPPDATA%\Second Hunt`) or PORTABLE (a `data`
+   folder next to the game). That folder holds your settings, saves, replays and online identity. You can
    move it later from SECOND HUNT SETTINGS > APP > FILES > DATA FOLDER.
 4. Pick your ROM file or drop it on the window.
 

@@ -366,6 +366,15 @@ namespace MphRead
                 BotProbe(Int32.Parse(Arg(args, "level") ?? "3"), Single.Parse(Arg(args, "seconds") ?? "30", System.Globalization.CultureInfo.InvariantCulture), Arg(args, "put") != "0", Arg(args, "occupy") == "1");
                 return;
             }
+            if (verb == "botsweep")
+            {
+                if (!ToolPaths.UseDesktopExtraction()) return;
+                if (Arg(args, "window") is string win) { _traceFrom = Int32.Parse(win.Split('-')[0]); _traceTo = Int32.Parse(win.Split('-')[1]); }
+                bool ok = BotSweep(Int32.Parse(Arg(args, "runs") ?? "12"), Single.Parse(Arg(args, "seconds") ?? "300", System.Globalization.CultureInfo.InvariantCulture),
+                    Arg(args, "occupy") != "0", Arg(args, "verbose") == "1", Int32.Parse(Arg(args, "first") ?? "0"), Int32.Parse(Arg(args, "trace") ?? "-1"));
+                Environment.ExitCode = ok ? 0 : 1;
+                return;
+            }
             if (verb == "netjoin")
             {
                 if (!ToolPaths.UseDesktopExtraction()) return;
@@ -1084,6 +1093,150 @@ namespace MphRead
                 + string.Join(", ", closest.Skip(1).Where(x => x < 999).Select(x => x.ToString("0.0"))));
         }
 
+        // -echoesturret botsweep [runs=12] [seconds=300] [occupy=0] [first=] [verbose=1]: the bots' turret errands over a sweep
+        // of matches (each its own RNG seed, bot level 0-2 and player hunter, 3 bots); occupy (default) puts the idle player
+        // back in the turret whenever it is free, for slot runs, occupy=0 leaves it to the bots (seat runs, and slot runs on
+        // a seated bot). Every errand ends reached (held in the slot / seated), cut (the turret left its state, the
+        // occupant left, she died) or FAILED: out of time without getting there, or a stall (2 s moving under 1 unit
+        // before she got there). PASS = no failures (turret-bot-stall, 2026-11-11)
+        static int _traceFrom, _traceTo;
+
+        static bool BotSweep(int runs, float seconds, bool occupy, bool verbose, int first, int trace = -1)
+        {
+            EchoesArena.Register(Paths.FileSystem);
+            EchoesArena.Def def = EchoesArena.Find("M06_ShootingGallery")!;
+            Hunter[] hunters = { Hunter.Samus, Hunter.Kanden, Hunter.Spire, Hunter.Trace, Hunter.Noxus, Hunter.Sylux, Hunter.Weavel };
+            int[] reached = new int[3], cut = new int[3], timedOut = new int[3], stalled = new int[3];
+            var reachTimes = new List<float>[] { new(), new(), new() };
+            var failSpots = new List<string>();
+            for (int run = first; run < first + runs; run++)
+            {
+                int level = run % 3;
+                Hunter hunter = hunters[run / 3 % hunters.Length];
+                var settings = MphRecomp.Multiplayer.MatchSettings.Quick(GameMode.Battle, def.Room, hunter, 3, level);
+                settings.TimeLimitSeconds = 36000;
+                settings.PointGoal = 999;
+                using var host = MphRecomp.Campaign.CampaignHost.StartMatch(settings);
+                Rng.SetRng1((uint)(0x5EED0000 + run * 7919));
+                Rng.SetRng2((uint)(0x0DD50000 + run * 104729));
+                var idle = new MphRecomp.Campaign.CampaignInput { SelectWeapon = BeamType.None };
+                EchoesTurretEntity turret = TurretIn(host.Scene)!;
+                TurretSpot spot = EchoesTurret.For(host.RoomId)!;
+                Vector3 enter = (new Vector3(spot.EnterMin[0], spot.EnterMin[1], spot.EnterMin[2]) + new Vector3(spot.EnterMax[0], spot.EnterMax[1], spot.EnterMax[2])) / 2;
+                PlayerEntity me = PlayerEntity.Main;
+                int n = PlayerEntity.Players.Count;
+                var job = new int[n];
+                var start = new int[n];
+                var got = new bool[n];
+                var stall = new bool[n];
+                var trail = new Queue<Vector3>[n];
+                var hp = new int[n];
+                for (int i = 0; i < n; i++) trail[i] = new Queue<Vector3>();
+                int runReached = 0, runFailed = 0, runCut = 0;
+                if (verbose && run == first)
+                {
+                    Console.WriteLine($"  slot box {String.Join(",", spot.SlotMin)} .. {String.Join(",", spot.SlotMax)}, enter box {String.Join(",", spot.EnterMin)} .. {String.Join(",", spot.EnterMax)}");
+                    Console.WriteLine($"  lift box {String.Join(",", spot.BaseMin ?? [])} .. {String.Join(",", spot.BaseMax ?? [])} rise {spot.BaseRise}, column {String.Join(",", spot.ColumnMin ?? [])} .. {String.Join(",", spot.ColumnMax ?? [])}");
+                }
+                for (int f = 0; f < seconds * 60; f++)
+                {
+                    if (occupy && turret.State == EchoesTurretEntity.TurretState.Free && me.Health > 0 && !me.HostSeated && f % 60 == 0)
+                    {
+                        me.Teleport(enter.WithY(spot.EnterMax[1]), -Vector3.UnitZ, host.Scene.GetNodeRefContaining(enter));
+                    }
+                    host.Step(idle);
+                    for (int i = 1; i < n; i++)
+                    {
+                        PlayerEntity p = PlayerEntity.Players[i];
+                        if (!p.IsBot) continue;
+                        int s = p.SlotIndex;
+                        int j = EchoesTurretBots.JobOf(s);
+                        if (job[i] != 0 && (j != job[i] || p.Health == 0))
+                        {
+                            // the errand ended this step: why
+                            int k = job[i];
+                            bool on = k == 1 ? turret.State == EchoesTurretEntity.TurretState.Free
+                                : turret.State == EchoesTurretEntity.TurretState.Active && turret.Occupant != null && turret.Occupant != p;
+                            string what;
+                            if (got[i] || k == 1 && p.HostSeated || k == 2 && p.HostSlotHeld)
+                            {
+                                if (!got[i]) reachTimes[k].Add((f - start[i]) / 60f); // (a seat run ends the step she sits)
+                                what = "reached";
+                                reached[k]++;
+                                runReached++;
+                            }
+                            else if (stall[i] || on && p.Health > 0)
+                            {
+                                what = stall[i] ? "STALLED" : "TIMED OUT";
+                                (stall[i] ? stalled : timedOut)[k]++;
+                                runFailed++;
+                                failSpots.Add($"run {run} bot {s} {p.Hunter} {(k == 1 ? "seat" : "slot")} f{start[i]}..{f} {what} at ({p.Position.X:0.0},{p.Position.Y:0.0},{p.Position.Z:0.0})");
+                            }
+                            else
+                            {
+                                what = $"cut ({turret.State}{(p.Health == 0 ? ", died" : "")})";
+                                cut[k]++;
+                                runCut++;
+                            }
+                            if (verbose) Console.WriteLine($"    run {run} bot {s} {p.Hunter} {(k == 1 ? "seat" : "slot")} f{start[i]}..{f} ({(f - start[i]) / 60f:0.0} s) {what} at ({p.Position.X:0.0},{p.Position.Y:0.0},{p.Position.Z:0.0})");
+                            job[i] = 0;
+                        }
+                        if (job[i] == 0 && j != 0 && p.Health > 0)
+                        {
+                            job[i] = j;
+                            start[i] = f;
+                            got[i] = stall[i] = false;
+                            trail[i].Clear();
+                        }
+                        if (trace >= 0 && s == trace && (f % 15 == 0 || f > _traceFrom && f < _traceTo))
+                        {
+                            Console.WriteLine($"      f{f} bot {s} {p.Hunter} at ({p.Position.X:0.00},{p.Position.Y:0.00},{p.Position.Z:0.00}) alt {p.IsAltForm} to {EchoesTurretBots.ToOf(s)} hop {EchoesTurretBots.HopOf(s)} held {p.HostSlotHeld} turret {turret.State} hp {p.Health} grates {Grates(host.Scene)} jump {EchoesTurretBots.JumpOf(s)}");
+                        }
+                        if (job[i] == 0) continue;
+                        if (!got[i] && (job[i] == 1 ? p.HostSeated : p.HostSlotHeld))
+                        {
+                            got[i] = true;
+                            reachTimes[job[i]].Add((f - start[i]) / 60f);
+                        }
+                        if (got[i] || stall[i]) continue;
+                        // a hit's knockback isn't a stall: the gunner shooting her back down the route (run 44, 2 hits
+                        // of 75 near (-11.3,2.9,-6)); she's moving again or dead within a hit or two
+                        if (p.Health < hp[i]) trail[i].Clear();
+                        hp[i] = p.Health;
+                        trail[i].Enqueue(p.Position);
+                        if (trail[i].Count > 120)
+                        {
+                            Vector3 then = trail[i].Dequeue();
+                            if ((p.Position - then).Length < 1)
+                            {
+                                stall[i] = true;
+                                if (verbose)
+                                {
+                                    Vector3 goal = job[i] == 1 ? turret.EnterCentre : turret.SlotCentre;
+                                    var res = new CollisionResult();
+                                    bool hit = CollisionDetection.CheckBetweenPoints(p.Position.AddY(0.5f), goal.WithY(p.Position.Y + 0.5f), TestFlags.Players, host.Scene, ref res);
+                                    Console.WriteLine($"    run {run} bot {s} {p.Hunter} stall f{f} at ({p.Position.X:0.0},{p.Position.Y:0.0},{p.Position.Z:0.0}) hop {EchoesTurretBots.HopOf(s)} turret {turret.State} alt {p.IsAltForm}"
+                                        + $" sphere {p.Volume.SpherePosition} goal {goal} ray {(hit ? $"hit {res.EntityCollision?.Entity?.GetType().Name ?? "room"} at {res.Position}" : "clear")}");
+                                }
+                            }
+                        }
+                    }
+                }
+                if (trace >= 0 && run == first)
+                {
+                    foreach (string line in EchoesTurretBots.GraphLines()) Console.WriteLine($"  node {line}");
+                }
+                Console.WriteLine($"  run {run}: {hunter} + 3 bots level {level}: errands reached {runReached}, cut {runCut}, failed {runFailed}");
+            }
+            static string Times(List<float> t) => t.Count == 0 ? "-" : $"{t.Min():0.0}/{t.Average():0.0}/{t.Max():0.0} s";
+            Console.WriteLine($"seat runs: reached {reached[1]} (min/avg/max {Times(reachTimes[1])}), cut {cut[1]}, timed out {timedOut[1]}, stalled {stalled[1]}");
+            Console.WriteLine($"slot runs: reached {reached[2]} (min/avg/max {Times(reachTimes[2])}), cut {cut[2]}, timed out {timedOut[2]}, stalled {stalled[2]}");
+            foreach (string l in failSpots) Console.WriteLine("  " + l);
+            bool pass = failSpots.Count == 0;
+            Console.WriteLine(pass ? "botsweep PASS" : $"botsweep FAIL: {failSpots.Count} errands didn't get there");
+            return pass;
+        }
+
         // -echoesturret sounds [disc=]: Shooting Gallery's sound objects (SOND) with every property and who messages them
         // (dev: which sounds Echoes plays for the turret and the slot)
         static void Sounds(string disc)
@@ -1162,6 +1315,10 @@ namespace MphRead
                 long t0 = host.Frame;
                 for (int k = 0; k < 180 && turret.State == EchoesTurretEntity.TurretState.Entering; k++) host.Step(idle);
                 Check(turret.State == EchoesTurretEntity.TurretState.Active && Math.Abs(host.Frame - t0 - 120) <= 2, $"control after {host.Frame - t0} steps (2 s)");
+                // the seat keeps its player safe, they die only with the turret (owner 2026-11-10)
+                int seatHp = me.Health;
+                me.TakeDamage(30, DamageFlags.IgnoreInvuln, Vector3.UnitZ, dummy);
+                Check(me.Health == seatHp, $"no damage while seated ({seatHp} -> {me.Health})");
                 Check(MathF.Abs(turret.PivotNow.Y - spot.Pivot[1]) < 0.01f && MathF.Abs(me.Position.Y - (spot.Pivot[1] + spot.SeatOffset[1])) < 0.01f,
                     $"raised: pivot y {turret.PivotNow.Y:0.00}, feet y {me.Position.Y:0.00}");
                 // the lift's solid base (Echoes' 'Dummy Base') rose with it: a drop beside the seat's column lands on its top
@@ -1557,6 +1714,21 @@ namespace MphRead
                 }
                 Check(left >= 0, $"with nobody in sight the bot got out after {left / 60f:0.0} s");
             }
+            // the 4 bars' filmstrip pulse (layer 667ec949, Retro UV mode 5): its material must count as animated, or the
+            // arena draws it with the still matrix (0.4.0 dropped strip layers from GxShader's Scrolls gate)
+            {
+                EchoesArena.Def gallery = EchoesArena.Find("M06_ShootingGallery")!;
+                string dir = EchoesArena.HdDir(gallery.Room) ?? Path.Combine(Paths.FileSystem, "_archives", gallery.Archive, ArenaHdWriter.Dir);
+                string gx = Path.Combine(dir, ArenaHdWriter.Materials);
+                var bars = File.Exists(gx) ? MphRecomp.Assets.GxJson.Read(gx).Where(m => m.Layers.Any(l => l?.Strip != null)).ToList() : new();
+                bool moves = bars.Count > 0 && bars.All(m =>
+                {
+                    var p = MphRecomp.Render.GxShader.Pack(m);
+                    float[] a = MphRecomp.Render.GxShader.ScrolledTexMtx(m, p, 0.1), b = MphRecomp.Render.GxShader.ScrolledTexMtx(m, p, 0.6);
+                    return p.Scrolls && !a.SequenceEqual(b);
+                });
+                Check(moves, $"the bars' filmstrip pulse animates ({bars.Count} strip materials)");
+            }
             // the effects' model particles (PMDL): each placed model drawn by some effect, near where the effect runs
             {
                 Console.WriteLine("  the turret effects' model particles:");
@@ -1701,6 +1873,17 @@ namespace MphRead
                     Console.WriteLine($"{pad}{c.Id:x8} = [{c.Data.Length}] {Convert.ToHexString(c.Data.AsSpan(0, Math.Min(c.Data.Length, 48)))}");
                 }
             }
+        }
+
+        // the arena's breakables, up (U) or broken (d), in order (dev trace)
+        static string Grates(Scene scene)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (EntityBase e in scene.Entities)
+            {
+                if (e is EchoesBreakableEntity g) sb.Append(g.Up ? 'U' : 'd');
+            }
+            return sb.ToString();
         }
     }
 }

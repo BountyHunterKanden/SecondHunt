@@ -41,6 +41,11 @@ namespace MphRead
                 Check();
                 return;
             }
+            if (args.Length >= 2 && args[1] == "modmodes")
+            {
+                ModModes();
+                return;
+            }
             if (args.Length >= 2 && args[1] == "name")
             {
                 Name(args.Length >= 3 ? args[2] : "Kanden~7");
@@ -64,6 +69,11 @@ namespace MphRead
             if (args.Length >= 2 && args[1] == "license")
             {
                 License();
+                return;
+            }
+            if (args.Length >= 3 && args[1] == "card")
+            {
+                Card(args[2]);
                 return;
             }
             if (args.Length >= 2 && args[1] == "back")
@@ -363,6 +373,73 @@ namespace MphRead
         // (default "Kanden~7") typed key by key (SHIFT for capitals and shifted symbols), an empty name tried (vanilla's
         // "invalid name."), then OK keeps it (hunter_license.json); MULTIPLAYER again shows no notice. MP_SHOTS=1:
         // name_notice.png, name_keyboard.png, name_shift.png, name_typed.png (extract_out/frontend)
+        // -mpmenu card <hunter_license.json>: that license's card, once per hunter of choice (card_<h>.png, extract_out/frontend);
+        // CARD_CHOICE=trooper / darksamus: once, that character as the hunter of choice (card_<id>.png; the picker test's
+        // pictures from testdata/picker_renders and brawl_extract/Converted; CARD_HD + CARD_PICTURES: the game's own hd folder
+        // and cache/characters instead)
+        private static void Card(string json)
+        {
+            Character? choice = Characters.All.FirstOrDefault(c => !c.HasOriginal && c.Id == Environment.GetEnvironmentVariable("CARD_CHOICE"));
+            if (choice != null)
+            {
+                string? hd = PickerTest.FindUp(AppContext.BaseDirectory, System.IO.Path.Combine("brawl_extract", "Converted"));
+                string pictures = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"mpmenu_card_pictures_{Environment.ProcessId}");
+                System.IO.Directory.CreateDirectory(pictures);
+                if (hd != null) PickerTest.FillPictures(hd, pictures);
+                MultiplayerMenu.CharacterHdRoot = Environment.GetEnvironmentVariable("CARD_HD") ?? hd;
+                MultiplayerMenu.CharacterPicturesDir = Environment.GetEnvironmentVariable("CARD_PICTURES") ?? pictures;
+            }
+            for (int h = 0; h < 7; h++)
+            {
+                if (choice != null && h != (int)choice.Base) continue;
+                string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"mpmenu_card_{Environment.ProcessId}");
+                if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, recursive: true);
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.Copy(json, System.IO.Path.Combine(dir, "hunter_license.json"));
+                HunterLicense lic = HunterLicense.Load(dir);
+                lic.FavoriteHunter = h;
+                if (choice != null)
+                {
+                    lic.CharacterMatches[choice.Id] = 1;
+                    (lic.ChoiceHunter, lic.ChoiceCharacter) = (h, choice.Id);
+                }
+                lic.Save(dir);
+                FrontendSession s = FrontendSession.Load(Paths.FileSystem);
+                s.Multiplayer.ProfileDir = dir;
+                void Run(int frames)
+                {
+                    for (int i = 0; i < frames; i++)
+                    {
+                        s.Build(640, 360);
+                        s.Tick();
+                    }
+                }
+                s.Start(18);
+                Run(30);
+                s.TouchDs(172, 72); // MULTIPLAYER
+                Run(60);
+                MenuPage page = s.Menu.Page!;
+                foreach (int i in Enumerable.Range(0, page.Items.Count))
+                {
+                    MenuAction? a = page.Items[i].Actions.FirstOrDefault(x => x.Calls.Any(c => c.B == 90));
+                    if (a == null || !MenuEngine.TryRect(a, page.Items[i], out float x0, out float y0, out float x1, out float y1)) continue;
+                    s.TouchDs((x0 + x1) / 2, 192 - (y0 + y1) / 2);
+                    break;
+                }
+                Run(90);
+                s.Build(1280, 720);
+                using var img = FrontendTool.RasterCanvas(s.DrawList, 1280, 720);
+                string path = System.IO.Path.Combine(FrontendTool.OutDir(), $"card_{choice?.Id ?? h.ToString()}.png");
+                img.SaveAsPng(path);
+                Console.WriteLine($"shot {path} (page {s.Menu.Page?.Index}, hunter {h})");
+                System.IO.Directory.Delete(dir, recursive: true);
+            }
+            if (MultiplayerMenu.CharacterPicturesDir is string made && made.Contains("mpmenu_card_pictures_"))
+            {
+                System.IO.Directory.Delete(made, recursive: true);
+            }
+        }
+
         private static void Name(string text)
         {
             string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"mpmenu_license_{Environment.ProcessId}");
@@ -827,6 +904,65 @@ namespace MphRead
             l.RankPoints = 840;
             l.AfterMatch(M(0, false, Human(Hunter.Trace, 1, 4)), null);
             Check(l.RankPoints == 850 && l.RankLevel == 4, $"points stop at 850, level 4 from 750 ({l.RankPoints}, level {l.RankLevel})");
+            // the hunter of choice can be a character (owner 2026-11-07), counted as a hunter is: most own matches, the one
+            // just played keeping a tie; the vanilla FavoriteHunter counts the character's matches as its base hunter's
+            int kanden = l.HunterMatches[(int)Hunter.Kanden];
+            Check(l.HunterOfChoice() == ((int)Hunter.Kanden, null) && l.ChoiceHunter == -1, $"no character played: the vanilla hunter ({kanden} Kanden)");
+            HunterLicense.MatchRecord As(Hunter h, string? character) => new(false, GameMode.Battle, 95, 60, h, 1, false, 0,
+                new[] { Bot(Hunter.Samus, 0) }, character);
+            for (int i = 0; i < kanden - 1; i++) l.AfterMatch(As(Hunter.Weavel, "TROOPER"), null);
+            Check(l.HunterOfChoice() == ((int)Hunter.Kanden, null), $"{kanden - 1} Trooper matches: still Kanden ({l.HunterOfChoice()})");
+            l.AfterMatch(As(Hunter.Weavel, "TROOPER"), null);
+            Check(l.HunterOfChoice() == ((int)Hunter.Weavel, "trooper") && l.FavoriteHunter == (int)Hunter.Weavel,
+                $"{kanden} Trooper matches tie Kanden's: the one just played, TROOPER ({l.HunterOfChoice()}; vanilla Weavel {l.FavoriteHunter})");
+            for (int i = 0; i < kanden - 1; i++) l.AfterMatch(As(Hunter.Weavel, null), null);
+            Check(l.HunterOfChoice() == ((int)Hunter.Weavel, "trooper") && l.OwnMatches((int)Hunter.Weavel, null) == kanden - 1,
+                $"Weavel's own matches don't count the Trooper's ({l.OwnMatches((int)Hunter.Weavel, null)}): still TROOPER");
+            l.AfterMatch(As(Hunter.Weavel, null), null);
+            Check(l.HunterOfChoice() == ((int)Hunter.Weavel, null), $"Weavel ties the Trooper: Weavel ({l.HunterOfChoice()})");
+            for (int i = 0; i <= kanden; i++) l.AfterMatch(As(Hunter.Samus, "DARK SAMUS"), null);
+            Check(l.HunterOfChoice() == ((int)Hunter.Samus, "darksamus") && l.FavoriteHunter == (int)Hunter.Weavel,
+                $"more Dark Samus matches: DARK SAMUS ({l.HunterOfChoice()}; vanilla stays Weavel, {l.HunterMatches[(int)Hunter.Weavel]} > {l.HunterMatches[0]})");
+            System.IO.Directory.CreateDirectory(dir);
+            l.Save(dir);
+            HunterLicense back = HunterLicense.Load(dir);
+            Check(back.HunterOfChoice() == ((int)Hunter.Samus, "darksamus") && back.CharacterMatches.GetValueOrDefault("darksamus") == kanden + 1,
+                $"saved and loaded: DARK SAMUS ({back.HunterOfChoice()})");
+            var bad = new HunterLicense { ChoiceHunter = (int)Hunter.Kanden, ChoiceCharacter = "darksamus", FavoriteHunter = 3 };
+            bad.ClampChoice(counted: false);
+            Check(bad.HunterOfChoice() == (3, null), $"a character on the wrong hunter: the vanilla hunter ({bad.HunterOfChoice()})");
+            // ... shown in its most used skin (owner 2026-11-07), the one just played keeping a tie; Sylux too (Prime 4)
+            HunterLicense.MatchRecord In(Hunter h, string? character, string? skin) => new(false, GameMode.Battle, 95, 60, h, 1, false, 0,
+                new[] { Bot(Hunter.Kanden, 0) }, character, skin);
+            var worn = new HunterLicense();
+            for (int i = 0; i < 2; i++) worn.AfterMatch(In(Hunter.Samus, "DARK SAMUS", "MP2DarkSamus"), null);
+            worn.AfterMatch(In(Hunter.Samus, "DARK SAMUS", "MP3DarkSamus"), null);
+            Check(worn.ChoiceSkin() == "MP2DarkSamus", $"2 Echoes, 1 Corruption: Echoes ({worn.ChoiceSkin()})");
+            worn.AfterMatch(In(Hunter.Samus, "DARK SAMUS", "MP3DarkSamus"), null);
+            Check(worn.ChoiceSkin() == "MP3DarkSamus", $"Corruption ties: the one just played ({worn.ChoiceSkin()})");
+            HunterLicense? sent = System.Text.Json.JsonSerializer.Deserialize<HunterLicense>(System.Text.Json.JsonSerializer.Serialize(
+                new { worn.ChoiceHunter, worn.ChoiceCharacter, worn.FavoriteHunter, SkinChoice = new Dictionary<string, string>(worn.SkinChoice)
+                    { ["trooper"] = "MP2DarkSamus", ["zerosuit"] = "MP3ZeroSuit/../x", ["sylux"] = "MP4Sylux" } }));
+            sent!.ClampChoice(counted: false);
+            Check(sent.ChoiceSkin() == "MP3DarkSamus" && !sent.SkinChoice.ContainsKey("trooper") && !sent.SkinChoice.ContainsKey("zerosuit")
+                && sent.SkinOf("sylux") == "MP4Sylux", $"another device's: kept, a skin its character doesn't claim dropped ({string.Join(", ", sent.SkinChoice)})");
+            var sylux = new HunterLicense();
+            for (int i = 0; i < 2; i++) sylux.AfterMatch(In(Hunter.Sylux, null, "MP4Sylux"), null);
+            sylux.AfterMatch(In(Hunter.Sylux, null, null), null);
+            Check(sylux.HunterOfChoice() == ((int)Hunter.Sylux, null) && sylux.ChoiceSkin() == "MP4Sylux", $"Sylux, mostly Prime 4: Prime 4 ({sylux.ChoiceSkin()})");
+            sylux.AfterMatch(In(Hunter.Sylux, null, null), null);
+            Check(sylux.ChoiceSkin() == null, $"vanilla Sylux ties: her own look ({sylux.ChoiceSkin()})");
+            var samus = new HunterLicense();
+            for (int i = 0; i < 2; i++) samus.AfterMatch(In(Hunter.Samus, null, "MP2DarkSuit"), null);
+            samus.AfterMatch(In(Hunter.Samus, null, null), null);
+            Check(samus.HunterOfChoice() == ((int)Hunter.Samus, null) && samus.ChoiceSkin() == "MP2DarkSuit", $"Samus, mostly the Dark Suit: the Dark Suit ({samus.ChoiceSkin()})");
+            samus.AfterMatch(In(Hunter.Samus, null, null), null);
+            Check(samus.ChoiceSkin() == null, $"vanilla Samus ties: her own look ({samus.ChoiceSkin()})");
+            worn.AfterMatch(In(Hunter.Samus, null, "MP2DarkSamus"), null); // (a seat's skin alone: its character's)
+            Check(worn.SkinMatches.GetValueOrDefault("darksamus/MP2DarkSamus") == 3, $"a Dark Samus skin on plain Samus counts as Dark Samus's");
+            worn.Save(dir);
+            Check(HunterLicense.Load(dir).ChoiceSkin() == worn.ChoiceSkin(), "saved and loaded: the same skin");
+            System.IO.Directory.Delete(dir, recursive: true);
             Console.WriteLine(fails == 0 ? "PASS license" : $"FAIL license ({fails})");
         }
 
@@ -1905,6 +2041,151 @@ namespace MphRead
             ("battle", 44, 68, true), ("survival", 113, 54, true), ("bounty", 167, 54, true), ("defender", 221, 54, true),
             ("prime hunter", 113, 113, false), ("capture", 167, 113, false), ("nodes", 221, 112, true)
         };
+
+        // -mpmenu modmodes: GAME MODE's mod-mode row (MultiplayerMenu.ModModes.cs) with a scratch mod adding two modes: no
+        // row without mods; with them, a tap on the right arrow steps to the second mode and a tap on the name picks it
+        // (its base mode's rules page, the mod's starting values, mm= in the setup); the d-pad reaches the box under the
+        // list and A picks the first; picking a plain mode after drops it
+        private static void ModModes()
+        {
+            int pass = 0, total = 0;
+            void Ok(string what, bool ok, string detail = "")
+            {
+                total++;
+                if (ok) pass++;
+                Console.WriteLine($"{(ok ? "PASS" : "FAIL")} {what}{(detail.Length > 0 ? " | " + detail : "")}");
+            }
+            string data = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "mphrecomp_mpmodmodes_" + Guid.NewGuid().ToString("N"));
+            string mods = System.IO.Path.Combine(data, "mods");
+            System.IO.Directory.CreateDirectory(System.IO.Path.Combine(mods, "tagmod"));
+            System.IO.File.WriteAllText(System.IO.Path.Combine(mods, "tagmod", "mod.json"),
+                "{ \"Id\": \"tagmod\", \"Version\": \"1.0.0\", \"Kind\": \"gameplay\", \"Entry\": \"main.lua\", \"Modes\": [\n"
+                + "  { \"Id\": \"tag\", \"Name\": \"TAG\", \"Base\": \"Battle\", \"PointGoal\": 5, \"TimeLimit\": 3 },\n"
+                + "  { \"Id\": \"last\", \"Name\": \"Last One Standing\", \"Description\": \"one life each\", \"Base\": \"Survival\", \"TimeLimit\": 4 } ] }");
+            System.IO.File.WriteAllText(System.IO.Path.Combine(mods, "tagmod", "main.lua"), "mod.on('tick', function() end)");
+            try
+            {
+                // the row's items (the ones with its calls)
+                int[] RowItems(FrontendSession s) => Enumerable.Range(0, s.Menu.Page!.Items.Count)
+                    .Where(i => s.Menu.Page.Items[i].Actions.Any(a => a.Calls.Any(c => c.B is >= 2350 and <= 2352))).ToArray();
+                // a tap on the centre of the row's touch rect for this call
+                bool Tap(FrontendSession s, int call)
+                {
+                    for (int i = 0; i < s.Menu.Page!.Items.Count; i++)
+                    {
+                        MenuItem it = s.Menu.Page.Items[i];
+                        if (s.Menu.ItemState(i) == MenuState.Hidden) continue;
+                        foreach (MenuAction a in it.Actions)
+                        {
+                            if (!a.Calls.Any(c => c.B == call) || !MenuEngine.TryRect(a, it, out float x0, out float y0, out float x1, out float y1)) continue;
+                            s.TouchDs((x0 + x1) / 2, 192 - (y0 + y1) / 2);
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                // to the mode page; `pick` at frame 140 (it reports what it saw); then the rules page's OK and on through
+                // the lobby to START GAME
+                (FrontendSession S, MatchSettings? Setup, string Raw, int RulesPage, bool Saw) Go(string? modsDir, Func<FrontendSession, bool> pick)
+                {
+                    string? setup = null;
+                    int rules = -1;
+                    bool saw = false;
+                    FrontendSession session = FrontendSession.Load(Paths.FileSystem, modsDir: modsDir);
+                    session.Request = r => { if (r.Kind == FrontendRequestKind.StartMatch) setup = r.Arg; };
+                    session.Start(18);
+                    string script = $"20:ds@172/72,60:ds@{LocalDoor.X}/{LocalDoor.Y},100:ds@48/72,240:ds@212/173,"
+                        + "280:ds@26/134,300:ds@70/77,340:ds@223/170,360:ds@223/170,380:ds@223/170,440:ds@98/139,450:ds@154/63,"
+                        + "460:ds@212/139,500:ds@195/41";
+                    var steps = script.Split(',').Select(t => t.Split(':')).Select(p => (F: Int32.Parse(p[0]), In: p[1][3..].Split('/'))).ToList();
+                    for (int f = 0; f <= 620 && setup == null; f++)
+                    {
+                        if (f == 140) saw = session.Menu.Page?.Index == MultiplayerMenu.ModePage && pick(session);
+                        if (f == 220) rules = session.Menu.Page?.Index ?? -1;
+                        foreach (var st in steps.Where(t => t.F == f)) session.TouchDs(Single.Parse(st.In[0]), Single.Parse(st.In[1]));
+                        session.Tick();
+                    }
+                    return (session, setup == null ? null : MatchSetupText.Read(setup), setup ?? $"no START GAME (page {session.Menu.Page?.Index})", rules, saw);
+                }
+                bool Hidden(FrontendSession s) => RowItems(s).All(i => s.Menu.ItemState(i) == MenuState.Hidden);
+                var battle = ModeTaps.First(m => m.Name == "battle");
+
+                // no mods: the row stays hidden, BATTLE plays a plain match
+                var none = Go(null, s =>
+                {
+                    bool hidden = Hidden(s);
+                    s.TouchDs(battle.X, battle.Y);
+                    return hidden;
+                });
+                Ok("no mods: no mod-mode row on GAME MODE, a plain match", none.Saw && none.Setup?.ModMode == null, none.Raw);
+
+                // taps: right arrow (to the second mode), then the name (pick)
+                var t = Go(mods, s =>
+                {
+                    bool shown = RowItems(s).Length == 3 && !Hidden(s); // (the box and its two arrows)
+                    shown &= Tap(s, 2350);
+                    for (int n = 0; n < 20; n++) s.Tick();
+                    return shown && Tap(s, 2352);
+                });
+                Ok("mods: the row shows; tap right arrow + name: the second mode (Survival rules page, 4 min, mm=tagmod:last)",
+                    t.Saw && t.RulesPage == 30 && t.Setup?.ModMode == "tagmod:last" && t.Setup.Mode == MphRead.GameMode.Survival
+                    && t.Setup.TimeLimitSeconds == 240, $"rules page {t.RulesPage}, {t.Raw}");
+
+                // d-pad: down from BATTLE until the row's box (the item with both pick and next) is focused, A
+                int presses = -1;
+                var k = Go(mods, s =>
+                {
+                    MenuPage page = s.Menu.Page!;
+                    int box = RowItems(s).FirstOrDefault(i => page.Items[i].Actions.Any(a => a.Calls.Any(c => c.B == 2352))
+                        && page.Items[i].Actions.Any(a => a.Calls.Any(c => c.B == 2350)), -1);
+                    for (int n = 0; n < 12 && box >= 0; n++)
+                    {
+                        if (s.Menu.FocusedItem() == box)
+                        {
+                            presses = n;
+                            break;
+                        }
+                        s.Navigate(0, -1);
+                        for (int w = 0; w < 4; w++) s.Tick();
+                    }
+                    if (presses < 0) return false;
+                    s.Press(MenuKeys.A);
+                    return true;
+                });
+                Ok("d-pad down to the row + A: the first mode (Battle, 5 points, 3 min, mm=tagmod:tag)",
+                    k.Saw && presses > 0 && k.Setup?.ModMode == "tagmod:tag" && k.Setup.Mode == MphRead.GameMode.Battle
+                    && k.Setup.PointGoal == 5 && k.Setup.TimeLimitSeconds == 180, $"{presses} presses, rules page {k.RulesPage}, {k.Raw}");
+
+                // a mod mode, B (YES: back to CHOOSE MULTIPLAYER TYPE), LOCAL, CREATE GAME again, BATTLE: a plain match
+                var back = Go(mods, s =>
+                {
+                    void Run(int n) { for (int i = 0; i < n; i++) s.Tick(); }
+                    bool ok = Tap(s, 2352);
+                    Run(40);
+                    ok &= s.Menu.Page?.Index == 28;
+                    s.Press(MenuKeys.B);
+                    Run(60);
+                    s.TouchDs(108, 124); // the box's YES
+                    Run(60);
+                    ok &= s.Menu.Page?.Index == MultiplayerMenu.TypePage;
+                    s.TouchDs(LocalDoor.X, LocalDoor.Y);
+                    Run(40);
+                    s.TouchDs(48, 72);
+                    Run(40);
+                    ok &= s.Menu.Page?.Index == MultiplayerMenu.ModePage;
+                    s.TouchDs(battle.X, battle.Y);
+                    return ok;
+                });
+                Ok("mod mode, leave, CREATE GAME, BATTLE: a plain Battle match (Battle's own 7 points, 7 min)", back.Saw && back.Setup != null
+                    && back.Setup.ModMode == null && back.Setup.Mode == MphRead.GameMode.Battle && back.Setup.PointGoal == none.Setup?.PointGoal
+                    && back.Setup.TimeLimitSeconds == none.Setup?.TimeLimitSeconds, back.Raw);
+            }
+            finally
+            {
+                try { System.IO.Directory.Delete(data, recursive: true); } catch { }
+            }
+            Console.WriteLine($"{pass}/{total} pass");
+        }
 
         private static void Check()
         {

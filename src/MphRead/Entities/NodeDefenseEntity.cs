@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -37,7 +38,9 @@ namespace MphRead.Entities
         public int OccupyingTeam => _occupyingTeam;
         public bool Blinking => _blinkTimer > 0;
         public IReadOnlyList<bool> OccupiedBy => _occupiedBy;
-        public bool IsOccupied => _occupiedBy[0] || _occupiedBy[1] || _occupiedBy[2] || _occupiedBy[3];
+        // recomp (PlayerEntity.HostBotNodeOccupied): every seat, not 0-3 only (bots only read it)
+        public bool IsOccupied => PlayerEntity.HostBotNodeOccupied ? Array.IndexOf(_occupiedBy, true) >= 0
+            : _occupiedBy[0] || _occupiedBy[1] || _occupiedBy[2] || _occupiedBy[3];
         public float Progress => _progress;
 
         private readonly Material _terminalMat = null!;
@@ -168,7 +171,7 @@ namespace MphRead.Entities
             {
                 if (_contested)
                 {
-                    if (_occupiedBy[PlayerEntity.Main.SlotIndex])
+                    if (_occupiedBy[PlayerEntity.Main.SlotIndex] && PlayerEntity.MainCuesHeard) // recomp: MainCuesHeard
                     {
                         _soundSource.SetPausedFreeSfxScripts(true);
                     }
@@ -179,11 +182,11 @@ namespace MphRead.Entities
                     {
                         if (!_inProgress && _progress >= 10 / 30f)
                         {
-                            Music.PlayRoomMusic(_scene.RoomId, track: 2);
+                            if (PlayerEntity.MainCuesHeard) Music.PlayRoomMusic(_scene.RoomId, track: 2); // recomp: MainCuesHeard
                             value1 = 1;
                             _inProgress = true;
                         }
-                        _soundSource.SetPausedFreeSfxScripts(false);
+                        if (PlayerEntity.MainCuesHeard) _soundSource.SetPausedFreeSfxScripts(false); // recomp: MainCuesHeard
                     }
                     _progress += _scene.FrameTime;
                     float spinSpeed = _progress / (300 / 30f) * (15 * 30f);
@@ -200,7 +203,7 @@ namespace MphRead.Entities
             {
                 if (prevOccupiedBy[PlayerEntity.Main.SlotIndex])
                 {
-                    Music.PlayRoomMusic(_scene.RoomId, track: 0);
+                    if (PlayerEntity.MainCuesHeard) Music.PlayRoomMusic(_scene.RoomId, track: 0); // recomp: MainCuesHeard
                     if (value1 != 2)
                     {
                         value1 = 3;
@@ -254,6 +257,10 @@ namespace MphRead.Entities
             if (value2 != 0 && nodeCount >= 2)
             {
                 value1 = 5;
+            }
+            if (!PlayerEntity.MainCuesHeard)
+            {
+                value1 = 0; // recomp: the main player's capture rings / multi-node voice, none in a replay's free cam
             }
             if (value1 == 1)
             {
@@ -343,7 +350,7 @@ namespace MphRead.Entities
             _scoreTimer = 150 / 30f;
             if (_currentTeam == PlayerEntity.Main.TeamIndex)
             {
-                Music.PlayRoomMusic(_scene.RoomId, track: 0);
+                if (PlayerEntity.MainCuesHeard) Music.PlayRoomMusic(_scene.RoomId, track: 0); // recomp: MainCuesHeard
                 dest1 = 2;
             }
             else

@@ -25,8 +25,7 @@ internal sealed partial class CampaignRenderer
         if (_fhLevel != null)
         {
             // the cart's own arm cannon, body and ball (PlayerFirstHunt.cs), never RECOMP SETTINGS' HD suit and gun:
-            // nothing for StartGearLoad to load (todo: a suit changed in the pause menu still hot-swaps the HD gear in,
-            // ReloadGunFromSettings)
+            // nothing for StartGearLoad to load, and a suit changed in the pause menu is ignored here (ReloadGunFromSettings)
             _gunDir = null;
             _suitId = null;
         }

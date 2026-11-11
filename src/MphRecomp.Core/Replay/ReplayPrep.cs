@@ -67,7 +67,9 @@ namespace MphRecomp.Replay
 
         public static string SidecarPath(string dataDir, ReplayFile file) => Path.Combine(Dir(dataDir), Key(file) + Extension);
 
-        public static bool Worth(ReplayFile file) => file.Steps.Count >= MinSteps;
+        // not a modded match (format 75 Mods): its gameplay mods' Lua state isn't in a keyframe, so it's only ever played
+        // from the start with the mods loaded (docs/MOD_API.md �9)
+        public static bool Worth(ReplayFile file) => file.Steps.Count >= MinSteps && file.Mods.Count == 0;
 
         // whether a prepare should start for the sidecar at `path`: not when it's complete or another process is writing it
         // (its .lock held: the viewer reads along); a cut-off one left by a stopped prepare goes first (a new prepare
@@ -117,6 +119,8 @@ namespace MphRecomp.Replay
                     {
                         f.Delete();
                         File.Delete(Path.ChangeExtension(f.FullName, ".lock"));
+                        File.Delete(ReplayKeyframes.WalkPath(f.FullName));
+                        File.Delete(f.FullName + ".walk-viewer");
                     }
                     catch (IOException)
                     {
@@ -194,6 +198,7 @@ namespace MphRecomp.Replay
                 {
                     if (player.CheckAfterStart() is string after) return "refused: " + after;
                     var kbase = ReplayCheckpoints.KeyframeBase(host);
+                    ReplayKeyframes.WriteWalk(path, kbase);
                     var writer = new SimSnapshot.KeyframeWriter(kbase);
                     using var sidecar = KeyframeSidecar.Create(path, kbase);
                     var sw = new Stopwatch();
@@ -357,6 +362,8 @@ namespace MphRecomp.Replay
             w.Write(i.TouchDown);
             w.Write(i.TouchDx);
             w.Write(i.TouchDy);
+            w.Write(i.MovePush);
+            w.Write(i.MoveDir);
             w.Write(step.Checksum);
         }
 
@@ -375,6 +382,8 @@ namespace MphRecomp.Replay
             i.TouchDown = r.ReadBoolean();
             i.TouchDx = r.ReadSByte();
             i.TouchDy = r.ReadSByte();
+            i.MovePush = r.ReadByte();
+            i.MoveDir = r.ReadByte();
             return new ReplayStep { Input = i, Checksum = r.ReadUInt32() };
         }
 
@@ -640,7 +649,12 @@ namespace MphRecomp.Replay
                     || _sidecar.Signature != _base.Signature))
                 {
                     Break($"the prepared match started differently (objects {_sidecar.ObjectCount} / {_base.ObjectCount}, "
-                        + $"leaves {_sidecar.LeafCount} / {_base.LeafCount}, signature {_sidecar.Signature} / {_base.Signature})");
+                        + $"leaves {_sidecar.LeafCount} / {_base.LeafCount}, signature {_sidecar.Signature} / {_base.Signature})"
+                        + WalkDiff());
+                }
+                else if (_sidecar != null)
+                {
+                    try { File.Delete(WalkPath(_path)); } catch (IOException) { } // (it matched: the walk isn't needed)
                 }
             }
             else
@@ -684,6 +698,54 @@ namespace MphRecomp.Replay
             }
             LastLoadMs = sw.Elapsed.TotalMilliseconds;
             return true;
+        }
+
+        // (11-05, the same refusal back over and over: "started differently" with nothing to say what) the prepare writes
+        // its step-0 walk beside the sidecar; a viewer whose own walk differs writes its copy beside it (.walk-viewer) and
+        // names the first lines that differ in the refusal, so the log says which state to keep out of the walk
+        public static string WalkPath(string sidecar) => sidecar + ".walk";
+
+        public static void WriteWalk(string sidecar, SimSnapshot.KeyframeBase kbase)
+        {
+            try
+            {
+                File.WriteAllLines(WalkPath(sidecar), kbase.Describe());
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // (diagnostics only)
+            }
+        }
+
+        string WalkDiff()
+        {
+            try
+            {
+                string[] mine = _base.Describe().ToArray();
+                File.WriteAllLines(_path + ".walk-viewer", mine);
+                string prepPath = WalkPath(_path);
+                if (!File.Exists(prepPath)) return "; (no prepared walk to compare)";
+                string[] theirs = File.ReadAllLines(prepPath);
+                var sb = new StringBuilder();
+                int shown = 0, differ = 0, n = Math.Max(mine.Length, theirs.Length);
+                for (int i = 0; i < n; i++)
+                {
+                    string? p = i < theirs.Length ? theirs[i] : null, v = i < mine.Length ? mine[i] : null;
+                    if (p == v) continue;
+                    differ++;
+                    if (shown++ < 12) sb.Append($"\n  prepared: {p ?? "(none)"}\n  viewer:   {v ?? "(none)"}");
+                }
+                // (the statics, as sets: a static walked on one side only)
+                var ps = new HashSet<string>(theirs.Where(l => l.StartsWith("s ")));
+                var vs = new HashSet<string>(mine.Where(l => l.StartsWith("s ")));
+                foreach (string s in ps.Except(vs).Take(6)) sb.Append($"\n  prepared only: {s}");
+                foreach (string s in vs.Except(ps).Take(6)) sb.Append($"\n  viewer only:   {s}");
+                return $"; {differ} walk lines differ (walks: {prepPath}, {_path}.walk-viewer):" + sb;
+            }
+            catch (Exception ex)
+            {
+                return "; (walk diff failed: " + ex.Message + ")";
+            }
         }
 
         public void Break(string why)

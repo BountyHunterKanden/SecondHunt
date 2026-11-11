@@ -10,6 +10,9 @@ namespace MphRecomp.App;
 // A small timer runs only while a music player or the SFX mixer exists; it hands the envelope's gain to every
 // GameMusicPlayer (sequenced track + streamed music, a factor beside the OPTIONS > AUDIO volume) and every GameSfxPlayer's
 // streams (the title theme). Off with ONLINE SETTINGS' DUCK MUSIC (VoiceSettings.DuckMusic). Any thread.
+// Self duck (2026-10-31, owner): while you hold push to talk and the sound comes out of the device's speakers
+// (VoiceDevices.OnLoudspeaker: no headset/headphones; Android only), the music drops much deeper at once (DuckEnvelope.Self)
+// so your microphone doesn't send it to the other players. The lower of the two gains wins.
 internal static class MusicDuck
 {
     const int PeriodMs = 20;
@@ -18,6 +21,7 @@ internal static class MusicDuck
     static readonly List<GameMusicPlayer> s_music = new();
     static readonly List<GameSfxPlayer> s_sfx = new();
     static readonly DuckEnvelope s_envelope = new();
+    static readonly DuckEnvelope s_self = DuckEnvelope.Self();
     static Timer? s_timer;
 
     public static void Register(GameMusicPlayer p)
@@ -74,9 +78,13 @@ internal static class MusicDuck
         lock (s_gate)
         {
             if (s_timer == null) return;
-            bool heard = VoiceChat.Current?.AnyoneHeard == true;
-            float before = s_envelope.Gain;
-            gain = s_envelope.Step(Environment.TickCount64, heard, VoiceSettings.Current.DuckMusic);
+            VoiceChat? voice = VoiceChat.Current;
+            bool heard = voice?.AnyoneHeard == true;
+            bool self = voice?.SelfTalking == true && VoiceDevices.OnLoudspeaker?.Invoke() == true;
+            bool enabled = VoiceSettings.Current.DuckMusic;
+            long now = Environment.TickCount64;
+            float before = MathF.Min(s_envelope.Gain, s_self.Gain);
+            gain = MathF.Min(s_envelope.Step(now, heard, enabled), s_self.Step(now, self, enabled));
             if (gain == before && gain == 1) return; // (nothing to do: the usual case)
             music = s_music.ToArray();
             sfx = s_sfx.ToArray();

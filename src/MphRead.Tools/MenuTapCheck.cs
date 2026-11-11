@@ -27,7 +27,9 @@ namespace MphRead
             int checkedButtons = 0, missed = 0;
             foreach ((int w, int h) in shapes)
             {
-                FrontendSession s = FrontendSession.Load(Paths.FileSystem, settingsPath: Path.Combine(dir, "recomp_settings.json"));
+                // (FE_SAVES=<folder>: the campaign files, so the file select's COPY / DELETE are up)
+                FrontendSession s = FrontendSession.Load(Paths.FileSystem, settingsPath: Path.Combine(dir, "recomp_settings.json"),
+                    savesDir: Environment.GetEnvironmentVariable("FE_SAVES"));
                 s.Request = _ => { };
                 MenuFile file = s.Menu.File;
                 for (int page = 2; page < file.Pages.Count; page++)

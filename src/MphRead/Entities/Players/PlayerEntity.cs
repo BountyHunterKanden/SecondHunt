@@ -293,6 +293,7 @@ namespace MphRead.Entities
         public int TeamIndex { get; set; } = -1;
         public int SlotIndex { get; private set; }
         public bool IsBot { get; set; }
+        public bool CamSeqAiOwed { get; set; } // recomp: CameraSequence.OweCamSeqAi
         public LoadFlags LoadFlags { get; set; }
         public Hunter Hunter { get; private set; }
         public PlayerValues Values { get; private set; }
@@ -340,6 +341,8 @@ namespace MphRead.Entities
 
         private ushort _timeIdle = 0;
         private byte _crushBits = 0;
+        private bool _crushedNow = false;
+        private bool _crushedBefore = false;
         private Vector3 _field4E8; // stores gun vec 2
         private float _altTiltX = 0;
         private float _altTiltZ = 0;
@@ -414,6 +417,8 @@ namespace MphRead.Entities
         private Vector3 _jumpPadAccel;
 
         public const ushort RespawnTime = 90 * 2; // todo: FPS stuff
+        // mph-recomp host hook: changes the damage an enemy (or an enemy's shot) deals this player; null = vanilla
+        public static Func<uint, EntityBase, uint>? HostEnemyDamage;
 
         private ushort _autofireCooldown = 0;
         private ushort _powerBeamAutofire = 0;
@@ -549,6 +554,7 @@ namespace MphRead.Entities
             Vector3 prevFacing = _facingVector;
             NodeRef prevNodeRef = NodeRef;
             int prevHealth = _health;
+            CamSeqAiOwed = false; // recomp: owed in an earlier room
             _models.Clear();
             _bipedModelLods[0] = HostFirstHunt ? FirstHuntBodyModel(0) : Read.GetModelInstance(Metadata.HunterModels[Hunter][0]); // recomp: the cart's body
             _bipedModelLods[1] = HostFirstHunt ? FirstHuntBodyModel(1) : Read.GetModelInstance(Metadata.HunterModels[Hunter][1]);
@@ -583,6 +589,10 @@ namespace MphRead.Entities
             EquipInfo.Beams = _beams;
             // recomp: First Hunt's values in a First Hunt level (FirstHunt/FirstHuntRules.cs)
             Values = HostFirstHunt && FirstHuntRules.Values is PlayerValues fhValues ? fhValues : Metadata.PlayerValues[(int)Hunter];
+            if (GameFilters.PlayerValues) // mph-recomp: gameplay mods' player_values filter, a patched copy (GameFilters.cs)
+            {
+                Values = GameFilters.PatchValues(SlotIndex, Hunter.ToString(), Values);
+            }
             _hudObjects = HudElements.HunterObjects[(int)Hunter];
             if (IsMainPlayer)
             {
@@ -628,6 +638,9 @@ namespace MphRead.Entities
             _field449 = 0;
             _respawnTimer = 0;
             _timeSinceDead = 0;
+            _deathCollapsing = false; // recomp: PlayerDeathAnim.cs
+            _ragdoll = null; // recomp: PlayerRagdoll.cs
+            _ragdollHost = null;
             _field551 = 255;
             _field552 = 0;
             _field553 = 0;
@@ -881,6 +894,9 @@ namespace MphRead.Entities
             _field449 = 0;
             _respawnTimer = 0;
             _timeSinceDead = 0;
+            _deathCollapsing = false; // recomp: PlayerDeathAnim.cs
+            _ragdoll = null; // recomp: PlayerRagdoll.cs
+            _ragdollHost = null;
             _field551 = 255;
             _field552 = 0;
             _field553 = 0;
@@ -990,6 +1006,7 @@ namespace MphRead.Entities
                     _boostBombsYOffset = 208;
                 }
             }
+            if (GameEvents.Any) GameEvents.Raise("spawn", SlotIndex, respawn); // recomp: mod event (GameEvents.cs)
         }
 
         public void InitEnemyHunter()
@@ -1390,6 +1407,7 @@ namespace MphRead.Entities
             UpdateZoom(false);
             PreviousWeapon = CurrentWeapon;
             CurrentWeapon = WeaponSelection = beam;
+            if (GameEvents.Any) GameEvents.Raise("weapon_switch", SlotIndex, beam.ToString(), PreviousWeapon.ToString()); // recomp: mod event (GameEvents.cs)
             if (beam == AffinityBeam // recomp: the seat's (the Trooper's is the Pirate Blaster, PlayerPirateBlaster.cs)
                 || GameState.SinglePlayer && (Hunter == Hunter.Samus && (beam == BeamType.PowerBeam || beam == BeamType.OmegaCannon)
                 || Hunter == Hunter.Guardian && beam == BeamType.VoltDriver))
@@ -1714,12 +1732,19 @@ namespace MphRead.Entities
         // recomp (2026-10-16): the Shock Coil's ramp is dropped after 2 ticks without a hit, as the game does (PlayerProcess.cs);
         // off = MphRead's half of that, for replays recorded before it (MphRecomp MatchSettings.ShockCoilGrace)
         public bool HostShockCoilGrace { get; set; } = true;
-        // homing shots turn at the game's rate (BeamProjectileEntity.Spawn); off only for replays before format 76
+
+        // recomp (2026-10-31): this player's homing shots (missiles) turn at the game's rate: homing / 4 per 60 Hz frame, as
+        // gravity is (BeamProjectileEntity.Spawn); off = MphRead's / 2 (twice as fast), for replays recorded before it
+        // (MphRecomp MatchSettings.VanillaHoming)
         public bool HostVanillaHoming { get; set; } = true;
 
         public void TakeDamage(uint damage, DamageFlags flags, Vector3? direction, EntityBase? source)
         {
             if (_health == 0 || !NetDamageAllowed) // a match client takes damage only from the host (PlayerNet.cs)
+            {
+                return;
+            }
+            if (HostSeated && HostSeatSafe && !_netApplyingDamage) // recomp: the turret's occupant (PlayerEchoesSeat.cs)
             {
                 return;
             }
@@ -1814,7 +1839,7 @@ namespace MphRead.Entities
                     return;
                 }
             }
-            if (!ignoreDamage && flags.TestFlag(DamageFlags.Headshot) && attacker?.HudViewer == true) // todo: and not on wifi (recomp: HudViewer, was attacker == Main)
+            if (!ignoreDamage && flags.TestFlag(DamageFlags.Headshot) && attacker?.HudViewer == true && !_netHeadShown) // todo: and not on wifi (recomp: HudViewer, was attacker == Main; recomp: not when the prediction showed it, PlayerNet.cs)
             {
                 int messageId = GameState.Multiplayer ? 228 : 121; // HEADSHOT!
                 QueueHudMessage(128, 40, 20 / 30f, 0, messageId);
@@ -1835,6 +1860,16 @@ namespace MphRead.Entities
                 {
                     damage = 1;
                 }
+            }
+            if (HostEnemyDamage != null && attacker == null && source != null && !flags.TestFlag(DamageFlags.Death))
+            {
+                damage = HostEnemyDamage(damage, source); // mph-recomp host hook (EnemyPlacement's per-spawner damage)
+            }
+            if (GameFilters.Damage && !ignoreDamage && !flags.TestFlag(DamageFlags.Death))
+            {
+                // mph-recomp: gameplay mods' damage filter (GameFilters.cs); one bool read when none hooks it
+                damage = GameFilters.PlayerDamage(SlotIndex, attacker?.SlotIndex ?? -1, damage,
+                    beam?.Beam.ToString() ?? (bomb != null ? "Bomb" : ""), flags.TestFlag(DamageFlags.Headshot));
             }
             if (HostShieldWall && !ignoreDamage && ShieldWallAbsorbs(damage, flags, direction, source))
             {
@@ -1922,6 +1957,8 @@ namespace MphRead.Entities
                     _hidingTimer = 0;
                 }
             }
+            // recomp: mod event (GameEvents.cs, observe only): target slot, attacker slot (-1 none), amount, beam ("" none), fatal
+            if (GameEvents.Any) GameEvents.Raise("damage", SlotIndex, attacker?.SlotIndex ?? -1, (int)damage, beam?.Beam.ToString() ?? "", dead);
             if (dead)
             {
                 // todo?: the game encodes the beam in the damage flags for wifi stuff
@@ -2066,13 +2103,18 @@ namespace MphRead.Entities
                 // the game stops the boost charge SFX here, but that SFX is empty
                 _boostCharge = 0;
                 GameState.Deaths[SlotIndex]++;
+                if (GameEvents.Any) GameEvents.Raise("death", SlotIndex, attacker?.SlotIndex ?? -1, beamType.ToString()); // recomp: mod event (GameEvents.cs)
                 if (this == Main && beamType == BeamType.OmegaCannon)
                 {
                     _scene.SetFade(FadeType.FadeInWhite, 90 / 30f, overwrite: true);
                 }
+                RagdollDeath(damage, beamType, attacker, beam, bomb, direction); // recomp: the DEATH look option's RAGDOLL (PlayerRagdoll.cs), before the speed and pose change
                 Speed = Vector3.Zero;
-                _respawnTimer = RespawnTime;
+                _respawnTimer = GameFilters.RespawnTime // mph-recomp: gameplay mods' respawn_time filter (GameFilters.cs)
+                    ? GameFilters.RespawnFrames(SlotIndex, attacker?.SlotIndex ?? -1, RespawnTime) : RespawnTime;
                 _timeSinceDead = 0;
+                FirstHuntDeath(); // recomp: First Hunt's collapse (FirstHunt/PlayerFirstHunt.cs)
+                DeathCollapse(); // recomp: the DEATH look option's collapse (PlayerDeathAnim.cs), off unless the host turns it on
                 if (GameState.SinglePlayer)
                 {
                     if (IsAltForm)
@@ -2315,6 +2357,11 @@ namespace MphRead.Entities
                             {
                                 GameState.Points[SlotIndex]--;
                             }
+                            if (GameFilters.Kill) // mph-recomp: gameplay mods' kill scoring (GameFilters.cs)
+                            {
+                                GameFilters.KillPoints(SlotIndex, SlotIndex, beamType.ToString(), flags.TestFlag(DamageFlags.Headshot),
+                                    (GameState.Mode == GameMode.Battle || GameState.Mode == GameMode.BattleTeams) && !HostFirstHunt ? -1 : 0);
+                            }
                         }
                         else
                         {
@@ -2360,9 +2407,17 @@ namespace MphRead.Entities
                                     GameState.BeamKills[attacker.SlotIndex, (int)beamType]++;
                                     // todo: update license info
                                 }
+                                else if (beamType > BeamType.Enemy && (int)beamType < GameState.ExtraBeamSlots)
+                                {
+                                    GameState.ExtraBeamKills[attacker.SlotIndex, (int)beamType]++; // recomp (Gaming Hub)
+                                }
                                 if (GameState.KillStreak[attacker.SlotIndex] < 255)
                                 {
                                     GameState.KillStreak[attacker.SlotIndex]++;
+                                }
+                                if (GameState.KillStreak[attacker.SlotIndex] > GameState.BestKillStreak[attacker.SlotIndex])
+                                {
+                                    GameState.BestKillStreak[attacker.SlotIndex] = GameState.KillStreak[attacker.SlotIndex]; // recomp
                                 }
                                 if (GameState.KillStreak[attacker.SlotIndex] == 5)
                                 {
@@ -2409,6 +2464,11 @@ namespace MphRead.Entities
                                 else if (GameState.IsOctolithMode && OctolithFlag != null)
                                 {
                                     GameState.OctolithStops[attacker.SlotIndex]++;
+                                }
+                                if (GameFilters.Kill) // mph-recomp: gameplay mods' kill scoring (GameFilters.cs)
+                                {
+                                    GameFilters.KillPoints(SlotIndex, attacker.SlotIndex, beamType.ToString(), flags.TestFlag(DamageFlags.Headshot),
+                                        GameState.Mode == GameMode.Battle || GameState.Mode == GameMode.BattleTeams ? 1 : 0);
                                 }
                                 // bugfix?: this flag is also set for suicides/environmental damage/etc.
                                 if (flags.TestFlag(DamageFlags.FromAlt))

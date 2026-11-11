@@ -21,6 +21,7 @@ namespace MphRead.Entities
         private bool _bool4 = false;
         private readonly bool[] _triggeredSlots = new bool[PlayerEntity.SlotCapacity] { true, true, true, true, true, true, true, true };
         private readonly int _targetRoomId = -1;
+        public bool ArrivalFlipped { get; set; } // recomp: SceneSetup (Magma Drop, Trace/Sylux): arrive facing the other way
         private NodeRef _targetNodeRef = NodeRef.None;
 
         // used for invisible teleporters

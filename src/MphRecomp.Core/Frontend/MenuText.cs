@@ -157,6 +157,28 @@ namespace MphRecomp.Frontend
             return lines;
         }
 
+        // Lines for drawing: a text on one line that fits (most labels) comes back in a kept one-item array, and a longer
+        // one's lines are kept by text, as Lines' new list and split strings every frame were the menus' garbage (the
+        // freezes, 2026-11-11). The one-line array is only good until the next call.
+        private readonly string[] _oneLine = new string[1];
+        private readonly Dictionary<(string, int), List<string>> _drawLines = new();
+
+        private IReadOnlyList<string> DrawLines(string text, int wrapWidth)
+        {
+            if (text.Contains('\n') || wrapWidth > 0 && Measure(text) > wrapWidth)
+            {
+                if (!_drawLines.TryGetValue((text, wrapWidth), out List<string>? lines))
+                {
+                    if (_drawLines.Count >= 256) _drawLines.Clear(); // texts that change (counters, names) can't pile up
+                    lines = Lines(text, wrapWidth);
+                    _drawLines[(text, wrapWidth)] = lines;
+                }
+                return lines;
+            }
+            _oneLine[0] = text;
+            return _oneLine;
+        }
+
         // Emit text as glyph quads in MENU SPACE (Y up). (x, y) is the anchor in the menu file's text coordinates
         // (Y up from the bottom of the touch screen, so menu-space y = textY - 192): align 0 = left edge at x,
         // 1 = right edge at x, 2 = centred on x. Lines run downward `lineHeight` apart; y is the top of the first line.
@@ -164,8 +186,10 @@ namespace MphRecomp.Frontend
             float r, float g, float b, float a, float z, List<WidgetTri> output)
         {
             float top = y - 192 + lineHeight; // the anchor is the BOTTOM of the first line (checked against the game)
-            foreach (string line in Lines(text, wrapWidth))
+            IReadOnlyList<string> lines = DrawLines(text, wrapWidth);
+            for (int n = 0; n < lines.Count; n++)
             {
+                string line = lines[n];
                 float width = Measure(line);
                 float penX = align == 1 ? x - width : align == 2 ? x - MathF.Floor(width / 2) : x;
                 for (int i = 0; i < line.Length; i++)
@@ -201,8 +225,10 @@ namespace MphRecomp.Frontend
         {
             float lineHeight = Cell * scale;
             float lineTop = y;
-            foreach (string line in Lines(text, wrapWidth: 0))
+            IReadOnlyList<string> lines = DrawLines(text, wrapWidth: 0);
+            for (int n = 0; n < lines.Count; n++)
             {
+                string line = lines[n];
                 float width = Measure(line) * scale;
                 float penX = align == 1 ? x - width : align == 2 ? x - width / 2 : x;
                 for (int i = 0; i < line.Length; i++)

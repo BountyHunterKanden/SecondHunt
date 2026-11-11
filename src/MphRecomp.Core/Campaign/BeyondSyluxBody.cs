@@ -78,6 +78,8 @@ namespace MphRecomp.Campaign
 
             string idle = Planted(body, Idle) ?? Idle;
             var m = new BodyClips { Idle = idle, FlourishSet = BodyFlourish.Prepare(body, BodyFlourish.Beyond, idle, SpineRoot) };
+            // RAGDOLL: his DS map names a bone for every driver (his coil arm's cannon rides R_elbow, his wrist down it)
+            m.Ragdoll = BodyClips.RagdollOf(Spec.Map);
             foreach (PlayerAnimation a in new[] { PlayerAnimation.Idle, PlayerAnimation.Flourish, PlayerAnimation.Turn,
                 PlayerAnimation.Charge, PlayerAnimation.Shoot, PlayerAnimation.ChargeShoot })
             {

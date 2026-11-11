@@ -15,20 +15,27 @@ internal static class DesktopPlatform
 {
     static DesktopAudio? _audio;
 
-    public static void Install()
+    // sound: false opens no sound device (a test run plays silent, --sound 1 to hear it)
+    public static void Install(bool sound = true)
     {
         AppPlatform.CacheDir = DesktopPaths.Cache;
         AppPlatform.DecodeImage = DecodeImage;
         AppPlatform.EncodePng = EncodePng;
-        _audio = DesktopAudio.TryOpen();
+        _audio = sound ? DesktopAudio.TryOpen() : null;
         if (_audio != null) AppPlatform.Audio = _audio;
         MphRecomp.App.VoiceAudio.Install(DesktopPaths.Root, () => new VoiceCaptureWindows()); // online voice chat (O8)
+        MphRecomp.Online.Voice.VoiceDevices.OnLoudspeaker = AudioOutputWindows.OnLoudspeaker; // self duck on push to talk
         MphRecomp.App.ReplayPrepHost.Start = StartReplayPrep;
     }
 
     // a replay's keyframes prepared by this app run again (Program.cs --replayprep), below normal priority so the game
     // in front keeps its frames
     static void StartReplayPrep(string replay, string sidecar)
+    {
+        Spawn(replay, sidecar)?.Dispose();
+    }
+
+    static System.Diagnostics.Process? Spawn(string replay, string sidecar)
     {
         try
         {
@@ -42,12 +49,14 @@ internal static class DesktopPlatform
             {
                 psi.ArgumentList.Add(arg);
             }
-            using var child = System.Diagnostics.Process.Start(psi);
+            var child = System.Diagnostics.Process.Start(psi);
             if (child != null) child.PriorityClass = System.Diagnostics.ProcessPriorityClass.BelowNormal;
+            return child;
         }
         catch (Exception ex)
         {
             Log.Warn("MPHReplay", "keyframe prepare not started: " + ex.Message);
+            return null;
         }
     }
 

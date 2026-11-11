@@ -31,6 +31,8 @@ namespace MphRecomp.Arenas
             public IReadOnlyList<PaletteData>? Palette { get; init; }
             public int ScrollS { get; init; }
             public int ScrollT { get; init; }
+            public int Alpha { get; init; } = 31;
+            public RenderMode RenderMode { get; init; } = RenderMode.Normal;
         }
 
         public const int ScrollFrames = 240;   // one scroll loop: 240 animation steps at 30 per second
@@ -79,7 +81,7 @@ namespace MphRecomp.Arenas
                     palettes.Add(new Repack.PaletteInfo(tm.Palette.Select(d => d.Data).ToList()));
                 }
                 materialIndex[m] = materials.Count;
-                materials.Add(new Material(MaterialRaw(tm.Name, palId, texId, repeat: true)));
+                materials.Add(new Material(MaterialRaw(tm.Name, palId, texId, repeat: true, tm.Alpha, tm.RenderMode)));
                 if (tm.ScrollS != 0 || tm.ScrollT != 0) scrolling.Add((tm.Name, tm.ScrollS, tm.ScrollT));
             }
 
@@ -233,21 +235,21 @@ namespace MphRecomp.Arenas
             return Read.ReadStruct<RawNode>(ms.ToArray());
         }
 
-        static RawMaterial MaterialRaw(string name, int palette, int texture, bool repeat)
+        static RawMaterial MaterialRaw(string name, int palette, int texture, bool repeat, int alpha = 31, RenderMode renderMode = RenderMode.Normal)
         {
             using var ms = new MemoryStream();
             using var w = new BinaryWriter(ms);
             WriteName(w, name);
             w.Write((byte)0);                                // lighting off: the corner colours are the light
             w.Write((byte)CullingMode.Neither);
-            w.Write((byte)31);                               // alpha
+            w.Write((byte)alpha);                            // alpha
             w.Write((byte)0);                                // wireframe
             w.Write((short)palette); w.Write((short)texture);
             w.Write((byte)(repeat ? 1 : 0)); w.Write((byte)(repeat ? 1 : 0));   // repeat s, t (0 clamp, 1 repeat)
             for (int i = 0; i < 9; i++) w.Write((byte)31);   // diffuse, ambient, specular
             w.Write((byte)0);
             w.Write((uint)PolygonMode.Modulate);
-            w.Write((byte)RenderMode.Normal); w.Write((byte)0); w.Write((ushort)0);
+            w.Write((byte)renderMode); w.Write((byte)0); w.Write((ushort)0);
             w.Write((uint)TexgenMode.None);
             w.Write((ushort)0); w.Write((ushort)0);
             w.Write(0u);                                     // matrix id

@@ -79,6 +79,7 @@ namespace MphRecomp.Arenas
         public static IReadOnlyList<EntityBase> Extra(Scene scene, int roomId, IReadOnlyList<EntityBase> entities)
         {
             PlayerEntity.HostWallList = null;
+            PlayerEntity.HostGrateBoxes = null;
             if (!Enabled || !GameState.Multiplayer) return entities;
             Room? room;
             lock (_rooms)
@@ -94,6 +95,8 @@ namespace MphRecomp.Arenas
             }
             // the walls, for the bots (PlayerAiWalls.cs: shot down when one stands across a bot's way)
             PlayerEntity.HostWallList = list.OfType<EchoesBreakableEntity>().Where(b => !b.Grate).ToList();
+            // the grates' footprints, for the bots' item picks (PlayerAiUnstick.cs HostBotGrateItems)
+            PlayerEntity.HostGrateBoxes = room.Spots.Where(s => s.AnyBomb).Select(s => (s.Min, s.Max)).ToList();
             if (room.Pools.Length > 0)
             {
                 list.Add(new EchoesFluidEntity(id++, room.Pools.Select(p => (p.Min, p.Max, p.Surface)).ToArray(), scene));

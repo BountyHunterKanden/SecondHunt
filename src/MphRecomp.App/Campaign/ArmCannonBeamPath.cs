@@ -61,6 +61,8 @@ internal sealed partial class CampaignRenderer
         Vector3 end = start + dir * reach;
         if (CollisionDetection.CheckBetweenPoints(start, end, TestFlags.Beams, scene, ref res)) end = res.Position;
         float range = (end - start).Length;
+        if (PlayerOnPath(beam, start, dir, range) is float body) range = body; // (lands on a player before the wall)
+        end = start + dir * range;
         string mode;
         res = new CollisionResult();
         if (CollisionDetection.CheckBetweenPoints(start, tip, TestFlags.Beams, scene, ref res))
@@ -97,6 +99,44 @@ internal sealed partial class CampaignRenderer
         }
         if (_cannonMeasure || _wallCheck) Log.Info("MPHCampaign", FormattableString.Invariant(
             $"armshot: render {_cannonRenders} seat {p.SlotIndex} {beam.Beam} range {range:0.0} {mode} shift {(beam.HostDrawShift?.Length ?? 0):0.00} fade {beam.HostDrawFadeAt:0.0} hide {beam.HostDrawHide:0.0}"));
+    }
+
+    // how far along the shot's line (start, dir) it first meets another player (the sim's test in CheckCollision: a
+    // biped's cylinder, an alt form's sphere, a Weavel's turret), if before `range`. The walls-only landing ran past a
+    // player to the wall behind, so a close hit's drawn shot was still beside its target (owner 2026-10-31, Fault Line
+    // online: the Trooper's Pirate Blaster on Samus at 4 units). Draw only: the hit is the sim's.
+    static float? PlayerOnPath(BeamProjectileEntity beam, Vector3 start, Vector3 dir, float range)
+    {
+        Vector3 end = start + dir * range;
+        float? best = null;
+        void Take(in CollisionResult res)
+        {
+            float d = MathF.Max(0, Vector3.Dot(res.Position - start, dir));
+            if (d < range && (best == null || d < best)) best = d;
+        }
+        foreach (PlayerEntity player in PlayerEntity.Players)
+        {
+            if (player == null || player.Health <= 0 || player == beam.Owner) continue;
+            float radii = player.Volume.SphereRadius + beam.CylinderRadius;
+            var res = new CollisionResult();
+            if (player.IsAltForm)
+            {
+                if (CollisionDetection.CheckCylinderOverlapSphere(start, end, player.Volume.SpherePosition, radii, ref res)) Take(res);
+            }
+            else
+            {
+                float minY = Fixed.ToFloat(player.Values.MinPickupHeight);
+                if (CollisionDetection.CheckCylindersOverlap(start, end, player.Position.AddY(minY), Vector3.UnitY,
+                    Fixed.ToFloat(player.Values.MaxPickupHeight) - minY, radii, ref res)) Take(res);
+            }
+            if (player.Hunter == Hunter.Weavel && player.Flags2.TestFlag(PlayerFlags2.Halfturret) && beam.Owner != player.Halfturret)
+            {
+                res = new CollisionResult();
+                if (CollisionDetection.CheckCylinderOverlapSphere(start, end, player.Halfturret.Position,
+                    beam.CylinderRadius + 0.45f, ref res)) Take(res);
+            }
+        }
+        return best;
     }
 
     // the first wall on the line from -> to (stopping just short of `to`, which may sit on a wall), and its distance from `from`

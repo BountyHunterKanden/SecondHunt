@@ -107,6 +107,7 @@ namespace MphRead.Entities
             SlotCamera(); // recomp: the turret's bomb slot's fixed camera while it holds this ball (PlayerEchoesSeat.cs)
             SeatCamera(); // recomp: the turret's own camera while seated (PlayerEchoesSeat.cs)
             CameraInfo.Update();
+            DeathFollowStep(); // recomp: DEATH's FOLLOW CAM, view only (PlayerDeathCam.cs)
         }
 
         private void UpdateCameraFirst()
@@ -220,6 +221,7 @@ namespace MphRead.Entities
                     CameraInfo.Target.Z + camVec.Z * v5
                 );
             }
+            posVec = SpiderCameraPos(posVec, v5, v6); // recomp: spider ball (PlayerSpiderBall.cs)
             CameraInfo.Target.Y += v7;
             if (_camSwitchTimer < Values.CamSwitchTime * 2) // todo: FPS stuff
             {

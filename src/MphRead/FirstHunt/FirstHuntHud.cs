@@ -31,6 +31,7 @@ namespace MphRead
         private const int EnergyConfig = 0x2072050, AmmoConfig = 0x2072088;
         private const int SmallFont = 0x2073b58, BigFont = 0x2073b48;
         private const int TextPalette = 15, EnergyPalette = 3, AmmoPalette = 4;
+        private static int _energyPalette = EnergyPalette;
 
         private static byte[]? _arm9 = null;
         private static byte[]? _overlay0 = null;
@@ -64,6 +65,7 @@ namespace MphRead
             _overlay0 = overlay0;
             _cache.Clear();
             _visorFrame = null;
+            _panels.Clear();
         }
 
         private static int Arm9Int(int address)
@@ -140,7 +142,7 @@ namespace MphRead
         // one frame of a sprite record (0x2005dfc: OAM attrs = attrs[frame], tiles = tiles + frame * object bytes)
         private static Glyph SpriteFrame(int record, int frame)
         {
-            long key = (long)record << 16 | (uint)frame;
+            long key = (long)_energyPalette << 56 | (long)record << 16 | (uint)frame;
             if (_cache.TryGetValue(key, out Glyph? glyph))
             {
                 return glyph;
@@ -156,7 +158,12 @@ namespace MphRead
             int height = _objSizes[Math.Min(shape, 2) * 4 + size, 1];
             int bytes = width * height / 2;
             bool affine = (attr0 & 0x100) != 0;
-            Scene.HostHudSprite sprite = Tiles(Data(tiles + frame * bytes, bytes), width, height, attr2 >> 12,
+            int palette = attr2 >> 12;
+            if (palette == EnergyPalette)
+            {
+                palette = _energyPalette;
+            }
+            Scene.HostHudSprite sprite = Tiles(Data(tiles + frame * bytes, bytes), width, height, palette,
                 flipX: !affine && (attr1 & 0x1000) != 0, flipY: !affine && (attr1 & 0x2000) != 0);
             int offX = attr1 & 0x1FF;
             if (offX >= 0x100)
@@ -293,11 +300,6 @@ namespace MphRead
             bool morph = player.IsAltForm || mode == FhMode.Morphball;
             if (FirstHuntMission.Ending)
             {
-                // the banner leaves the BGs as they were
-                if (!morph)
-                {
-                    DrawVisorFrame();
-                }
                 DrawBanner();
                 return;
             }
@@ -332,7 +334,11 @@ namespace MphRead
                 Sprite(DamageIcon, 0, 207 + dx, _rowY - 22 + dy);
                 Text(SmallFont, TextPalette, 219 + dx, _rowY + 3 + dy, 2, Arm9String(0x2072168));
             }
-            Meter(93, _energyY, player.Health, EnergyPalette, EnergyConfig);
+            // 0x2014130: under 25 energy the cart loads overlay 0's OBJ palette 1 (red) into palette 3, the energy
+            // meter's, and keeps it there (no blink)
+            _energyPalette = player.Health < 25 ? 1 : EnergyPalette;
+            Meter(93, _energyY, player.Health, _energyPalette, EnergyConfig);
+            _energyPalette = EnergyPalette;
             if (mode == FhMode.Survivor)
             {
                 // 0x20161ec
@@ -587,13 +593,72 @@ namespace MphRead
             Span(frame[3], rightStart, w);
         }
 
+        // The end banner (0x202db00, overlay 0 data; BizHawk fh_end_ref): the visor's BG2/BG3 go off, BG1 takes the
+        // result's whole-screen panel map (BG1's tiles and palette: SUCCESS, TIME OUT or the disconnect box) and a
+        // translucent dark plane (filter_Model) goes over the 3D, which keeps drawing at about a third of its brightness;
+        // the text types 1 character a 30 Hz tick, centred at (128, 84), and holds to T+299; then both screens fade to
+        // black (EndFadeFrames) and the results come up. Survivor has none.
+        private const int PanelSuccess = 0x20d3ba8, PanelTimeOut = 0x20d41a8, PanelDisconnected = 0x20d35a8;
+        // the panel's wide-screen seams: the curved lines left and right of the box stretch out to the edges
+        private const int PanelSeamLeft = 40, PanelSeamRight = 216;
+        private static readonly Dictionary<int, Scene.HostHudSprite[]> _panels = new();
+        private static Scene.HostHudSprite? _black = null;
+
+        private static Scene.HostHudSprite[] Panel(int map)
+        {
+            if (_panels.TryGetValue(map, out Scene.HostHudSprite[]? panel))
+            {
+                return panel;
+            }
+            int Ptr(int index) => Arm9Int(VisorFrameTable + index * 4);
+            var pixels = new ColorRgba[256 * 192];
+            DrawBg(pixels, map, Ptr(4), Ptr(0), 256, 0, 0, 24, brightness: 15 / 16f);
+            panel = new[]
+            {
+                new Scene.HostHudSprite { Width = 256, Height = 192, Pixels = pixels },
+                Crop(pixels, 0, PanelSeamLeft),
+                Crop(pixels, PanelSeamLeft, PanelSeamRight),
+                Crop(pixels, PanelSeamRight, 256),
+                Crop(pixels, PanelSeamLeft, PanelSeamLeft + 1),
+                Crop(pixels, PanelSeamRight - 1, PanelSeamRight)
+            };
+            _panels[map] = panel;
+            return panel;
+        }
+
+        private static void DrawPanel(int map)
+        {
+            Scene.HostHudSprite[] panel = Panel(map);
+            float w = _scene.Size.X;
+            float leftEnd = PanelSeamLeft * _scale;
+            float middleStart = w / 2 - (128 - PanelSeamLeft) * _scale;
+            if (middleStart <= leftEnd)
+            {
+                Span(panel[0], w / 2 - 128 * _scale, w / 2 + 128 * _scale);
+                return;
+            }
+            float middleEnd = w / 2 + (PanelSeamRight - 128) * _scale;
+            float rightStart = w - (256 - PanelSeamRight) * _scale;
+            Span(panel[4], leftEnd - 1, middleStart + 1);
+            Span(panel[5], middleEnd - 1, rightStart + 1);
+            Span(panel[1], 0, leftEnd);
+            Span(panel[2], middleStart, middleEnd);
+            Span(panel[3], rightStart, w);
+        }
+
+        private static void Shade(float alpha)
+        {
+            _black ??= new Scene.HostHudSprite { Width = 1, Height = 1, Pixels = new[] { new ColorRgba(0, 0, 0, 255) } };
+            _scene.HostHudQuad(_black, -1, 1, 1, -1, alpha);
+        }
+
         private static void DrawBanner()
         {
-            // 0x202db00: typed out 1 character a frame, centred at (128, 84); Survivor has none
+            bool complete = FirstHuntMission.Result == FhResult.Complete;
             int address = FirstHuntMission.Mode switch
             {
-                FhMode.Morphball => FirstHuntMission.Result == FhResult.Complete ? 0x2074ffc : 0x2075054,
-                FhMode.Regulator => FirstHuntMission.Result == FhResult.Complete ? 0x2074fd0 : 0x207502c,
+                FhMode.Morphball => complete ? 0x2074ffc : 0x2075054,
+                FhMode.Regulator => complete ? 0x2074fd0 : 0x207502c,
                 FhMode.Multiplayer => FirstHuntMission.Result == FhResult.Disconnected ? 0x207507c : 0,
                 _ => 0
             };
@@ -601,12 +666,20 @@ namespace MphRead
             {
                 return;
             }
+            // the dark plane: about 0.32 of the 3D's brightness left (Morph Ball, a still camera, fh_end_ref)
+            Shade(0.68f);
+            DrawPanel(FirstHuntMission.Result == FhResult.Disconnected ? PanelDisconnected : complete ? PanelSuccess : PanelTimeOut);
             if (_bannerCounter < 400 * 2)
             {
                 _bannerCounter++;
             }
             float y = FirstHuntMission.Result == FhResult.Disconnected ? 74 : 84;
             Text(SmallFont, TextPalette, 128, y, 2, Arm9String(address), count: _bannerCounter / 2); // todo: FPS stuff
+            int clock = FirstHuntMission.Clock;
+            if (FirstHuntMission.Mode != FhMode.Multiplayer && clock >= 0 && clock < FirstHuntMission.EndFadeFrames)
+            {
+                Shade(1 - clock / (float)FirstHuntMission.EndFadeFrames);
+            }
         }
     }
 }

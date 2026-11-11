@@ -70,6 +70,9 @@ namespace MphRead
         // the host: the match is over (after the banner); and the banner lines, for a HUD
         public static Action? HostOver { get; set; }
 
+        // the end banner's last frames: both screens fade to black (BizHawk fh_end_ref: T+300..T+343 at 60 Hz)
+        public const int EndFadeFrames = 44;
+
         private static bool _completePosted = false;
         private static int _completeDelay = 0;
         private static bool _mainAlive = false;
@@ -236,7 +239,8 @@ namespace MphRead
                         }
                     }
                     Ending = true;
-                    Clock = Mode == FhMode.Survivor ? 0 : 150 * 2; // the banner, 5 s; todo: FPS stuff
+                    // the banner, 5 s, then the fade to black (T+300..343) before the results; todo: FPS stuff
+                    Clock = Mode == FhMode.Survivor ? 0 : 150 * 2 + EndFadeFrames;
                     // the end (0x202e460): Survivor fades its music out, the rest play COMPLETE (11) or FAILED (5) once
                     if (Mode == FhMode.Survivor)
                     {

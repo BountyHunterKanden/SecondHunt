@@ -102,6 +102,7 @@ namespace MphRecomp.Replay
             ricochet.Weapon = null!; // (and its weapon, set with it)
             // (PlacedPickups._placed and any other static list: their spare room)
             SimSnapshot.TrimStaticLists();
+            SimSnapshot.SortArenaTables();
         }
 
         // ---- what a checkpoint holds ----
@@ -259,6 +260,17 @@ namespace MphRecomp.Replay
             (typeof(MphRecomp.Arenas.EchoesBreakables), "_rooms"), (typeof(MphRecomp.Arenas.EchoesTurret), "_rooms"),
             (typeof(MphRecomp.Arenas.EchoesStatics), "_rooms"), (typeof(MphRecomp.Arenas.EchoesMovement), "_water"),
             (typeof(MphRecomp.Arenas.ArenaNav), "_links"), (typeof(MphRecomp.Arenas.ArenaNav), "_versions"),
+            (typeof(MphRecomp.Arenas.MiningPlazaCrates), "_rooms"), (typeof(MphRecomp.Arenas.MiningPlazaGate), "_rooms"),
+            (typeof(MphRecomp.Arenas.MiningPlazaPillars), "_rooms"),
+                // (11-06) the spider ball's track cache: keyed by the room it was built for, so at step 0 it still held the
+                // last match's room -- the whole old match (its drawn HUD, crates, bombs) -- and the viewer's old match is
+                // not the prepare's: a Mining Plaza replay after a match refused its keyframes. Rebuilt from the room.
+                (typeof(MphRead.Entities.PlayerEntity), "_spiderRoom"), (typeof(MphRead.Entities.PlayerEntity), "_spiderTris"),
+                (typeof(MphRead.Entities.PlayerEntity), "HostSpiderTrackHere"),
+                // (11-06) the turret bots' nav nodes from the last turret room (Shooting Gallery), found by the arena=all
+                // sweep: Mining Plaza after it refused. Cleared by Start and rebuilt from the room.
+                (typeof(MphRecomp.Arenas.EchoesTurretBots), "_nodes"), (typeof(MphRecomp.Arenas.EchoesTurretBots), "_seatNode"),
+                (typeof(MphRecomp.Arenas.EchoesTurretBots), "_slotNode"),
                 (typeof(MphRecomp.Multiplayer.ExtraArenas), "s_owned"), (typeof(MphRecomp.Multiplayer.ExtraArenas), "s_ownedAt"),
                 // (10-27) the viewer's display switches, not match state: the headless prepare runs with drawing off,
                 // and a prepared keyframe put CollectDrawItems=false back, so nothing drew after a seek (black screen);
@@ -269,6 +281,18 @@ namespace MphRecomp.Replay
                 (typeof(Mesh), "ListId"),
                 // (10-27) the view's size: the prepare's 256x192 put back squashed the 3D view and the HUD to 4:3
                 (typeof(Scene), "Size"),
+                // (11-07) the DEATH look's ragdoll: which look is drawn (a display switch) and the host body's pose at death
+                // (the draw-only Dark Samus stand-in the prepare has none of); the ragdoll itself is match state
+                (typeof(MphRead.Entities.PlayerEntity), "HostRagdollShown"), (typeof(MphRead.Entities.PlayerEntity), "_ragdollHost"),
+                // (11-09) DEATH's VANILLA ORBS: the setting, and this frame's orb pose (draw only; the clips the orbs play
+                // under the collapse, _deathOrbClip1/2, are match state)
+                (typeof(MphRead.Entities.PlayerEntity), "HostDeathOrbs"), (typeof(MphRead.Entities.PlayerEntity), "_deathOrbPose"),
+                // (11-09) DEATH's FOLLOW CAM: the setting and the view following the body (view only)
+                (typeof(MphRead.Entities.PlayerEntity), "HostDeathFollow"), (typeof(MphRead.Entities.PlayerEntity), "_deathCam"),
+                (typeof(MphRead.Entities.PlayerEntity), "HostDeathFollowSeat"),
+                // (11-09) the ragdoll's launch the host sends its guests (online send only; the ragdoll itself is walked)
+                (typeof(MphRead.Entities.PlayerEntity), "NetThrowSet"), (typeof(MphRead.Entities.PlayerEntity), "NetThrowSpeed"),
+                (typeof(MphRead.Entities.PlayerEntity), "NetThrowPush"),
                 // (10-27) texture binding ids handed out by this process's renderer: the prepare's ids are other textures
                 // in the viewer (the HUD drew and repainted into another sprite's texture after a seek); the pixels are
                 // painted again from the restored frame (PlayerEntity.HostAfterRestore)

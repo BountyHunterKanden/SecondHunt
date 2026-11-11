@@ -50,6 +50,19 @@ namespace MphRead
                 Environment.ExitCode = r == null ? 0 : 1;
                 return;
             }
+            // (diagnostics) viewwarm=<replay,...>: play those through in this process first, as the Android app plays its
+            // matches before one is watched
+            if (args.FirstOrDefault(a => a.StartsWith("viewwarm="))?[9..] is string viewWarm)
+            {
+                foreach (string w in viewWarm.Split(','))
+                {
+                    var wp = new ReplayPlayer(ReplayFile.Load(w));
+                    CampaignHost wh = wp.Start(collectDrawItems: true, viewWidth: 1280, viewHeight: 720);
+                    while (!wh.Ended && wp.TryNext(out CampaignInput wi)) wh.Step(wi);
+                    wh.Dispose();
+                    Console.WriteLine("       played " + Path.GetFileName(w) + " first");
+                }
+            }
             int pass = 0, fail = 0;
             foreach (string path in files)
             {
@@ -65,7 +78,7 @@ namespace MphRead
                     Console.WriteLine($"SKIP   {name}: {file.Steps.Count} steps (too short to prepare)");
                     continue;
                 }
-                string? result = PrepOne(path, file, seeks, live);
+                string? result = PrepOne(path, file, seeks, live, args.FirstOrDefault(a => a.StartsWith("warm=")));
                 Console.WriteLine($"{(result == null ? "PASS" : "FAIL")}   {name}" + (result != null ? ": " + result : ""));
                 if (result == null) pass++; else fail++;
             }
@@ -73,7 +86,7 @@ namespace MphRead
             Environment.ExitCode = fail == 0 ? 0 : 1;
         }
 
-        private static string? PrepOne(string path, ReplayFile file, int seeks, bool live)
+        private static string? PrepOne(string path, ReplayFile file, int seeks, bool live, string? warm = null)
         {
             string dir = Path.Combine(Path.GetTempPath(), "mph-prep");
             Directory.CreateDirectory(dir);
@@ -100,7 +113,7 @@ namespace MphRead
                         File.Delete(feed.Sidecar!);
                         sidecar = feed.Sidecar!;
                         string fed = feed.ReplayPath!;
-                        child = System.Threading.Tasks.Task.Run(() => RunChild("-replaypreptest", fed, "prep=" + sidecar));
+                        child = System.Threading.Tasks.Task.Run(() => warm == null ? RunChild("-replaypreptest", fed, "prep=" + sidecar) : RunChild("-replaypreptest", fed, "prep=" + sidecar, warm));
                     }
                     if (i % 60 == 0) System.Threading.Thread.Sleep(100);
                 }
@@ -112,7 +125,7 @@ namespace MphRead
             }
             else
             {
-                (code, output) = RunChild("-replaypreptest", path, "prep=" + sidecar);
+                (code, output) = warm == null ? RunChild("-replaypreptest", path, "prep=" + sidecar) : RunChild("-replaypreptest", path, "prep=" + sidecar, warm);
             }
             foreach (string line in output.Split('\n').Where(l => l.StartsWith("child") || l.Contains("PREP")))
             {
@@ -155,6 +168,9 @@ namespace MphRead
                     if (at < 0) return $"no keyframe before {to}";
                     if (!kf.Load(at)) return $"keyframe {at} refused: {kf.LastRefusal}";
                     loadMs.Add(kf.LastLoadMs);
+                    // (as MatchReplay.AfterRestore: the reticles' pixel data with their restored size; without it a seek
+                    // into an Imperialist zoom indexed the normal reticle's data and crashed)
+                    foreach (MphRead.Entities.PlayerEntity p in MphRead.Entities.PlayerEntity.Players) p.HostAfterRestore();
                     player.Rewind(at);
                     while (player.Position < to && !host.Ended && player.TryNext(out CampaignInput input))
                     {

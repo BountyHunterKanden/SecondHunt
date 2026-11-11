@@ -21,7 +21,7 @@ internal sealed partial class CampaignRenderer
     //   gun        [mp1 / none] the first-person gun from <data>/guns/<id>; default: RECOMP SETTINGS' suit
     //   layout     [reference] the first on-device control layout; default: Prime-style
     //   loadout    [all] every weapon, nothing saved (dev "Boss fights"); boss [down] (dev "Escape tests")
-    //   escape     [1] start with the escape running (dev "Escape at the ship");
+    //   escape     [1] start with the escape running (dev "Escape at the ship"); helpers [off] no other-hunter helpers;
     //   shipmenu   [1] start in the in-ship menu; movies [off]; view [wide|ds|prime|panini]
     //   match / arena / bots / botlevel / time / points, or net host|client: a multiplayer match (MatchSession.cs)
     public static CampaignRenderer Create(string filesDir, string dataDir, LaunchArgs args)
@@ -39,7 +39,7 @@ internal sealed partial class CampaignRenderer
         // hunters keep MP1PowerSuit.
         string? explicitGun = args.Get("gun") is string g && g != "settings" ? g : null;
         string gunId = explicitGun ?? (hunter == Hunter.Samus ? RecompSettings.Load(settingsPath).SamusSuit : "MP1PowerSuit");
-        // a file saved with a non-suit picked (MP4Sylux, a Dark Samus) wears MPH's own Samus
+        // a file saved with a non-suit picked (MP4Sylux, a Dark Samus, before the 2026-11-01 fix) wears MPH's own Samus
         if (explicitGun == null && !MphRecomp.Multiplayer.Characters.IsSamusSuit(gunId)) gunId = "original";
         // a public build wears the picked suit's body and morph ball but keeps MPH's own arm cannon (owner 2026-10-07: the
         // Prime arm cannons are held, the suits are public; was no HD gear at all, Beta 1): CampaignRenderer.StartGearLoad
@@ -53,7 +53,7 @@ internal sealed partial class CampaignRenderer
         renderer.PauseMenu = new PauseOverlay(settingsPath, Path.Combine(dataDir, "mods"));
         renderer.SettingsPath = settingsPath; // CampaignAudio.cs: RecompSettings.Music
         renderer.ReloadAimFromSettings();
-        renderer.PauseMenu.Resumed += () => { renderer.ReloadGunFromSettings(); renderer.ReloadTrooperFromSettings(); renderer.ReloadAimFromSettings(); };
+        renderer.PauseMenu.Resumed += () => { renderer.ReloadGunFromSettings(); renderer.ReloadTrooperFromSettings(); renderer.ReloadSyluxFromSettings(); renderer.ReloadAimFromSettings(); };
         renderer.PauseMenu.ControlsClosed += renderer.ReloadAimFromSettings; // the customizer from the ship's OPTIONS
         renderer.PauseMenu.QuitToMenu += () => renderer.ExitSink?.Invoke();
         // the gunship between planets (save, star map, travel): CampaignShip.cs
@@ -68,6 +68,7 @@ internal sealed partial class CampaignRenderer
         renderer.ConfigureShip(hardMode ? Path.Combine(dataDir, "saves", "hardmode") : Path.Combine(dataDir, "saves"), args);
         // (the pause's CAMPAIGN TROOPER TYPE shows with a Trooper file: the front end's saves, and this campaign's own)
         renderer.PauseMenu.SavesDir = hardMode ? Path.Combine(dataDir, "saves", "hardmode") : Path.Combine(dataDir, "saves");
+        renderer.PauseMenu.CampaignPlays = renderer.PlayingCharacter; // (owner 2026-11-09: only on his own file)
         renderer.ConfigureEnemyPlacer(enemyPlace);
         // loadout all (dev launcher "Boss fights"): a fresh story with every weapon, full ammo and 799 energy, and nothing
         // saved (the ship's save prompt would otherwise write slot 1, the player's file A). Both are dev-only: a public
@@ -78,6 +79,11 @@ internal sealed partial class CampaignRenderer
         }
         // boss down (dev launcher "Escape tests"): the boss is beaten for the player once its intro is over (CampaignBossSkip.cs)
         if (args.Get("boss") == "down" && !RecompSettings.PublicBuild) renderer.UseBossSkip();
+        // helpers off (dev, owner 2026-11-07): the other hunters' campaign helpers (teleporters, moved pickups) stay out,
+        // to try the vanilla rooms with the alt-form hop (SceneSetup.AltHuntersHelpersOff); every other launch has them
+        MphRead.SceneSetup.AltHuntersHelpersOff = args.Get("helpers") == "off" && !RecompSettings.PublicBuild;
+        // (dev) the strafe alt forms' old facing-relative controls under a room camera, to compare (PlayerAltCamMove.cs)
+        MphRead.Entities.PlayerEntity.AltCamMoveOff = args.Get("cammove") == "off" && !RecompSettings.PublicBuild;
         // escape 1 (dev launcher "Escape at the ship"): the room starts with the escape already running, to walk to the ship
         // and test EXIT SHIP being off after boarding (CampaignEscape.cs)
         if (args.Get("escape") == "1" && !RecompSettings.PublicBuild) renderer.UseEscapeStart();
@@ -87,6 +93,9 @@ internal sealed partial class CampaignRenderer
         renderer.MapReportPath = Path.Combine(dataDir, "map_reports.json"); // the PRIME map's split reports (PrimeMap.Report.cs)
         // a multiplayer match with bots instead of the campaign (MatchSession.cs)
         renderer.ConfigureMatch(args);
+        // RECOMP SETTINGS' DEATH: First Hunt's collapse (dev only, needs First Hunt imported) or the ragdoll (every build,
+        // no import) in a match: MatchStart
+        MphRecomp.Anim.DeathCollapse.Set(RecompSettings.Load(settingsPath).DeathAnimation, dataDir);
         renderer.ReloadCameraFromSettings(); // a match takes the match camera setting, not the campaign's (CampaignRenderer)
         renderer.ConfigureFirstHunt(args); // dev fhlevel: a First Hunt level (FirstHunt/FirstHuntSession.cs)
         if (explicitGun == null) renderer.DropSettingsSuitInMatch(); // matches don't wear RECOMP SETTINGS' suit
@@ -94,6 +103,14 @@ internal sealed partial class CampaignRenderer
         renderer.ConfigureSkins(args);
         // view framing: WIDE (CampaignView.cs; dev only: view wide|ds|prime|panini)
         ConfigureView(args);
+        renderer.ConfigureDevStartAt(args); // dev: startat x,y,z[,yaw] (CampaignDevStartAt.cs)
+        // the player's enabled mods (Core Mods/LiveMods.cs, docs/MOD_API.md): offline games only, so an online or LAN game
+        // and a replay being played back run without them; CampaignRenderer.Shutdown takes them down
+        string? noMods = !string.IsNullOrEmpty(args.Get("replay")) ? "replay"
+            : !string.IsNullOrEmpty(args.Get("net")) || MphRecomp.Multiplayer.Net.OnlineMatch.Current != null
+                || MphRecomp.Multiplayer.Net.LanSession.Current != null ? "network game" : null;
+        // (a match's gameplay mods start with each match instead: MatchReplay.StartMatchReplayed, so its replay records them)
+        MphRecomp.Mods.LiveMods.Attach(dataDir, noMods, line => Log.Info("MPHMods", line), match: renderer._matchSettings != null);
         return renderer;
     }
 }

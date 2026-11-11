@@ -33,6 +33,14 @@ internal sealed partial class CampaignRenderer
 
     MatchSettings? CampaignCharacterSeat()
     {
+        // a Sylux file (owner 2026-11-08): his seat, so CAMPAIGN SYLUX TYPE draws Beyond's body and Lockjaw; built for his
+        // own look too, so a switch on resume finds the seat set up
+        if (CampaignSylux)
+        {
+            var sylux = new MatchSettings { Mode = GameMode.SinglePlayer, LocalSeat = 0, PirateBlaster = false };
+            sylux.Players.Add(new MatchPlayer { Hunter = _hunter, Skin = CampaignSyluxSkin });
+            return sylux;
+        }
         if (_character == null || _hunter != Characters.Trooper.Base
             || !string.Equals(_character, Characters.Trooper.Id, StringComparison.OrdinalIgnoreCase)) return null;
         var settings = new MatchSettings { Mode = GameMode.SinglePlayer, LocalSeat = 0, PirateBlaster = false };
@@ -103,6 +111,7 @@ internal sealed partial class CampaignRenderer
             _seatLook[i] = looksOn ? _seatKind[i] : LookAlikes.Look.None;
             _seatVariant[i] = i < settings.Players.Count ? LookAlikes.VariantFor(settings, i) : LookAlikes.Variant.First;
             _seatName[i] = looksOn && i < settings.Players.Count ? LookAlikes.CharacterName(settings.Players[i]) : null;
+            SetSeatPictureSkin(i, i < settings.Players.Count ? settings.Players[i] : null); // its HUD portrait (MatchPortraits.cs)
             if (_seatLook[i] != LookAlikes.Look.None) Log.Info("MPHCampaign", $"skins: seat {i} look-alike {_seatLook[i]} {_seatVariant[i]} (where its skin isn't drawn)");
             if (_seatSkin[i] != null) Log.Info("MPHCampaign", $"skins: seat {i} ({settings.Players[i].Hunter}) wears {_seatSkin[i]}");
             _seatShieldRecolor[i] = i < settings.Players.Count ? ShieldRecolor(settings.Players[i].Skin) : 0;
@@ -139,20 +148,9 @@ internal sealed partial class CampaignRenderer
             if (_seatLook[i] != LookAlikes.Look.None) wanted.Add((_seatLook[i], _seatVariant[i]));
         }
         if (wanted.Count > 0) LookAlikes.Register(wanted);
-        // Limoki's Dark Samus stand-in (Core DarkSamusStandin.cs) in place of the recoloured Samus, built now (after the
-        // looks' sets: it carries her team / copy colours too), not on the first frame. Dev builds: --es dsstandin off =
-        // the recolour as before
-        bool standinOff = !MphRecomp.Config.RecompSettings.PublicBuild && args.Get("dsstandin") == "off";
-        _standin = !standinOff && Array.IndexOf(_seatLook, LookAlikes.Look.DarkSamus) >= 0 && DarkSamusStandin.Available
-            ? Read.GetModelInstance(DarkSamusStandin.ModelNames[0]) : null;
-        // and her morph ball (owner 10-27), with or without the body; dev: --es dsball original = her previous ball
-        // paint (blue lines B), to compare with her 10-28 repaint (owner 10-28)
-        bool ballOriginal = !MphRecomp.Config.RecompSettings.PublicBuild && args.Get("dsball") == "original"
-            && DarkSamusStandin.OriginalBallAvailable;
-        _standinAltName = DarkSamusStandin.ModelNames[ballOriginal ? 2 : 1];
-        _standinAlt = !standinOff && Array.IndexOf(_seatLook, LookAlikes.Look.DarkSamus) >= 0 && DarkSamusStandin.BallAvailable
-            ? Read.GetModelInstance(_standinAltName) : null;
-        if (_standin != null) Log.Info("MPHCampaign", $"skins: Dark Samus seats wear Limoki's stand-in{(_standinAlt != null ? " and ball" : "")}");
+        // her morph ball's paint; dev: --es dsball original = her previous ball paint (blue lines B), to compare with her
+        // 10-28 repaint (owner 10-28). Her body and ball are built with the skin loads (LoadStandin)
+        _standinBallOriginal = !MphRecomp.Config.RecompSettings.PublicBuild && args.Get("dsball") == "original";
         // and she floats on Samus's rig the way her Echoes / Corruption bodies do (PlayerHostFloat.cs); dev: --es dsfloat off,
         // --es dsfloat hover = the feet riding the bob clear of the floor (default: held, toes just into it, as Corruption)
         _floatOff = !MphRecomp.Config.RecompSettings.PublicBuild && args.Get("dsfloat") == "off";
@@ -167,6 +165,7 @@ internal sealed partial class CampaignRenderer
     ModelInstance? _standin; // Limoki's Dark Samus body for her look-alike seats, null = the recolour
     ModelInstance? _standinAlt; // and her morph ball, null = the recoloured Samus ball
     string _standinAltName = DarkSamusStandin.ModelNames[1];
+    bool _standinBallOriginal; // dev: her previous ball paint
     bool _floatOff; // dev: Dark Samus look-alike seats walk on Samus's steps as before
     bool _looksOn; // the look-alikes and the Scout Drone's attack fallbacks (CampaignRenderer.DroneFallback.cs)
     readonly LookAlikes.Look[] _seatLook = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Repeat(LookAlikes.Look.None, 16));
@@ -227,9 +226,34 @@ internal sealed partial class CampaignRenderer
     string? HdRoot => _gunsRoot != null ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_gunsRoot) ?? "", "hd") : null;
     string? BodiesRoot => _gunsRoot != null ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_gunsRoot) ?? "", "bodies") : null;
 
+    // Limoki's Dark Samus stand-in (Core DarkSamusStandin.cs) in place of the recoloured Samus, and her morph ball (owner
+    // 10-27), built before the room (after the looks' sets: it carries her team / copy colours too), not on the first
+    // frame. GL thread, after the ROM's paths are set: ConfigureSkins runs before them on Android, where her build
+    // failed and every Dark Samus seat wore the recoloured Samus (owner 11-09). Her model is the only Dark Samus look
+    // (owner 11-09); the recolour is drawn only if her build fails, and logs why
+    void LoadStandin()
+    {
+        _standin = _standinAlt = null;
+        if (Array.IndexOf(_seatLook, LookAlikes.Look.DarkSamus) < 0) return;
+        _standin = DarkSamusStandin.Available ? Read.GetModelInstance(DarkSamusStandin.ModelNames[0]) : null;
+        _standinAltName = DarkSamusStandin.ModelNames[_standinBallOriginal && DarkSamusStandin.OriginalBallAvailable ? 2 : 1];
+        _standinAlt = DarkSamusStandin.BallAvailable ? Read.GetModelInstance(_standinAltName) : null;
+        if (_standin != null) Log.Info("MPHCampaign", $"skins: Dark Samus seats wear Limoki's stand-in{(_standinAlt != null ? " and ball" : "")}");
+        if (_standin != null) PlayerEntity.HostWarmFittedIce(_standin.Model);
+        else Log.Error("MPHCampaign", $"skins: Dark Samus stand-in didn't build, seats wear the recolour: {DarkSamusStandin.LastMessage ?? "no reason recorded"}");
+    }
+
     // GL thread, with the room load (OnSurfaceChanged): each distinct skin on a worker (its hunter's model looked up here)
     void StartSkinLoads()
     {
+        LoadStandin();
+        // the host-drawn bodies' ice reference (SuitIce.Reference: the reference body posed, read on this thread) now too,
+        // not at a skinned seat's first freeze; their fits then run on workers
+        if (Array.Exists(_seatSkin, id => id != null))
+        {
+            SuitIce.Reference("Samus_lod0");
+            SuitIce.Reference("Nox_lod0");
+        }
         string? hdRoot = HdRoot;
         if (hdRoot == null) return;
         string? bodiesRoot = BodiesRoot;
@@ -362,6 +386,11 @@ internal sealed partial class CampaignRenderer
             bool body = s?.HasBody == true || on && BodyOf(p) != null;
             if (p.SlotIndex >= 0 && p.SlotIndex < _seatShieldRecolor.Length) p.HostShieldRecolor = _seatShieldRecolor[p.SlotIndex];
             p.HostOwnBiped = body;
+            // its HD suit falls on the DEATH look's ragdoll (CampaignSuit.RagdollPose) when it rides this hunter's DS rig; a
+            // native body (CampaignRetroBody) when its clips map its bones to the ragdoll's (BodyClips.Ragdoll: Prime 4
+            // Sylux so far), otherwise that seat dies as MPH's
+            CampaignRetroBody? nb = on ? BodyOf(p) : null;
+            p.HostOwnRagdoll = nb != null ? nb.Clips.Ragdoll != null : s?.HasBody == true && s.BodyRig == p.Hunter;
             // MphRead's own body / ball in the seat's look-alike colours (only where the skin's own aren't drawn)
             LookAlikes.Look look = s == null && !body && p.SlotIndex >= 0 && p.SlotIndex < _seatLook.Length ? _seatLook[p.SlotIndex] : LookAlikes.Look.None;
             LookAlikes.Variant variant = p.SlotIndex >= 0 && p.SlotIndex < _seatVariant.Length ? _seatVariant[p.SlotIndex] : LookAlikes.Variant.First;
@@ -369,8 +398,9 @@ internal sealed partial class CampaignRenderer
             p.HostLookRecolor = LookAlikes.RecolorFor(look, variant, Metadata.HunterModels[p.Hunter][0], phase);
             p.HostGunLookRecolor = LookAlikes.RecolorFor(look, variant, Metadata.HunterModels[p.Hunter][3], phase); // its first-person gun
             // her stand-in body: her own paint as the 1st, her team / copy colours made from it (the ball and gun keep the
-            // recolour)
-            bool standin = _standin != null && look == LookAlikes.Look.DarkSamus && p.HostLookRecolor >= 0;
+            // recolour). Never on a seat with its own native body (Echoes Dark Samus), hooks off too: between the steps her
+            // ragdoll is fitted and drawn on that body, and a stand-in left there hid it (she stood when killed, 2026-11-10)
+            bool standin = _standin != null && look == LookAlikes.Look.DarkSamus && p.HostLookRecolor >= 0 && (on || BodyOf(p) == null);
             p.HostBodyModel = standin ? _standin : null;
             p.HostFloatPose = !_floatOff && look == LookAlikes.Look.DarkSamus && p.HostLookRecolor >= 0 && p.Hunter == Hunter.Samus;
             p.HostBodyRecolor = standin && variant != LookAlikes.Variant.First
@@ -392,19 +422,28 @@ internal sealed partial class CampaignRenderer
                 p.HostLookRecolor = HunterColours.RecolorFor(Metadata.HunterModels[p.Hunter][0], copy);
                 p.HostGunLookRecolor = HunterColours.RecolorFor(Metadata.HunterModels[p.Hunter][3], copy);
             }
-            // a dev picture's 2nd-4th / team variant on a vanilla body: MPH's pal_02-04 / team palette (a real match gets it
-            // from the seat's Recolor, which --lookvariant leaves at the seat order's)
-            else if (copy < 0 && variant != LookAlikes.Variant.First && p.SlotIndex >= 0 && p.SlotIndex < _seatDevVariant.Length
+            // a dev picture's 1st-4th / team variant on a vanilla body: MPH's pal_01-04 / team palette (a real match gets it
+            // from the seat's Recolor, which --lookvariant leaves at the seat order's; the 1st too, owner 11-09: a 1st in
+            // seat 2 wore seat 2's colour)
+            else if (copy < 0 && p.SlotIndex >= 0 && p.SlotIndex < _seatDevVariant.Length
                 && _seatDevVariant[p.SlotIndex] && look == LookAlikes.Look.None && _seatKind[p.SlotIndex] == LookAlikes.Look.None)
             {
                 p.HostLookRecolor = (int)variant;
                 p.HostGunLookRecolor = (int)variant;
+            }
+            // the 2nd-4th Samus's ball by the owner's rule (HunterColours.SamusBalls), MPH's own pal_02-04 on her body
+            if (!hunterCopy && p.Hunter == Hunter.Samus && s == null && !body && look == LookAlikes.Look.None
+                && p.SlotIndex >= 0 && p.SlotIndex < _seatKind.Length && _seatKind[p.SlotIndex] == LookAlikes.Look.None)
+            {
+                int ball = HunterColours.SamusBallFor(Metadata.HunterModels[Hunter.Samus][0], p.HostLookRecolor >= 0 ? p.HostLookRecolor : p.Recolor);
+                if (ball >= 0) p.HostLookRecolor = ball;
             }
             p.HostBombLookRecolor = hunterCopy && p.Hunter == Hunter.Kanden ? HunterColours.RecolorFor("KandenAlt_TailBomb", copy) : -1;
             p.HostSyluxTrailRecolor = hunterCopy && p.Hunter == Hunter.Sylux ? HunterColours.RecolorFor(HunterColours.TrailModel, copy) : -1;
             p.HostSyluxBombColor = hunterCopy && p.Hunter == Hunter.Sylux && HunterColours.SyluxBombColor(copy) is var sc
                 ? new Vector3(sc.R, sc.G, sc.B) : null;
             p.HostCharacterName = p.SlotIndex >= 0 && p.SlotIndex < _seatName.Length ? _seatName[p.SlotIndex] : null;
+            p.HostPortrait = SeatPortrait(p);
             p.HostOwnAlt = s?.HasBall == true || on && (DroneOf(p) != null || LockjawOf(p) != null);
             // a native body's own morph ball trail colour; the Dark Samus look-alike / stand-in takes her ball's blue too
             // (trail, morph sphere, boost glow: owner 10-27, it had gone back to MPH's yellow)
@@ -432,6 +471,8 @@ internal sealed partial class CampaignRenderer
         TickBlasterFx(); // the Pirate Blaster's shots in Prime 1's look (CampaignRenderer.BlasterFx.cs; its systems step in TickDroneFx)
         TickHyperBeamFx(); // the Hyper Beam's shots in Corruption's look (CampaignRenderer.HyperBeamFx.cs; its systems step in TickDroneFx)
         TickTurretFx(); // Shooting Gallery turret's Echoes effects (CampaignRenderer.TurretFx.cs; its systems step in TickDroneFx)
+        TickGrappleFx(); // the grapple beam in Echoes' look and sound (CampaignRenderer.GrappleFx.cs; its systems step in TickDroneFx)
+        TickSpiderFx(); // the spider ball's Echoes loop and bolt (CampaignRenderer.SpiderFx.cs)
         TickPillarFx(); // Mining Plaza's collapsing pillars in Echoes' look and sound (CampaignRenderer.PillarFx.cs; its systems step in TickDroneFx)
         TickDroneFx(); // the Scout Drone's Prime 1 effects (CampaignRenderer.DroneFx.cs)
         TickDroneFallback(); // ... or MPH's own where the import has none (CampaignRenderer.DroneFallback.cs)
@@ -447,6 +488,23 @@ internal sealed partial class CampaignRenderer
     int DdGlTexture(PlayerEntity? p, Scene scene) =>
         p != null && p.DoubleDamage && p.DoubleDmgBindingId != 0 && BindTexture(p.DoubleDmgBindingId, scene) ? _textures[p.DoubleDmgBindingId].Tex : 0;
 
+    // recomp: a frozen seat's fitted ice on the body drawn here (SuitIce.cs, PlayerFittedIce.cs): vanilla's shell for the
+    // seat's MPH body (Ref; each body fits it to itself) in vanilla's ice texture and lighting; null = none
+    readonly IceLook _iceLook = new();
+    IceLook? IceOf(PlayerEntity p, Scene scene)
+    {
+        int id = p.HostIceBindingId;
+        if (id == 0 || !BindTexture(id, scene)) return null;
+        LightInfo l = p.HostLights;
+        _iceLook.Tex = _textures[id].Tex;
+        _iceLook.Push = 0;
+        _iceLook.Ref = SuitIce.Reference(p.HostBipedModel1.Model.Name);
+        _iceLook.Facets = p.HostIceLook == 2;
+        (_iceLook.L1, _iceLook.C1, _iceLook.L2, _iceLook.C2) = (l.Light1Vector, l.Light1Color, l.Light2Vector, l.Light2Color);
+        (_iceLook.Dif, _iceLook.Amb) = (p.HostIceDiffuse, p.HostIceAmbient);
+        return _iceLook;
+    }
+
     void DrawSkins(Scene scene, SuitPass pass)
     {
         DrawArmCannon(scene, pass); // the main player's first-person arm cannon (MatchArmCannon.cs)
@@ -456,6 +514,7 @@ internal sealed partial class CampaignRenderer
         DrawParalyzerFx(scene, pass); // the Paralyzer in Brawl's look (CampaignRenderer.ParalyzerFx.cs)
         DrawHyperBeamFx(scene, pass); // the Hyper Beam shots' swooshes (CampaignRenderer.HyperBeamFx.cs)
         DrawHyperFx(scene, pass); // Dark Samus's Hyper Ball in Corruption's look (CampaignRenderer.HyperFx.cs)
+        DrawSpiderFx(scene, pass); // the spider ball's bolt to the track (CampaignRenderer.SpiderFx.cs)
         DrawDroneFallback(scene, pass); // ... or the fallbacks without the import (CampaignRenderer.DroneFallback.cs)
         DrawLookAlikeFx(scene, pass); // Dark Samus look-alike's phazon glow (CampaignRenderer.LookAlikeFx.cs)
         DrawLockjawFx(scene, pass); // Beyond Sylux's Lockjaw orb (CampaignRenderer.LockjawFx.cs)
@@ -478,6 +537,9 @@ internal sealed partial class CampaignRenderer
             if (s != null) { s.DdTex = dd; Array.Copy(_ddMtx, s.DdMtx, 9); }
             if (nb != null) { nb.DdTex = dd; Array.Copy(_ddMtx, nb.DdMtx, 9); }
             if (drone != null) { drone.DdTex = dd; Array.Copy(_ddMtx, drone.DdMtx, 9); }
+            // its ice is drawn here on a body drawn here (an ice probe's odd seat keeps vanilla's shell, side by side)
+            // (the campaign suit's wearer: DrawSuit's)
+            if (!(p.IsMainPlayer && SuitShown)) p.HostOwnIce = (nb != null || s != null && s.HasBody) && !(PlayerEntity.HostIceProbe == 2 && (p.SlotIndex & 1) == 1);
             try
             {
                 if (s == null && nb == null)
@@ -509,6 +571,16 @@ internal sealed partial class CampaignRenderer
                 else if (hasBody && p.HostBipedAlpha > 0
                     && !((p.IsMainPlayer || p.SlotIndex == PlayerEntity.HostFirstPersonSeat) && CameraInBody(scene, p)))
                 {
+                    if (p.HostOwnIce && !p.HostIced)
+                    {
+                        // (the body's shell fitted ahead of its first freeze)
+                        FittedIce.IceReference? iceRef = SuitIce.Reference(p.HostBipedModel1.Model.Name);
+                        nb?.WarmIce(iceRef);
+                        s?.WarmIce(iceRef);
+                    }
+                    IceLook? ice = p.HostOwnIce && p.HostIced ? IceOf(p, scene) : null;
+                    if (s != null) s.Ice = ice;
+                    if (nb != null) nb.Ice = ice;
                     if (nb != null && !(s != null && s.HasBody && nb.Clips.SuitLegs.Contains((PlayerAnimation)p.HostBipedModel1.AnimInfo.Index[0])))
                     {
                         nb.DrawBody(p, SmoothView(p, scene), scene.PerspectiveMatrix, pass, p.HostBipedAlpha, p.HostDamageFlash);
@@ -522,8 +594,8 @@ internal sealed partial class CampaignRenderer
                 if (s != null) (s.SeatTint, s.SeatTint2, s.SeatTint3, s.SeatHue, s.SeatRef, s.SeatChest) = (Vector4.Zero, Vector4.Zero, Vector4.Zero, Vector4.Zero, Vector4.Zero, Vector4.Zero);
                 if (nb != null) (nb.SeatTint, nb.SeatTint2) = (Vector4.Zero, Vector4.Zero);
                 if (drone != null) (drone.SeatTint, drone.SeatTint2) = (Vector4.Zero, Vector4.Zero);
-                if (s != null) s.DdTex = 0;
-                if (nb != null) nb.DdTex = 0;
+                if (s != null) (s.DdTex, s.Ice) = (0, null);
+                if (nb != null) (nb.DdTex, nb.Ice) = (0, null);
                 if (drone != null) drone.DdTex = 0;
             }
         }

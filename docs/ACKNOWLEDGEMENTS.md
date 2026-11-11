@@ -28,6 +28,8 @@ also read it in the app, under SECOND HUNT SETTINGS > APP > HELP > CREDITS.
     ([#10](https://github.com/BountyHunterKanden/SecondHunt/issues/10))
   - [@Swordman14](https://github.com/Swordman14): asking for a static reticle, which turned into AIM VIEW
     ([#11](https://github.com/BountyHunterKanden/SecondHunt/issues/11))
+  - [@extracoconut](https://github.com/extracoconut): a portable mode on Windows, which turned into the DATA FOLDER
+    choice ([#12](https://github.com/BountyHunterKanden/SecondHunt/issues/12))
 - **Everyone on Discord**, including finRatman, Limoki and Yaba, and every player who has sent bug reports, logs,
   replays, screenshots and videos.
 

@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace MphRecomp.Online
 {
-    // The chat this device has received in the game it is in (docs/ONLINE_PLAY.md section 8, Social O7): the last lines the
+    // The chat this device has received in the game it is in (docs/ONLINE_PLAY.md section 8, Social O7): the last Keep lines the
     // server pushed (ChatEvent), kept in memory only, shown by the lobby page and the match overlay. A line from a player
     // muted here (PlayerMutes) is kept but not listed. One log per OnlineClient (OnlineClient.Chat); Add runs on the network
     // thread, the readers on the game thread.
@@ -17,7 +17,7 @@ namespace MphRecomp.Online
             public string Shown => IsPreset ? ChatPresets.Text(Preset) : Text;
         }
 
-        public const int Keep = 100;
+        public const int Keep = 500; // (a long lobby's whole chat: the CHAT page scrolls back through it; was 100)
         private readonly object _lock = new();
         private readonly List<Line> _lines = new();
         private long _seq;

@@ -67,6 +67,11 @@ namespace MphRead
 
         private void DispatchMessage(MessageInfo info)
         {
+            // mph-recomp: mod.on_message watch (null unless a mod watches messages)
+            if (GameEvents.Messages != null)
+            {
+                GameEvents.RaiseMessage(info.Message, info.Sender?.Id ?? -1, info.Target?.Id ?? -1, info.Param1, info.Param2);
+            }
             if (info.Message == Message.SetTriggerState)
             {
                 int index = (int)info.Param1;

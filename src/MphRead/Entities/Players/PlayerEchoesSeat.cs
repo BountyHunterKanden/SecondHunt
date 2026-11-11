@@ -22,6 +22,14 @@ namespace MphRead.Entities
         // ---- the turret's seat ----
 
         public bool HostSeated { get; private set; }
+        // the seated player takes no damage (bombs, splash, kill planes): the turret's shell takes the hits, and it kills
+        // them when it's destroyed, after unseating them (owner 2026-11-10). Off = as before, for replays recorded before
+        // it (MphRecomp MatchSettings.TurretSeatSafe)
+        public static bool HostSeatSafe { get; set; } = true;
+        // bots on a turret errand steer a strafing alt form (Trace, Weavel) the way it moves, and EchoesTurretBots re-plans a
+        // route they've lost (2026-11-11, issue turret-bot-stall). Off = as before, for replays recorded before it
+        // (MphRecomp MatchSettings.TurretBotNav)
+        public static bool HostTurretBotNav { get; set; } = true;
         // the turret's kills (its shots, BeamProjectileEntity.HostTurretShot, and the entry kill, which the turret makes with
         // HostTurretKillApplying on) say (HEAVY TURRET) (owner 2026-10-17: "killed by [player] (heavy turret)"). Text only:
         // the stats are as before. A match client gets it from the host's snapshot (PlayerNet NetLastTurret).
@@ -81,6 +89,8 @@ namespace MphRead.Entities
             Speed = Vector3.Zero;
             Position = position;
             EquipInfo.ChargeLevel = 0;
+            // the seat's input skips the player's own, so an Imperialist zoom held on the way in would stay on in the turret
+            UpdateZoom(false);
             NetAimEpoch++; // the turret re-aims the player (PlayerNet.cs)
             SeatAim();
         }
@@ -481,7 +491,17 @@ namespace MphRead.Entities
                 if (errand.Ball)
                 {
                     _buttons.R.IsDown = false; // (no boosting past it)
-                    Func21418D8(errand.To);
+                    // a strafing alt form (Trace, Weavel) moves the way it faces, not the way it rolled: the game's own AI
+                    // steers it with the walking buttons (PlayerAi Func2142AE8 for AltFormStrafe); the rolling steer left
+                    // Trace still beside the slot (issue turret-bot-stall, HostTurretBotNav)
+                    if (HostTurretBotNav && _player.Values.AltFormStrafe != 0)
+                    {
+                        Func2142AE8(errand.To);
+                    }
+                    else
+                    {
+                        Func21418D8(errand.To);
+                    }
                     // bombs: a press every 20 AI steps
                     _buttons.L.IsDown = errand.Bomb && _errandFrames++ % 20 == 0;
                 }
@@ -489,6 +509,16 @@ namespace MphRead.Entities
                 {
                     // a jump: the press, then (2) a second press near the top; over once she is down again
                     bool grounded = _player.Flags1.TestFlag(PlayerFlags1.Grounded);
+                    // her jump back once she stands after a form switch: the AI's own morph (between errands) and the
+                    // errand's unmorph left UsedJump on, and PlayerCollision only clears it on landing, so she stood in
+                    // the Shooting Gallery's Dark Water trench pressing Jump until she died (issue turret-bot-stall,
+                    // HostTurretBotNav)
+                    if (HostTurretBotNav && _errandJump == 0 && _player.Flags1.TestFlag(PlayerFlags1.UsedJump) && !_player.IsMorphing
+                        && !_player.IsUnmorphing && _player.Flags1.TestFlag(PlayerFlags1.Standing)
+                        && _player.Flags1.TestFlag(PlayerFlags1.StandingPrevious))
+                    {
+                        _player.Flags1 &= ~PlayerFlags1.UsedJump;
+                    }
                     if (_errandJump > 0)
                     {
                         _errandJump++;

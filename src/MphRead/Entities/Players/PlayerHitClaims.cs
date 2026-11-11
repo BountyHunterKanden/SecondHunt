@@ -31,6 +31,8 @@ namespace MphRead.Entities
             public int Number;
             public bool Claimable;
             public uint HitMask; // the players this shot's own beams hit on the host
+            public uint HeadMask; // of those, the ones hit in the head (a claimed head upgrade sets it too)
+            public uint BodyDamage; // what its own body hit dealt (a head upgrade adds only the rest of the head damage)
             public float Reach; // how far along its line the beam can get: its speed over its lifespan (+ a step)
             public int FlightFrames; // its lifespan in steps
             public BeamProjectileEntity? StandIn;
@@ -45,7 +47,7 @@ namespace MphRead.Entities
 
         // what the host's check reads of a kept shot
         public readonly record struct ClaimShotInfo(bool Claimable, Vector3 Origin, Vector3 Direction, BeamType Beam, uint HitMask,
-            int BeamsInFlight, float Radius, float Reach, int FlightFrames);
+            int BeamsInFlight, float Radius, float Reach, int FlightFrames, uint HeadMask);
 
         private bool HitClaimTagging => HostRemote && HostHitClaims || NetClient && this == Main && NetShotLogOn;
 
@@ -74,6 +76,8 @@ namespace MphRead.Entities
             }
             slot.Number = number;
             slot.HitMask = 0;
+            slot.HeadMask = 0;
+            slot.BodyDamage = 0;
             // claimable: a straight shot (no homing, no continuous beam, no gravity): the host checks the claimed hit against
             // the shot's line; the rest stay the host's own copy's call
             slot.Claimable = !beam.Flags.TestFlag(BeamFlags.Homing) && !beam.Flags.TestFlag(BeamFlags.Continuous)
@@ -85,13 +89,20 @@ namespace MphRead.Entities
             slot.StandIn.HostCopyHitFields(beam);
         }
 
+        // dev tools (-replayevents): each beam hit on a player as it lands (where it struck, head or not); null in the game
+        public static Action<BeamProjectileEntity, PlayerEntity, Vector3, bool>? HitNote { get; set; }
+
         // ProcessCollision, a beam's hit on a player or their Halfturret: the host notes it on the shot (a claim on that player
         // for that shot then adds nothing); the guest logs its claim (not a Halfturret's: claims are on the player)
         public static void HitClaimBeamHit(BeamProjectileEntity beam, PlayerEntity target, Vector3 point, bool head, bool halfturret,
             uint damage = 0)
         {
+            // (the HEADSHOT! message only for a hit the host flags as one: a beam whose head damage is its body damage, the
+            // Shock Coil, is never flagged, owner 2026-10-31)
+            bool shownHead = head && MathF.Abs(beam.Damage - beam.HeadshotDamage) > 1 / 4096f;
+            HitNote?.Invoke(beam, target, point, head);
             int predicted = NetClient && beam.Owner == Main && !halfturret
-                ? target.NetPredictHit(damage, head) // (instant hit feedback, any of its own beams: PlayerNetPredict.cs)
+                ? target.NetPredictHit(damage, shownHead) // (instant hit feedback, any of its own beams: PlayerNetPredict.cs)
                 : 0;
             if (beam.HostShotNumber == 0 || beam.Owner is not PlayerEntity p || p == target)
             {
@@ -100,6 +111,14 @@ namespace MphRead.Entities
             if (p.FindClaimShot(beam.HostShotNumber) is ClaimShot shot && target.SlotIndex is >= 0 and < 32)
             {
                 shot.HitMask |= 1u << target.SlotIndex;
+                if (head)
+                {
+                    shot.HeadMask |= 1u << target.SlotIndex;
+                }
+                else
+                {
+                    shot.BodyDamage = damage;
+                }
             }
             if (NetClient && p == Main && NetShotLogOn && !halfturret)
             {
@@ -145,7 +164,7 @@ namespace MphRead.Entities
                 }
             }
             info = new ClaimShotInfo(shot.Claimable, shot.StandIn.SpawnPosition, shot.StandIn.Direction, shot.StandIn.Beam,
-                shot.HitMask, flying, shot.StandIn.CylinderRadius, shot.Reach, shot.FlightFrames);
+                shot.HitMask, flying, shot.StandIn.CylinderRadius, shot.Reach, shot.FlightFrames, shot.HeadMask);
             return true;
         }
 
@@ -153,13 +172,29 @@ namespace MphRead.Entities
         // hits `victim` at `point`, unless that shot already hit them (with HostClaimOneHit: anyone) or they're down. True = applied
         // rescue (P2, FRUITY_PORT.md): no host shot carried the claim, so `number` is the seat's newest claimable shot, used for
         // its weapon's damage only: the shot's own hit mask is no bar, and the falloff reads from where the shooter stands now
-        public static bool HostApplyClaimedHit(int shooter, int number, int victim, Vector3 point, bool head, bool rescue = false)
+        // upgrade (format 77, 2026-10-31 player report): the shot's own copy hit `victim` in the body where the guest's screen saw
+        // a headshot (Net/HitClaims.cs checked it): it becomes one, dealing what the head damage adds over the body hit
+        public static bool HostApplyClaimedHit(int shooter, int number, int victim, Vector3 point, bool head, bool rescue = false,
+            bool upgrade = false)
         {
             if (!HostHitClaims || shooter < 0 || shooter >= MaxPlayers || victim < 0 || victim >= MaxPlayers || shooter == victim)
             {
                 return false;
             }
             PlayerEntity p = Players[shooter], target = Players[victim];
+            if (upgrade)
+            {
+                if (p.FindClaimShot(number) is not ClaimShot hit || hit.StandIn == null || !hit.Claimable
+                    || (hit.HitMask & (1u << victim)) == 0 || (hit.HeadMask & (1u << victim)) != 0
+                    || target.Health == 0 || !target.LoadFlags.TestFlag(LoadFlags.Spawned))
+                {
+                    return false;
+                }
+                hit.HeadMask |= 1u << victim;
+                hit.StandIn.Owner = p;
+                hit.StandIn.HostClaimHit(target, point, head: true, already: hit.BodyDamage);
+                return true;
+            }
             if (p.FindClaimShot(number) is not ClaimShot shot || shot.StandIn == null || !shot.Claimable
                 || (!rescue && (HostClaimOneHit ? shot.HitMask != 0 : (shot.HitMask & (1u << victim)) != 0))
                 || target.Health == 0 || !target.LoadFlags.TestFlag(LoadFlags.Spawned))

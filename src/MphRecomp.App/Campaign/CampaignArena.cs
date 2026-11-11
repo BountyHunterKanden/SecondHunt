@@ -41,6 +41,26 @@ internal sealed partial class CampaignRenderer
     void DrawArena(Scene scene, int pass, int restoreDepthFunc)
     {
         if (_host == null || scene != _host.Scene) return;
+        BeginArenaHd();
+        if (_arenaHd == null)
+        {
+            if (_arenaHdLoad == null || !_arenaHdLoad.IsCompleted) return;
+            _arenaHd = _arenaHdLoad.Result;
+            _arenaHdLoad = null;
+            if (_arenaHd == null) return;
+        }
+        ArenaHdDraw hd = _arenaHd;
+        ArenaWatch(hd);
+        if (!hd.Warm(pass == 0 ? 3 : 0)) return;   // GL objects a few ms per frame; the stand-in draws meanwhile
+        if (hd.Failed) return;
+        if (scene.Room is RoomEntity room) room.Hidden = true;
+        DrawArenaReady(scene, hd, pass, restoreDepthFunc);
+    }
+
+    // the room's HD bundle read started on a worker (once per room)
+    void BeginArenaHd()
+    {
+        if (_host == null) return;
         if (_arenaHdRoom != _host.RoomId)
         {
             _arenaHdRoom = _host.RoomId;
@@ -59,18 +79,29 @@ internal sealed partial class CampaignRenderer
                 }
             }
         }
-        if (_arenaHd == null)
+    }
+
+    // GL thread, before a room's first frame (OnSurfaceChanged): the HD bundle read and its GL objects made now, so the
+    // match opens on the finished arena, not the DS stand-in with the textures popping in a moment later (owner 11-06:
+    // "see like an undetailed view, then textures load in ... can we eliminate all of this"). Adds the load's own time
+    // (Odin ~140 ms) to the start; DrawArena's per-frame warm-up stays for anything that misses this.
+    void FinishArenaHdNow()
+    {
+        BeginArenaHd();
+        if (_arenaHd == null && _arenaHdLoad != null)
         {
-            if (_arenaHdLoad == null || !_arenaHdLoad.IsCompleted) return;
             _arenaHd = _arenaHdLoad.Result;
             _arenaHdLoad = null;
-            if (_arenaHd == null) return;
         }
-        ArenaHdDraw hd = _arenaHd;
-        ArenaWatch(hd);
-        if (!hd.Warm(pass == 0 ? 3 : 0)) return;   // GL objects a few ms per frame; the stand-in draws meanwhile
-        if (hd.Failed) return;
-        if (scene.Room is RoomEntity room) room.Hidden = true;
+        if (_arenaHd == null) return;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _arenaHd.Warm(30_000);
+        if (!_arenaHd.Failed && _host?.Scene.Room is RoomEntity room) room.Hidden = true;
+        Log.Info("MPHArena", $"arena: ready before the first frame (GL warm-up {sw.ElapsedMilliseconds} ms)");
+    }
+
+    void DrawArenaReady(Scene scene, ArenaHdDraw hd, int pass, int restoreDepthFunc)
+    {
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         // the sky only with the frame's first opaque pass (the one restoring LESS); the depth rebuild has colour masked
         bool first = pass == 0 && restoreDepthFunc == GLES30.GlLess;
@@ -101,12 +132,11 @@ internal sealed partial class CampaignRenderer
     // how much of Echoes' underwater fog colour covers the view under water
     const float UnderwaterTint = 0.35f;
 
-    // with the camera inside Pipeline's water (Echoes movement's boxes, PlayerEntity.HostWater) the view takes Echoes'
-    // underwater fog colour (WATR UnderwaterFogColor): after everything in the room, under the HUD
     void DrawArenaUnderwater(Scene scene)
     {
-        if (_host == null || scene != _host.Scene || _arenaHd == null || _arenaHd.Failed) return;
-        if (!PlayerEntity.HostEchoesMoves || PlayerEntity.HostWater is not { } water) return;
+        bool swim = PlayerEntity.HostSwimWater;
+        if (_host == null || scene != _host.Scene || !swim && (_arenaHd == null || _arenaHd.Failed)) return;
+        if (!(PlayerEntity.HostEchoesMoves || swim) || PlayerEntity.HostWater is not { } water) return;
         Vector3 c = scene.CameraPosition;
         bool inside = false;
         foreach ((Vector3 min, Vector3 max) in water)
@@ -215,7 +245,7 @@ internal sealed partial class CampaignRenderer
     }
 
     readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _crates = new();
-    // one Mining Plaza piece list, reused (its pillars/gate/crates fill it: no per-frame iterators, 11-01)
+    // one Mining Plaza piece list, reused (its pillars/gate/crates fill it: no per-frame iterators, 2026-11-01)
     readonly List<(Matrix4 Model, int Pass, CrateLight? Light, float Fade)> _pieces = new();
     // the turret as its occupant sees it (see-through, no depth write): drawn last, with the blended pass (DrawArena)
     readonly List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> _seatShell = new();
@@ -297,6 +327,12 @@ internal sealed partial class CampaignRenderer
     // occupant's own viewport only (a negative Fade to DrawProps: see-through at that alpha)
     const float SeatAlpha = 0.25f;
 
+    // the turret seen from its occupant's own eyes (drawn see-through, SeatAlpha): a replay watched from third person, the
+    // free cam or another seat sees it solid, and from another seat's eyes in the turret, that seat's (owner 2026-11-10:
+    // "the turret is transparent in replays")
+    bool SeenFromSeat(EchoesTurretEntity t) => t.Occupant is { } occupant && (_replayPlayer == null || WatchingOwnView
+        ? occupant == PlayerEntity.Main : occupant.SlotIndex == PlayerEntity.HostFirstPersonSeat);
+
     void AddTurret((TurretLook Look, CrateLight? Light, CrateLight? Holo, CrateLight? Ring) l, EchoesTurretEntity? t)
     {
         TurretLook look = l.Look;
@@ -305,7 +341,7 @@ internal sealed partial class CampaignRenderer
         float dt = Math.Clamp(seconds - _fadeAt, 0, 0.1f);
         _fadeAt = seconds;
         bool holoOn = state == EchoesTurretEntity.TurretState.Free, ringOn = t is { Armed: true };
-        bool seat = t != null && PlayerEntity.Main is { } main && t.Occupant == main;
+        bool seat = t != null && SeenFromSeat(t);
         _holoFade = _holoFade < 0 ? (holoOn ? 1 : 0) : Math.Clamp(_holoFade + (holoOn ? dt / 1.0f : -dt / 0.2f), 0, 1);
         _ringFade = _ringFade < 0 ? (ringOn ? 1 : 0) : Math.Clamp(_ringFade + (ringOn ? dt : -dt) / 1.0f, 0, 1);
         foreach (TurretPiece p in look.Pieces)

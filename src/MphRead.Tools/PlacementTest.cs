@@ -2,7 +2,10 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using MphRead;
 using MphRead.Entities;
+using MphRead.Formats;
+using MphRecomp.Arenas.Editor;
 using MphRead.Formats.Culling;
 using MphRecomp.Arenas;
 using MphRecomp.Campaign;
@@ -38,6 +41,7 @@ namespace MphRead
                 case "baked": Baked(value); return;
                 case "gravity": Gravity(value); return;
                 case "show": Show(value, vanilla); return;
+                case "pads": Pads(value); return;
                 default: throw new ArgumentException($"unknown option {arg}");
                 }
             }
@@ -181,6 +185,41 @@ namespace MphRead
             }
             try { Directory.Delete(dir, true); } catch { }
             Console.WriteLine(fails == 0 ? "PASS" : $"FAIL ({fails})");
+        }
+
+        // -placetest pads=<placement file>: each jump pad's arc without and with the obstacle check (MapPads, 2026-10-31)
+        static void Pads(string file)
+        {
+            System.Diagnostics.Trace.Listeners.Clear();
+            if (!ToolPaths.UseDesktopExtraction()) return;
+            EchoesArena.Register(Paths.FileSystem);
+            var data = System.Text.Json.JsonSerializer.Deserialize<PickupPlacement.FileData>(File.ReadAllText(file))!;
+            MatchSettings settings = MatchSettings.Quick(GameMode.Battle,
+                (MatchArenas.Find(data.Room) ?? MatchArenas.Find("Mining Plaza"))!.Name, Hunter.Samus, 0);
+            settings.Solo = true;
+            using CampaignHost host = CampaignHost.StartMatch(settings);
+            for (int i = 0; i < 2; i++) host.Step(new CampaignInput { SelectWeapon = BeamType.None });
+            static Vector3 V(float[] v) => new Vector3(v[0], v[1], v[2]);
+            Func<Vector3, Vector3, bool> blocked = (a, b) =>
+            {
+                var res = new CollisionResult();
+                return CollisionDetection.CheckBetweenPoints(a, b, TestFlags.Players, host.Scene, ref res);
+            };
+            static string Arc(MapPads.Launch l) => $"speed {l.Vector.Length:0.00} peak {l.Arc.Max(q => q.Y):0.0}"
+                + (l.TooFar ? " TOO FAR" : "") + (l.Blocked ? " BLOCKED" : "");
+            foreach (PickupPlacement.JumpPadSpotData jp in data.JumpPads)
+            {
+                Vector3 pad = V(jp.Pos), target = V(jp.Target);
+                MapPads.Launch plain = MapPads.Solve(pad, target), clear = MapPads.Solve(pad, target, blocked);
+                int hit = -1;
+                for (int i = 1; i < plain.Arc.Count && hit < 0; i++)
+                {
+                    if (blocked(plain.Arc[i - 1].AddY(0.5f), plain.Arc[i].AddY(0.5f)) || blocked(plain.Arc[i - 1].AddY(1.6f), plain.Arc[i].AddY(1.6f))) hit = i;
+                }
+                Console.WriteLine($"  pad {pad} -> {target}");
+                Console.WriteLine($"    old: {Arc(plain)}" + (hit >= 0 ? $", hits at {plain.Arc[hit]}" : ", clear"));
+                Console.WriteLine($"    new: {Arc(clear)}");
+            }
         }
 
         static void Center(string dir)

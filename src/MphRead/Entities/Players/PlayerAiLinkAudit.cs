@@ -112,7 +112,7 @@ namespace MphRead.Entities
 
             public string AuditMove() => $"wall {_player._horizColTimer} grounded {_player.Flags1.TestFlag(PlayerFlags1.Grounded)} f118 {Field118} speed {_player.Speed.X:0.00},{_player.Speed.Y:0.00},{_player.Speed.Z:0.00} "
                 + $"hold {AuditOnHold} n3c {_node3C?.Id} at {(long)_scene.FrameCount - _unstickTravelAt} travel {AuditTravel} unstick {BotUnstickOn} prevInRange {(_node44 != null && IsNodeInRange(_node44))} "
-                + $"clock {_unstickFrames} climb {_unstickClimb} climbs {_unstickClimbs} drift {_unstickDrift} counts {HostUnstickCounts[0]},{HostUnstickCounts[1]},{HostUnstickCounts[2]},{HostUnstickCounts[3]}";
+                + $"clock {_unstickFrames} climb {_unstickClimb} climbs {_unstickClimbs} drift {_unstickDrift} counts {HostUnstickCounts[0]},{HostUnstickCounts[1]},{HostUnstickCounts[2]},{HostUnstickCounts[3]} guard {_edgeGuard}/{HostEdgeGuardCount}";
 
             // a teleport (the audit's Put) starts the stuck fix's clock again: in a match a bot never jumps spots, but the audit
             // puts it down within 2 units of where the last link ended, and the carried clock fired a jump at once (a test artifact)

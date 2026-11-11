@@ -25,11 +25,12 @@ internal sealed class FrontendRenderer : IGlScreen
     MoviePresenter? _presenter;
     double _last;
     int _width = 1, _height = 1;
-
     // the boot/logo + menu themes + UI feedback sounds; see GameAudio.cs. Neither the front end's Music.* game state
     // nor a Scene/SoundSource exists here, so these are driven directly rather than through MusicPlayer.Host /
     // Sfx.SetHost (the campaign's seam -- see CampaignActivity.cs)
     GameMusicPlayer? _music;
+    // seconds of menu music rendered ahead (GameMusicPlayer's bufferSeconds; the campaign keeps 0.25)
+    const float MenuBufferSeconds = 1f;
     GameSfxPlayer? _sfx;
     PageTune? _currentTune;
 
@@ -102,7 +103,10 @@ internal sealed class FrontendRenderer : IGlScreen
                 };
                 // the title menus run no echo (the capture effect isn't started there); a campaign may have left it on
                 MphRecomp.Frontend.DsEcho.Stop();
-                _music = new GameMusicPlayer(_session.Settings.Music);
+                // a 1 s music buffer: a Mono major GC after a match froze the pump ~0.45 s, which ran a 0.25 s buffer
+                // dry (menu music skipped in the LAN lobby, 2026-11-06). Menu fades go through the track volume, so
+                // they stay immediate
+                _music = new GameMusicPlayer(_session.Settings.Music, MenuBufferSeconds);
                 Log.Info("MPHFrontend", $"audio ready (music {_session.Settings.Music})");
                 if (_session.Audio != null) _session.Audio.SfxTest = PlaySfxTest;
                 _session.Start(StartPage);

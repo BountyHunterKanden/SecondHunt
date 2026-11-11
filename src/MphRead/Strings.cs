@@ -35,7 +35,7 @@ namespace MphRead.Text
             var entries = new List<StringTableEntry>();
             string filename = name == StringTables.ScanLog && Paths.MphKey == Ver.AMHK0 ? StringTables.ScanLogSorted : name;
             string path = Paths.Combine(Paths.FileSystem, GetFolder(), filename);
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(path));
+            var bytes = new ReadOnlySpan<byte>(Read.ReadFileBytes(path));
             uint count = Read.SpanReadUint(bytes, 0);
             // ScanLog has an 8-byte header and 8 bytes between the last entry and first string,
             // which are related to parsing max string length and not necessary for us to use
@@ -235,7 +235,7 @@ namespace MphRead.Text
             {
                 path = path.Replace("amhe0", "amhp1");
             }
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(path));
+            var bytes = new ReadOnlySpan<byte>(Read.ReadFileBytes(path));
             // in practice the entries are always tightly packed in order, but we'll read them through the offsets anyway
             int offset = 0;
             var list = new List<uint>();

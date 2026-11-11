@@ -15,6 +15,23 @@ namespace MphRead.Entities
 
     public partial class PlayerEntity
     {
+        // test tools: one line per Sylux ride-spring contact (-althoptest restscan ALTHOP_TRACE)
+        public static Action<string>? AltSpringTrace { get; set; }
+        // campaign Sylux: last step's ceiling test with the ride spring's lift added (the ball rests on the floor under it)
+        private bool _altSpringCeiling = false;
+        public static bool AltNarrowOff { get; set; } = Environment.GetEnvironmentVariable("ALTNARROW_OFF") == "1";
+
+        // the narrow ball's reach along a direction with height ny: sqrt(a^2 (1 - ny^2) + b^2 ny^2), a = a hair under Samus's
+        // ball radius (Ice Hive's tunnel lip is 0.99 wide: at Samus's 1.0 the ball wedged between lip and back wall and crept up
+        // the floor fillet), b = this ball's own
+        private const float NarrowHalfWidth = 0.48f;
+        private int NarrowRadius(float ny)
+        {
+            float a = NarrowHalfWidth, b = Fixed.ToFloat(Values.AltColRadius);
+            float y2 = Math.Clamp(ny * ny, 0, 1);
+            return Fixed.ToInt(MathF.Sqrt(a * a * (1 - y2) + b * b * y2));
+        }
+        private const float AltSpringLift = 0.15f;
         private EntityCollision? _collidedEntCol = null;
         private EntityCollision? _standingEntCol = null;
 
@@ -484,17 +501,35 @@ namespace MphRead.Entities
                 {
                     Flags1 |= PlayerFlags1.NoUnmorph;
                 }
+                // recomp (campaign): Lockjaw's ride spring is off under a ceiling too low to unmorph, but that test runs from
+                // where the spring holds the ball. Under a ceiling just out of reach (Ice Hive's tunnel, UNIT4_RM1 ~18.3,36,-38)
+                // the spring lifted the ball into the test, the spring cut out, the ball dropped back clear, and the spring
+                // lifted it again every 9 frames, forever (owner 2026-11-11: "infinite bob in the tunnel"). Campaign tests
+                // the ceiling with the spring's lift added, so there the spring stays off and the ball rests on the floor.
+                // Matches and replays keep MPH's test
+                _altSpringCeiling = false;
+                if (Hunter == Hunter.Sylux && GameState.Mode == GameMode.SinglePlayer)
+                {
+                    _altSpringCeiling = count > 0 || CollisionDetection.CheckSphereBetweenPoints(candidates, point1, point2.AddY(AltSpringLift),
+                        radius, limit: 1, includeOffset: false, TestFlags.Players, _scene, results) > 0;
+                }
                 if (Hunter == Hunter.Kanden)
                 {
                     float altRadius = Fixed.ToFloat(Values.AltColRadius);
                     for (int i = 1; i < _kandenSegPos.Length; i++)
                     {
-                        point2 = _kandenSegPos[i].AddY(Fixed.ToFloat(Values.AltColYPos));
+                        // recomp: on a spider track a segment's centre is along its own up (PlayerSpiderBall.cs)
+                        point2 = SpiderAttached ? _kandenSegPos[i] + _kandenSegMtx[i].Row1.Xyz * Fixed.ToFloat(Values.AltColYPos)
+                            : _kandenSegPos[i].AddY(Fixed.ToFloat(Values.AltColYPos));
                         count = CollisionDetection.CheckSphereBetweenPoints(candidates, point2, point2, altRadius,
                             limit: 40, includeOffset: true, TestFlags.Players, _scene, results);
                         for (int j = 0; j < count; j++)
                         {
                             CollisionResult result = results[j];
+                            if (SpiderIgnores(result))
+                            {
+                                continue; // recomp: the track holds the segments (SpiderStinglarvaSegments)
+                            }
                             if (result.Field0 == 1)
                             {
                                 Vector3 edge = result.EdgePoint2 - result.EdgePoint1;
@@ -510,8 +545,15 @@ namespace MphRead.Entities
                                     float mag = MathF.Sqrt(magSqr);
                                     if (altRadius - mag > 0)
                                     {
-                                        float yInc = between.Y / mag * (altRadius - mag);
-                                        _kandenSegPos[i].Y += yInc;
+                                        if (SpiderAttached) // recomp: straight out from the edge, not world up
+                                        {
+                                            _kandenSegPos[i] += between / mag * (altRadius - mag);
+                                        }
+                                        else
+                                        {
+                                            float yInc = between.Y / mag * (altRadius - mag);
+                                            _kandenSegPos[i].Y += yInc;
+                                        }
                                     }
                                 }
                             }
@@ -625,8 +667,41 @@ namespace MphRead.Entities
             return y >= 0.1f && (y <= 0.5f || y <= 0.85f && result.Flags.TestFlag(CollisionFlags.Bit12));
         }
 
+        // the DS's fx32 arithmetic (NitroSDK): FX_Mul and VEC_DotProduct round, a squared length drops the remainder, FX_Div is
+        // the 64/32 hardware divide rounded at bit 20, FX_Sqrt the 64-bit hardware root rounded at bit 10
+        private static int FxIn(float value) => (int)MathF.Round(value * 4096);
+        private static int FxMul(int a, int b) => (int)(((long)a * b + 0x800) >> 12);
+        private static int FxDot(int ax, int ay, int az, int bx, int by, int bz)
+            => (int)(((long)ax * bx + (long)ay * by + (long)az * bz + 0x800) >> 12);
+        private static int FxSqr(int x, int y, int z) => (int)(((long)x * x + (long)y * y + (long)z * z) >> 12);
+        private static int FxDiv(int a, int b) => (int)((((long)a << 32) / b + 0x80000) >> 20);
+
+        private static int FxSqrt(int value)
+        {
+            if (value <= 0)
+            {
+                return 0;
+            }
+            ulong v = (ulong)value << 32;
+            ulong root = (ulong)Math.Sqrt(v);
+            while (root * root > v)
+            {
+                root--;
+            }
+            while ((root + 1) * (root + 1) <= v)
+            {
+                root++;
+            }
+            return (int)((root + 0x200) >> 10);
+        }
+
         public void HandleCollision(CollisionResult result)
         {
+            // recomp: attached, the spider track's own faces hold it, not push it (PlayerSpiderBall.cs)
+            if (SpiderIgnores(result))
+            {
+                return;
+            }
             bool v163 = false;
             bool v164 = false;
             bool v165 = false;
@@ -663,9 +738,25 @@ namespace MphRead.Entities
                 }
                 float altRad = Fixed.ToFloat(Values.AltColRadius);
                 Vector3 altPos = Position.AddY(Fixed.ToFloat(Values.AltColYPos));
+                // recomp (campaign, Sylux/Trace ball): room collision meets the ball as an upright ellipsoid, a hair under Samus's
+                // ball width (r 0.48) and its own height (0.63). The campaign rooms are built for Samus's ball, and the bigger one
+                // (r 0.63, 1.26 across) didn't fit them: Ice Hive's recessed wall tunnel past the rotating platforms is 0.99 wide
+                // at its lip, and the ball held on it and on the maze posts (UNIT4_RM1, owner 2026-11-11). Floors and ceilings keep the
+                // ball's own radius, so it rides at the same height and doesn't bob. Platforms and matches keep the sphere.
+                // AltNarrowOff (dev) compares without
+                bool narrow = GameState.Mode == GameMode.SinglePlayer && result.EntityCollision == null && !AltNarrowOff
+                    && (Hunter == Hunter.Sylux || Hunter == Hunter.Trace);
+                int fxAltRad = Values.AltColRadius;
                 if (result.Field0 == 0)
                 {
-                    v2 = altRad + result.Plane.W - Vector3.Dot(altPos, result.Plane.Xyz);
+                    if (narrow)
+                    {
+                        fxAltRad = NarrowRadius(result.Plane.Y);
+                        altRad = Fixed.ToFloat(fxAltRad);
+                    }
+                    // the cart's face depth in fixed point too (0x201fb18): r + w - dot, the dot rounded
+                    v2 = Fixed.ToFloat(fxAltRad + FxIn(result.Plane.W) - FxDot(FxIn(altPos.X), FxIn(altPos.Y), FxIn(altPos.Z),
+                        FxIn(result.Plane.X), FxIn(result.Plane.Y), FxIn(result.Plane.Z)));
                 }
                 else
                 {
@@ -673,25 +764,78 @@ namespace MphRead.Entities
                     {
                         return;
                     }
-                    Vector3 edge = result.EdgePoint2 - result.EdgePoint1;
-                    Debug.Assert(edge != Vector3.Zero);
-                    Vector3 between = altPos - result.EdgePoint1;
-                    float dot = Vector3.Dot(between, edge);
-                    float div = Math.Clamp(dot / edge.LengthSquared, 0, 1);
-                    between = altPos - (result.EdgePoint1 + edge * div);
-                    if (HostFhBallRules && between.Y < 0 && result.EntityCollision == null && (Speed.Y <= 0 || Flags1.TestFlag(PlayerFlags1.Standing)))
-                    {
-                        return; // (First Hunt: an edge above its centre, e.g. a low lid's front, likewise)
-                    }
-                    float magSqr = between.LengthSquared;
-                    if (magSqr >= altRad * altRad || magSqr <= 0)
+                    // host hook (First Hunt rooms): FH's ball has no edge or corner contacts with room collision. The cart's query
+                    // (0x201eab0) keeps a face only where the ball centre's path crosses inside the polygon (1/32 slack), and the
+                    // response (0x200d73c) always pushes along the face normal. MPH's edge contact pushes along the face normal
+                    // too, so a low step's side wall (Morph Ball course, foot of the spawn ramp: 0.175 high) worked as a full wall
+                    // and stopped the ball; on the cart it rolls straight up onto the step
+                    if (HostFhBallRules && result.EntityCollision == null)
                     {
                         return;
                     }
-                    float mag = MathF.Sqrt(magSqr);
-                    between /= mag;
-                    dot = Vector3.Dot(between, result.Plane.Xyz) * (altRad - mag);
-                    v2 = dot * dot;
+                    // the cart works this out in fixed point (0x201fb44..0x201fd24): the dots and multiplies round, the squared
+                    // lengths drop the remainder, and the divide and square root are the DS's hardware units. In floats a contact
+                    // a hair inside or outside the ball came out the other way, so the ball stopped on lips the DS rolls over
+                    // (and rolled on where it stops). Measured on 39 crossings vs BizHawk; docs/ACCURACY.md A13
+                    int p1x = FxIn(result.EdgePoint1.X), p1y = FxIn(result.EdgePoint1.Y), p1z = FxIn(result.EdgePoint1.Z);
+                    int ex = FxIn(result.EdgePoint2.X) - p1x, ey = FxIn(result.EdgePoint2.Y) - p1y, ez = FxIn(result.EdgePoint2.Z) - p1z;
+                    if (ex == 0 && ey == 0 && ez == 0)
+                    {
+                        return;
+                    }
+                    int ax = FxIn(altPos.X), ay = FxIn(altPos.Y), az = FxIn(altPos.Z);
+                    int fxDot = FxDot(ax - p1x, ay - p1y, az - p1z, ex, ey, ez);
+                    int lenSqr = FxSqr(ex, ey, ez);
+                    int div = lenSqr == 0 ? 0 : Math.Clamp(FxDiv(fxDot, lenSqr), 0, 4096);
+                    int dx = ax - (p1x + FxMul(ex, div)), dy = ay - (p1y + FxMul(ey, div)), dz = az - (p1z + FxMul(ez, div));
+                    int fxRad = Values.AltColRadius;
+                    int magSqr = FxSqr(dx, dy, dz);
+                    if (narrow && magSqr > 0)
+                    {
+                        // the ellipsoid's reach toward the edge: from the contact direction's height
+                        fxRad = NarrowRadius(Fixed.ToFloat(dy) / MathF.Sqrt(Fixed.ToFloat(magSqr))); // magSqr is fixed point
+                        altRad = Fixed.ToFloat(fxRad);
+                    }
+                    if (magSqr >= FxMul(fxRad, fxRad) || magSqr <= 0)
+                    {
+                        return;
+                    }
+                    int fxMag = FxSqrt(magSqr);
+                    int nx = FxDiv(dx, fxMag), ny = FxDiv(dy, fxMag), nz = FxDiv(dz, fxMag);
+                    Vector3 between = new Vector3(Fixed.ToFloat(nx), Fixed.ToFloat(ny), Fixed.ToFloat(nz));
+                    float mag = Fixed.ToFloat(fxMag);
+                    // recomp (campaign): a platform's edge below the ball's centre pushes the ball away from the edge, so it rolls
+                    // over the lip. MPH's push goes along the face normal, so the top edge of the next piston's side face acted as a
+                    // wall: in Piston Cave (UNIT1_C5) the tops sit 0.2 apart and a contact 0.006 deep zeroed the ball's speed in the
+                    // gap (owner 2026-11-05: rolls straight across on the DS). Campaign only: matches and replays keep MPH's response
+                    if (GameState.Mode == GameMode.SinglePlayer && result.EntityCollision != null && between.Y > 0)
+                    {
+                        result.Plane.Xyz = between;
+                        v2 = altRad - mag;
+                    }
+                    else if (narrow && ey * (long)ey > (ex * (long)ex + ey * (long)ey + ez * (long)ez) * 81 / 100)
+                    {
+                        // an upright room edge (a post, a tunnel mouth's side) pushes the narrow ball straight away from it, so
+                        // it slides round the corner instead of meeting the corner as the end of a wall (MPH's face-normal push).
+                        // The push is level (the edge is upright), so it can't lift the ball
+                        result.Plane.Xyz = between;
+                        v2 = altRad - mag;
+                    }
+                    else
+                    {
+                        // the cart's depth is the plain product (0x201fd08), sign and all. MphRead squared it, so a contact from
+                        // behind the face still pushed and zeroed the speed
+                        int fxNormal = FxDot(nx, ny, nz, FxIn(result.Plane.X), FxIn(result.Plane.Y), FxIn(result.Plane.Z));
+                        v2 = Fixed.ToFloat(FxMul(fxNormal, fxRad - fxMag));
+                        if (GameState.Mode == GameMode.SinglePlayer)
+                        {
+                            // campaign keeps MphRead's squared depth: with the plain product the Trace/Sylux ball (r 0.63) stuck
+                            // on the Ice Hive maze-top post (UNIT4_RM1 ~14.8,41,-38.5) it used to roll past (owner 2026-11-11).
+                            // Matches and replays keep the cart's depth (A13)
+                            float sq = Vector3.Dot(between, result.Plane.Xyz) * (altRad - mag);
+                            v2 = sq * sq;
+                        }
+                    }
                 }
             }
             else if (result.Field0 == 0)
@@ -908,6 +1052,20 @@ namespace MphRead.Entities
                     position.Y += normal.Y * depth * factor;
                 }
                 float dot = Vector3.Dot(Speed, normal);
+                if (dot < 0 && IsAltForm && MathF.Abs(normal.Y) <= 0.05f && Values.AltFormStrafe != 0)
+                {
+                    // recomp: an upright wall the ball pushes into; an edge facing the same way is a wall's, not a lip (PlayerAltCamMove.cs)
+                    _altWallNormal = new Vector3(normal.X, 0, normal.Z);
+                }
+                if (dot < 0 && IsAltForm && normal.Y > 0.05f && normal.Y < 0.9f && Values.AltFormStrafe != 0)
+                {
+                    // recomp: a lip or ledge edge (slanted, not an upright wall) the strafe alt form pushes into, for next frame's traction (PlayerAltCamMove.cs)
+                    float h = MathF.Sqrt(normal.X * normal.X + normal.Z * normal.Z);
+                    if (h > 0.1f)
+                    {
+                        _altEdgeNormal = new Vector3(normal.X / h, 0, normal.Z / h);
+                    }
+                }
                 if (dot < 0)
                 {
                     // floor collision
@@ -957,7 +1115,7 @@ namespace MphRead.Entities
             }
             if (IsAltForm)
             {
-                bool climbing = Hunter == Hunter.Spire && result.Field0 == 0;
+                bool climbing = Hunter == Hunter.Spire && result.Field0 == 0 && !SpiderAttached;
                 if (climbing)
                 {
                     if ((_scene.RoomId == 30 || _scene.RoomId == 67) // Magma Drop, Cortex CPU
@@ -1004,24 +1162,33 @@ namespace MphRead.Entities
                     }
                 }
                 else if (Hunter == Hunter.Sylux && result.Field0 == 0 && result.Plane.Y > Fixed.ToFloat(3138)
-                    && !Flags1.TestFlag(PlayerFlags1.NoUnmorphPrevious))
+                    && !Flags1.TestFlag(PlayerFlags1.NoUnmorphPrevious) && !_altSpringCeiling)
                 {
                     Vector3 pos = Position.AddY(Fixed.ToFloat(Values.AltColYPos) - Fixed.ToFloat(Values.AltColRadius) - 0.3f);
                     float dot = result.Plane.W - Vector3.Dot(pos, result.Plane.Xyz);
+                    float traceY = Speed.Y;
                     if (dot >= 0)
                     {
                         v164 = true;
-                        Speed = Speed.AddY(Fixed.ToFloat(Values.AltAirGravity));
+                        // recomp: vanilla runs this spring once per 30 Hz tick; we run it every 60 Hz step, so the
+                        // gravity and push are halved and the damping is its square root (Lockjaw bounced on and on)
+                        Speed = Speed.AddY(Fixed.ToFloat(Values.AltAirGravity) / 2); // todo: FPS stuff
                         if (Speed.Y < 0.25f)
                         {
                             if (Speed.Y < 0)
                             {
-                                Speed = Speed.WithY(Speed.Y * Fixed.ToFloat(4034));
+                                Speed = Speed.WithY(Speed.Y * MathF.Sqrt(Fixed.ToFloat(4034))); // todo: FPS stuff
                             }
-                            Speed = Speed.AddY(dot * 0.2f);
+                            // vanilla's fx32 multiply and add drop the remainder, so the rest bob dies in ~13 s; floats kept it going (the
+                            // ball rocked for 20+ s). Grids measured against BizHawk's rest tail; docs/ACCURACY.md A13
+                            Speed = Speed.WithY(MathF.Truncate(Speed.Y * 8192) / 8192);
+                            Speed = Speed.AddY(dot * 0.2f / 2); // todo: FPS stuff
+                            Speed = Speed.WithY(MathF.Truncate(Speed.Y * 32768) / 32768);
                             Speed = Speed.WithY(Math.Min(Speed.Y, 0.25f));
                         }
                     }
+                    AltSpringTrace?.Invoke($"spring f0 {result.Field0} plane {result.Plane.X:0.000},{result.Plane.Y:0.000},{result.Plane.Z:0.000},{result.Plane.W:0.000}"
+                        + $" dot {dot:0.0000} vy {traceY:0.0000}->{Speed.Y:0.0000} ent {result.EntityCollision != null}");
                 }
             }
             if (result.EntityCollision != null)
@@ -1081,8 +1248,15 @@ namespace MphRead.Entities
                         if ((_crushBits & 3) == 3 || (_crushBits & 0xC) == 0xC || (_crushBits & 0x30) == 0x30)
                         {
                             // caught between one crusher moving +X and one moving -X, or one +Z and one -Z, or one +Y and one -Y
-                            TakeDamage((uint)_health, DamageFlags.Death | DamageFlags.IgnoreInvuln | DamageFlags.NoDmgInvuln,
-                                direction: null, source: null);
+                            // recomp: vanilla checks this once a 30 Hz tick, so a squeeze that lasts one of our 60 Hz steps
+                            // (the ball rolling off the corners of two closing pistons in Piston Cave) went uncaught there;
+                            // in the campaign the squeeze has to hold for two steps
+                            _crushedNow = true;
+                            if (GameState.Mode != GameMode.SinglePlayer || _crushedBefore)
+                            {
+                                TakeDamage((uint)_health, DamageFlags.Death | DamageFlags.IgnoreInvuln | DamageFlags.NoDmgInvuln,
+                                    direction: null, source: null);
+                            }
                         }
                     }
                 }

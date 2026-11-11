@@ -69,6 +69,8 @@ internal sealed unsafe class Sdl3Pads : IDisposable
     uint _id; // the open pad's SDL_JoystickID
     bool _sensorsOn, _testGyro;
     ulong _lastGyroNs, _lastAccelNs;
+    // the gyro's sample times on DesktopGyro's clock (the pad stamps them on its own count), so its takes are paced
+    readonly MphRecomp.Input.SensorClock _gyroClock = new();
     long _lastEventMs; // when the last sensor event came; with none for half a second the sensors are polled instead
     readonly System.Diagnostics.Stopwatch _pollClock = new();
 
@@ -185,12 +187,14 @@ internal sealed unsafe class Sdl3Pads : IDisposable
             if (_hasSensor(_pad, SensorAccel) != 0) _setSensor(_pad, SensorAccel, want ? (byte)1 : (byte)0);
             _sensorsOn = want;
             _lastGyroNs = _lastAccelNs = 0;
+            _gyroClock.Reset();
             _lastEventMs = Environment.TickCount64;
             _pollClock.Reset();
             if (want) Log.Info("MPHPad", $"gyro on: {_sensorRate(_pad, SensorGyro):0} Hz");
         }
         byte* events = stackalloc byte[16 * EventSize];
         bool any = false;
+        long arrived = DesktopGyro.NowNs; // (SDL read the pad's packets in this poll's update)
         int n;
         do
         {
@@ -202,7 +206,7 @@ internal sealed unsafe class Sdl3Pads : IDisposable
                 ulong ns = *(ulong*)(e + 40); // sensor_timestamp; the event's own when a driver gives none
                 if (ns == 0) ns = *(ulong*)(e + 8);
                 float* d = (float*)(e + 24);
-                Sample(*(int*)(e + 20), new System.Numerics.Vector3(d[0], d[1], d[2]), ns);
+                Sample(*(int*)(e + 20), new System.Numerics.Vector3(d[0], d[1], d[2]), ns, arrived);
                 any = true;
             }
         }
@@ -224,21 +228,25 @@ internal sealed unsafe class Sdl3Pads : IDisposable
         if (_sensorData(_pad, SensorAccel, v, 3) != 0) Polled(SensorAccel, new(v[0], v[1], v[2]), dt);
     }
 
-    void Sample(int sensor, System.Numerics.Vector3 v, ulong ns)
+    void Sample(int sensor, System.Numerics.Vector3 v, ulong ns, long arrivedNs)
     {
         ref ulong last = ref (sensor == SensorGyro ? ref _lastGyroNs : ref _lastAccelNs);
         float dt = last == 0 || ns <= last ? 0f : (ns - last) * 1e-9f;
         last = ns;
-        Polled(sensor, v, dt);
+        long local = sensor == SensorGyro ? _gyroClock.ToLocal((long)ns, arrivedNs) : 0;
+        if (DesktopGyro.Dumping)
+            DesktopGyro.Dump($"{(sensor == SensorGyro ? 'S' : 'A')} {ns} {arrivedNs} {local} {dt:R} {v.X:R} {v.Y:R} {v.Z:R}");
+        Polled(sensor, v, dt, local);
     }
 
-    void Polled(int sensor, System.Numerics.Vector3 v, float dt)
+    // timeNs: when the sample was made on DesktopGyro's clock (0 = unknown: its take isn't paced)
+    void Polled(int sensor, System.Numerics.Vector3 v, float dt, long timeNs = 0)
     {
         if (sensor == SensorGyro)
         {
             LastGyro = v;
             GyroSamples++;
-            Motion?.AddGyro(v, dt);
+            Motion?.AddGyro(v, dt, timeNs);
         }
         else if (sensor == SensorAccel)
         {

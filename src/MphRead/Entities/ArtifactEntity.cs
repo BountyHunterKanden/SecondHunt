@@ -165,6 +165,7 @@ namespace MphRead.Entities
                 {
                     return base.Process();
                 }
+                if (GameEvents.Any) GameEvents.Raise("artifact", (int)_data.ModelId, (int)_data.ArtifactId); // recomp: mod event (GameEvents.cs) (model >= 8 = octolith)
                 if (_data.Message1 != Message.None)
                 {
                     _scene.SendMessage(_data.Message1, this, _msgTarget1, 0, 0);

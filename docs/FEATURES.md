@@ -26,22 +26,24 @@ Nothing from any game ships with Second Hunt.
 - Shooting Gallery's turret works just like it does in _Echoes_. Climb in and fire on the arena, or roll into the slot
   behind it in any alt form and bomb it.
 - Mining Plaza, a brand new arena made from the Mining Plaza room in _Echoes_' campaign, with its doors sealed, new
-  pickups and a chain of three jump pads
+  pickups and a chain of three jump pads, in every mode
 - An EXTRA ARENAS playlist in FIND GAME for the _Echoes_ arenas
 
 ## Hunters and skins
 
-- The Trooper from _Metroid Prime_, a Space Pirate with four skins, a wall cling, a Scout Drone alt form with its own
-  laser, and the Pirate Blaster. A full burst puts a Squad Mark on a target, showing them through walls to the Trooper
+- The Pirate Trooper from _Metroid Prime_, a Space Pirate with four skins, a wall cling, a Scout Drone alt form with its own
+  laser, and the Pirate Blaster. A full burst puts a Squad Mark on a target, showing them through walls to the Pirate Trooper
   and his team.
 - Dark Samus from _Echoes_ or _Corruption_, and Overcharged Dark Samus (her final form from _Echoes_) as a skin with its
   own morph ball. No Dark Samus imported? Pick Limoki's low-poly Dark Samus.
-- HD Samus suits from every Prime game you import, the beta Phazon Suit included, in your pick of colors
+- HD Samus suits from the _Metroid Prime Trilogy_ games you import, the beta Phazon Suit included, in your pick of colors
 - Sylux in his _Metroid Prime 4: Beyond_ suit, with his own arm cannon
 - Flourishes when hunters stand still. Sylux has two.
-- Stand-ins for players who haven't imported a hunter. They still see the Trooper in his skin's colors, Dark Samus as
+- Stand-ins for players who haven't imported a hunter. They still see the Pirate Trooper in his skin's colors, Dark Samus as
   Limoki's low-poly Dark Samus, and HD Samus or _Beyond_ Sylux as the original MPH Samus or Sylux.
-- HUD portraits for the Trooper and Dark Samus in the hit box and on the scoreboard
+- HUD portraits for the Pirate Trooper and Dark Samus in the hit box and on the scoreboard
+- Ice shaped to each new hunter's body when the Judicator freezes them
+- The Pirate Blaster, the Pirate Trooper's weapon and an extra pickup for everyone
 - Team and same-hunter colors for the new hunters, like the original's
 - A color picker that shows your hunter in each color
 
@@ -58,18 +60,23 @@ Nothing from any game ships with Second Hunt.
 - LAN and bot matches in every mode and arena. Bots run on the game's own bot code, take jump pads, ledges and
   drop-downs, and the new hunters fight as bots too. You can set the bots' level for online matches you host.
 - EXTRA rules for hosts, to turn the extra pickups (the Pirate Blaster among them) and the extra characters on or off
-- The Gaming Hub is back. The old Nintendo WFC pages for _Hunters_ are rebuilt in the game, with leaderboards and
+- The Hunter Hub: the old Nintendo WFC Gaming Hub pages for _Hunters_, rebuilt in the game, with leaderboards and
   everyone's license stats.
-- Hunter License rank and stats like the original, and you can bring your license over from your DS save
+- Hunter License rank and stats like the original. Bring your license over from your DS save (IMPORT LICENSE), make
+  the Pirate Trooper or Dark Samus your hunter of choice, and quitting an internet match costs rank like the original.
 - STREAMING switches that hide your IP address, name and friend code on screen
 
 ## Campaign
 
 - The whole campaign, from the opening to Gorea, with the game's own menus, gunship, cutscenes, scans and both endings
-- Play it as any hunter after your first clear, the Trooper included
-- Bring your DS save over, or export yours back out to play on a DS or an emulator
+- Play it as any hunter after your first clear, the Pirate Trooper included, and play a Sylux file as the original Sylux or
+  _Beyond_ Sylux (GAME > CAMPAIGN > SYLUX)
+- PLANET SELECT on the gunship with the hunters panel like the DS, and a logbook with each category's color, sorted
+  like the original
+- Bring your DS save over (logbook, unlocks and license included, with a backup first), or export yours back out to
+  play on a DS or an emulator
 - UNLOCKS ALL and LOGBOOK SCANS ALL switches, if you just want to look around
-- Alt-form hop (next update). Jump hops any alt form up to bomb jump height, so every hunter can get where Samus can,
+- ALT FORM HOP: Jump hops any alt form up to bomb jump height, so every hunter can get where Samus can,
   and morph ball doors open for every hunter.
 
 ## Replays
@@ -91,10 +98,11 @@ The full button lists are on the [Controls](CONTROLS.md) page.
 - Dual sticks on any controller, and full rebinding, button combos included
 - A weapon ring on L2. Hold it and point the right stick at a weapon.
 - Gyro aim on phones, handhelds and controllers with a gyro, on top of the stick. Pick yaw or roll, filter the noise,
-  or turn it on with a button.
+  or YAW+ROLL for full turning at any aim height, filter the noise, and set a GYRO BUTTON to hold, pause or toggle it.
 - A touch overlay with the DS's own touch moves (double tap to jump, drag to roll and flick to boost in morph ball), and
   stylus aim like the DS
-- Keyboard and mouse on Windows, and SDL3 controllers there too (Switch Pro included)
+- Keyboard and mouse on Windows, with MOUSE ROLL for the morph ball, SLOW MOVE and a MODERN or CLASSIC STICK CURVE,
+  and SDL3 controllers there too (Switch Pro included)
 - A Nintendo button layout for controllers with A on the right
 - Imperialist zoom with its own sensitivity, and a smooth zoom
 - TRY CONTROLS, a room to try your settings before a match
@@ -105,11 +113,14 @@ The full button lists are on the [Controls](CONTROLS.md) page.
 - AIM VIEW, so the view follows your aim instantly, or trails it like the DS
 - HUD sway on or off, and visor, helmet and HUD opacity, with readouts that can lock to the visor
 - A hit direction indicator
+- Ragdoll deaths (LOOK > HUNTERS > DEATH): hunters fall limp, thrown by the killing shot, and your camera follows your
+  own body. VANILLA ORBS adds the game's blue death orbs.
 - The campaign radar from the DS touch screen, on your HUD
 - Third person in the campaign and in bot and LAN matches
 - The two DS screens merged into one, with clean redrawn HUD lines
 - Art of your hunters behind the settings menus, and a SECOND HUNT logo on the main menu (LOOK > MENUS turns it off)
 - An option to skip the boot logos and go straight to the menu
+- On Windows, keep your files in APPDATA or in a PORTABLE folder next to the game (APP > FILES > DATA FOLDER)
 
 ## Plays like the original
 
@@ -126,5 +137,5 @@ These aren't in public builds yet.
 - Dark Samus's Hyper Mode, with the Hyper Ball and Hyper Beam
 - The Spider Ball for every hunter on _Echoes_' spider tracks, and the Grapple Beam
 - High frame rates, 120 fps and up, with smooth frames on any screen
-- New death animations, _First Hunt_'s collapse and ragdolls
+- _First Hunt_'s death collapse as a death animation
 - Lua mods and game modes made as mods, and a Hard Mode campaign with enemies from _First Hunt_ and the Prime games

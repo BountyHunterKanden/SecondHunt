@@ -123,6 +123,8 @@ namespace MphRecomp.Campaign
             if (body.Clip(Flourish) is HdGun.Anim flourish) body.Data.Anims[FlourishUp] = rig.BakeUpright(body, flourish, FlourishUp);
 
             var m = new BodyClips { Idle = Idle };
+            // RAGDOLL: her DS map names a bone for every driver (her right hand rides R_elbow's "*fwd", the wrist there)
+            m.Ragdoll = BodyClips.RagdollOf(DsRetarget.ZeroSuit.Map);
             foreach (string s in new[] { Idle, Forward, Back, Left, Right }) body.Data.Anims[s] = new HdGun.Anim { Name = s };
             foreach (PlayerAnimation a in new[] { PlayerAnimation.Idle, PlayerAnimation.Spawn, PlayerAnimation.Flourish,
                 PlayerAnimation.Charge, PlayerAnimation.Shoot, PlayerAnimation.ChargeShoot })

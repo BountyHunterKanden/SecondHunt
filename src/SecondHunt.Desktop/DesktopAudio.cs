@@ -69,8 +69,10 @@ internal sealed class DesktopAudio : IAudioOutput, IDisposable
     // for the log: what the device has played so far, and the loudest sample since the last call
     public string Stats()
     {
-        string s = $"{_mixer.FramesRendered} frames played ({_mixer.FramesRendered / (double)Rate:0.0} s), peak {_mixer.Peak:0.000}";
+        string s = $"{_mixer.FramesRendered} frames played ({_mixer.FramesRendered / (double)Rate:0.0} s), peak {_mixer.Peak:0.000}"
+            + (_mixer.LongestGapMs >= 100 ? $", device stalled {_mixer.LongestGapMs} ms" : "");
         _mixer.Peak = 0;
+        _mixer.LongestGapMs = 0;
         return s;
     }
 
@@ -115,9 +117,15 @@ internal sealed class DesktopAudio : IAudioOutput, IDisposable
 
         public long FramesRendered;
         public float Peak;
+        // (owner 11-05: the music skipped when a USB headset's mic opened) the longest wait between two device periods
+        public long LongestGapMs;
+        long _lastCall;
 
         protected override void GenerateAudio(Span<float> buffer, int channels)
         {
+            long now = Environment.TickCount64;
+            if (_lastCall != 0) LongestGapMs = Math.Max(LongestGapMs, now - _lastCall);
+            _lastCall = now;
             FramesRendered += buffer.Length / Math.Max(1, channels);
             buffer.Clear();
             Track[] tracks = _tracks;

@@ -51,6 +51,52 @@ public sealed class KeyboardMouseInput
     {
         ControlBinds.Tidy(settings); // (older saved lists in today's layout)
         _functions = Build(settings);
+        _mouseRoll = settings.MouseRoll;
+        _slowMove = Array.IndexOf(RecompSettings.SlowMovePercents, settings.SlowMovePercent) >= 0 ? settings.SlowMovePercent / 100f : 0.4f;
+        _rollScale = RollPxPerCount * settings.MouseSens / MouseScale.Default;
+    }
+
+    // KEYBOARD & MOUSE > AIM > MOVE (owner 2026-11-09, "so the other hunters have a way to move more subtly in alt form on
+    // pc"). SLOW MOVE: while its key is held (Left Shift by default) walking and every alt form move at a part push
+    // (CampaignInput.MovePush, PlayerStickPush.cs), the same the move stick's light tilt gives, so it needs nothing new on
+    // the wire or in replays. With a pad stick it takes the gentler of the two. MOUSE ROLL: in the rolling alt forms
+    // (PlayerEntity.HostTouchRolls: Samus, Kanden, Spire, Noxus) the mouse is the DS stylus dragged on the touch screen,
+    // which vanilla rolls the ball by (PlayerTouch.cs). The stylus's own path: it rides in NetInput and replays already.
+    // Each step's drag is held under RollStepMax so eight steps never reach vanilla's 90-pixel flick boost: a fast mouse
+    // rolls fast, the jump key boosts
+    bool _mouseRoll;
+    float _slowMove = 0.4f;
+    const float RollPxPerCount = 0.2f; // DS touch pixels a mouse count, at the default mouse sensitivity
+    const float RollStepMax = 11; // (8 x 11 = 88 < vanilla's flick, 90 pixels over 8 frames)
+    float _rollScale = RollPxPerCount;
+    System.Numerics.Vector2 _rollRest; // the part pixel carried to the next step
+    bool _slowHeld;
+
+    public bool SlowMoveHeld => _slowHeld;
+
+    public byte SlowMovePush => MphRecomp.Input.StickCurve.Level(_slowMove);
+
+    // after the stick curve: a held slow key caps the push (0 = the whole push)
+    public void ApplySlowMove(ref CampaignInput input)
+    {
+        if (!_slowHeld || input.Move == System.Numerics.Vector2.Zero) return;
+        byte slow = SlowMovePush;
+        if (input.MovePush == 0 || input.MovePush > slow) input.MovePush = slow;
+    }
+
+    // the mouse's movement this step as a stylus drag, in a rolling alt form with MOUSE ROLL on (a real stylus wins)
+    bool MouseRolls(ref CampaignInput input, PlayerEntity player, System.Numerics.Vector2 pointer)
+    {
+        if (!_mouseRoll || !player.HostTouchRolls || input.TouchDown) return false;
+        System.Numerics.Vector2 px = pointer * _rollScale + _rollRest;
+        float len = px.Length();
+        if (len > RollStepMax) px *= RollStepMax / len;
+        var step = new System.Numerics.Vector2(MathF.Truncate(px.X), MathF.Truncate(px.Y));
+        _rollRest = len > RollStepMax ? System.Numerics.Vector2.Zero : px - step;
+        input.TouchDown = true;
+        input.TouchDx = (sbyte)step.X;
+        input.TouchDy = (sbyte)step.Y;
+        return true;
     }
 
     // each function's bindings: one key or button, or a combo's (owner 2026-10-11)
@@ -210,6 +256,7 @@ public sealed class KeyboardMouseInput
         UpdateZoomTook(up, down);
         PlayerControls c = _binds;
         bool alt = player.IsAltForm;
+        _slowHeld = Held(ControlBinds.SlowMove, up, down);
         float x = 0, y = 0;
         // (MphRead's walk and roll keys are the same W A S D; one function each moves both)
         if (Held(ControlBinds.Right, up, down)) x += 1;
@@ -245,6 +292,8 @@ public sealed class KeyboardMouseInput
         if (Held(ControlBinds.Morph, up, down)) b |= CampaignButtons.Morph;
         if (Held(ControlBinds.Bombs, up, down)) b |= CampaignButtons.AltAttack; // (MphRead: Q, which scans too)
         if (Held(ControlBinds.ScanVisor, up, down)) b |= CampaignButtons.ScanVisor;
+        // recomp: the spider ball in alt form on an Echoes spider-track arena (right mouse by default; docs/SPIDER_BALL.md)
+        if (alt && PlayerEntity.HostSpiderBall && Held(ControlBinds.Spider, up, down)) b |= CampaignButtons.Spider;
         if (Held(ControlBinds.ZoomIn, up, down)) b |= CampaignButtons.ZoomIn; // ZOOM STEP (the game reads them only zoomed)
         if (Held(ControlBinds.ZoomOut, up, down)) b |= CampaignButtons.ZoomOut;
         if (Down(c.AffinitySlot, up, down)) b |= CampaignButtons.AffinitySlot;
@@ -262,8 +311,9 @@ public sealed class KeyboardMouseInput
         else
         {
             _wheel = System.Numerics.Vector2.Zero;
-            aim += pointer;
+            if (!MouseRolls(ref input, player, pointer)) aim += pointer;
         }
+        if (menu || !_mouseRoll || !player.HostTouchRolls) _rollRest = System.Numerics.Vector2.Zero;
         input.Buttons |= b;
         // the weapons' keys (the customizer's WEAPONS list; 1-9 and 0 by default, owner 2026-10-15)
         if (input.SelectWeapon == BeamType.None)

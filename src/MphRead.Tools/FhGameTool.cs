@@ -81,6 +81,7 @@ namespace MphRead
             case "movie": Movies(only, Arg(args, "out=")); break;
             case "timing": MenuTiming(only); break;
             case "ride": Ride(only ?? "Level SP Regulator"); break;
+            case "modules": Modules(); break;
             case "mazebomb": MazeBomb(); break;
             case "regenemy": RegEnemy(); break;
             case "naninject": NanInject(only ?? "Level SP Regulator", Arg(args, "at=") ?? "6.9,6.5,-62.2", Arg(args, "what=") ?? "aim"); break;
@@ -88,11 +89,12 @@ namespace MphRead
             case "ents": Ents(only ?? "Level SP Regulator"); break;
             case "fallsweep": FallSweep(only ?? "Level SP Regulator", int.Parse(Arg(args, "frames=") ?? "90"), Arg(args, "box="), int.Parse(Arg(args, "idle=") ?? "0")); break;
             case "idlewatch": IdleWatch(only ?? "Level SP Regulator", Arg(args, "at=") ?? "1.2,5.5,-56.6", int.Parse(Arg(args, "frames=") ?? "36000")); break;
-            case "walk": Walk(only ?? "Level SP Regulator", Arg(args, "at=")!, Arg(args, "move=") ?? "1,0", int.Parse(Arg(args, "frames=") ?? "240"), Arg(args, "out="), int.Parse(Arg(args, "jump=") ?? "-99")); break;
+            case "walk": Walk(only ?? "Level SP Regulator", Arg(args, "at=")!, Arg(args, "move=") ?? "1,0", int.Parse(Arg(args, "frames=") ?? "240"), Arg(args, "out="), int.Parse(Arg(args, "jump=") ?? "-99"), int.Parse(Arg(args, "morph=") ?? "-99")); break;
             case "mats": Mats(only ?? "Level SP Regulator"); break;
             case "dlcolors": DlColors(only ?? "Level SP Regulator"); break;
             case "model": ModelInfo(only ?? "fh:gun"); break;
             case "turn": TurnClips(); break;
+            case "leftturn": LeftTurn(); break;
             case "colpolys": ColPolys(only ?? "Level SP Regulator", Arg(args, "out=") ?? "colpolys.txt"); break;
             case "pressstrip": PressStrip(only ?? "main_menu", Arg(args, "x="), Arg(args, "y="), Arg(args, "out=")); break;
             default: Console.WriteLine("verbs: import, load, p1, p2, hud, save"); break;
@@ -142,6 +144,14 @@ namespace MphRead
                 them.TakeDamage(9999, DamageFlags.IgnoreInvuln, null, me);
                 Check(GameState.Points[0] == 1 && GameState.Kills[0] == 1 && GameState.Deaths[1] == 1, $"a kill: points {GameState.Points[0]}, kills {GameState.Kills[0]}, their deaths {GameState.Deaths[1]}");
                 int dead = 0;
+                // the cart's collapse (0x200bc58): clip 0 (26 in MPH's order) once on both layers, held on its last frame
+                AnimationInfo legs = them.BipedModel2.AnimInfo; // (BipedModel1 is private; both layers set by SetBipedAnimation)
+                int collapse = body.FrameCount[0];
+                Check(body.Index[0] == 26 && legs.Index[0] == 26 && body.Flags[0].TestFlag(AnimFlags.NoLoop),
+                    $"death: clip {body.Index[0]}/{legs.Index[0]} of {collapse} frames, flags {body.Flags[0]} (cart: clip 0, flags 8)");
+                for (; dead < 160 && them.Health == 0; dead++) host.Step(Idle); // 67 frames at 30 Hz = 134 steps; respawn at 180
+                Check(body.Index[0] == 26 && body.Frame[0] == collapse - 1 && !them.Flags2.TestFlag(PlayerFlags2.HideModel),
+                    $"collapsed and held: frame {body.Frame[0]}/{collapse}, model shown {!them.Flags2.TestFlag(PlayerFlags2.HideModel)}");
                 for (; dead < 400 && them.Health == 0; dead++) host.Step(Idle);
                 Check(dead >= 170 && dead <= 190 && them.Health == 99, $"respawned after {dead} frames (90 ticks = 180) with {them.Health} HP (cart MP: 99, player +0x42c = 0)");
                 me.TakeDamage(9999, DamageFlags.IgnoreInvuln, null, me);
@@ -191,6 +201,11 @@ namespace MphRead
                 Console.WriteLine($"  death effect: {fx.Lifespan} frames (60 Hz)");
                 if (room.EndsWith("Regulator"))
                 {
+                    int health = me.Health;
+                    me.Health = 20;
+                    host.Step(Idle);
+                    Shot("low_health");
+                    me.Health = health;
                     FirstHuntMission.ComboCount[me.SlotIndex] = 3;
                     FirstHuntMission.ComboValue[me.SlotIndex] = 30;
                     for (int i = 0; i < 4; i++) host.Step(new CampaignInput { SelectWeapon = BeamType.Missile });
@@ -273,7 +288,7 @@ namespace MphRead
                         for (; frames < 600; frames++)
                         {
                             host.Step(Idle);
-                            if (Environment.GetEnvironmentVariable("PAD_TRACE") == pad.Id.ToString() && frames < 40)
+                            if (Environment.GetEnvironmentVariable("PAD_TRACE") == pad.Id.ToString() && (frames < 40 || frames % 50 == 0))
                                 Console.WriteLine($"        f{frames} {F(me.Position)} speed {me.Speed.X:0.00},{me.Speed.Y:0.00},{me.Speed.Z:0.00} pad {me.Flags1.TestFlag(PlayerFlags1.UsedJumpPad)} {me.Flags1}");
                             if (launched < 0 && me.Flags1.TestFlag(PlayerFlags1.UsedJumpPad)) launched = frames;
                             apex = MathF.Max(apex, me.Position.Y - from.Y);
@@ -840,7 +855,7 @@ namespace MphRead
             }
         }
 
-        static void Walk(string room, string at, string move, int frames, string? outPath, int jumpAt = -99)
+        static void Walk(string room, string at, string move, int frames, string? outPath, int jumpAt = -99, int morphAt = -99)
         {
             // at=spawn: from the level's own spawn
             float[]? p = at == "spawn" ? null : at.Split(',').Select(v => float.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
@@ -851,16 +866,27 @@ namespace MphRead
                 var lines = new System.Collections.Generic.List<string>();
                 if (p != null) host.PlacePlayer(new OpenTK.Mathematics.Vector3(p[0], p[1] + 1, p[2]), -OpenTK.Mathematics.Vector3.UnitZ);
                 for (int i = 0; i < 20; i++) host.Step(Idle);
+                foreach (FhDoorEntity door in All(host.Scene).OfType<FhDoorEntity>().Where(d => d.FirstHuntLocked)) Console.WriteLine($"  locked door {door.Id} at {F(door.Position)} facing {F(door.FacingVector)}");
                 var input = new CampaignInput { SelectWeapon = BeamType.None, Move = new System.Numerics.Vector2(mv[0], mv[1]) };
                 for (int f = 0; f <= frames; f++)
                 {
                     CameraInfo cam = me.CameraInfo;
-                    lines.Add(System.FormattableString.Invariant($"{f} pos {me.Position.X:0.000} {me.Position.Y - 1:0.000} {me.Position.Z:0.000} cam {cam.Position.X:0.000} {cam.Position.Y:0.000} {cam.Position.Z:0.000} fwd {cam.Facing.X:0.000} {cam.Facing.Y:0.000} {cam.Facing.Z:0.000} hp {me.Health}"));
+                    lines.Add(System.FormattableString.Invariant($"{f} pos {me.Position.X:0.000} {me.Position.Y - 1:0.000} {me.Position.Z:0.000} cam {cam.Position.X:0.000} {cam.Position.Y:0.000} {cam.Position.Z:0.000} fwd {cam.Facing.X:0.000} {cam.Facing.Y:0.000} {cam.Facing.Z:0.000} hp {me.Health} alt {me.IsAltForm} module {PointModuleEntity.Current?.Id} combo {FirstHuntMission.ComboCount[me.SlotIndex]}/{FirstHuntMission.ComboValue[me.SlotIndex]}"));
                     input.Buttons = f >= jumpAt && f < jumpAt + 8 ? CampaignButtons.Jump : CampaignButtons.None;
+                    if (f >= morphAt && f < morphAt + 2) input.Buttons |= CampaignButtons.Morph; // morph=frame: one press
+                    if (Environment.GetEnvironmentVariable("WALK_FIRE") != null && f % 20 < 2) input.Buttons |= CampaignButtons.Shoot; // WALK_FIRE=1: a shot every 20 f
                     if (f < frames) host.Step(input);
+                    if (Environment.GetEnvironmentVariable("WALK_FIRE") != null)
+                    {
+                        foreach (BeamProjectileEntity beam in host.Scene.GetBeamProjectileEntities())
+                        {
+                            if (beam.Lifespan > 0) lines.Add(System.FormattableString.Invariant($"   beam {f} at {beam.Position.X:0.00} {beam.Position.Y:0.00} {beam.Position.Z:0.00} life {beam.Lifespan:0.00}"));
+                        }
+                    }
                 }
                 if (outPath != null) File.WriteAllLines(outPath, lines);
-                for (int i = 0; i < lines.Count; i += 10) Console.WriteLine("  " + lines[i]);
+                if (Environment.GetEnvironmentVariable("WALK_FIRE") != null) foreach (string l in lines.Where(l => l.StartsWith("   beam"))) Console.WriteLine(l);
+                else for (int i = 0; i < lines.Count; i += 10) Console.WriteLine("  " + lines[i]);
             }
             finally
             {
@@ -899,6 +925,32 @@ namespace MphRead
         // the two games' versions of a model
         // which way the body's turn clips swing: MPH's one Turn (22) against First Hunt's two (in MPH order after the
         // player loads: 22 and 27 = the cart's 22 and 23); prints each node's yaw over the clip
+        // -fhgame leftturn: aim held each way on the ground; the cart plays its own left clip (ours 27) forward and
+        // looping and its right one (MPH's Turn slot) as MPH plays Turn (0x200f92c..0x200f9dc)
+        static void LeftTurn()
+        {
+            CampaignHost host = StartP2("Level SP Regulator", out PlayerEntity me);
+            try
+            {
+                for (int i = 0; i < 60; i++) host.Step(Idle);
+                foreach (float dx in new[] { -40f, 40f })
+                {
+                    var input = new CampaignInput { SelectWeapon = BeamType.None, AimDelta = new System.Numerics.Vector2(dx, 0) };
+                    float yaw0 = MathF.Atan2(me.FacingVector.X, me.FacingVector.Z) * 180 / MathF.PI;
+                    for (int i = 0; i < 20; i++) host.Step(input);
+                    float yaw1 = MathF.Atan2(me.FacingVector.X, me.FacingVector.Z) * 180 / MathF.PI;
+                    AnimationInfo legs = me.BipedModel2.AnimInfo;
+                    Console.WriteLine(System.FormattableString.Invariant($"  aim {dx}: yaw {yaw0:0} -> {yaw1:0}, legs clip {legs.Index[0]} flags {legs.Flags[0]} frame {legs.Frame[0]}"));
+                    for (int i = 0; i < 40; i++) host.Step(Idle);
+                    Console.WriteLine($"  released: legs clip {legs.Index[0]} flags {legs.Flags[0]} frame {legs.Frame[0]}");
+                }
+            }
+            finally
+            {
+                host.Dispose();
+            }
+        }
+
         static void TurnClips()
         {
             CampaignHost host = StartP2("Level SP Regulator", out PlayerEntity me);
@@ -938,7 +990,22 @@ namespace MphRead
                 Console.WriteLine($"  nodes: {string.Join(" ", m.Nodes.Select(n => n.Name))}");
                 Console.WriteLine($"  materials: {string.Join(" ", m.Materials.Select(x => $"{x.Name}(tex {x.TextureId} {x.RenderMode} a{x.Alpha} l{x.Lighting})"))}");
                 Console.WriteLine($"  node anims: {m.AnimationGroups.Node.Count} [{string.Join(" ", m.AnimationGroups.Node.Select(g => g.FrameCount))}]");
+                Console.WriteLine($"  material colours: {string.Join(" ", m.Materials.Select(x => $"{x.Name}(dif {x.Diffuse.Red},{x.Diffuse.Green},{x.Diffuse.Blue} amb {x.Ambient.Red},{x.Ambient.Green},{x.Ambient.Blue} spe {x.Specular.Red},{x.Specular.Green},{x.Specular.Blue} pal {x.PaletteId})"))}");
                 Console.WriteLine($"  material anims: {m.AnimationGroups.Material.Count}, texcoord {m.AnimationGroups.Texcoord.Count}, texture {m.AnimationGroups.Texture.Count}");
+                // each recolor's mean texel brightness per material (the seat colours: green Samus too dark, 10-31)
+                for (int r = 0; r < m.Recolors.Count; r++)
+                {
+                    var parts = new System.Collections.Generic.List<string>();
+                    foreach (Material mat in m.Materials)
+                    {
+                        if (mat.TextureId < 0) continue;
+                        System.Collections.Generic.IReadOnlyList<ColorRgba> px = m.GetPixels(mat.TextureId, mat.PaletteId, r);
+                        double sum = 0; int cnt = 0;
+                        foreach (ColorRgba c in px) { if (c.Alpha == 0) continue; sum += (c.Red + c.Green + c.Blue) / 3.0; cnt++; }
+                        parts.Add(System.FormattableString.Invariant($"{mat.Name} {(cnt > 0 ? sum / cnt : 0):0.0}"));
+                    }
+                    Console.WriteLine($"  recolor {r} {m.Recolors[r].Name}: {string.Join(", ", parts)}");
+                }
                 foreach (Node n in m.Nodes)
                 {
                     Console.WriteLine(System.FormattableString.Invariant($"  node {n.Name}: pos {n.Position} scale {n.Scale} bounds {n.MinBounds}..{n.MaxBounds} r {n.BoundingRadius:0.###} billboard {n.BillboardMode} meshes {n.MeshCount}"));
@@ -1034,6 +1101,32 @@ namespace MphRead
             }
         }
 
+        // -fhgame modules: which point modules show before and after rolling through the next one (the cart hides the
+        // current one and shows the trees from its Next/Prev)
+        static void Modules()
+        {
+            CampaignHost host = StartP2("Level SP Morphball", out PlayerEntity me);
+            try
+            {
+                for (int i = 0; i < 20; i++) host.Step(Idle);
+                string Shown() => string.Join(" ", All(host.Scene).OfType<PointModuleEntity>().Where(m => m.Active).Select(m => m.Id));
+                for (int n = 0; n < 4; n++)
+                {
+                    PointModuleEntity? cur = PointModuleEntity.Current;
+                    Console.WriteLine($"  current {cur?.Id} shown: {Shown()}");
+                    PointModuleEntity? next = cur?.Next ?? cur?.Prev;
+                    if (next == null) break;
+                    host.PlacePlayer(next.Position, me.FacingVector);
+                    host.Step(Idle);
+                    host.Step(Idle);
+                }
+            }
+            finally
+            {
+                host.Dispose();
+            }
+        }
+
         static void Ride(string room)
         {
             CampaignHost host = StartP2(room, out PlayerEntity me);
@@ -1056,6 +1149,12 @@ namespace MphRead
                 FhTriggerVolumeEntity? trig = triggers.FirstOrDefault(t => t.Data.ParentMessage == FhMessage.Activate && t.Data.ParentMsgParam1 == plat.Data.GroupId
                     || t.Data.ChildMessage == FhMessage.Activate && t.Data.ChildMsgParam1 == plat.Data.GroupId);
                 var top = plat.Position + new OpenTK.Mathematics.Vector3(0, 2.5f, 0);
+                // a beam shot down onto the platform stops on it (the beams' ray, TestFlags.Beams, takes entity collision)
+                {
+                    CollisionResult hit = default;
+                    bool any = CollisionDetection.CheckBetweenPoints(top + new OpenTK.Mathematics.Vector3(0, 5, 0), plat.Position - new OpenTK.Mathematics.Vector3(0, 3, 0), TestFlags.Beams, host.Scene, ref hit);
+                    Console.WriteLine($"    {(any && hit.EntityCollision?.Entity == plat ? "ok  " : "FAIL")} beam ray onto platform {plat.Id}: hit {(any ? hit.EntityCollision?.Entity?.Type.ToString() ?? "room" : "nothing")} at y {hit.Position.Y - plat.Position.Y:0.00}");
+                }
                 if (me.Health == 0) { Console.WriteLine("    (Samus dead, stopping)"); return; }
                 if (trig != null) { host.PlacePlayer(trig.Position, me.FacingVector); host.Step(Idle); host.Step(Idle); }
                 host.PlacePlayer(top, me.FacingVector);

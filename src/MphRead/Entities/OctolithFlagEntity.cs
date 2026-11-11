@@ -177,11 +177,12 @@ namespace MphRead.Entities
             {
                 if (PlayerEntity.Main.TeamIndex == _data.TeamId)
                 {
+                    // recomp: the main player's side's cues, none in a replay's free cam (MainCuesHeard; also below)
                     _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
                     PlayerEntity.Main.StartFlagCarrySfx();
-                    Music.PlayRoomMusic(_scene.RoomId, track: 1);
+                    if (PlayerEntity.MainCuesHeard) Music.PlayRoomMusic(_scene.RoomId, track: 1);
                 }
-                else
+                else if (PlayerEntity.MainCuesHeard)
                 {
                     _soundSource.PlayFreeSfx(SfxId.FLAG_ACQUIRED);
                 }
@@ -192,7 +193,7 @@ namespace MphRead.Entities
                 if (_carrier == PlayerEntity.Main)
                 {
                     _soundSource.QueueStream(VoiceId.VOICE_OCTO_PICKUP, delay: 1, expiration: 2);
-                    _soundSource.PlayFreeSfx(SfxId.FLAG_ACQUIRED);
+                    if (PlayerEntity.MainCuesHeard) _soundSource.PlayFreeSfx(SfxId.FLAG_ACQUIRED);
                 }
                 else
                 {
@@ -222,6 +223,7 @@ namespace MphRead.Entities
                     PlayerEntity.Main.QueueHudMessage(128, 133, 60 / 30f, 1, messageId);
                 }
                 NetEvent(NetEventKind.Return, player);
+                if (GameEvents.Any) GameEvents.Raise("octolith_return", player.SlotIndex, (int)_data.TeamId); // recomp: mod event (GameEvents.cs)
                 SetAtBase();
                 return false;
             }
@@ -233,6 +235,7 @@ namespace MphRead.Entities
             _carrier = player;
             _lastCarrier = player;
             NetEvent(NetEventKind.Pickup, player);
+            if (GameEvents.Any) GameEvents.Raise("octolith_pickup", player.SlotIndex, (int)_data.TeamId, _bounty); // recomp: mod event (GameEvents.cs)
             _atBase = false;
             _grounded = true;
             _resetTimer = 0;
@@ -249,12 +252,12 @@ namespace MphRead.Entities
                 if (PlayerEntity.Main.TeamIndex == _data.TeamId)
                 {
                     messageId = 201; // your octolith reset!
-                    _soundSource.PlayFreeSfx(SfxId.FLAG_RESET2);
+                    if (PlayerEntity.MainCuesHeard) _soundSource.PlayFreeSfx(SfxId.FLAG_RESET2); // recomp: MainCuesHeard
                 }
                 else
                 {
                     messageId = 207; // enemy octolith reset!
-                    _soundSource.PlayFreeSfx(SfxId.FLAG_RESET1);
+                    if (PlayerEntity.MainCuesHeard) _soundSource.PlayFreeSfx(SfxId.FLAG_RESET1); // recomp: MainCuesHeard
                 }
             }
             else
@@ -279,10 +282,11 @@ namespace MphRead.Entities
             {
                 if (PlayerEntity.Main.TeamIndex == _data.TeamId)
                 {
+                    // recomp: the main player's side's cues, none in a replay's free cam (MainCuesHeard; also below)
                     if (reset)
                     {
                         messageId = 201; // your octolith reset!
-                        _soundSource.PlayFreeSfx(SfxId.FLAG_RESET2);
+                        if (PlayerEntity.MainCuesHeard) _soundSource.PlayFreeSfx(SfxId.FLAG_RESET2);
                     }
                     else
                     {
@@ -293,12 +297,12 @@ namespace MphRead.Entities
                 else if (reset)
                 {
                     messageId = 207; // enemy octolith reset!
-                    _soundSource.PlayFreeSfx(SfxId.FLAG_RESET1);
+                    if (PlayerEntity.MainCuesHeard) _soundSource.PlayFreeSfx(SfxId.FLAG_RESET1);
                 }
                 else
                 {
                     messageId = 231; // your team dropped the octolith!
-                    _soundSource.PlayFreeSfx(SfxId.FLAG_DROPPED);
+                    if (PlayerEntity.MainCuesHeard) _soundSource.PlayFreeSfx(SfxId.FLAG_DROPPED);
                 }
             }
             else if (reset)
@@ -341,11 +345,16 @@ namespace MphRead.Entities
         {
             Debug.Assert(_carrier != null);
             NetEvent(NetEventKind.Capture, _carrier);
+            if (GameEvents.Any) GameEvents.Raise("octolith_capture", _carrier.SlotIndex, _bounty); // recomp: mod event (GameEvents.cs)
             if (!_bounty)
             {
                 // recomp: vanilla (rev 1 ov9_3 0x212e060) compares the carrier's team with the main player's; upstream
                 // compared the octolith's own team, which swapped the score and scored-on sounds
-                if (_carrier.TeamIndex == PlayerEntity.Main.TeamIndex)
+                if (!PlayerEntity.MainCuesHeard)
+                {
+                    // recomp: the main player's side's cues, none in a replay's free cam (MainCuesHeard; also below)
+                }
+                else if (_carrier.TeamIndex == PlayerEntity.Main.TeamIndex)
                 {
                     _soundSource.QueueStream(VoiceId.VOICE_OCTO_SCORE, delay: 40 / 30f);
                     _soundSource.PlayFreeSfx(SfxId.SCORE);
@@ -357,7 +366,10 @@ namespace MphRead.Entities
             }
             else
             {
-                if (Bugfixes.CorrectBountySfx && _carrier.TeamIndex == PlayerEntity.Main.TeamIndex
+                if (!PlayerEntity.MainCuesHeard)
+                {
+                }
+                else if (Bugfixes.CorrectBountySfx && _carrier.TeamIndex == PlayerEntity.Main.TeamIndex
                     || !Bugfixes.CorrectBountySfx && _carrier.IsMainPlayer)
                 {
                     _soundSource.QueueStream(VoiceId.VOICE_BOUNTY, delay: 40 / 30f);

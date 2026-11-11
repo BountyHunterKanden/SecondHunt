@@ -139,7 +139,7 @@ namespace MphRecomp.Multiplayer
                     Glow: new[] { "1360cda7", "5d2a2923", "7b95650a", "9804aba5" }),
                 // the collar ring is a grey tube on the helmet texture, grey in every colour like vanilla
                 Regions: new[] { new SuitClasses.Region("3a4659b6", 356 / 512f, 0, 408 / 512f, 56 / 512f, Keep: true) }),
-            ["MP2DarkSuit"] = new(Dots: 0, Dim: 0.35f),
+            ["MP2DarkSuit"] = new(Dots: 0, Dim: 0.35f, Shift: new[] { "022045c3", "a3bb66a5", "27805bc6", "9fcf0d60" }), // the visor + its glow and reflection layers, whole
             // Phazon: the thigh speck layer (604da35a, dark plates with phazon veins) keeps its own colour, as vanilla (owner
             // 2026-10-24: circled leg spots still lit)
             ["Phazonsuit"] = new(Plain: new[] { "129e6a95", "a5d742bf", "36057a7a", "32357eec", "604da35a" }),
@@ -158,6 +158,15 @@ namespace MphRecomp.Multiplayer
         static readonly Dictionary<string, LookAlikes.Variant[]> ContrastVisor = new(StringComparer.OrdinalIgnoreCase)
         {
             ["MP3PEDSuit"] = new[] { LookAlikes.Variant.Second, LookAlikes.Variant.Fourth, LookAlikes.Variant.Seventh },
+        };
+
+        // a suit's own lights colour in a variant whose lights vanish into its body (owner 2026-11-06: the Light Suit's
+        // lemon copy had yellow glows on a yellow body; blue, the 6th's helmet accent)
+        static readonly Dictionary<string, Dictionary<LookAlikes.Variant, (float, float, float)>> LightsFor = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["MP2LightSuit"] = new() { [LookAlikes.Variant.Sixth] = (0.00f, 0.40f, 1.00f) },
+            // owner 2026-11-06: the Dark Suit's first copy (pal_02 mauve/teal) with a white visor
+            ["MP2DarkSuit"] = new() { [LookAlikes.Variant.Second] = (1.00f, 1.00f, 1.00f) },
         };
 
         static float Bright((float R, float G, float B) c) => Math.Max(c.R, Math.Max(c.G, c.B));
@@ -189,7 +198,7 @@ namespace MphRecomp.Multiplayer
             if (cv is not { } c) return null;
             Groups g = Suits.TryGetValue(skin, out Groups s) ? s : Default;
             var (main, second) = g.Swap.Contains(v) ? (c.Second, c.Main) : (c.Main, c.Second);
-            var lights = c.Lights;
+            var lights = LightsFor.TryGetValue(skin, out var lf) && lf.TryGetValue(v, out var own) ? own : c.Lights;
             // a big visor next to the helmet: in the variants whose lights read as the helmet's colour on this suit (pal_02's
             // violet in a magenta helmet, pal_04's red in a dark red one, the 7th's red in a crimson one), the visor takes the
             // main or second colour that stands apart from the helmet, else the suit's own green (owner 2026-10-24: the PED

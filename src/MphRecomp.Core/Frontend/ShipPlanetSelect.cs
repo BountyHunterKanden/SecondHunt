@@ -25,7 +25,9 @@ using MphRecomp.Frontend.Redraw;
 // LAND_SHIP_SCR plays) and its name shows in the banner. The window's camera follows the crosshair on a spring; once it's
 // within 32 units the zoom panel and LAND SHIP come up. LAND SHIP (tap or A, no confirm): the corners, then Land.
 // Added here (owner, 2026-10-01): tap a planet to select it (the nearest within reach; the crosshair glides there), and
-// drag on the map to move the crosshair. Not yet: the enemy panel (hunters on the planet, spec section 5). The slider
+// drag on the map to move the crosshair. The enemy panel (0x2106108 / 0x2106248): with LAND SHIP up, the selected planet's
+// hunters (the first three of StorySave.AreaHunters; Oubliette none) slide in at the left with the octoliths each holds
+// (LostOctoliths nibbles: crystal + "%dx") under the "enemy" box -- here in the console, left of the map. The slider
 // sounds (0x1f1..0x1f3, 0x1f2 with pan/pitch) are not voiced: their sound-table volume is 0, silent on the DS (BizHawk:
 // their channels play at volume 0); only the slider loop's handle matters, it gates the thrust (see ThrustLoop).
 namespace MphRecomp.Frontend
@@ -94,6 +96,16 @@ namespace MphRecomp.Frontend
         private readonly int[] _box = new int[2], _corners = new int[2], _textbox = new int[4], _gripV = new int[3], _gripH = new int[3];
         private readonly int[,] _planets = new int[PlanetCount, 4];
         private readonly int[] _zoom = new int[PlanetCount];
+        // the enemy panel: faces by Hunter (1 Kanden .. 6 Weavel; table 0x214370c), the box, the crystal's images
+        private static readonly string[] EnemyFiles = { "kanden", "trace", "sylux", "noxus", "spyre", "weavel" };
+        private readonly int[] _enemy = new int[6], _crystal = new int[3];
+        private readonly (int Image, int Ticks)[] _crystalFrames;
+        private readonly int _enemyBox;
+        private readonly byte[] _areaHunters = new byte[4];
+        private uint _lostOctoliths = UInt32.MaxValue;
+        private int _panelTimer, _panelFor = -1, _slots, _boxX;
+        private readonly int[] _slotHunter = new int[3], _slotCount = new int[3], _slotX = new int[3], _slotPhase = new int[3];
+        private readonly Random _rng = new();
         private DsImage? _reticleSrc;
         private Task<DsImage>? _reticleJob;
         private float _reticleJobScale;
@@ -189,6 +201,17 @@ namespace MphRecomp.Frontend
             {
                 _textbox[i] = Sprite(_space, "textbox", i);
             }
+            for (int h = 0; h < EnemyFiles.Length; h++)
+            {
+                _enemy[h] = Sprite(_space, "enemy_" + EnemyFiles[h], 0);
+            }
+            _enemyBox = Sprite(_space, "enemybox", 0);
+            for (int i = 0; i < 3; i++)
+            {
+                _crystal[i] = Sprite(_space, "enemycrystal", i);
+            }
+            // a glint: image 0 for 30 ticks, then 1, 2, 1 for 2 each
+            _crystalFrames = DsGraphics.LoadSprite(Path.Combine(_space, "enemycrystal.bin")).Frames;
             for (int p = 0; p < PlanetCount; p++)
             {
                 _zoom[p] = Sprite(_space, "zoom_" + Files[p], 0);
@@ -232,9 +255,16 @@ namespace MphRecomp.Frontend
         // ---------------------------------------------------------------- flow
 
         // areas: StorySave.Areas (the planets found); known: the planets the star map has shown before (a new file: 0);
-        // current: where the ship is (the first selection)
-        public void Open(int areas, int known, string[] names, int current)
+        // current: where the ship is (the first selection); areaHunters / lostOctoliths: StorySave's, for the enemy panel
+        // (null: no hunters shown)
+        public void Open(int areas, int known, string[] names, int current, byte[]? areaHunters = null,
+            uint lostOctoliths = UInt32.MaxValue)
         {
+            Array.Clear(_areaHunters);
+            if (areaHunters != null) Array.Copy(areaHunters, _areaHunters, Math.Min(areaHunters.Length, _areaHunters.Length));
+            _lostOctoliths = lostOctoliths;
+            _panelTimer = _slots = 0;
+            _panelFor = -1;
             _open = true;
             _areas = areas & AreaMask;
             _known = known & AreaMask;
@@ -495,6 +525,54 @@ namespace MphRecomp.Frontend
             if (_step == Step.Select) _landOk = ok;
             _zoomCount = _landOk ? _zoomCount + 1 : 0;
             _landVofs = Math.Clamp(_landVofs + (_landOk ? LandSlide : -LandSlide), -64, 0);
+            EnemyPanelTick();
+        }
+
+        // 0x2105e54..0x2105ef8: the roster is built the first tick LAND SHIP is up, for that selection; a new selection
+        // (or none) takes it down, and it slides in again. 0x2106248: the timer runs 1..120; on tick 1 everything is at
+        // x -64, then slot i slides in 16 px a tick from tick 2(i + 1) to x 8, the box to x -7
+        private void EnemyPanelTick()
+        {
+            if (_selected != _panelFor) _panelTimer = 0;
+            if (_panelTimer == 0)
+            {
+                if (!_landOk) return;
+                _panelFor = _selected;
+                BuildRoster(_selected);
+                _panelTimer = 1;
+                _boxX = -64;
+                for (int i = 0; i < 3; i++)
+                {
+                    _slotX[i] = -64;
+                    _slotPhase[i] = _rng.Next(20);
+                }
+                return;
+            }
+            if (_panelTimer < 120) _panelTimer++;
+            for (int i = 0; i < _slots; i++)
+            {
+                if (_panelTimer >= 2 * (i + 1)) _slotX[i] = Math.Min(_slotX[i] + 16, 8);
+            }
+            if (_slots > 0) _boxX = Math.Min(_boxX + 16, -7);
+        }
+
+        // 0x2106108: the first three hunters (bits 1..6) on the planet, each with the octoliths it holds (LostOctoliths'
+        // nibbles naming it); Oubliette has none
+        private void BuildRoster(int p)
+        {
+            _slots = 0;
+            if (p < 0 || p >= _areaHunters.Length) return;
+            for (int h = 1; h <= 6 && _slots < 3; h++)
+            {
+                if ((_areaHunters[p] & (1 << h)) == 0) continue;
+                int count = 0;
+                for (int n = 0; n < 8; n++)
+                {
+                    if (((_lostOctoliths >> (4 * n)) & 15) == h) count++;
+                }
+                _slotHunter[_slots] = h;
+                _slotCount[_slots++] = count;
+            }
         }
 
         // 0x2105790 (rev 0 0x210588c..0x2105950), every tick of the spring: the lag is measured before the step
@@ -683,6 +761,7 @@ namespace MphRecomp.Frontend
             DrawMap();
             if (_step == Step.Found) DrawScanBox();
             DrawLand();
+            DrawEnemies();
             if (_step is Step.Landing or Step.Done)
             {
                 float fade = Math.Clamp((_landTick - CornerTicks) / (float)FadeTicks, 0, 1);
@@ -846,6 +925,45 @@ namespace MphRecomp.Frontend
             }
         }
 
+        // the enemy panel, re-laid for the console: the DS stacks the faces down the touch screen's left (x 8,
+        // y 16 + 40i), which at the map's scale was tiny; here the box sits top left and the faces stand in a row under
+        // it (32 px apart, sliding in from the left as on the DS), scaled to fill the console left of the vertical slider
+        private const float EnemyW = 2 * 32 + 34, EnemyH = 16 + 44;
+        private void DrawEnemies()
+        {
+            if (_panelTimer == 0 || _slots == 0 || _step != Step.Select) return;
+            float left = 4, right = U(50) - 3, top = 122, bottom = 190;
+            float k = MathF.Min((right - left) / EnemyW, (bottom - top) / EnemyH);
+            float ox = right - EnemyW * k, oy = top + (bottom - top - EnemyH * k) / 2;
+            float X(float tx) => ox + tx * k;
+            float Y(float ty) => oy + ty * k;
+            float bx = _boxX + 7;
+            Quad(_enemyBox, X(bx), Y(0), X(bx + 64), Y(32), 0, 0, 1, 1, 1, 1, 1, 1);
+            ScaledText(M(3), X(bx + 16), Y(8), 4, k);
+            for (int i = 0; i < _slots; i++)
+            {
+                int x = _slotX[i] - 8 + 32 * i, y = 16;
+                Quad(_enemy[_slotHunter[i] - 1], X(x), Y(y), X(x + 32), Y(y + 32), 0, 0, 1, 1, 1, 1, 1, 1);
+                if (_slotCount[i] <= 0) continue;
+                int image = CrystalImage(_clock + _slotPhase[i]);
+                Quad(_crystal[image], X(x + 18), Y(y + 11), X(x + 34), Y(y + 43), 0, 0, 1, 1, 1, 1, 1, 1);
+                ScaledText($"{_slotCount[i]}x", X(x + 22), Y(y + 32), 5, k);
+            }
+        }
+
+        private int CrystalImage(int tick)
+        {
+            int total = 0;
+            foreach (var f in _crystalFrames) total += Math.Max(1, (int)f.Ticks);
+            tick %= Math.Max(1, total);
+            foreach (var f in _crystalFrames)
+            {
+                tick -= Math.Max(1, (int)f.Ticks);
+                if (tick < 0) return Math.Clamp(f.Image, 0, _crystal.Length - 1);
+            }
+            return 0;
+        }
+
         // the DS blend: the piece plus 6/16 of what's behind
         private void Blended(int tex, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1)
         {
@@ -918,6 +1036,20 @@ namespace MphRecomp.Frontend
             foreach (WidgetTri t in _glyphs)
             {
                 DrawList.Triangle(t.TextureId, UiWrap.Clamp, UiWrap.Clamp, UiBlend.Alpha, Map(t.A), Map(t.B), Map(t.C));
+            }
+        }
+
+        // one left-aligned line at `scale` of the font's size, (x, top) its cell's top left
+        private void ScaledText(string text, float x, float top, int pal, float scale, float lineHeight = 12)
+        {
+            (byte R, byte G, byte B) c = _colours.Colour(pal, 2);
+            _glyphs.Clear();
+            _font.Emit(text, 0, 192 - lineHeight, 0, 0, lineHeight, c.R / 255f, c.G / 255f, c.B / 255f, 1, 0, _glyphs);
+            // emitted for top 0: canvas y = -Y
+            UiVertex S(UiVertex v) => Map(new UiVertex(x + v.X * scale, v.Y * scale - top, v.U, v.V, v.R, v.G, v.B, v.A));
+            foreach (WidgetTri t in _glyphs)
+            {
+                DrawList.Triangle(t.TextureId, UiWrap.Clamp, UiWrap.Clamp, UiBlend.Alpha, S(t.A), S(t.B), S(t.C));
             }
         }
 

@@ -25,8 +25,11 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-gametest") { GameTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-vfstest") { VfsTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-modmgrtest") { ModManagerTest.Run(args); return; }
+            // the LuaLS ---@meta file the app writes next to the mods as mod_api.lua (docs/MOD_API.md �4.15)
+            if (args.Length >= 1 && args[0] == "-modmeta") { Console.Write(MphRecomp.Mods.ModApiMeta.Generate()); return; }
             if (args.Length >= 1 && args[0] == "-modapitest") { ModApiTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-exampletest") { ExampleModTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-modcontenttest") { ModContentTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-roomloadtest") { RoomLoadTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-collisiontest") { CollisionTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-combattest") { CombatTest.Run(args); return; }
@@ -53,6 +56,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-dsstandin") { DarkSamusStandinTool.Run(args); return; } // Dark Samus stand-in recipe (Limoki)
             if (args.Length >= 1 && args[0] == "-standinghittest") { StandingBodyHitTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-shockcoilheadtest") { ShockCoilHeadTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-splitcredittest") { SplitCreditTest.Run(); return; }
             if (args.Length >= 1 && args[0] == "-bodytest") { BodyTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-weavelcling") { WeavelClingTool.Run(args); return; } // Trooper wall cling
             if (args.Length >= 1 && args[0] == "-seatabilitiestest") { SeatAbilitiesTest.Run(); return; } // Trooper abilities online
@@ -61,6 +65,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-placetest") { PlacementTest.Run(args); return; } // Pickup placement editor
             if (args.Length >= 1 && args[0] == "-botprobe") { BotProbe.Run(args); return; } // Bots batch 10-23: jitter/hops/walls/roam pitch
             if (args.Length >= 1 && args[0] == "-botpacetest") { BotPaceTest.Run(args); return; } // Bot difficulty vs vanilla
+            if (args.Length >= 1 && args[0] == "-althoptest") { AltHopTest.Run(args); return; } // campaign alt-form hop (owner 11-07)
             if (args.Length >= 1 && args[0] == "-hyperballtest") { HyperBallTest.Run(args); return; } // Dark Samus Hyper Mode (H1)
             if (args.Length >= 1 && args[0] == "-hyperfxtest") { HyperFxTest.Run(args); return; } // Dark Samus Hyper Mode (H3 effects)
             if (args.Length >= 1 && args[0] == "-paralyzertest") { ParalyzerTest.Run(args); return; } // Zero Suit beam + alt form
@@ -79,6 +84,10 @@ namespace MphRead
             if (args.Length >= 2 && args[0] == "-hdrepose") { HdRepose.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-riglook") { RigLook.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-animprobe") { AnimProbe.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-deathanim") { DeathAnimTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-ragdoll") { RagdollTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-ragdollvariety") { RagdollVarietyTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-fittedice") { FittedIceTest.Run(args); return; }   // fitted per-body ice: shell measure + per-body checks
             if (args.Length >= 1 && args[0] == "-animtest") { AnimTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-hdpose") { HdPoseProbe.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-hdrig") { HdRigTool.Run(args); return; }
@@ -97,6 +106,8 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-campaignscan") { CampaignScanTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-scanreach") { ScanReachTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignencounters") { CampaignSim.Encounters(args); return; }
+            if (args.Length >= 1 && args[0] == "-kandenhit") { CampaignSim.KandenHit(args); return; }
+            if (args.Length >= 1 && args[0] == "-spiretrace") { SpireMeetingTrace.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignsuit") { CampaignSim.Suit(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignportal") { CampaignSim.Portal(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignlock") { CampaignSim.LockReplay(args); return; }
@@ -114,12 +125,14 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-landingperf") { CampaignSim.LandingPerf(args); return; }
             if (args.Length >= 1 && args[0] == "-suitrow") { CampaignSim.SuitRow(args); return; }
             if (args.Length >= 2 && args[0] == "-trooperrow") { CampaignSim.TrooperRow(args); return; }
+            if (args.Length >= 1 && args[0] == "-syluxrow") { CampaignSim.SyluxRow(); return; }
             if (args.Length >= 1 && args[0] == "-campaignhud") { CampaignSim.Hud(args); return; }
             if (args.Length >= 1 && args[0] == "-huddialog") { CampaignSim.HudDialogs(args); return; }
             if (args.Length >= 1 && args[0] == "-dialogtouch") { CampaignSim.DialogTouch(args); return; }
             if (args.Length >= 1 && args[0] == "-menutapcheck") { MenuTapCheck.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-songchecktest") { SongCheckTest.Run(); return; }
             if (args.Length >= 1 && args[0] == "-primehud") { PrimeHudTool.Run(args); return; } // Prime-style HUD (PlayerPrimeHud.cs)
+            if (args.Length >= 1 && args[0] == "-wave1hud") { Wave1HudTool.Run(args); return; } // wave 1 HUD fixes, widescreen (Wave1HudTool.cs)
             if (args.Length >= 1 && args[0] == "-campaignship") { CampaignShipTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-cartsave") { CartSaveTool.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-gyrotest") { GyroTest.Run(args); return; }
@@ -133,7 +146,13 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-blastersfxlevels") { BlasterSfxLevels.Run(args); return; } // F4: blaster hit sound level
             if (args.Length >= 1 && args[0] == "-replaytest") { ReplayTest.Test(args); return; }
             if (args.Length >= 1 && args[0] == "-replayplay") { ReplayTest.PlayFile(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaycullprobe") { CullProbe.Run(args); return; } // aim view pop-in: pieces the turned view needs vs the draw list
+            if (args.Length >= 1 && args[0] == "-replayevents") { ReplayTest.Events(args); return; } // hits, deaths, HUD messages, indicators
             if (args.Length >= 1 && args[0] == "-replayhpbox") { ReplayTest.HealthBox(args); return; } // opponent health box log
+            if (args.Length >= 1 && args[0] == "-replaygrapple") { ReplayTest.GrappleTrace(args); return; } // Echoes grapple states + each pick
+            if (args.Length >= 1 && args[0] == "-replaybotskf") { ReplayTest.BotTraceKeyframes(args); return; } // 11-06: -replaybots from a device's keyframes
+            if (args.Length >= 1 && args[0] == "-replaybots") { ReplayTest.BotTrace(args); return; } // match review 11-04: bot positions + AI states over a stretch
+            if (args.Length >= 1 && args[0] == "-replayseat") { ReplayTest.SeatTrace(args); return; } // 11-06: one seat (bot or person) + the Echoes turret over a stretch
             if (args.Length >= 1 && args[0] == "-replaynetdump") { ReplayNetDump.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-replaymock") { ReplayMockTool.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-replaysound") { ReplaySoundCheck.Run(args); return; } // C2: replay menu sounds
@@ -142,6 +161,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-replaysweep") { ReplayTest.Sweep(args); return; }
             if (args.Length >= 1 && args[0] == "-drawinvariance") { ReplayTest.DrawInvariance(args); return; }
             if (args.Length >= 1 && args[0] == "-replaygolden") { ReplayTest.Golden(args); return; }
+            if (args.Length >= 1 && args[0] == "-hubselftest") { HubSelfTest.Run(); return; } // Gaming Hub: rank rule + content keys
             if (args.Length >= 1 && args[0] == "-detmathtest") { DetMathTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-replayverify") { ReplayTest.Verify(args); return; }
             if (args.Length >= 1 && args[0] == "-replaynettest") { ReplayTest.NetTest(args); return; }
@@ -151,6 +171,8 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-replaypreptest") { ReplayTest.PrepTest(args); return; } // thread B prepared keyframes (seek)
             if (args.Length >= 1 && args[0] == "-replayaftermatch") { ReplayTest.AfterMatchTest(args); return; } // thread B viewer after a played match
             if (args.Length >= 1 && args[0] == "-echoesarena") { EchoesArenaTool.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-spiderball") { SpiderBallTool.Run(args); return; } // docs/SPIDER_BALL.md dev check
+            if (args.Length >= 1 && args[0] == "-grappledump") { GrappleDumpTool.Run(args); return; }   // docs/GRAPPLE.md G0/G1
             if (args.Length >= 1 && args[0] == "-echoesturret") { EchoesTurretTool.Run(args); return; } // Shooting Gallery turret (docs/SHOOTING_GALLERY_TURRET.md)
             if (args.Length >= 1 && args[0] == "-fharena") { FhArenaTool.Run(args); return; } // First Hunt arenas (FirstHuntArena)
             if (args.Length >= 1 && args[0] == "-fhgame") { FhGameTool.Run(args); return; } // the whole First Hunt game (FirstHuntGame)
@@ -175,6 +197,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-onlinecreatetest") { OnlineMenuTool.CreateTest(args); return; }
             if (args.Length >= 1 && args[0] == "-migratemenutest") { MigrateMenuTool.Test(args); return; }
             if (args.Length >= 1 && args[0] == "-onlinefriendstest") { OnlineMenuTool.FriendsTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-onlinehubtest") { OnlineMenuTool.HubTest(args); return; }
             if (args.Length >= 1 && args[0] == "-onlinerecordtest") { OnlineRecordTool.Test(args); return; } // (T3: head to head on the server)
             if (args.Length >= 1 && args[0] == "-onlinejoin") { OnlineMatchTool.Join(args); return; }
             if (args.Length >= 1 && args[0] == "-turntest") { TurnTestServer.Test(); return; } // O5 TURN client vs a local TURN server
@@ -184,6 +207,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-findgametest") { FindGameTool.Test(args); return; }
             if (args.Length >= 1 && args[0] == "-findgamejoin") { FindGameTool.Join(args); return; }
             if (args.Length >= 1 && args[0] == "-findgamemenutest") { FindGameTool.MenuTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-bombdoors") { BombDoorAudit.Run(args); return; }
             if (args.Length >= 3 && args[0] == "-campaigndoorprobe") { CampaignDoorProbe.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-campaignmsgscan") { CampaignDoorProbe.MessageScan(args); return; }
             if (args.Length >= 3 && args[0] == "-campaigndoorcheck") { CampaignDoorProbe.DoorCheck(args); return; }
@@ -202,6 +226,7 @@ namespace MphRead
             if (args.Length >= 2 && args[0] == "-fecanvas") { FrontendTool.Canvas(args); return; }
             if (args.Length >= 1 && args[0] == "-feflow") { FrontendTool.Flow(args); return; }
             if (args.Length >= 1 && args[0] == "-felayouts") { FrontendTool.Layouts(); return; }
+            if (args.Length >= 1 && args[0] == "-licensequit") { LicenseQuitTest.Run(); return; } // the Hunter License quit penalty
             if (args.Length >= 1 && args[0] == "-mpmenu") { MultiplayerMenuTool.Run(args); return; } // Vanilla multiplayer menu
             if (args.Length >= 1 && args[0] == "-extrarules") { ExtraRulesTest.Run(args); return; } // Extra pickups + Extra characters rules
             if (args.Length >= 1 && args[0] == "-culturetest") { CultureTest.Run(); return; } // non-invariant locales (Realme crash log, 2026-10-16)
@@ -211,6 +236,10 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-bootskip") { BootSkipTest.Run(args); return; } // STARTUP skip settings
             if (args.Length >= 1 && args[0] == "-dmgind") { DamageIndicatorTool.Run(args); return; } // damage direction indicator (DamageIndicatorTool.cs)
             if (args.Length >= 1 && args[0] == "-enemyplacetest") { EnemyPlaceTest.Run(args); return; } // Hard Mode enemy placement (EnemyPlaceTest.cs)
+            if (args.Length >= 1 && args[0] == "-fsmdump") { FsmDumpTool.Run(args); return; } // Retro AI state machines (FsmDumpTool.cs)
+            if (args.Length >= 1 && args[0] == "-mp1scly") { Mp1SclyTool.Run(args); return; } // Prime 1 room scripts census (Mp1SclyTool.cs)
+            if (args.Length >= 1 && args[0] == "-mp3scly") { Mp3SclyTool.Run(args); return; } // Corruption room scripts (Mp3SclyTool.cs)
+            if (args.Length >= 1 && args[0] == "-moduleindex") { ModuleIndexTool.Run(args); return; } // RSO/REL module symbol index (ModuleIndexTool.cs)
             if (args.Length >= 2 && args[0] == "-fesaves") { FrontendTool.Saves(args); return; }
             if (args.Length >= 1 && args[0] == "-feship") { FrontendTool.Ship(args); return; }
             if (args.Length >= 1 && args[0] == "-feshipweapon") { ShipWeaponTest.Run(args); return; }
@@ -218,6 +247,8 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-fegrooves") { FrontendGrooves.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-femenusamus") { MenuSamusTool.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-standinpics") { StandinPicturesTool.Run(args); return; } // stand-in character pictures (StandinPictures)
+            if (args.Length >= 1 && args[0] == "-portraits") { PortraitTool.Run(args); return; } // HUD hunter portraits (custom characters' pictures)
+            if (args.Length >= 1 && args[0] == "-badgecolours") { BadgeColoursTool.Run(args); return; } // every hunter x 8 lobby colours + auto badge pairs (badge eyedropper page)
             if (args.Length >= 1 && args[0] == "-menuartds") { MenuArtDsTool.Run(args); return; } // menu art from the DS bodies (StandinPictures.MenuArt)
             if (args.Length >= 1 && args[0] == "-febrief") { FrontendTool.Brief(args); return; }
             if (args.Length >= 1 && args[0] == "-feplanet") { FrontendTool.Planet(args); return; }
@@ -229,6 +260,7 @@ namespace MphRead
             if (args.Length >= 2 && args[0] == "-sndtrace") { SoundTrace.Run(args); return; }
             if (args.Length >= 2 && args[0] == "-sndpages") { SoundTrace.Pages(args); return; }
             if (args.Length >= 1 && args[0] == "-sndecho") { SoundTrace.Echo(args); return; }
+            if (args.Length >= 1 && args[0] == "-pistoncave") { PistonCaveTest.Run(args); return; } // Piston Cave piston snag + sounds
             if (args.Length >= 2 && args[0] == "-switchtest") { SwitchTest.Run(args); return; } // clean-room Switch .nsp/.xci reader (Import/Switch)
             if (CheckSetup(args))
             {

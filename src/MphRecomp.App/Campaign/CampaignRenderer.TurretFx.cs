@@ -171,7 +171,7 @@ internal sealed partial class CampaignRenderer
         // the bones' effects follow their bones (mode 2: the whole system rides it). Seen by the occupant they fade with
         // the turret's body: Echoes draws the actor at alpha 0.25 in its occupant's view (PreRender, CampaignArena
         // SeatAlpha) and its event particles take the actor's draw colour (so the ball's glow, 0.2 alpha, is all but gone)
-        float onBoneFade = t.Occupant != null && t.Occupant == PlayerEntity.Main ? 0.25f : 1;
+        float onBoneFade = SeenFromSeat(t) ? 0.25f : 1;
         // an event effect with Wipe: its particles go as its frames end (Retro's flags bit 0: DestroyParticles)
         if (_turretDownGlow is { } down && !down.Sys.Emitting)
         {

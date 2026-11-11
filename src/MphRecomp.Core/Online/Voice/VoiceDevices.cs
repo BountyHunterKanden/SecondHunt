@@ -38,6 +38,11 @@ namespace MphRecomp.Online.Voice
     {
         public static Func<IVoiceCapture?>? Capture { get; set; }
         public static Func<IVoicePlayback?>? Playback { get; set; }
+        // true while the game's sound comes out of the device's own speakers (no headset or headphones), so your microphone
+        // hears the music; the music then ducks deep while you push to talk (App/Audio/MusicDuck.cs). Set by Android (output
+        // devices) and Windows (the default output's form factor); null = unknown, no self duck. Cheap and any thread (the
+        // platform caches it).
+        public static Func<bool>? OnLoudspeaker { get; set; }
         // one line of the voice log (Android logcat MPHVoice); null = quiet
         public static Action<string>? Log { get; set; }
 

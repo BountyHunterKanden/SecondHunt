@@ -123,8 +123,16 @@ namespace MphRecomp.Render
             // the way toward the tint by its brightness (blacks lifted a little); w = 5+k the same on its unsaturated
             // armour only, its lights keep their colour (a same-character duplicate); w = 7+k as 3+k with the bright parts
             // lit well above the rest (the troopers; LookAlikes.BodyTint); w = 9+k two tones (a same-look copy): its
-            // armour toward uTint by brightness, its lights (saturated and bright) toward uTint2
+            // armour toward uTint by brightness, its lights (saturated and bright) toward uTint2; w = -1 multiplies the
+            // material by the tint (an Echoes model particle's colour: CCubeMaterial's extra KONST x CPREV stage)
             "uniform vec4 uTint; uniform int uTintUnit; uniform vec4 uTint2;\n" +
+            // uTintWarm 1 (Overcharged Dark Samus's skin) and 3 (her phazon): under a seat tint their warm parts, the red
+            // veins, keep their own colour, and 3 also keeps the phazon's white/pink sparkle. Neither takes a copy's lights
+            // colour: it left a splotch on her forehead, as on the Varia helmets (owner 2026-11-04/05). 4 (the Prime drone,
+            // MP1AlphaDrone) colours only its metal, texel by texel before lighting (dZone): the grey hull and its reflection
+            // sphere, its bronze and rust included, take the seat colour at their own brightness; only its brightest lit
+            // texels (the red eye, the panel and thruster cores) and its glow layer stay as imported (owner 2026-11-05)
+            "uniform int uTintWarm;\n" +
             // w = 11+k Samus's HD suit in a team / same-hunter copy's colours (SuitColours), on its textures before lighting
             // (environment maps aside): its colour groups -- uTintHue main, second, third (with the second) and lights hues --
             // to uTint (main), uTint2 (second), uTint3 (lights); uTintRef: the main, second and grey groups' mean texel
@@ -166,6 +174,11 @@ namespace MphRecomp.Render
             // Ice white): a copy turns only those texels to the seat colour at the same brightness, the black ones kept
             "vec3 trs(vec3 t, float k){ float l=max(t.r,max(t.g,t.b)); float s=l>0.0?(l-min(t.r,min(t.g,t.b)))/l:0.0; float m=max(uTint.r,max(uTint.g,uTint.b));\n" +
             "  return mix(t, uTint.rgb/max(m,0.01)*l, k*max(smoothstep(0.3,0.5,s)*smoothstep(0.04,0.1,l), smoothstep(0.55,0.75,l))); }\n" +
+            "vec3 dZone(vec3 a){ float l=max(a.r,max(a.g,a.b)), s=l>0.0?(l-min(a.r,min(a.g,a.b)))/l:0.0;\n" +
+            "  vec3 dn=uTint.rgb/max(max(uTint.r,max(uTint.g,uTint.b)),0.01);\n" +
+            "  float m=1.0-smoothstep(0.5,0.7,s)*smoothstep(0.78,0.92,l);\n" +
+            "  vec3 c=mix(dn*l, vec3(l), smoothstep(0.8,1.0,l)*0.35);\n" +
+            "  return mix(a, c, m); }\n" +
             "float trp(vec4 t, float ts, float tl){ float a=smoothstep(0.3,0.5,ts)*smoothstep(0.1,0.25,tl), b=smoothstep(0.42,0.6,tl);\n" +
             "  if(t.a<0.0) return max(a,b); float x=max(t.r,max(t.g,t.b)); return max(a*smoothstep(0.04,0.1,x), b*smoothstep(0.5,0.7,x)); }\n" +
             "vec4 smp(int m, vec2 c){ if(m==0) return texture(uTex0,c); if(m==1) return texture(uTex1,c); if(m==2) return texture(uTex2,c);\n" +
@@ -245,6 +258,19 @@ namespace MphRecomp.Render
             // show through it; a blur kept PED's eyes and brows, and at half brightness the eye sockets still read (owner 2026-10-24)
             "  if(k.r>k.a+0.5){ float ml0=max(uTint3.r,max(uTint3.g,uTint3.b)); return min(uTint3.rgb*(0.2/max(ml0,0.01)),vec3(1.0)); }\n" +
             "  if(v<0.02) return c;\n" +
+            // a texture shifted whole (R = 3/255, SuitClasses.Shift: the Dark Suit visor): its hue turned from the lights hue to the
+            // lights colour's, its saturation scaled by that colour's, brightness kept (a grey/white colour also takes some of the
+            // texture's luma, so the red-to-yellow ramp stays a grey-to-white gradient instead of going flat white)
+            "  if(k.a>0.5 && k.b>0.5 && k.r>0.008 && k.r<0.016 && k.g<0.002){ float l3=max(uTint3.r,max(uTint3.g,uTint3.b)), n3=min(uTint3.r,min(uTint3.g,uTint3.b));\n" +
+            "    float s3=l3>0.0 ? (l3-n3)/l3 : 0.0, vb=max(max(cb.r,max(cb.g,cb.b)),0.001), nb=min(cb.r,min(cb.g,cb.b));\n" +
+            "    float hs=tHue(cb,vb,nb)+tHue(uTint3.rgb,l3,n3)-max(uTintHue.w,0.0), ss=(vb-nb)/vb*s3;\n" +
+            "    float g=mix(1.0,0.55+0.45*dot(c,vec3(0.299,0.587,0.114))/v,1.0-s3);\n" +
+            "    vec3 p=clamp(abs(mod(hs/60.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0,0.0,1.0), o=v*mix(vec3(1.0),p,ss);\n" +
+            // (a coloured visor also goes deep to pale down the texture's red-to-yellow ramp: turning the hue alone left the
+            // red, green and yellow copies flat, where the original's ramp is mostly brightness; hue and ramp come from the blurred
+            // sample, so the texture's faint centre seam doesn't show as a line on a copy, owner 2026-11-06)
+            "    float t=clamp((dot(cb,vec3(0.299,0.587,0.114))/vb-0.38)/0.48,0.0,1.0);\n" +
+            "    return mix(o*g, mix(o*0.62, mix(o,vec3(v),0.45), t), s3); }\n" +
             "  float s=(v-n)/v, h=tHue(c,v,n), hb=tHue(cb,max(cb.r,max(cb.g,cb.b)),min(cb.r,min(cb.g,cb.b)));\n" +
             "  float dm=tHd(h,uTintHue.x), ds=min(tHd(h,uTintHue.y),tHd(h,uTintHue.z)), dl=tHd(h,uTintHue.w), dc=tHd(h,uTint4.w);\n" +
             "  float bm=tHd(hb,uTintHue.x), bs=min(tHd(hb,uTintHue.y),tHd(hb,uTintHue.z)), bc=tHd(hb,uTint4.w);\n" +
@@ -295,14 +321,18 @@ namespace MphRecomp.Render
             "    gTex = tm>=0 ? swz(smp(tm, tc(uDst[s].w)), uSwap[uKsel[s].w]) : vec4(0.0);\n" +
             "    if(uTint.w>1.5 && uTint.w<2.5 && tm==uTintUnit) gTex.rgb=uTint.rgb*max(gTex.r,max(gTex.g,gTex.b));\n" +
             "    if(tm>=0 && gT0.a<-0.5) gT0=vec4(gTex.rgb,1.0);\n" +
-            "    if(uTint2.w<-0.5 && (s==0 || s==2) && tm>=0 && uTint.w>6.5 && uTint.w<10.5) gTex.rgb=trs(gTex.rgb, clamp(uTint.w>8.5 ? uTint.w-9.0 : uTint.w-7.0, 0.0, 1.0));\n" +
+            "    if(uTintWarm==4 && tm>=0 && uNumStages==4 && (s==0 || s==3)) gTex.rgb = dZone(gTex.rgb);\n" +
+            "    if(uTint2.w<-0.5 && uTintWarm!=4 && (s==0 || s==2) && tm>=0 && uTint.w>6.5 && uTint.w<10.5) gTex.rgb=trs(gTex.rgb, clamp(uTint.w>8.5 ? uTint.w-9.0 : uTint.w-7.0, 0.0, 1.0));\n" +
             "    bool fs=false; int roS=-1;\n" +
-            "    if(uTint.w>10.5 && tm>=0 && uTgMode[uDst[s].w]==0){ ivec4 ci=uCabcd[s]; vec2 uv=tc(uDst[s].w); vec4 kk=smpK(tm, uv); fs=kk.r>kk.a+0.5;\n" +
+            // (an env-mapped stage is left as it is, unless its texture is shifted whole: the Dark Suit visor's red reflection
+            // blobs, which stayed red, turned pink on a white visor and read as the helmet showing through, owner 2026-11-06)
+            "    if(uTint.w>10.5 && tm>=0){ vec2 uv=tc(uDst[s].w); vec4 kk=smpK(tm, uv);\n" +
+            "     if(uTgMode[uDst[s].w]==0 || (kk.a>0.5 && kk.b>0.5 && kk.r>0.008 && kk.r<0.016 && kk.g<0.002)){ ivec4 ci=uCabcd[s]; fs=kk.r>kk.a+0.5;\n" +
             "      bool ras=any(equal(ci,ivec4(10))), reg=uDst[s].x!=0 || any(bvec4(ci.x>=2&&ci.x<=7, ci.y>=2&&ci.y<=7, ci.z>=2&&ci.z<=7, ci.w>=2&&ci.w<=7));\n" +
             "      int ro=ras ? 0 : (reg ? 1 : 2); roS=ro;\n" +
             // (a texture already recoloured texel by texel (uBaked: CampaignSuit's piece-by-piece CPU bake) is sampled as it is)
             "      vec3 rr=((uBaked>>tm)&1)!=0 ? gTex.rgb : suitc(gTex.rgb, smpL(tm, uv).rgb, kk, ro);\n" +
-            "      if(((uBaked>>tm)&1)==0) gTex.rgb=mix(gTex.rgb, rr, uTint.w-11.0); }\n" +
+            "      if(((uBaked>>tm)&1)==0) gTex.rgb=mix(gTex.rgb, rr, uTint.w-11.0); } }\n" +
             "    int rc = uRasChan[s];\n" +
             "    gRas = rc==0 ? ch0 : (rc==1 ? vChan1 : vec4(0.0));\n" +
             // the face's vertex colours carry baked eye-socket and lid shading (Prime 3), which drew the eyes through a
@@ -328,11 +358,12 @@ namespace MphRecomp.Render
             "  if(uAlphaTest.w==1){ bool p0=cmp(uAlphaTest.x,outa,uAlphaRef.x), p1=cmp(uAlphaTest.y,outa,uAlphaRef.y);\n" +
             "    bool pass = uAlphaTest.z==0 ? (p0&&p1) : (uAlphaTest.z==1 ? (p0||p1) : (uAlphaTest.z==2 ? (p0!=p1) : (p0==p1)));\n" +
             "    if(!pass) discard; }\n" +
-            "  vec3 fc=clamp(gC[0],0.0,1.0);\n" +
+            "  vec3 fc=clamp(gC[0],0.0,1.0); vec3 fc0=fc;\n" +
             // the face's later stages (lighting, specular, untextured raster passes) still shaded its cheeks, nose and eye
             // sockets through the glass: under a full recolour a face pixel is one flat colour, the glass's, dark (owner 2026-10-24)
             "  if(anyFs && uTint.w>11.5){ float mf=max(uTint3.r,max(uTint3.g,uTint3.b)); fc=min(uTint3.rgb*(0.2/max(mf,0.01)),vec3(1.0)); }\n" +
             "  if(uTint.w>0.5 && uTint.w<1.5) fc=uTint.rgb*max(fc.r,max(fc.g,fc.b));\n" +
+            "  if(uTint.w<-0.5) fc*=uTint.rgb;\n" +
             "  if(uTint.w>2.5 && uTint.w<8.5){ bool glo=uTint.w>6.5; bool arm=uTint.w>4.5 && !glo; float tk=uTint.w-(glo?7.0:(arm?5.0:3.0));\n" +
             "    float tl=max(fc.r,max(fc.g,fc.b)); float ts=tl>0.0?(tl-min(fc.r,min(fc.g,fc.b)))/tl:0.0;\n" +
             "    vec3 tt=uTint.rgb*(0.16+0.84*tl);\n" +
@@ -343,12 +374,18 @@ namespace MphRecomp.Render
             "    if(uTint2.w<-0.5 && gE.r>=0.0) tt=trg(gB+gC[0]-gS,gE); else if(uTint2.w<-0.5) tk*=trp(gT0,ts,tl);\n" +
             "    fc=mix(fc, tt, arm ? tk*(1.0-smoothstep(0.25,0.6,ts)) : tk); }\n" +
             "  if(uTint.w>8.5 && uTint.w<10.5){ float tk=uTint.w-9.0; float tl=max(fc.r,max(fc.g,fc.b)); float ts=tl>0.0?(tl-min(fc.r,min(fc.g,fc.b)))/tl:0.0;\n" +
-            "    float lm=smoothstep(0.35,0.6,ts)*smoothstep(0.35,0.6,tl);\n" +
+            "    bool dsc=uTint2.w>-0.5 && uTint2.w<0.5; float lm=dsc ? max(smoothstep(0.2,0.7,ts)*smoothstep(0.25,0.75,tl), smoothstep(0.88,1.0,tl)*(1.0-smoothstep(0.2,0.45,ts))) : smoothstep(0.35,0.6,ts)*smoothstep(0.35,0.6,tl);\n" +
             "    if(uTint2.w>0.5) lm=smoothstep(0.3,0.5,ts)*smoothstep(0.4,0.65,tl)*(1.0-smoothstep(18.0,30.0,tHd(tHue(fc,tl,min(fc.r,min(fc.g,fc.b))),uTint2.w-1.0)));\n" +
             "    if(uTint2.w<-0.5){ lm=0.0; tk*=trp(gT0,ts,tl); }\n" +
+            "    if(uTintWarm>0) lm=0.0;\n" +
             "    vec3 ta=tSyl(uTint.rgb*(0.28+1.0*tl),ts,tl); vec3 tb=min(uTint2.rgb*(0.55+0.75*tl)+vec3(0.10*tl),vec3(1.0));\n" +
+            // Dark Samus copies (dsc): darker body, a wider soft lights mask, her white-hot visor core kept as a pale shade of the lights (owner 2026-11-06)
+            "    if(dsc){ ta=uTint.rgb*(0.14+0.78*tl); tb=min(uTint2.rgb*(0.45+0.95*tl)+vec3(0.15*tl),vec3(1.0)); tb=mix(tb,vec3(1.0),0.7*smoothstep(0.9,1.0,tl)*(1.0-smoothstep(0.2,0.45,ts))); }\n" +
             "    if(uTint2.w<-0.5 && gE.r>=0.0){ ta=trg(gB+gC[0]-gS,gE); tk=uTint.w-9.0; }\n" +
             "    fc=mix(fc, mix(ta,tb,lm), tk); }\n" +
+            "  if(uTintWarm==1 || uTintWarm==3) fc=mix(fc, fc0, smoothstep(0.04,0.16,fc0.r-fc0.b));\n" +
+            "  if(uTintWarm==3) fc=mix(fc, fc0, smoothstep(0.5,0.8,fc0.r));\n" +
+            "  if(uTintWarm==4) fc=fc0;\n" +
             // MPH's double damage (PlayerDraw's binding, emission and texcoord overrides): a lit material shows the pickup's
             // texture as an environment map off the camera-space normal (plus its mesh UV), turning with time, lit with
             // MPH's grey emission (0x35AD) over the lights; no team colour, as in MPH (the damage flash still reddens it)
@@ -416,7 +453,7 @@ namespace MphRecomp.Render
                 int mode = L == null ? 0 : (L.MapMode == 0 && m.TexGenSrc[t] == 1 ? 1 : L.MapMode switch { 1 or 3 or 4 => 1, _ => 0 });
                 p.TgMode[t] = mode;
                 var mt = L == null ? Identity3 : L.UvMtx ?? MayaSrt(L.Scale, L.RotDeg, L.Trans);
-                if (L != null && L.ScrollPerSec != Vector2.Zero) p.Scrolls = true;
+                if (L != null && L.Moves) p.Scrolls = true;
                 Array.Copy(mt, 0, p.TexMtx, t * 9, 9);
                 if (L != null && L.TexMapId >= 0 && L.TexMapId < 8) p.Units[L.TexMapId] = L;
             }
@@ -438,9 +475,10 @@ namespace MphRecomp.Render
             for (int i = 0; i < 8; i++)
             {
                 var L = m.Layers[i];
-                if (L == null || L.ScrollPerSec == Vector2.Zero) continue;
-                t[i * 9 + 6] += (float)(L.ScrollPerSec.X * seconds % 1.0);
-                t[i * 9 + 7] += (float)(L.ScrollPerSec.Y * seconds % 1.0);
+                if (L == null || !L.Moves) continue;
+                Vector2 d = L.UvShift(seconds);
+                t[i * 9 + 6] += d.X;
+                t[i * 9 + 7] += d.Y;
             }
             return t;
         }

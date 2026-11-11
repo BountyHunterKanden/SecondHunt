@@ -24,6 +24,11 @@ namespace MphRead
         // set per match by MatchStart; off = replays from before it) the burst's second and third bolts pay 5 UA each too, and a
         // burst that runs dry stops there
         public static bool HostBoltCost { get; set; }
+        // 2026-11-07, a little stronger again (owner, after a player's report that it barely competed with the Power Beam): with
+        // MatchSettings.BlasterBuff on (set per match by MatchStart; off = replays before format 87) the bolts deal
+        // LighterBolt / LighterHeadshot (10 / 14) again and each bolt costs 4 UA, not 5 (the HUD's 599 / 4 = 149, as the
+        // Battlehammer): Info() hands out the 4 UA rows
+        public static bool HostBlasterBuff { get; set; }
 
         public const int BurstBolts = 3;
         public const int BurstGap = 3; // DS frames between bolts (x2 at 60 fps, like every cooldown)
@@ -33,6 +38,10 @@ namespace MphRead
         {
             if (beam == BeamType.PirateBlaster)
             {
+                if (HostBlasterBuff)
+                {
+                    return affinity ? WeaponMPAffinity4 : WeaponMP4;
+                }
                 return affinity ? WeaponMPAffinity : WeaponMP;
             }
             if (beam == BeamType.Paralyzer) // recomp: Zero Suit's Paralyzer (Metadata/Paralyzer.cs) reads its rows here too
@@ -62,11 +71,15 @@ namespace MphRead
 
         public static readonly WeaponInfo WeaponMP = Make("Pirate Blaster MP", ammoCost: 5);
         public static readonly WeaponInfo WeaponMPAffinity = Make("Pirate Blaster MP Affinity", ammoCost: 5);
+        // with HostBlasterBuff: 4 UA a bolt
+        public static readonly WeaponInfo WeaponMP4 = Make("Pirate Blaster MP 4", ammoCost: 4);
+        public static readonly WeaponInfo WeaponMPAffinity4 = Make("Pirate Blaster MP Affinity 4", ammoCost: 4);
         // the burst's second and third bolts: the burst's 5 UA is paid by the first
         public static readonly WeaponInfo BoltMP = Make("Pirate Blaster MP bolt", ammoCost: 0);
         public static readonly WeaponInfo BoltMPAffinity = Make("Pirate Blaster MP Affinity bolt", ammoCost: 0);
 
-        public static readonly IReadOnlyList<WeaponInfo> All = new[] { WeaponMP, WeaponMPAffinity, BoltMP, BoltMPAffinity };
+        public static readonly IReadOnlyList<WeaponInfo> All = new[] { WeaponMP, WeaponMPAffinity, BoltMP, BoltMPAffinity,
+            WeaponMP4, WeaponMPAffinity4 };
 
         private static WeaponInfo Make(string description, ushort ammoCost)
         {

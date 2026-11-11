@@ -203,13 +203,84 @@ namespace MphRead
                     EntityBase r = EnemyPlacement.Adjust(third, Array.IndexOf(EnemyPlacement.RoomFields, "REPLACE"), 1);
                     Check(r != third && EnemyPlacement.EntryOf(r).Id == all[0].Id, $"room's own {own[2].Type} replaced with {EnemyPlacement.EntryOf(r).Label}");
                 }
+                Hunters(host, all, start);
                 Check(EnemyPlacement.LastError == null, "no errors: " + (EnemyPlacement.LastError ?? "none"));
             }
 
             EnemyPlacement.FileData back = JsonSerializer.Deserialize<EnemyPlacement.FileData>(File.ReadAllText(path))!;
             Check(back.Enemies.Count == 2 && back.Gates.Count == 1 && back.Enemies[0].HealthMul == 2f, $"saved file reads back: {back.Enemies.Count} enemies, {back.Gates.Count} gate, {back.RoomEdits.Count} room edits");
             Console.WriteLine($"  file: {path}");
+
+            // a hunter from the file: SceneSetup.InitHunterSpawns gives it its bot at room load
+            if (all.FirstOrDefault(e => e.Hunter == Hunter.Spire) is EnemyCatalogue.Entry spire)
+            {
+                var hf = new EnemyPlacement.FileData { Room = roomName, RoomId = roomId };
+                hf.Enemies.Add(new EnemyPlacement.PlacedEnemy { Id = spire.Id, Pos = At(0, 6), Trigger = "entry", Group = -1 });
+                File.WriteAllText(path, JsonSerializer.Serialize(hf));
+                using CampaignHost host = CampaignHost.Start(roomName);
+                Steps(host, 120);
+                PlayerEntity? bot = BotOf(host.Scene, 20000);
+                Check(bot != null && bot.Hunter == Hunter.Spire && bot.Health > 0,
+                    $"hunter from the file: bot {bot?.Hunter} slot {bot?.SlotIndex} health {bot?.Health}");
+            }
             EnemyPlacement.Install(null);
+        }
+
+        static PlayerEntity? BotOf(Scene scene, int spawnerId)
+        {
+            for (int i = 1; i < PlayerEntity.PlayerCount; i++)
+            {
+                if (PlayerEntity.Players[i].IsBot && PlayerEntity.Players[i].EnemySpawner?.Id == spawnerId) return PlayerEntity.Players[i];
+            }
+            return null;
+        }
+
+        // H2 (11.2 item 7): the MPH hunters and the Guardian in the catalogue, placed live, killed, deleted
+        static void Hunters(CampaignHost host, IReadOnlyList<EnemyCatalogue.Entry> all, Vector3 start)
+        {
+            Console.WriteLine("== hunters");
+            var hunters = all.Where(e => e.Hunter != null).ToList();
+            foreach (EnemyCatalogue.Entry e in hunters)
+            {
+                EnemySpawnFields09 f = e.Mph.Fields.S09;
+                Console.WriteLine($"  {e.Label,-16} template {e.SourceRoom} hunter {f.HunterId} weapon {f.HunterWeapon} health {f.HunterHealth}/{f.HunterHealthMax} chance {f.HunterChance} color {f.HunterColor}");
+            }
+            Check(hunters.Count == EnemyCatalogue.PlaceableHunters.Length, $"{hunters.Count} hunter entries of {EnemyCatalogue.PlaceableHunters.Length}");
+            EnemyCatalogue.Entry? kanden = hunters.FirstOrDefault(e => e.Hunter == Hunter.Kanden);
+            if (kanden == null)
+            {
+                return;
+            }
+            var data = EnemyPlacement.PlacedData(kanden.Mph, new EnemyPlacement.PlacedEnemy { Id = kanden.Id, Count = 3, Limit = 3, Total = 0 }, 20100, Hunter.Kanden);
+            Check(data.EnemyType == EnemyType.Hunter && data.Fields.S09.HunterId == (uint)Hunter.Kanden && data.Fields.S09.HunterChance == 100
+                && data.Fields.S09.EncounterType == 0 && data.SpawnTotal == 1 && data.SpawnLimit == 1,
+                $"hunter data: id {data.Fields.S09.HunterId} chance {data.Fields.S09.HunterChance} encounter {data.Fields.S09.EncounterType} total {data.SpawnTotal}");
+            int count = PlayerEntity.PlayerCount;
+            EntityBase? s = EnemyPlacement.Place(kanden, start + new Vector3(4, 0, 0), 0);
+            Check(s != null, $"Place hunter -> spawner {s?.Id}");
+            if (s == null)
+            {
+                return;
+            }
+            Steps(host, 120);
+            PlayerEntity? bot = BotOf(host.Scene, s.Id);
+            Check(bot != null && bot.Hunter == Hunter.Kanden && bot.Health > 0 && PlayerEntity.PlayerCount == count + 1,
+                $"live bot {bot?.Hunter} slot {bot?.SlotIndex} health {bot?.Health}, players {count} -> {PlayerEntity.PlayerCount}");
+            Check(EnemyPlacement.EntryOf(s).Id == kanden.Id, $"EntryOf -> {EnemyPlacement.EntryOf(s).Label}");
+            if (bot != null)
+            {
+                bot.TakeDamage(5000, DamageFlags.None, null, host.Player);
+                Steps(host, 300);
+                Check(bot.Health == 0 || bot.AiData.Flags2.TestFlag(AiFlags2.Bit13), $"defeated (health {bot.Health}, story-hunter defeat flag {bot.AiData.Flags2.TestFlag(AiFlags2.Bit13)})");
+            }
+            Check(EnemyPlacement.Delete(s) && BotOf(host.Scene, s.Id) == null && PlayerEntity.PlayerCount == count,
+                $"Delete frees the slot (players {PlayerEntity.PlayerCount})");
+            // place again: the slot is used again
+            EntityBase? again = EnemyPlacement.Place(kanden, start + new Vector3(4, 0, 0), 0);
+            Steps(host, 60);
+            PlayerEntity? bot2 = again == null ? null : BotOf(host.Scene, again.Id);
+            Check(bot2 != null && bot2.Health > 0, $"placed again: bot slot {bot2?.SlotIndex} health {bot2?.Health}");
+            if (again != null) EnemyPlacement.Delete(again);
         }
     }
 }

@@ -88,7 +88,9 @@ internal sealed class DesktopInput
     {
         CampaignRenderer? game = _app.Game;
         SetCapture(game != null && game.InGameplay && !game.DialogUp && _w.IsFocused && !_app.Background); // a dialog frees it for its buttons; a test run never grabs
+        DesktopApp.Step = "gamepads";
         PollGamepad();
+        DesktopApp.Step = "input";
         if (game != null && _wheelFrames > 0 && --_wheelFrames == 0)
         {
             game.Pad.Set(PadButton.L1, false);
@@ -227,6 +229,7 @@ internal sealed class DesktopInput
         {
         case FrontendRenderer front:
             if (front.Typing && TypingKey(front, e)) break;
+            if (!e.IsRepeat) LobbyTalk(front, true, e.Key.ToString(), true);
             MenuKey(e, key => front.Post(s => s.Press(key)), (dx, dy) => front.Post(s => s.Navigate(dx, dy)));
             break;
         case CampaignRenderer game:
@@ -261,6 +264,7 @@ internal sealed class DesktopInput
             CaptureButton("-" + e.Key);
             return;
         }
+        if (_app.TopScreen is FrontendRenderer front) LobbyTalk(front, true, e.Key.ToString(), false);
         if (_app.TopScreen is CampaignRenderer game)
         {
             if (e.Key == Keys.F3) game.Pad.Set(PadButton.ThumbL, false);
@@ -269,6 +273,16 @@ internal sealed class DesktopInput
             if (ReplayKey(game, e.Key) is PadButton rb) game.Pad.Set(rb, false);
         }
     }
+
+    // (owner 2026-11-05: V did nothing in an online lobby) a key or controller button bound to push to talk (RECOMP
+    // SETTINGS > CONTROLS) talks in a lobby too, as Android's GameActivity.LobbyTalk; a match reads it itself (CampaignRenderer)
+    static void LobbyTalk(FrontendRenderer front, bool keys, string name, bool down) => front.Post(s =>
+    {
+        if (Array.IndexOf(MphRecomp.Config.ControlBinds.Get(s.Settings, keys, MphRecomp.Config.ControlBinds.Talk), name) >= 0)
+        {
+            MphRecomp.Online.Voice.VoiceChat.HoldToTalk(down);
+        }
+    });
 
     // a replay's bar (MatchReplay.cs) from the keyboard: Enter A (press the picked button), Space X (pause / play),
     // Q / E L1 / R1 (10 s back / forward), Z / C L2 / R2 (slower / faster), Y the camera, H B (hide the bar and HUD);
@@ -685,6 +699,13 @@ internal sealed class DesktopInput
             int held = hx != 0 ? hx : sx, wasHeld = _hatX != 0 ? _hatX : _stickX;
             if (held != wasHeld) front.Post(s => s.HoldDirection(held)); // the match rules' arrows repeat while held (F1)
             if (MenuStick(ry)) front.Post(s => s.ScrollStick(ry));
+            foreach ((GamepadButton b, PadButton pb) in PadMap)
+            {
+                if (now[(int)b] != _padPrev[(int)b]) LobbyTalk(front, false, pb.ToString(), now[(int)b]);
+            }
+            if (Btn(GamepadButton.Back) != _padPrev[(int)GamepadButton.Back]) LobbyTalk(front, false, nameof(PadButton.Select), Btn(GamepadButton.Back));
+            if ((l2 >= 0.5f) != (_prevL2 >= 0.5f)) LobbyTalk(front, false, nameof(PadButton.L2), l2 >= 0.5f);
+            if ((r2 >= 0.5f) != (_prevR2 >= 0.5f)) LobbyTalk(front, false, nameof(PadButton.R2), r2 >= 0.5f);
             foreach ((GamepadButton b, MenuKeys key) in MenuButtons)
             {
                 if (Pressed(b)) front.Post(s => s.Press(key));

@@ -9,7 +9,7 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Arenas
 {
-    // Mining Plaza's Luminoth gate (owner 2026-10-31: "open exactly how it does in echoes but only on two
+    // Mining Plaza's Luminoth gate (thread 3d373d, owner 2026-10-31: "open exactly how it does in echoes but only on two
     // conditions. the time limit is half way up for the match, or 2/3 of the needed score ... whichever condition is met
     // first"). Echoes' own gate platform (PLAT 000202ea, its DCLN) and its two spinning holograms (ACTR 000202ed/e6, AROT
     // 000202dd), opened on Echoes' 'Gate Control' sequence (MiningPlaza.Gate reads it). The open rule runs in the host's
@@ -60,33 +60,49 @@ namespace MphRecomp.Arenas
             public float At { get; set; }
         }
 
-        // the open rule: progress toward the mode's goal by the leading team (or player), 0-1; -1 when the mode has no goal
-        public static float Progress()
+        // the open rule's score half: the leading team (or player) has 2/3 of the mode's goal. Counted goals (points,
+        // Survival deaths) round to the nearest whole one, at least 1 (owner 2026-11-02: goal 2 opens at 1, not never;
+        // Survival with 1 spare life opens on the first death); timed goals (Defender, Prime Hunter) are a straight 2/3
+        public static bool ScoreReached()
         {
             int n = PlayerEntity.SlotCapacity;
-            float best = -1;
             switch (GameState.Mode)
             {
                 case GameMode.Battle or GameMode.BattleTeams or GameMode.Bounty or GameMode.BountyTeams or GameMode.Capture
                     or GameMode.Nodes or GameMode.NodesTeams:
-                    if (GameState.PointGoal <= 0) return -1;
-                    for (int i = 0; i < n; i++) best = Math.Max(best, GameState.TeamPoints[i] / (float)GameState.PointGoal);
-                    return best;
+                    if (GameState.PointGoal <= 0) return false;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (GameState.TeamPoints[i] >= Share(GameState.PointGoal)) return true;
+                    }
+                    return false;
                 case GameMode.Defender or GameMode.DefenderTeams:
-                    if (GameState.TimeGoal <= 0) return -1;
-                    for (int i = 0; i < n; i++) best = Math.Max(best, GameState.TeamTime[i] / GameState.TimeGoal);
-                    return best;
+                    if (GameState.TimeGoal <= 0) return false;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (GameState.TeamTime[i] / GameState.TimeGoal >= ScoreShare) return true;
+                    }
+                    return false;
                 case GameMode.PrimeHunter:
-                    if (GameState.TimeGoal <= 0) return -1;
-                    for (int i = 0; i < n; i++) best = Math.Max(best, GameState.Time[i] / GameState.TimeGoal);
-                    return best;
+                    if (GameState.TimeGoal <= 0) return false;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (GameState.Time[i] / GameState.TimeGoal >= ScoreShare) return true;
+                    }
+                    return false;
                 case GameMode.Survival or GameMode.SurvivalTeams:
                     // last standing wins: a team (or player) down 2/3 of its lives (its spare lives + its last one)
-                    for (int i = 0; i < n; i++) best = Math.Max(best, GameState.TeamDeaths[i] / (float)(GameState.TeamLives(i) + 1));
-                    return best;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (GameState.TeamDeaths[i] >= Share(GameState.TeamLives(i) + 1)) return true;
+                    }
+                    return false;
             }
-            return -1;
+            return false;
         }
+
+        // 2/3 of a counted goal, to the nearest whole one, at least 1
+        public static int Share(int goal) => Math.Max(1, (2 * goal + 1) / 3);
 
         public const float ScoreShare = 2f / 3, TimeShare = 0.5f;
 
@@ -117,6 +133,7 @@ namespace MphRecomp.Arenas
         public static IReadOnlyList<EntityBase> Extra(Scene scene, int roomId, IReadOnlyList<EntityBase> entities)
         {
             GateSpot? spot;
+            PlayerEntity.HostBotNoJumpAt = null;
             lock (_rooms)
             {
                 if (!GameState.Multiplayer || !_rooms.TryGetValue(roomId, out spot)) return entities;
@@ -125,7 +142,13 @@ namespace MphRecomp.Arenas
             int id = entities.Count == 0 ? 0 : entities.Max(e => e.Id) + 1;
             // its nav bit follows the pillars' (EchoesArena: the state rays)
             int index = entities.Count(e => e is MiningPlazaPillarEntity);
-            list.Add(new MiningPlazaGateEntity(id, index, spot, Light(spot.Ambient, spot.Lights), Light(spot.HoloAmbient, spot.HoloLights), scene));
+            var gate = new MiningPlazaGateEntity(id, index, spot, Light(spot.Ambient, spot.Lights), Light(spot.HoloAmbient, spot.HoloLights), scene);
+            list.Add(gate);
+            if (!Solo && spot.Tris.Length > 0)
+            {
+                (Vector3 lo, Vector3 hi) = Box(spot);
+                PlayerEntity.HostBotNoJumpAt = p => !gate.Opened && JumpsAtBox(lo, hi, p.Position, p.Speed, p.AiData.HostNodePos);
+            }
             return list;
         }
 
@@ -191,6 +214,63 @@ namespace MphRecomp.Arenas
                     Vector3.TransformPosition(new Vector3(t[k + 3], t[k + 4], t[k + 5]), m),
                     Vector3.TransformPosition(new Vector3(t[k + 6], t[k + 7], t[k + 8]), m));
             }
+        }
+
+        // bots never jump this close to the shut gate (PlayerEntity.HostBotNoJumpAt): across from its box, and from a
+        // unit under it to its top (Tools -botprobe counts a jump at it within 0.8)
+        public const float NoJumpNear = 2f;
+        public const float NoJumpReach = 8f, NoJumpRun = 30f; // (JumpsAtBox)
+
+        // the shut gate's box (its collision triangles' bounds)
+        public static (Vector3 Lo, Vector3 Hi) Box(GateSpot s)
+        {
+            float[] tr = s.Tris;
+            Vector3 lo = new(Single.MaxValue), hi = new(Single.MinValue);
+            for (int k = 0; k + 2 < tr.Length; k += 3)
+            {
+                var v = new Vector3(tr[k], tr[k + 1], tr[k + 2]);
+                lo = Vector3.ComponentMin(lo, v);
+                hi = Vector3.ComponentMax(hi, v);
+            }
+            return (lo, hi);
+        }
+
+        // a jump from q that ends up at the box: q next to it, or the line to the bot's node or along its run (speed over
+        // NoJumpRun frames) passing next to it, either capped at NoJumpReach across. Owner 11-05 (R2 1:34): Dark Samus
+        // jumped from 4.6 off, running at a node on the gate's face, and hung against the gate
+        public static bool JumpsAtBox(Vector3 lo, Vector3 hi, Vector3 q, Vector3 speed, Vector3? node)
+        {
+            if (NearBox(lo, hi, q, NoJumpNear))
+            {
+                return true;
+            }
+            var run = new Vector3(speed.X, 0, speed.Z) * NoJumpRun;
+            return (node is Vector3 n && LineNearBox(lo, hi, q, new Vector3(n.X, q.Y, n.Z) - q))
+                || (run.LengthSquared > 0.0001f && LineNearBox(lo, hi, q, run));
+        }
+
+        static bool LineNearBox(Vector3 lo, Vector3 hi, Vector3 q, Vector3 d)
+        {
+            float len = d.Length;
+            if (len < 0.0001f)
+            {
+                return false;
+            }
+            d *= Math.Min(len, NoJumpReach) / len;
+            for (int i = 1; i <= 16; i++)
+            {
+                if (NearBox(lo, hi, q + d * (i / 16f), NoJumpNear))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public static bool NearBox(Vector3 lo, Vector3 hi, Vector3 q, float near)
+        {
+            float dx = Math.Max(0, Math.Max(lo.X - q.X, q.X - hi.X)), dz = Math.Max(0, Math.Max(lo.Z - q.Z, q.Z - hi.Z));
+            return dx * dx + dz * dz < near * near && q.Y > lo.Y - 1 && q.Y < hi.Y;
         }
 
         public static float Done(GateSpot s) => Math.Max(s.MoveEnd, s.Cues.Count == 0 ? 0 : s.Cues.Max(c => c.At)) + 0.5f;
@@ -262,7 +342,7 @@ namespace MphRecomp.Arenas
             float now = GameState.MatchTime;
             if (now > _startTime) _startTime = now;
             if (_startTime > 0 && now >= 0 && now <= _startTime * MiningPlazaGate.TimeShare) return true;
-            return MiningPlazaGate.Progress() >= MiningPlazaGate.ScoreShare;
+            return MiningPlazaGate.ScoreReached();
         }
 
         void Step()

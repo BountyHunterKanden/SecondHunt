@@ -75,6 +75,14 @@ namespace MphRead
                     settings.TrooperSkin = "junk";
                     Check("an unknown setting shows the first imported one", Value(row) == "POWER");
                 }
+                // a campaign's pause: the row follows the file being played (owner 2026-11-09)
+                menus.CampaignPlays = () => null;
+                Check("in a Samus campaign with a Trooper file C: the row is hidden", Row(menus) == null);
+                menus.CampaignPlays = () => MphRecomp.Multiplayer.Characters.Sylux.Id;
+                Check("in a Sylux campaign: the row is hidden", Row(menus) == null);
+                menus.CampaignPlays = () => MphRecomp.Multiplayer.Characters.Trooper.Id;
+                Check("in a Trooper campaign: the row is there", Row(menus) != null);
+                menus.CampaignPlays = null;
                 var bare = new RecompMenus(null!, null!, new RecompSettings(), Path.Combine(empty, "s.json"), modsDir: null);
                 bare.SavesDir = savesDir;
                 Check("no Trooper imported (a Trooper file all the same): the row is hidden", Row(bare) == null);

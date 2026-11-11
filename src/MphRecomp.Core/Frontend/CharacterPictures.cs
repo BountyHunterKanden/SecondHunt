@@ -110,7 +110,7 @@ namespace MphRecomp.Frontend
         }
 
         // in the colour pictures' names: new seat colours draw them again
-        public const string ColourLook = "k2"; // (k2 10-30: Prime 4 Sylux drawn with her lights hue)
+        public const string ColourLook = "k8"; // (k8 11-08: Dark Suit copies with the re-hued opaque visor, copy 2 white; k7 11-06: DS stand-in trooper copies keep his black armour; k6 11-06: Overcharged Dark Samus keeps her insides and phazon sparkle, as in a match; k5 11-06: brighter violet/green/pink Dark Samus lights; k4 11-06: Dark Samus copies with derived lights; k2 10-30: Prime 4 Sylux drawn with her lights hue; k3 10-31: troopers keep their black)
 
         // the key a seat's colour `copy` is cached under (its picture is the same for every seat with that skin)
         public static string ColourKey(MphRecomp.Multiplayer.MatchPlayer seat, int copy) =>

@@ -84,9 +84,12 @@ namespace MphRecomp.Assets
             return list;
         }
 
-        public static HdBall? For(string hdDir, string suit)
+        // a palette's own ball first (the Fusion Suit's Varia/Gravity/Phazon colours have their own matsets), else the base suit's
+        public static HdBall? For(string hdDir, string suit) => At(hdDir, suit + "Ball") ?? At(hdDir, IdFor(suit));
+
+        static HdBall? At(string hdDir, string id)
         {
-            string id = IdFor(suit), folder = Path.Combine(hdDir, id);
+            string folder = Path.Combine(hdDir, id);
             if (!Directory.Exists(folder)) return null;
             string[] daes = Directory.GetFiles(folder, "*.dae");
             if (daes.Length == 0) return null;

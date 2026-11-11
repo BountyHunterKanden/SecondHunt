@@ -15,6 +15,9 @@ namespace MphRecomp.Multiplayer.Net
         public CampaignButtons Buttons;
         public BeamType SelectWeapon; // held to pick a weapon directly; None = no change (the wheel resolves here)
         public sbyte MoveX, MoveY; // -1, 0, 1: strafe (+right), forward (+fwd)
+        // how far the move stick is pushed, CampaignInput.MovePush (0 = all the way, 1..15 = 16ths): the move byte's top
+        // four bits since LAN protocol 25 / online 21 (they were always 0 before, which reads as the whole push)
+        public byte MovePush;
         public float Yaw; // degrees
         public float Pitch; // degrees (the game clamps it)
         public byte AimEpoch;
@@ -25,6 +28,9 @@ namespace MphRecomp.Multiplayer.Net
         // T11 (touch controls, 2026-10-10): the stylus on the touch controls' touch area this frame (PlayerTouch.cs:
         // vanilla's touch roll, flick boost and double-tap jump), DS pixels moved since the last frame; 0 / false for a pad
         public bool Touching;
+        // the move stick's own direction, CampaignInput.MoveDir (0 = the d-pad's bits steer, 1..120): the touch byte's top
+        // seven bits since LAN protocol 25 / online 21 (always 0 before: the d-pad's eight directions, as they played)
+        public byte MoveDir;
         public sbyte TouchDx, TouchDy;
         // online (0.3.6, client-reported position, Net/ClientPosition.cs): where this device had its own player at the start
         // of this input's step (Report), in alt form or not, and the newest host snapshot its prediction had taken in by then
@@ -50,13 +56,13 @@ namespace MphRecomp.Multiplayer.Net
             BinaryPrimitives.WriteUInt16LittleEndian(dest, Seq);
             BinaryPrimitives.WriteUInt16LittleEndian(dest[2..], (ushort)Buttons);
             dest[4] = (byte)(sbyte)SelectWeapon;
-            dest[5] = (byte)((MoveX + 1) | ((MoveY + 1) << 2));
+            dest[5] = (byte)((MoveX + 1) | ((MoveY + 1) << 2) | ((MovePush & 15) << 4));
             BinaryPrimitives.WriteInt16LittleEndian(dest[6..], (short)Math.Clamp(MathF.Round(Wrap(Yaw) * YawScale), -32768, 32767));
             BinaryPrimitives.WriteInt16LittleEndian(dest[8..], (short)Math.Clamp(MathF.Round(Pitch * PitchScale), -18000, 18000));
             dest[10] = AimEpoch;
             dest[11] = (byte)TouchDx;
             dest[12] = (byte)TouchDy;
-            dest[13] = (byte)(Touching ? 1 : 0);
+            dest[13] = (byte)((Touching ? 1 : 0) | ((MoveDir & 127) << 1));
         }
 
         public readonly void WriteRecord(Span<byte> dest)
@@ -81,12 +87,14 @@ namespace MphRecomp.Multiplayer.Net
                 SelectWeapon = (BeamType)(sbyte)src[4],
                 MoveX = (sbyte)((src[5] & 3) - 1),
                 MoveY = (sbyte)(((src[5] >> 2) & 3) - 1),
+                MovePush = (byte)(src[5] >> 4),
                 Yaw = BinaryPrimitives.ReadInt16LittleEndian(src[6..]) / YawScale,
                 Pitch = BinaryPrimitives.ReadInt16LittleEndian(src[8..]) / PitchScale,
                 AimEpoch = src[10],
                 TouchDx = (sbyte)src[11],
                 TouchDy = (sbyte)src[12],
-                Touching = (src[13] & 1) != 0
+                Touching = (src[13] & 1) != 0,
+                MoveDir = (byte)(src[13] >> 1)
             };
         }
 

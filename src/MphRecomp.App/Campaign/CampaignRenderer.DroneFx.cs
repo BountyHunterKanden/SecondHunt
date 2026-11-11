@@ -315,6 +315,7 @@ internal sealed partial class CampaignRenderer
         ResetBlasterFx(); // the Pirate Blaster's bolts (CampaignRenderer.BlasterFx.cs)
         ResetParalyzerFx(); // the Paralyzer's Brawl look (CampaignRenderer.ParalyzerFx.cs)
         ResetHyperBeamFx(); // the Hyper Beam's Corruption look (CampaignRenderer.HyperBeamFx.cs)
+        StopPillarFx(); // the gate's and pillars' loops (CampaignRenderer.PillarFx.cs)
         ResetHyperFx(); // Dark Samus's Hyper Ball look and hum (CampaignRenderer.HyperFx.cs)
         ResetTurretFx(); // Shooting Gallery turret's Echoes effects (CampaignRenderer.TurretFx.cs)
     }

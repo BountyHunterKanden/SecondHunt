@@ -52,6 +52,11 @@ internal sealed partial class CampaignRenderer
         MphRecomp.Arenas.EchoesTurretBots.ForceSeat = args.Get("turrettest") == "1" && !MphRecomp.Config.RecompSettings.PublicBuild;
         // dev --es dronetest 1: Trooper bots fire their drone whenever they have a target (PlayerEntity.HostDroneTest)
         MphRead.Entities.PlayerEntity.HostDroneTest = args.Get("dronetest") == "1" && !MphRecomp.Config.RecompSettings.PublicBuild;
+        // dev --es iceprobe 1-4: every seat looks frozen all the time, 2 = odd seats in vanilla's shell beside the even seats'
+        // fitted ice, 3 / 4 = all vanilla / all fitted (PlayerEntity.HostIceProbe: look only, nothing in the match changes)
+        MphRead.Entities.PlayerEntity.HostIceProbe = MphRecomp.Config.RecompSettings.PublicBuild ? 0
+            : int.TryParse(args.Get("iceprobe"), out int iceProbe) ? Math.Clamp(iceProbe, 0, 4) : 0;
+        _cpuSplit = args.Get("cpusplit") is string cs && cs.Length > 0 && cs != "0"; // dev: live matches too (CampaignRenderer.CpuSplit.cs)
         if (ConfigureReplay(args)) return; // --es replay: a recorded match played back (MatchReplay.cs)
         string? mode = args.Get("match");
         string? net = args.Get("net");
@@ -126,6 +131,8 @@ internal sealed partial class CampaignRenderer
             int bots = int.TryParse(args.Get("bots"), out int b) ? b : 3;
             int level = int.TryParse(args.Get("botlevel"), out int l) ? l : 1;
             MatchSettings settings = MatchSettings.Quick(gameMode, arena.Name, renderer._hunter, bots, level);
+            foreach (MatchPlayer p in settings.Players) // the ROM's bot names (KANBOT...), as the lobby's ADD BOT gives them
+                if (p.Bot) p.Nickname = MphRecomp.Frontend.MultiplayerMenu.OnlineBot(p.Hunter, level).Nickname;
             if (float.TryParse(args.Get("time"), System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out float time)) settings.TimeLimitSeconds = time;
             if (int.TryParse(args.Get("points"), out int points)) settings.PointGoal = points;
@@ -202,7 +209,7 @@ internal sealed partial class CampaignRenderer
                 // as vanilla: the game's fade to black, then the menus' RESULTS page (MultiplayerMenu); a LAN match's
                 // session ends here (the other device hears BYE once its own match is over too)
                 // (TRY CONTROLS: no results, so nothing reaches the license or the stats; owner 10-24. Its 99 point goal can end it)
-                MphRecomp.Frontend.MatchResults.Last = _tryControls ? null : MphRecomp.Frontend.MatchResults.Capture(_matchSettings!.LocalSeat);
+                MphRecomp.Frontend.MatchResults.Last = _tryControls ? null : MphRecomp.Frontend.MatchResults.Capture(_matchSettings!.LocalSeat, _matchSettings.Arena);
                 RecordFirstHuntMatch(); // a First Hunt deathmatch: its results page instead (FirstHuntSession.cs)
                 _matchEndedAt = double.MaxValue; // once
                 ShipSink?.Invoke("");

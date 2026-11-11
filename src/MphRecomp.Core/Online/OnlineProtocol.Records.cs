@@ -21,6 +21,11 @@ namespace MphRecomp.Online
         public string MatchKey { get; set; } = "";
         public bool Teams { get; set; }
         public List<ResultRow> Rows { get; set; } = new();
+        // the Gaming Hub (server 0.10.0, docs/GAMING_HUB.md; an older server ignores these): the mode and arena keys
+        // (ContentKeys) and how long the match ran
+        public string? Mode { get; set; }
+        public string? Arena { get; set; }
+        public int Seconds { get; set; }
     }
 
     public sealed class ResultRow
@@ -29,6 +34,22 @@ namespace MphRecomp.Online
         // 0 = first; equal places tie
         public int Place { get; set; }
         public int Team { get; set; } = -1;
+        // the Gaming Hub's numbers for this seat (null from an older client)
+        public ResultStats? Stats { get; set; }
+    }
+
+    // one seat's match numbers for the Gaming Hub (ContentKeys for the hunter and the weapon keys)
+    public sealed class ResultStats
+    {
+        public string Hunter { get; set; } = "";
+        public int Kills { get; set; }
+        public int Deaths { get; set; }
+        public int Headshots { get; set; }
+        public int AltKills { get; set; }
+        public int BestStreak { get; set; }
+        public int Shots { get; set; } // shots fired (0 from a client before SHOTS FIRED)
+        // kills per weapon key (alt_form included)
+        public Dictionary<string, int> Weapons { get; set; } = new();
     }
 
     // the viewer's record against a player (PlayerCard.Record): Last = HeadToHeadInfo.Victory / Defeat / Tie from the viewer's

@@ -86,7 +86,9 @@ internal sealed partial class CampaignRenderer
         if (t == null) return;
 
         PlayerEntity? main = PlayerEntity.Main;
-        bool mine = t.Occupant != null && t.Occupant == main;
+        // a replay's free cam is no seat's ear: the main player's turret sounds like anyone's, placed at the turret
+        // (GameAudio.FreeCamEar drops the seat-only ones)
+        bool mine = t.Occupant != null && t.Occupant == main && !PlayerEntity.HostNoViewer;
         Place(_turretSound, t.PivotNow);
         _turretSelf.Update(t.PivotNow, -1);
 

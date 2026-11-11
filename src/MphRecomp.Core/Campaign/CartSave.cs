@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using MphRead;
 
@@ -20,6 +21,86 @@ namespace MphRecomp.Campaign
         public long PlaySeconds { get; init; }
         public bool Cleared { get; init; }
         internal byte[]? Story { get; init; }
+    }
+
+    // What a vanilla cart keeps for the whole cart, outside the three files: the options save's multiplayer unlocks
+    // (section 4 +0x04 arenas by room id - 93, +0x08 hunters by Hunter, +0x10 bit 5 an ending / bit 6 the 100% ending)
+    // and the Hunter License's marks (section 5 +0x18 bit 28 beaten, bit 29 at 100%). Null parts = that section is empty
+    // or damaged on this cart.
+    public sealed class CartUnlocks
+    {
+        public int? Arenas { get; init; }
+        public int? Hunters { get; init; }
+        public bool Ending { get; init; }
+        public bool Ending100 { get; init; }
+        public bool LicenseBeaten { get; init; }
+        public bool LicenseCompleted { get; init; }
+        // the whole Hunter License (section 5), null = none on this cart
+        public CartLicense? License { get; init; }
+        // why the license doesn't look like one the game wrote (CartSave.CheckLicense), null = it does
+        public string? LicenseProblem { get; init; }
+    }
+
+    // A vanilla cart's Hunter License (section 5, 0x1E8 bytes; docs/MULTIPLAYER_MENU.md M6), as the card's own fields:
+    // the name (ASCII, NUL-ended, +0x00..0x17), +0x18 the packed marks (favourites, rank level, beaten, 100%), +0x1C rank
+    // points, the counters +0x20..0x58, +0x74 matches by hunter, +0xAC kills by beam, +0xD0 / +0x144 wins / matches by arena
+    // (room id - 93), +0x1B8 matches by mode, the current streaks +0x1D4..0x1E0. Times are whole seconds.
+    public sealed class CartLicense
+    {
+        public string Name { get; init; } = "";
+        public uint Marks { get; init; }
+        public int RankPoints { get; init; }
+        public int WifiWins { get; init; }
+        public int OnlineMatches { get; init; }
+        public int WirelessWins { get; init; }
+        public int LocalMatches { get; init; }
+        public int BipedKills { get; init; }
+        public int AltFormKills { get; init; }
+        public int HeadshotKills { get; init; }
+        public int Disconnects { get; init; }
+        public int WirelessSeconds { get; init; }
+        public int WifiSeconds { get; init; }
+        public int TotalSeconds { get; init; }
+        public int WifiBestWinStreak { get; init; }
+        public int WifiBestKillStreak { get; init; }
+        public int WirelessBestWinStreak { get; init; }
+        public int WirelessBestKillStreak { get; init; }
+        public int WifiWinStreak { get; init; }
+        public int WifiKillStreak { get; init; }
+        public int WirelessWinStreak { get; init; }
+        public int WirelessKillStreak { get; init; }
+        public int[] HunterMatches { get; init; } = new int[7];
+        public int[] WeaponKills { get; init; } = new int[9];
+        public int[] ArenaWins { get; init; } = new int[29];
+        public int[] ArenaMatches { get; init; } = new int[29];
+        public int[] ModeMatches { get; init; } = new int[7];
+        public int FavoriteHunter => (int)(Marks >> 3) & 0xF;
+        public int FavoriteWeapon => (int)(Marks >> 7) & 0x1F;
+        public int FavoriteMode => (int)(Marks >> 12) & 0x7;
+        public int LuckyArena => (int)(Marks >> 15) & 0x1F; // room id - 93
+        public int RankLevel => (int)(Marks >> 24) & 0x7;
+        public bool Beaten => (Marks & (1u << 28)) != 0;
+        public bool Completed => (Marks & (1u << 29)) != 0;
+
+        internal static CartLicense Read(byte[] b)
+        {
+            int I(int o) => (int)Math.Min(BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(o)), (uint)Int32.MaxValue - 1);
+            int[] A(int o, int n) => Enumerable.Range(0, n).Select(i => I(o + 4 * i)).ToArray();
+            int end = Array.IndexOf(b, (byte)0, 0, 0x18);
+            return new CartLicense
+            {
+                Name = Encoding.ASCII.GetString(b, 0, end < 0 ? 0x18 : end),
+                Marks = BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(0x18)),
+                RankPoints = I(0x1C),
+                WifiWins = I(0x20), OnlineMatches = I(0x24), WirelessWins = I(0x28), LocalMatches = I(0x2C),
+                BipedKills = I(0x30), AltFormKills = I(0x34), HeadshotKills = I(0x38), Disconnects = I(0x3C),
+                WirelessSeconds = I(0x40), WifiSeconds = I(0x44), TotalSeconds = I(0x48),
+                WifiBestWinStreak = I(0x4C), WifiBestKillStreak = I(0x50), WirelessBestWinStreak = I(0x54), WirelessBestKillStreak = I(0x58),
+                HunterMatches = A(0x74, 7), WeaponKills = A(0xAC, 9), ArenaWins = A(0xD0, 29), ArenaMatches = A(0x144, 29),
+                ModeMatches = A(0x1B8, 7),
+                WifiWinStreak = I(0x1D4), WifiKillStreak = I(0x1D8), WirelessWinStreak = I(0x1DC), WirelessKillStreak = I(0x1E0)
+            };
+        }
     }
 
     // Vanilla Metroid Prime Hunters cartridge saves (US rev 1, AMHE1): reading the three adventure files into app saves
@@ -47,11 +128,20 @@ namespace MphRecomp.Campaign
         // empty here so the game sets its defaults).
         private static readonly int[] _otherEmptyBlocks = BuildOtherEmptyBlocks();
 
-        public IReadOnlyList<CartSaveFile> Files { get; }
+        // Sections 4 (options) and 5 (Hunter License): blocks of roundup(length + 8, 0x100) from their start, the highest
+        // index wins, checksum = 1 + length + the u16 words over block[4..8 + length] (the story's rule)
+        private const int OptionsStart = 0x29A00, OptionsBlocks = 10, OptionsLength = 0xA4;
+        private const int LicenseStart = 0x2A400, LicenseBlocks = 9, LicenseLength = 0x1E8;
+        // the retail arenas (rooms 93-119) and hunters (Samus..Guardian)
+        private const int ArenaMask = 0x7FFFFFF, HunterMask = 0x7F;
 
-        private CartSave(IReadOnlyList<CartSaveFile> files)
+        public IReadOnlyList<CartSaveFile> Files { get; }
+        public CartUnlocks Unlocks { get; }
+
+        private CartSave(IReadOnlyList<CartSaveFile> files, CartUnlocks unlocks)
         {
             Files = files;
+            Unlocks = unlocks;
         }
 
         // Accepts raw .sav (melonDS, flashcarts, BizHawk, cart dumpers), DeSmuME .dsv (raw + footer) and padded raws:
@@ -91,7 +181,166 @@ namespace MphRecomp.Campaign
                     Cleared = (story[0x1084] & 2) != 0
                 });
             }
-            return new CartSave(files);
+            return new CartSave(files, ReadUnlocks(data));
+        }
+
+        private static CartUnlocks ReadUnlocks(byte[] data)
+        {
+            byte[]? options = NewestSectionBlock(data, OptionsStart, OptionsBlocks, OptionsLength);
+            byte[]? license = TagIsUsed(data, 5) ? NewestSectionBlock(data, LicenseStart, LicenseBlocks, LicenseLength) : null;
+            uint marks = license == null ? 0 : U32(license, 0x18);
+            return new CartUnlocks
+            {
+                Arenas = options == null ? null : (int)(U32(options, 0x04) & ArenaMask),
+                Hunters = options == null ? null : (int)(U32(options, 0x08) & HunterMask),
+                Ending = options != null && (options[0x10] & 0x20) != 0,
+                Ending100 = options != null && (options[0x10] & 0x40) != 0,
+                LicenseBeaten = (marks & (1u << 28)) != 0,
+                LicenseCompleted = (marks & (1u << 29)) != 0,
+                License = license == null ? null : CartLicense.Read(license),
+                LicenseProblem = license == null ? null : CheckLicense(data)
+            };
+        }
+
+        // Is the Hunter License one the game wrote? (owner 11-07: refuse a hand-edited one.) Nothing on a DS save is signed,
+        // but the cart keeps its last 9 license saves in a ring (block = save index % 9, the highest wins) and the game
+        // writes one after every match and again on the way out of RESULTS (a real Wi-Fi cart, 11-07: saves 162-170, one
+        // match per two saves). So every save has to add up on its own (matches by hunter / mode / arena = the matches,
+        // arena wins = the wins, ...) and be a step on from the one before: counters only go up, at most one match per
+        // save, points by what one match can give, the clock moving. An editor that changes the newest block, or writes
+        // one block (our own -cartsave license), fails here.
+        private static string? CheckLicense(byte[] data)
+        {
+            int size = (LicenseLength + 8 + 0xFF) & ~0xFF;
+            var saves = new List<(uint Index, CartLicense License)>();
+            for (int b = 0; b < LicenseBlocks; b++)
+            {
+                var block = data.AsSpan(LicenseStart + b * size, size);
+                uint checksum = BinaryPrimitives.ReadUInt32LittleEndian(block);
+                if (checksum == 0 || checksum != SectionChecksum(block, LicenseLength))
+                {
+                    continue;
+                }
+                uint index = BinaryPrimitives.ReadUInt32LittleEndian(block[4..]);
+                if (index % LicenseBlocks != b)
+                {
+                    return $"save {index} in block {b}";
+                }
+                saves.Add((index, CartLicense.Read(block.Slice(8, LicenseLength).ToArray())));
+            }
+            saves.Sort((x, y) => x.Index.CompareTo(y.Index));
+            uint newest = saves[^1].Index;
+            // a save cut off by a power loss leaves one bad block
+            if (saves.Count < Math.Min(LicenseBlocks, newest + 1) - 1)
+            {
+                return $"{saves.Count} saves up to save {newest}";
+            }
+            for (int s = 0; s < saves.Count; s++)
+            {
+                string? problem = LicenseAddsUp(saves[s].License)
+                    ?? (s == 0 ? null : LicenseStep(saves[s - 1].License, saves[s].License, saves[s].Index - saves[s - 1].Index));
+                if (problem != null)
+                {
+                    return $"save {saves[s].Index}: {problem}";
+                }
+            }
+            CartLicense last = saves[^1].License;
+            if (last.OnlineMatches + (long)last.LocalMatches > newest + 1)
+            {
+                return $"{last.OnlineMatches + last.LocalMatches} matches in {newest + 1} saves";
+            }
+            return null;
+        }
+
+        private static string? LicenseAddsUp(CartLicense l)
+        {
+            // 50M is over a year and a half of play; keeps the sums below from overflowing
+            int[] all = new[] { l.RankPoints, l.WifiWins, l.OnlineMatches, l.WirelessWins, l.LocalMatches, l.BipedKills,
+                l.AltFormKills, l.HeadshotKills, l.Disconnects, l.WirelessSeconds, l.WifiSeconds, l.TotalSeconds }
+                .Concat(l.HunterMatches).Concat(l.WeaponKills).Concat(l.ArenaWins).Concat(l.ArenaMatches).Concat(l.ModeMatches).ToArray();
+            if (all.Any(v => v > 50_000_000)) return "a count too big";
+            int matches = l.OnlineMatches + l.LocalMatches, wins = l.WifiWins + l.WirelessWins, kills = l.BipedKills + l.AltFormKills;
+            if (l.HunterMatches.Sum() != matches) return "matches by hunter";
+            if (l.ModeMatches.Sum() != matches) return "matches by mode";
+            if (l.ArenaMatches.Sum() != matches) return "matches by arena";
+            if (l.ArenaWins.Sum() != wins) return "wins by arena";
+            if (l.ArenaWins.Where((w, i) => w > l.ArenaMatches[i]).Any()) return "an arena's wins";
+            if (l.WifiWins > l.OnlineMatches || l.WirelessWins > l.LocalMatches) return "wins";
+            if (l.WeaponKills.Sum() > kills || l.HeadshotKills > kills) return "kills";
+            if ((long)l.WifiSeconds + l.WirelessSeconds > l.TotalSeconds) return "times";
+            if (l.WifiBestWinStreak > l.WifiWins || l.WirelessBestWinStreak > l.WirelessWins
+                || l.WifiWinStreak > l.WifiBestWinStreak || l.WirelessWinStreak > l.WirelessBestWinStreak) return "win streaks";
+            if (l.WifiBestKillStreak > kills || l.WirelessBestKillStreak > kills
+                || l.WifiKillStreak > l.WifiBestKillStreak || l.WirelessKillStreak > l.WirelessBestKillStreak) return "kill streaks";
+            int[] thresholds = MphRecomp.Frontend.HunterLicense.RankThresholds;
+            if (l.RankPoints >= thresholds[4] || l.RankLevel != thresholds.Count(t => l.RankPoints >= t)) return "rank";
+            return null;
+        }
+
+        // the next save from the one before (steps > 1 = a block lost to a cut-off save in between)
+        private static string? LicenseStep(CartLicense a, CartLicense b, uint steps)
+        {
+            static bool Up(int[] x, int[] y) => x.Zip(y).All(p => p.Second >= p.First);
+            if (b.OnlineMatches < a.OnlineMatches || b.LocalMatches < a.LocalMatches || b.WifiWins < a.WifiWins
+                || b.WirelessWins < a.WirelessWins || b.BipedKills < a.BipedKills || b.AltFormKills < a.AltFormKills
+                || b.HeadshotKills < a.HeadshotKills || b.Disconnects < a.Disconnects || b.WirelessSeconds < a.WirelessSeconds
+                || b.WifiSeconds < a.WifiSeconds || b.WifiBestWinStreak < a.WifiBestWinStreak
+                || b.WifiBestKillStreak < a.WifiBestKillStreak || b.WirelessBestWinStreak < a.WirelessBestWinStreak
+                || b.WirelessBestKillStreak < a.WirelessBestKillStreak || !Up(a.HunterMatches, b.HunterMatches)
+                || !Up(a.WeaponKills, b.WeaponKills) || !Up(a.ArenaWins, b.ArenaWins) || !Up(a.ArenaMatches, b.ArenaMatches)
+                || !Up(a.ModeMatches, b.ModeMatches))
+            {
+                return "a count went down";
+            }
+            if (b.TotalSeconds <= a.TotalSeconds) return "the clock didn't move";
+            int matches = b.OnlineMatches + b.LocalMatches - a.OnlineMatches - a.LocalMatches;
+            if (matches > steps) return $"{matches} matches in {steps} save(s)";
+            if (b.WifiWins - a.WifiWins > b.OnlineMatches - a.OnlineMatches
+                || b.WirelessWins - a.WirelessWins > b.LocalMatches - a.LocalMatches) return "more wins than matches";
+            if ((long)b.WifiSeconds - a.WifiSeconds + b.WirelessSeconds - a.WirelessSeconds > (long)b.TotalSeconds - a.TotalSeconds)
+            {
+                return "match time past the clock";
+            }
+            // 3 opponents at 15 points each is the most one 4-player match moves
+            if (Math.Abs(b.RankPoints - a.RankPoints) > 45 * Math.Max(matches, 1)) return "points jumped";
+            if (matches == 0 && (b.BipedKills != a.BipedKills || b.AltFormKills != a.AltFormKills || !a.WeaponKills.SequenceEqual(b.WeaponKills)))
+            {
+                return "kills without a match";
+            }
+            return null;
+        }
+
+        private static byte[]? NewestSectionBlock(byte[] data, int start, int blocks, int length)
+        {
+            int size = (length + 8 + 0xFF) & ~0xFF;
+            byte[]? best = null;
+            uint bestIndex = 0;
+            for (int b = 0; b < blocks; b++)
+            {
+                var block = data.AsSpan(start + b * size, size);
+                uint checksum = BinaryPrimitives.ReadUInt32LittleEndian(block);
+                if (checksum == 0 || checksum != SectionChecksum(block, length))
+                {
+                    continue;
+                }
+                uint index = BinaryPrimitives.ReadUInt32LittleEndian(block[4..]);
+                if (best == null || index > bestIndex)
+                {
+                    best = block.Slice(8, length).ToArray();
+                    bestIndex = index;
+                }
+            }
+            return best;
+        }
+
+        private static uint SectionChecksum(ReadOnlySpan<byte> block, int length)
+        {
+            uint sum = 1 + (uint)length;
+            for (int i = 4; i < 8 + length; i += 2)
+            {
+                sum += BinaryPrimitives.ReadUInt16LittleEndian(block[i..]);
+            }
+            return sum;
         }
 
         private static byte[]? NewestBlock(byte[] data, int file)
@@ -213,8 +462,9 @@ namespace MphRecomp.Campaign
         }
 
         // A fresh 256 KB DS save holding the app file as file A (B and C empty, options unset). With a base save the
-        // file goes into that save's slot instead and everything else in it is kept.
-        public static byte[] Export(CampaignSaveFile file, byte[]? baseSave = null, int slot = 0)
+        // file goes into that save's slot instead and everything else in it is kept. With unlocks (the app's Hunter
+        // License) the options + license sections get them OR-ed in, written as their next block.
+        public static byte[] Export(CampaignSaveFile file, byte[]? baseSave = null, int slot = 0, CartUnlocks? unlocks = null)
         {
             byte[] data;
             if (baseSave != null)
@@ -242,7 +492,91 @@ namespace MphRecomp.Campaign
             BinaryPrimitives.WriteUInt32LittleEndian(written[4..], 0);
             BinaryPrimitives.WriteUInt32LittleEndian(written, Checksum(written));
             BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(TagOffset + 4 * slot), TagUsed);
+            if (unlocks != null)
+            {
+                WriteUnlocks(data, unlocks);
+            }
             return data;
+        }
+
+        // A formatted cart has no options/license blocks: the game sets these in RAM at boot (arm9 0x0205C29C) and a
+        // section whose tag is empty keeps them. Options: volumes 9/9, the starting arenas + hunters, +0x10 0x680,
+        // +0x14 0x1333; license: all zero but the name, which the game refills from the firmware nickname after a
+        // load while options +0x10 bit 8 is clear (ov0 0x02124B08), so an empty name is fine.
+        private static readonly byte[] _optionsDefault = BuildOptionsDefault();
+
+        private static byte[] BuildOptionsDefault()
+        {
+            var d = new byte[OptionsLength];
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x00), 0x242400);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x04), 0x161295);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x08), 0x23);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x10), 0x680);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(0x14), 0x1333);
+            return d;
+        }
+
+        private static void WriteUnlocks(byte[] data, CartUnlocks unlocks)
+        {
+            byte[] options = TagIsUsed(data, 4) ? NewestSectionBlock(data, OptionsStart, OptionsBlocks, OptionsLength)
+                ?? (byte[])_optionsDefault.Clone() : (byte[])_optionsDefault.Clone();
+            uint arenas = U32(options, 0x04) | (uint)((unlocks.Arenas ?? 0) & ArenaMask);
+            uint hunters = U32(options, 0x08) | (uint)((unlocks.Hunters ?? 0) & HunterMask);
+            BinaryPrimitives.WriteUInt32LittleEndian(options.AsSpan(0x04), arenas);
+            BinaryPrimitives.WriteUInt32LittleEndian(options.AsSpan(0x08), hunters);
+            if (unlocks.Ending || unlocks.LicenseBeaten) options[0x10] |= 0x20;
+            if (unlocks.Ending100 || unlocks.LicenseCompleted) options[0x10] |= 0x40;
+            WriteSection(data, 4, OptionsStart, OptionsBlocks, options);
+
+            byte[] license = (TagIsUsed(data, 5) ? NewestSectionBlock(data, LicenseStart, LicenseBlocks, LicenseLength) : null)
+                ?? new byte[LicenseLength];
+            uint marks = U32(license, 0x18);
+            if (unlocks.LicenseBeaten || unlocks.Ending) marks |= 1u << 28;
+            if (unlocks.LicenseCompleted || unlocks.Ending100) marks |= 1u << 29;
+            BinaryPrimitives.WriteUInt32LittleEndian(license.AsSpan(0x18), marks);
+            WriteSection(data, 5, LicenseStart, LicenseBlocks, license);
+        }
+
+        // a license block (section 5, 0x1E8 bytes as CartLicense.Read reads them) written into a save as its newest: the
+        // -cartsave test's made-up license (the owner's test saves have none)
+        public static void WriteLicense(byte[] data, byte[] license)
+        {
+            var block = new byte[LicenseLength];
+            license.AsSpan(0, Math.Min(license.Length, LicenseLength)).CopyTo(block);
+            WriteSection(data, 5, LicenseStart, LicenseBlocks, block);
+        }
+
+        private static bool TagIsUsed(byte[] data, int section) =>
+            BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(TagOffset + 4 * section)) != TagEmpty;
+
+        // the section's next block after its newest valid one (vanilla's ring), index + 1, then the tag set
+        private static void WriteSection(byte[] data, int section, int start, int blocks, byte[] content)
+        {
+            int length = content.Length;
+            int size = (length + 8 + 0xFF) & ~0xFF;
+            int newest = -1;
+            uint newestIndex = 0;
+            for (int b = 0; b < blocks; b++)
+            {
+                var block = data.AsSpan(start + b * size, size);
+                uint checksum = BinaryPrimitives.ReadUInt32LittleEndian(block);
+                if (checksum == 0 || checksum != SectionChecksum(block, length)) continue;
+                uint index = BinaryPrimitives.ReadUInt32LittleEndian(block[4..]);
+                if (newest < 0 || index > newestIndex)
+                {
+                    newest = b;
+                    newestIndex = index;
+                }
+            }
+            int at = newest < 0 ? 0 : (newest + 1) % blocks;
+            uint next = newest < 0 ? 0 : newestIndex + 1;
+            var written = data.AsSpan(start + at * size, size);
+            written.Fill(0xFF);
+            written[..(8 + length)].Clear();
+            BinaryPrimitives.WriteUInt32LittleEndian(written[4..], next);
+            content.CopyTo(written[8..]);
+            BinaryPrimitives.WriteUInt32LittleEndian(written, SectionChecksum(written, length));
+            BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(TagOffset + 4 * section), TagUsed);
         }
 
         private static byte[] NewCart()

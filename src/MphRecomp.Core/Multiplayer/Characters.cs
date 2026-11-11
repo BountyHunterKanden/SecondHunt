@@ -88,8 +88,8 @@ namespace MphRecomp.Multiplayer
 
         public static readonly IReadOnlyList<Character> All = new[] { Samus, Trooper, DarkSamus, ZeroSuit, Sylux };
 
-        // the campaign's SAMUS SUIT row: Samus's own suits only, never another hunter (Beyond's Sylux had a guns/ folder), Dark
-        // Samus or the Zero Suit; those are new-file hunters
+        // the campaign's SAMUS SUIT row (owner 2026-11-01): Samus's own suits only (her rig, Brawl's too in dev builds), never
+        // another hunter (Beyond's Sylux had a guns/ folder), Dark Samus or the Zero Suit; those are new-file hunters
         public static bool IsSamusSuit(string id) =>
             id is "original" or "none"
             || (TrophyRigs.TryHunterFor(id, out Hunter h) && h == Hunter.Samus

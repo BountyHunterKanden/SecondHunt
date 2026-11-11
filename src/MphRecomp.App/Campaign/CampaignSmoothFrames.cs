@@ -97,8 +97,41 @@ internal sealed partial class CampaignRenderer
             if (!_sfPrevAt.TryGetValue(at.Key, out Vector3 was)) continue;
             Vector3 move = at.Value - was;
             float d2 = move.LengthSquared;
-            if (d2 > 0 && d2 < SmoothEntityJump * SmoothEntityJump) _sfMove[at.Key] = move;
+            if (d2 > 0 && d2 < SmoothEntityJump * SmoothEntityJump)
+            {
+                if (at.Key is BeamProjectileEntity shot) move = ShotCarryToHunter(shot, move, scene);
+                _sfMove[at.Key] = move;
+            }
         }
+    }
+
+    // a shot's carry stops at the first hunter it would reach (owner 2026-10-31: the Pirate Blaster's bolts looked like they
+    // landed and flew on through the target): carried a step past its last spot, a bolt that hits in the next step drew
+    // inside or past the target first. Same body tests as the sim's hit (BeamProjectileEntity: biped cylinder, alt form sphere)
+    static Vector3 ShotCarryToHunter(BeamProjectileEntity b, Vector3 move, Scene scene)
+    {
+        if (b.Flags.TestFlag(BeamFlags.Collided)) return move;
+        Vector3 from = b.Position, to = from + move;
+        float best = 1, len2 = move.LengthSquared;
+        foreach (PlayerEntity player in scene.GetPlayerEntities())
+        {
+            if (player.Health == 0 || player.HostSeated || b.Owner == player || b.Owner == player.Halfturret) continue;
+            CollisionResult res = default;
+            float radii = player.Volume.SphereRadius + b.CylinderRadius;
+            bool hit;
+            if (player.IsAltForm)
+            {
+                hit = CollisionDetection.CheckCylinderOverlapSphere(from, to, player.Volume.SpherePosition, radii, ref res);
+            }
+            else
+            {
+                float minY = Fixed.ToFloat(player.Values.MinPickupHeight);
+                hit = CollisionDetection.CheckCylindersOverlap(from, to, player.Position.AddY(minY), Vector3.UnitY,
+                    Fixed.ToFloat(player.Values.MaxPickupHeight) - minY, radii, ref res);
+            }
+            if (hit) best = Math.Min(best, Math.Clamp(Vector3.Dot(res.Position - from, move) / len2, 0, 1));
+        }
+        return move * best;
     }
 
     void RecordOwners(IReadOnlyList<RenderItem> items)

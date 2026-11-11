@@ -170,7 +170,7 @@ internal sealed partial class CampaignRenderer
         if (now < 0 || now == was) return;
         MiningPlazaGate.GateSpot s = gt.Spot;
         // the jingle, at the open, the same for everyone (not positional; owner 2026-10-31 "standard volume for everyone")
-        if (was < 0) PillarSound(lib, "gate_jingle", null);
+        if (was < 0) PillarSound(lib, "gate_jingle", null, everyone: true); // the whole match hears it, free cam too
         foreach (MiningPlazaGate.GateCue c in s.Cues)
         {
             // the cues at 0 play on the open's first step
@@ -214,9 +214,9 @@ internal sealed partial class CampaignRenderer
 
     static Vector3 V(float[] a) => a.Length >= 3 ? new Vector3(a[0], a[1], a[2]) : Vector3.Zero;
 
-    void PillarSound(PillarFxLib lib, string role, SoundSource? src)
+    void PillarSound(PillarFxLib lib, string role, SoundSource? src, bool everyone = false)
     {
-        if (_sfx != null && lib.Sounds.TryGetValue(role, out var snd)) _sfx.PlayPcm(snd.Pcm, snd.Rate, snd.Volume, src);
+        if (_sfx != null && lib.Sounds.TryGetValue(role, out var snd)) _sfx.PlayPcm(snd.Pcm, snd.Rate, snd.Volume, src, everyone);
     }
 
     // a system at `at`: Echoes' axes as the room maps them (X, Y = -Z, Z = up), or the import's own (the impact's turn)
@@ -230,7 +230,7 @@ internal sealed partial class CampaignRenderer
             y = new Vector3(axes[3], axes[4], axes[5]);
             z = new Vector3(axes[6], axes[7], axes[8]);
         }
-        var fx = new DroneFxLive { Sys = new RetroParticleSystem(lib.Parts, id, PillarMatrix(at, y, x, z), follow: true, seed: Environment.TickCount ^ (int)id) };
+        var fx = new DroneFxLive { Sys = new RetroParticleSystem(lib.Parts, id, GrappleMatrix(at, y, x, z), follow: true, seed: Environment.TickCount ^ (int)id) };
         _fxLive.Add(fx);
         return fx;
     }
@@ -240,12 +240,6 @@ internal sealed partial class CampaignRenderer
         StopFx(ref st.Explosion);
         if (st.Slide != null) _sfx?.StopPcm(st.Slide);
         st.Slide = null;
-    }
-
-    static Matrix4 PillarMatrix(Vector3 at, Vector3 y, Vector3 x, Vector3 z)
-    {
-        float s = EchoesArena.DefaultScale;
-        return new Matrix4(new Vector4(x * s, 0), new Vector4(y * s, 0), new Vector4(z * s, 0), new Vector4(at, 1));
     }
 
     void StopPillarFx()

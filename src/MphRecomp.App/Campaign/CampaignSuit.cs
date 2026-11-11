@@ -54,6 +54,7 @@ internal sealed class CampaignSuit
         public int ClsMask;                      // the units that have one
         public bool Cull;                // front faces only (a vein ball's vents: HdBall.IsVent)
         public int Face;                 // the menu recipe's visor lists: 1 = the face behind the visor, 2 = the visor pane
+        public bool KeepColour, Phazon;  // Overcharged Dark Samus's untinted parts and her phazon (CampaignRetroBody's rule)
     }
 
     readonly List<float> _build = new();
@@ -74,10 +75,14 @@ internal sealed class CampaignSuit
     // the torso fires (TrophyRigs.OffHandStaysDown), null for everyone else
     Hunter _hunter = Hunter.Samus;
     bool[]? _offArm;
+    // whose DS rig the body rides (a seat on another hunter can't take its ragdoll: the bones are another rig's)
+    public Hunter BodyRig => _hunter;
     // a body converted from its own Retro model with its sheets as the disc has them (the final form Dark Samus, owner
     // 10-18: "when she jumps she's way brighter"): its additive parts once, its blended ones culled as the disc says --
     // CampaignRetroBody's look. The trophies keep the doubled sheets (DrawPass)
     bool _oneSheet;
+    static readonly string[] OverchargedSkin = { "0aa4aed0", "76c58b0b" };
+    static readonly string[] OverchargedPhazon = { "6294e431", "50c52d95" };
     // the menus' face lists (MenuSamus.json "visor"), loaded once for every suit
     static Frontend.MenuSamus? _visorRecipe;
     static bool _visorTried;
@@ -121,6 +126,53 @@ internal sealed class CampaignSuit
     // the seat's double damage (MphRead's PlayerEntity.DoubleDamage, set by MatchSkins as SeatTint): its GL texture
     // (DoubleDmgBindingId, 0 = off) and DoubleDamageLook's matrix; the draw goes through the interpreter, as the flash
     public int DdTex { get; set; }
+    // recomp: the seat's fitted ice while it's frozen (SuitIce.cs; set by MatchSkins around its body's draw, null = none)
+    public IceLook? Ice { get; set; }
+    Task<IceShell?>? _iceJob;
+
+    // the shell's fit started now, on its worker (MatchSkins, as the suit first draws), not at its first freeze (owner
+    // 2026-11-10: a body's first freeze showed no ice while its fit ran)
+    public void WarmIce(FittedIce.IceReference? r)
+    {
+        if (_iceJob == null && r != null && HasBody) IceShellOf(new IceLook { Ref = r });
+    }
+
+    // vanilla's ice shell fitted to this suit's bind pose (SuitIce.cs), on its skeleton's nodes: the palette as drawn
+    IceShell? IceShellOf(IceLook look)
+    {
+        if (look.Ref is not FittedIce.IceReference r) return null;
+        if (_iceJob != null) return SuitIce.Fit(ref _iceJob, "suit " + Id, () => null);
+        float[] verts = _verts;
+        var parts = new List<(int Start, int Count)>();
+        foreach (Batch b in _body) if (PassOf(b) == 0 || PassOf(b) == 1) parts.Add((b.Start, b.Count));
+        string[] names = _skel.Names;
+        Matrix4[] inv = _rig.InvBind, bind = _rig.BindWorld;
+        return SuitIce.Fit(ref _iceJob, "suit " + Id, () =>
+        {
+            // each skeleton node's vertices in its own frame (by their heaviest weight), and the body's surface
+            var clouds = new List<Vector3>[names.Length];
+            for (int i = 0; i < clouds.Length; i++) clouds[i] = new List<Vector3>();
+            var tris = new List<Vector3[]>();
+            foreach ((int start, int count) in parts)
+            {
+                for (int v = start; v + 2 < start + count; v += 3)
+                {
+                    var t = new Vector3[3];
+                    for (int k = 0; k < 3; k++)
+                    {
+                        int o = (v + k) * Floats, j = 0;
+                        t[k] = new Vector3(verts[o], verts[o + 1], verts[o + 2]);
+                        for (int w = 1; w < 4; w++) if (verts[o + 15 + w] > verts[o + 15 + j]) j = w;
+                        int bone = (int)(verts[o + 11 + j] + 0.5f);
+                        if ((uint)bone < (uint)clouds.Length) clouds[bone].Add(Vector3.TransformPosition(t[k], inv[bone]));
+                    }
+                    tris.Add(t);
+                }
+            }
+            FittedIce.IceCorner[]? corners = FittedIce.ShellOnSkeleton(r, names, clouds, bind, tris);
+            return corners == null ? null : new IceShell(corners);
+        });
+    }
     public float[] DdMtx { get; } = new float[9];
 
     // _prog = the interpreter (GunPrograms.SuitInterpFrag), _depthProg = depth only, _specProg = the materials' own
@@ -359,6 +411,17 @@ internal sealed class CampaignSuit
         if (_body.Count == 0) return $"none (no part of {Path.GetFileName(daePath)} has a GX program: no .brres or .gx.json?)";
         _oneSheet = Id.Equals("MP2DarkSamusFinal", StringComparison.OrdinalIgnoreCase);
         if (_oneSheet) foreach (Batch b in _body) b.Cull = b.Pass != 0 && (b.Gx.CullMode & 3) == 2;
+        // under a seat tint (a lobby colour's picture) only her blue skin and phazon take the colour, as a match draws
+        // her native body (CampaignRetroBody: same texture ids, GxShader uTintWarm)
+        if (_oneSheet)
+            foreach (Batch b in _body)
+            {
+                bool skin = false;
+                for (int u = 0; u < 8; u++)
+                    if (Array.IndexOf(OverchargedPhazon, b.P.Units[u]?.Name ?? "") >= 0) b.Phazon = true;
+                    else if (Array.IndexOf(OverchargedSkin, b.P.Units[u]?.Name ?? "") >= 0) skin = true;
+                b.KeepColour = !skin && !b.Phazon;
+            }
         MarkFace();
         _dsModel = rm;
         _skel = sk;
@@ -664,12 +727,15 @@ internal sealed class CampaignSuit
     public void DrawBody(PlayerEntity player, Matrix4 view, Matrix4 proj, SuitPass pass, float alpha, bool flash = false, float lift = 0)
     {
         _posing = player;
+        // a dead seat on the DEATH look's RAGDOLL (PlayerRagdoll.cs), posed on its bodies' turns instead of the clips
+        _doll = player.HostRagdollPose is PlayerRagdoll doll && player.Hunter == _hunter ? doll : null;
+        _dollLift = lift;
         try
         {
             DrawBodyAt(player.HostBipedModel1.AnimInfo, player.BipedModel2.AnimInfo, player.FacingVector.Y, player.Position + new Vector3(0, lift, 0),
                 new Vector3(player.Field70, 0, player.Field74), view, proj, pass, alpha, flash);
         }
-        finally { _posing = null; }
+        finally { _posing = null; _doll = null; }
         if (pass == SuitPass.Opaque) GunFlashOnTip(player);
     }
 
@@ -690,10 +756,16 @@ internal sealed class CampaignSuit
             bool fade = alpha < 0.999f && _fadeOk;
             bool own = !(fade && p == 0);
             bool moved = fade && p == 1;
-            if (!(own && Has(_body, p)) && !(moved && Has(_body, 0))) return;
-            Matrix4 model = HunterRig.ModelMatrix(_dsModel, HunterRig.Placement(_hunter, position, facing));
-            if (_upright != 0) AimInModel(model, facing, pitch);
-            Pose(legs, torso, pitch);
+            bool body = own && Has(_body, p) || moved && Has(_body, 0);
+            bool ice = Ice != null && p == 1 && !rebuild; // (the fitted ice over it, in the blended pass: SuitIce.cs)
+            if (!body && !ice) return;
+            Matrix4 model;
+            if (_doll == null || !RagdollPose(_doll, _dollLift, out model))
+            {
+                model = HunterRig.ModelMatrix(_dsModel, HunterRig.Placement(_hunter, position, facing));
+                if (_upright != 0) AimInModel(model, facing, pitch);
+                Pose(legs, torso, pitch);
+            }
             _lastModel = model;
             Begin(view, proj, model, _pal, _skel.Count);
             double s = Environment.TickCount64 / 1000.0;
@@ -706,6 +778,13 @@ internal sealed class CampaignSuit
                 DrawPass(_body, 0, 1f, s, rebuild ? DepthDone.Skip : DepthDone.Lequal);
             }
             else if (own) DrawPass(_body, p, fade ? alpha : 1f, s);
+            if (ice && IceShellOf(Ice!) is IceShell shell && SuitIce.Begin(Ice!, _mvp16, view, _m16))
+            {
+                _cur = 0;
+                SuitIce.Bones(_pal, _skel.Count);
+                shell.Draw();
+                SuitIce.End("suit " + Id);
+            }
         }
         catch (Exception ex)
         {
@@ -818,7 +897,31 @@ internal sealed class CampaignSuit
         _skel.Fk(_pose, _world, pitch, _rig.Lengths, _rig.Offsets);
         Straighten();
         if (_posing != null) _flourish?.Apply(_posing, _rig, _world);
+        if (_posing != null) GrappleArm(_posing);
         for (int i = 0; i < _skel.Count; i++) HunterRig.ToArray(_rig.InvBind[i] * _world[i], _pal, i * 16);
+    }
+
+    // The DEATH look's RAGDOLL on this suit (PlayerRagdoll.cs): posed on the ragdoll's turns on the rig's own bone
+    // lengths (MphRecomp.Core Anim/SuitRagdoll). No upright / flourish / grapple poses while dead
+    PlayerRagdoll? _doll; // DrawBody's seat's ragdoll, when it's on this rig
+    float _dollLift;
+    readonly System.Runtime.CompilerServices.ConditionalWeakTable<PlayerRagdoll, SuitRagdoll> _dollFits = new();
+
+    bool RagdollPose(PlayerRagdoll doll, float lift, out Matrix4 model)
+    {
+        model = Matrix4.Identity;
+        if (!_dollFits.TryGetValue(doll, out SuitRagdoll? fit))
+        {
+            Matrix4 placement = doll.Placement;
+            placement.Row3.Y += lift;
+            fit = new SuitRagdoll(doll, _skel, _rig.Lengths, _rig.Offsets, HunterRig.ModelMatrix(_dsModel, placement));
+            if (fit.Missing != null) Log.Info(Tag, $"suit {Id}: the ragdoll has no bone {fit.Missing}: posed on the clips while dead");
+            _dollFits.AddOrUpdate(doll, fit);
+        }
+        if (!fit.Pose(doll, _world)) return false;
+        for (int i = 0; i < _skel.Count; i++) HunterRig.ToArray(_rig.InvBind[i] * _world[i], _pal, i * 16);
+        model = fit.Model;
+        return true;
     }
 
     // Zero Suit Samus on Weavel's rig (owner 2026-10-12: "go back to putting her on a vanilla rig but just updating her
@@ -902,6 +1005,41 @@ internal sealed class CampaignSuit
             Log.Info(Tag, $"suit {Id}: gun arm held: aim (model) {_aimModel.X:0.00},{_aimModel.Y:0.00},{_aimModel.Z:0.00}, barrel "
                 + $"{got.X:0.00},{got.Y:0.00},{got.Z:0.00}");
         }
+    }
+
+    // the Echoes grapple's left arm (MphRead's PlayerGrapple.GrapplePoseWorld does it on MPH's own nodes, which this rig
+    // doesn't draw from): the elbow straightened and the arm turned at the shoulder onto the beam's tip, by
+    // HostGrapplePose (up in 5 frames, down in 10); the beam then leaves this wrist (HostGrappleHand)
+    bool[]? _gArm, _gFore;
+    void GrappleArm(PlayerEntity p)
+    {
+        float w = p.HostGrapplePose;
+        if (w <= 0) return;
+        int sh = _skel.IndexOf("L_shoulder"), el = _skel.IndexOf("L_elbow"), wr = _skel.IndexOf("L_wrist");
+        if (sh < 0 || el < 0 || wr < 0) return;
+        _gArm ??= _skel.Subtree("L_shoulder");
+        _gFore ??= _skel.Subtree("L_elbow");
+        Vector3 tip = Vector3.TransformPosition(p.HostGrapplePoseTip, _lastModel.Inverted());
+        Vector3 s = _world[sh].Row3.Xyz, e = _world[el].Row3.Xyz, h = _world[wr].Row3.Xyz;
+        TurnPart(_gFore, el, h - e, e - s, w);
+        h = _world[wr].Row3.Xyz;
+        TurnPart(_gArm, sh, h - s, tip - s, w);
+        p.HostGrappleHand = Vector3.TransformPosition(_world[wr].Row3.Xyz, _lastModel);
+    }
+
+    // TurnOnto by a `weight` share of the turn
+    void TurnPart(bool[] nodes, int pivot, Vector3 from, Vector3 to, float weight)
+    {
+        if (from.LengthSquared < 1e-10f || to.LengthSquared < 1e-10f) return;
+        from.Normalize(); to.Normalize();
+        float d = Math.Clamp(Vector3.Dot(from, to), -1f, 1f);
+        Vector3 axis = Vector3.Cross(from, to);
+        if (d > 0.99999f || axis.LengthSquared < 1e-12f) return;
+        axis.Normalize();
+        float full = MathF.Acos(d), angle = full * weight;
+        Vector3 Turned(float a) => Vector3.TransformVector(from, Matrix4.CreateFromAxisAngle(axis, a));
+        if (Vector3.Dot(Turned(-full), to) > Vector3.Dot(Turned(full), to)) angle = -angle;
+        Turn(nodes, pivot, axis, angle);
     }
 
     // MPH's muzzle point (its shoot node R_elbow + Weavel's muzzle offset) in the rig's model space, on her posed arm
@@ -1135,7 +1273,9 @@ internal sealed class CampaignSuit
     }
 
     // its pass in this draw: the face's parts move (hidden: -1, the pane: 0) unless the recolour's shader hides the face
-    bool FaceListed => _tint.W <= 10.5f;
+    // (a suit whose visor is shifted whole keeps the menus' way on its copies too: the Dark Suit's 27% glass over the
+    // shader's flat face read as see-through where the original's pane is opaque, owner 2026-11-06)
+    bool FaceListed => _tint.W <= 10.5f || SuitColours.Rules(Id)?.Shift != null;
     int PassOf(Batch b) => b.Face == 0 || !FaceListed ? b.Pass : b.Face == 1 ? -1 : 0;
     bool Solid(Batch b) => b.Face == 2 && FaceListed;
 
@@ -1219,7 +1359,7 @@ internal sealed class CampaignSuit
         if (P.Blend && !solid)
         {
             GLES30.GlEnable(GLES30.GlBlend);
-            GLES30.GlBlendFunc(SrcFactor(P.BlendSrc), DstFactor(P.BlendDst));
+            GLES30.GlBlendFunc(FadedSrc(P.BlendSrc, fade), DstFactor(P.BlendDst));
             GLES30.GlDepthMask(false);
         }
         else
@@ -1285,8 +1425,9 @@ internal sealed class CampaignSuit
         GLES30.GlUniform1f(U(prog, "uExposure"), 1f);
         GLES30.GlUniform1i(U(prog, "uRawEnvNormal"), 0);
         GLES30.GlUniform4f(U(prog, "uTint"), _tint.X, _tint.Y, _tint.Z, _tint.W);
-        // (w kept only for Prime 4 Sylux's lights hue, > 0.5: GxShader tSyl; the colour pictures draw her here)
-        GLES30.GlUniform4f(U(prog, "uTint2"), SeatTint2.X, SeatTint2.Y, SeatTint2.Z, SeatTint2.W > 0.5f ? SeatTint2.W : 0);
+        // (w kept only for Prime 4 Sylux's lights hue, > 0.5: GxShader tSyl, and the trooper's -1 that keeps his black
+        // like in a match; the colour pictures draw both here)
+        GLES30.GlUniform4f(U(prog, "uTint2"), SeatTint2.X, SeatTint2.Y, SeatTint2.Z, SeatTint2.W > 0.5f || SeatTint2.W < -0.5f ? SeatTint2.W : 0);
         GLES30.GlUniform4f(U(prog, "uTint3"), SeatTint3.X, SeatTint3.Y, SeatTint3.Z, SeatTint3.W);
         GLES30.GlUniform4f(U(prog, "uTintHue"), SeatHue.X, SeatHue.Y, SeatHue.Z, SeatHue.W);
         GLES30.GlUniform4f(U(prog, "uTintRef"), SeatRef.X, SeatRef.Y, SeatRef.Z, SeatRef.W);
@@ -1329,6 +1470,13 @@ internal sealed class CampaignSuit
             GlUniforms.Uniform4iv(U(prog, "uAlphaTest"), 1, P.AlphaTest, 0); GlUniforms.Uniform2fv(U(prog, "uAlphaRef"), 1, P.AlphaRef, 0);
             GLES30.GlUniform1i(U(prog, "uBlendAlpha"), P.Blend ? 1 : 0);
             GLES30.GlUniform1i(U(prog, "uNmap"), P.NmapUnit + 1); GLES30.GlUniform1i(U(prog, "uNmapTc"), P.NmapCoord);
+            if (_oneSheet)
+            {
+                bool warm = _tint.W > 2.5f && _tint.W < 10.5f;
+                GLES30.GlUniform1i(U(prog, "uTintWarm"), !warm ? 0 : b.Phazon ? 3 : 1);
+                Vector4 t = warm && b.KeepColour ? Vector4.Zero : _tint;
+                GLES30.GlUniform4f(U(prog, "uTint"), t.X, t.Y, t.Z, t.W);
+            }
         }
         GlUniforms.Uniform4fv(U(prog, "uReg"), 4, P.Reg, 0); GlUniforms.Uniform4fv(U(prog, "uKonst"), 4, P.Konst, 0);
         GlUniforms.Uniform4iv(U(prog, "uColCtrl"), 2, P.ColCtrl, 0); GlUniforms.Uniform4iv(U(prog, "uAlpCtrl"), 2, P.AlpCtrl, 0);
@@ -1415,6 +1563,16 @@ internal sealed class CampaignSuit
         0 => GLES30.GlZero, 1 => GLES30.GlOne, 2 => GLES30.GlDstColor, 3 => GLES30.GlOneMinusDstColor,
         4 => GLES30.GlSrcAlpha, 5 => GLES30.GlOneMinusSrcAlpha, 6 => GLES30.GlDstAlpha, _ => GLES30.GlOneMinusDstAlpha,
     };
+
+    // a fading body's (cloak, unmorph) pure additive parts (ONE, ONE): uFade only scales the alpha, which ONE ignores, so
+    // they're scaled by the constant alpha instead (owner 2026-10-31: the Overcharged Dark Samus, mostly ONE/ONE glow,
+    // stayed bright while cloaked)
+    internal static int FadedSrc(int f, float fade)
+    {
+        if (f != 1 || fade >= 0.999f) return SrcFactor(f);
+        GLES30.GlBlendColor(0, 0, 0, fade);
+        return 0x8003; // GL_CONSTANT_ALPHA
+    }
     static int DstFactor(int f) => f switch
     {
         0 => GLES30.GlZero, 1 => GLES30.GlOne, 2 => GLES30.GlSrcColor, 3 => GLES30.GlOneMinusSrcColor,

@@ -44,6 +44,15 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotStuckSight = false;
             PlayerEntity.HostBotBreakWalls = false;
             PlayerEntity.HostBotStuckVertical = false;
+            PlayerEntity.HostBotLedgeLand = false;
+            PlayerEntity.HostBotEdgeGuard = false;
+            PlayerEntity.HostBotCrateNeed = false;
+            PlayerEntity.HostBotItemWalled = false;
+            PlayerEntity.HostBotOutOfReach = false;
+            PlayerEntity.HostBotUnderGiveUp = false;
+            PlayerEntity.HostBotGrateItems = false;
+            PlayerEntity.HostBotItemNoGain = false;
+            PlayerEntity.HostBotNodeOccupied = false;
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = false;
@@ -69,7 +78,7 @@ namespace MphRecomp.Campaign
             PlayerEntity me = PlayerEntity.Players[0];
             me.IsBot = false;
             me.HostRemote = false;
-            me.HostShieldWall = me.HostWallCling = me.HostHoverWalk = me.HostBallJump = me.HostHyperBall = me.HostScoutDrone = false;
+            me.HostShieldWall = me.HostWallCling = me.HostHoverWalk = me.HostBallJump = me.HostAltHop = me.HostAltCamMove = me.HostHyperBall = me.HostScoutDrone = false;
             me.HostSoloUa = false;
             GameState.Nicknames[0] = "Player1";
             // the Regulator is the cart's mode 1, two players: slot 1 an AI Samus (the +0x42c player: 3 tanks, PlayerFirstHunt)
@@ -80,7 +89,7 @@ namespace MphRecomp.Campaign
             {
                 scene.AddPlayer(Hunter.Samus, recolor: 1);
                 PlayerEntity cpu = PlayerEntity.Players[1];
-                cpu.HostShieldWall = cpu.HostWallCling = cpu.HostHoverWalk = cpu.HostBallJump = cpu.HostHyperBall = cpu.HostScoutDrone = false;
+                cpu.HostShieldWall = cpu.HostWallCling = cpu.HostHoverWalk = cpu.HostBallJump = cpu.HostAltHop = cpu.HostAltCamMove = cpu.HostHyperBall = cpu.HostScoutDrone = false;
                 cpu.HostHyperBallCorruption = cpu.HostSoloUa = false;
                 cpu.HostAffinityBeam = null;
                 cpu.HostHealthPercent = 100;
@@ -141,6 +150,15 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotStuckSight = false;
             PlayerEntity.HostBotBreakWalls = false;
             PlayerEntity.HostBotStuckVertical = false;
+            PlayerEntity.HostBotLedgeLand = false;
+            PlayerEntity.HostBotEdgeGuard = false;
+            PlayerEntity.HostBotCrateNeed = false;
+            PlayerEntity.HostBotItemWalled = false;
+            PlayerEntity.HostBotOutOfReach = false;
+            PlayerEntity.HostBotUnderGiveUp = false;
+            PlayerEntity.HostBotGrateItems = false;
+            PlayerEntity.HostBotItemNoGain = false;
+            PlayerEntity.HostBotNodeOccupied = false;
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = false;
@@ -169,11 +187,12 @@ namespace MphRecomp.Campaign
             for (int i = 0; i < settings.Players.Count; i++)
             {
                 MatchPlayer seat = settings.Players[i];
-                // the slot's colour (the cart's yellow, green, white, blue: todo, its own models; MPH Samus' palettes for now)
+                // the slot's colour: the cart's yellow, green, white, blue (samus_hi_yellow's recolors are the cart's
+                // samus_hi_green/white/blue palettes, checked texel for texel 10-31; same materials and level lights too)
                 scene.AddPlayer(Hunter.Samus, recolor: i);
                 PlayerEntity player = PlayerEntity.Players[i];
                 // (the seats are reused from match to match: none of Second Hunt's extras)
-                player.HostShieldWall = player.HostWallCling = player.HostHoverWalk = player.HostBallJump = false;
+                player.HostShieldWall = player.HostWallCling = player.HostHoverWalk = player.HostBallJump = player.HostAltHop = player.HostAltCamMove = false;
                 player.HostHyperBall = player.HostHyperBallCorruption = player.HostScoutDrone = player.HostSoloUa = false;
                 player.HostWallClingJumpRule = player.HostDronePadArc = player.HostPirateBlasterKey = true;
                 player.HostTeamHitsIgnored = true;

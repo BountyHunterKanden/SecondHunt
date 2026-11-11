@@ -7,6 +7,7 @@ using MphRecomp.Arenas;
 using MphRecomp.Config;
 using MphRecomp.Frontend;
 using MphRecomp.Import;
+using MphRecomp.Mods;
 using MphRecomp.Multiplayer;
 using MphRecomp.PrimeMusic;
 
@@ -70,12 +71,39 @@ namespace MphRead
 
                     // #18: Prime songs public since the 2026-10-29 rework
                     Check($"{b}, Prime songs on", MusicLibrary.On, true);
+                    // spider ball + grapple: wave 2, off in public (owner 2026-11-07)
+                    {
+                        GameMode mode = GameState.Mode;
+                        int room = EchoesArena.All[0].Id;
+                        try
+                        {
+                            GameState.Mode = GameMode.Battle;
+                            EchoesMovement.Extra(null!, room, Array.Empty<MphRead.Entities.EntityBase>());
+                            Check($"{b}, spider ball on in an Echoes arena", MphRead.Entities.PlayerEntity.HostSpiderBall, !pub);
+                            if (pub)
+                            {
+                                EchoesGrapple.SetRoomSpots(room, new[] { new GrappleSpot() });
+                                EchoesGrapple.Extra(null!, room, Array.Empty<MphRead.Entities.EntityBase>());
+                                Check($"{b}, grapple points in an Echoes arena", MphRead.Entities.PlayerEntity.HostGrapplePoints != null, false);
+                            }
+                        }
+                        finally
+                        {
+                            EchoesGrapple.SetRoomSpots(room, null);
+                            GameState.Mode = mode;
+                        }
+                    }
 
                     // #24 / C13: First Hunt's arenas out of the arena lists, every build
                     foreach (FirstHuntArena.Def d in FirstHuntArena.All.Where(d => d.Id is >= 1101 and <= 1103))
                     {
                         Check($"{b}, {d.InGameName} out of the arena lists", FirstHuntArena.IsDevRoom(d.Room), true);
                     }
+
+                    // MODS: hidden in public for now (owner 2026-11-07 "remove for now"), so a mods folder runs nothing there
+                    int mods = ModsRunning();
+                    if (mods < 0) Console.WriteLine($"SKIP {b}, mods: no example mod here");
+                    else Check($"{b}, an installed mod runs", mods > 0, !pub);
 
                     // #16 + #18: RECOMP SETTINGS' rows (a headless front end on the PC's ROM tree, scratch settings)
                     List<string>? labels = SettingLabels();
@@ -89,10 +117,22 @@ namespace MphRead
                     // the campaign's radar on its own, every build (owner 2026-10-26)
                     Check($"{b}, settings has the campaign radar row", labels.Contains("campaign\nradar"), true);
                     Check($"{b}, settings has the radar pickups row", labels.Contains("radar\npickups"), true);
-                    Check($"{b}, settings has the map mode row", labels.Contains("map\nmode"), true);
+                    Check($"{b}, settings has the map mode row", labels.Contains("map\nmode"), !pub); // (PRIME map: map work, owner 2026-11-07)
                     // high frame rate: not in the next release (owner 2026-10-18; the frame rate row is PC only anyway)
                     Check($"{b}, settings has the smooth frames row", labels.Contains("smooth\nframes"), !pub);
                     Check($"{b}, settings has the frame rate row", labels.Contains("frame\nrate"), false);
+                    // DEATH: RAGDOLL every build, First Hunt's collapse dev only (owner 2026-11-09 "ragdoll in next release
+                    // without first hunt at all"); FIRST HUNT is never offered in public (RecompMenus.FirstHuntOffered)
+                    Check($"{b}, settings has the death row", labels.Contains("death"), true);
+                    Check($"{b}, settings has the vanilla orbs row (DEATH on RAGDOLL)", labels.Contains("vanilla\norbs"), true);
+                    Check($"{b}, settings has no follow cam row (RAGDOLL's own, owner 2026-11-09)", labels.Contains("follow\ncam"), false);
+                    MphRecomp.Anim.DeathCollapse.Set("firsthunt", Environment.CurrentDirectory);
+                    Check($"{b}, DEATH = FIRST HUNT turns the collapse on", MphRecomp.Anim.DeathCollapse.Root != null, !pub);
+                    Check($"{b}, DEATH = FIRST HUNT leaves the ragdoll off", MphRecomp.Anim.DeathCollapse.Ragdoll, false);
+                    MphRecomp.Anim.DeathCollapse.Set("ragdoll", Environment.CurrentDirectory);
+                    Check($"{b}, DEATH = RAGDOLL turns the ragdoll on", MphRecomp.Anim.DeathCollapse.Ragdoll, true);
+                    Check($"{b}, DEATH = RAGDOLL leaves the collapse off", MphRecomp.Anim.DeathCollapse.Root != null, false);
+                    MphRecomp.Anim.DeathCollapse.Set(null, Environment.CurrentDirectory);
                     Check($"{b}, settings has Prime song rows", labels.Count(l => l.Contains("song", StringComparison.OrdinalIgnoreCase)
                         || l.StartsWith("match\nmusic", StringComparison.Ordinal) || l.StartsWith("menu\nmusic", StringComparison.Ordinal)) > 0, true);
                     Console.WriteLine($"  {b} rows: " + String.Join(", ", labels.Select(l => l.Replace('\n', ' '))));
@@ -106,6 +146,31 @@ namespace MphRead
             return fails;
         }
 
+        // Copies docs/mods/example_stat_tracker into a scratch data folder and attaches it as a game would. -1 = no example mod.
+        static int ModsRunning()
+        {
+            string? src = null;
+            for (DirectoryInfo? d = new DirectoryInfo(AppContext.BaseDirectory); d != null && src == null; d = d.Parent)
+            {
+                string c = Path.Combine(d.FullName, "docs", "mods", "example_stat_tracker");
+                if (Directory.Exists(c)) src = c;
+            }
+            if (src == null) return -1;
+            string dir = Path.Combine(Path.GetTempPath(), "releasegatestest_mods_" + Environment.ProcessId);
+            string to = Path.Combine(dir, "mods", "example_stat_tracker");
+            Directory.CreateDirectory(to);
+            try
+            {
+                foreach (string f in Directory.GetFiles(src)) File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
+                return LiveMods.Attach(dir, null);
+            }
+            finally
+            {
+                LiveMods.Detach();
+                try { Directory.Delete(dir, true); } catch (Exception) { }
+            }
+        }
+
         static List<string>? SettingLabels()
         {
             string dir = Path.Combine(Path.GetTempPath(), "releasegatestest_" + Environment.ProcessId);
@@ -114,6 +179,8 @@ namespace MphRead
             {
                 Paths.UpdatePaths(); // (paths.txt next to the tool, as Program does for its viewer)
                 Paths.ChooseMphPath();
+                // (DEATH on RAGDOLL, so its VANILLA ORBS and FOLLOW CAM rows show)
+                File.WriteAllText(Path.Combine(dir, "recomp_settings.json"), "{\"DeathAnimation\":\"ragdoll\"}");
                 FrontendSession session = FrontendSession.Load(Paths.FileSystem, settingsPath: Path.Combine(dir, "recomp_settings.json"));
                 MethodInfo rows = typeof(RecompMenus).GetMethod("SettingRows", BindingFlags.NonPublic | BindingFlags.Instance)!;
                 var list = (System.Collections.IEnumerable)rows.Invoke(session.Recomp, null)!;

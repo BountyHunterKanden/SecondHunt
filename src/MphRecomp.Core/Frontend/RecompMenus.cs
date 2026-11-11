@@ -111,9 +111,14 @@ namespace MphRecomp.Frontend
         private readonly List<string> _suits = new();
         // the imported Trooper bodies (Characters.Trooper.Known order): the CAMPAIGN TROOPER TYPE row, hidden with none
         private readonly List<string> _trooperSkins = new();
+        private readonly List<string> _syluxSkins = new(); // ORIGINAL first, then his imported skins (none: no row)
         // the campaign's saves (FrontendSession): CAMPAIGN TROOPER TYPE shows only once the hunters are unlocked and a file
         // plays the Trooper (owner 2026-10-28)
         public string? SavesDir { get; set; }
+        // a campaign's pause (PauseOverlay): the file being played, as Characters.Trooper.Id / Characters.Sylux.Id, null for
+        // any other hunter. There CAMPAIGN TROOPER/SYLUX TYPE follow that file alone (owner 2026-11-09: a Samus file doesn't
+        // get the Sylux row because file B plays Sylux); unset (the front end) = any file counts
+        public Func<string?>? CampaignPlays { get; set; }
 
         public event Action<FrontendRequestKind>? Requested;
 
@@ -141,6 +146,7 @@ namespace MphRecomp.Frontend
             // (C6), dim while AtDefault
             // (a rows page draws the checkbox in its value box instead of the value: DrawRowMarks, RecompMenus.Music.cs)
             public Func<bool>? Check;
+            public bool NoLock; // with Check: no lock beside the ticked box (the checkbox pairs no row)
             public Func<bool>? Partly; // with Check: a group with some of its songs on (a half-lit box)
             // the song lists' play / pause (owner 2026-10-29): a box where the X box goes, a triangle or two bars in it;
             // X or a tap on it runs Play
@@ -188,8 +194,9 @@ namespace MphRecomp.Frontend
             _settingsPath = settingsPath;
             if (modsDir != null)
             {
-                var manager = new ModManager();
-                manager.Discover(modsDir);
+                // in load order, with each mod's problem (bad mod.json, missing requirement, conflict) worked out
+                ModManager manager = LiveMods.Discover(modsDir, settings);
+                manager.Resolve();
                 _mods.AddRange(manager.Available);
             }
             // imports go beside the settings file too: hd/ and guns/ are read from there (below, CampaignSuit, HdGun)
@@ -249,6 +256,11 @@ namespace MphRecomp.Frontend
             _suits.Add("original"); // MPH's own DS gun, no HD
             if (hdRoot != null && System.IO.Directory.Exists(hdRoot))
                 _trooperSkins.AddRange(MphRecomp.Multiplayer.Characters.Skins(MphRecomp.Multiplayer.Characters.Trooper, hdRoot));
+            if (hdRoot != null && System.IO.Directory.Exists(hdRoot))
+            {
+                List<string> sylux = MphRecomp.Multiplayer.Characters.Skins(MphRecomp.Multiplayer.Characters.Sylux, hdRoot);
+                if (sylux.Count > 1) _syluxSkins.AddRange(sylux); // ORIGINAL alone is nothing to pick
+            }
         }
 
         // the Trooper type a Trooper campaign file plays: the picked one when it's imported, else the first imported
@@ -259,6 +271,7 @@ namespace MphRecomp.Frontend
         // the hunters are unlocked for new files (an ending reached) and a campaign file plays the Trooper
         private bool HasTrooperFile()
         {
+            if (CampaignPlays != null) return CampaignPlays() == MphRecomp.Multiplayer.Characters.Trooper.Id;
             if (SavesDir == null || !System.IO.Directory.Exists(SavesDir)) return false;
             var saves = new MphRecomp.Campaign.CampaignSaves(SavesDir);
             if (!saves.HuntersUnlocked()) return false;
@@ -266,6 +279,30 @@ namespace MphRecomp.Frontend
             {
                 if (saves.TryLoad(slot, out MphRecomp.Campaign.CampaignSaveFile? file, out _)
                     && file!.Character == MphRecomp.Multiplayer.Characters.Trooper.Id)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // the look a Sylux campaign file plays: the picked one when it's imported, else ORIGINAL
+        private string ShownSylux() =>
+            _syluxSkins.FirstOrDefault(x => x.Equals(_settings.SyluxSkin, StringComparison.OrdinalIgnoreCase))
+            ?? MphRecomp.Multiplayer.Characters.Original;
+
+        // the hunters are unlocked for new files and a campaign file plays Sylux (a plain hunter file: no character)
+        private bool HasSyluxFile()
+        {
+            if (CampaignPlays != null) return CampaignPlays() == MphRecomp.Multiplayer.Characters.Sylux.Id;
+            if (SavesDir == null || !System.IO.Directory.Exists(SavesDir)) return false;
+            var saves = new MphRecomp.Campaign.CampaignSaves(SavesDir);
+            if (!saves.HuntersUnlocked()) return false;
+            for (int slot = 1; slot <= 3; slot++)
+            {
+                if (saves.TryLoad(slot, out MphRecomp.Campaign.CampaignSaveFile? file, out _)
+                    && file!.Hunter == MphRecomp.Multiplayer.Characters.Sylux.Base
+                    && (file.Character == null || file.Character == MphRecomp.Multiplayer.Characters.Sylux.Id))
                 {
                     return true;
                 }
@@ -552,6 +589,7 @@ namespace MphRecomp.Frontend
                 return all[((i + step) % all.Length + all.Length) % all.Length];
             }
             int GyroPitch() => _settings.GyroPitchSensitivity > 0 ? _settings.GyroPitchSensitivity : _settings.GyroSensitivity;
+            bool fhOffered = FirstHuntOffered(); // (DEATH's FIRST HUNT: once, not a file check each frame)
             var rows = new List<RowModel>
             {
                 new()
@@ -561,6 +599,34 @@ namespace MphRecomp.Frontend
                     Value = MenuArtValue,
                     Step = _ => OpenMenuArt(),
                     Action = true
+                },
+                // owner 2026-11-06 (FrontendSession.DrawSecondHuntLogo)
+                new()
+                {
+                    Label = "second hunt\nlogo",
+                    Description = "on: the second hunt logo shows under the game's logo on the main menu. off: only the game's logo.",
+                    Value = () => _settings.SecondHuntLogo ? "ON" : "OFF",
+                    Step = _ => _settings.SecondHuntLogo = !_settings.SecondHuntLogo
+                },
+                // owner 2026-11-07 (MphRecomp.Anim.DeathCollapse, PlayerRagdoll.cs; FIRST HUNT dev only, with it imported;
+                // RAGDOLL every build, owner 2026-11-09)
+                new()
+                {
+                    Label = "death",
+                    Description = "vanilla: hunters die as in the game. first hunt: their body collapses to the floor, as in first hunt's multiplayer. ragdoll: the body falls limp, pushed by the killing shot, and your camera follows your own body until it lands.",
+                    Value = () => _settings.DeathAnimation switch { "firsthunt" when fhOffered => "FIRST HUNT", "ragdoll" => "RAGDOLL", _ => "VANILLA" },
+                    Step = d => _settings.DeathAnimation = Next(fhOffered ? new[] { "vanilla", "firsthunt", "ragdoll" } : new[] { "vanilla", "ragdoll" },
+                        _settings.DeathAnimation == "firsthunt" && !fhOffered ? "vanilla" : _settings.DeathAnimation, d)
+                },
+                // owner 2026-11-09 (PlayerDeathAnim.cs HostDeathOrbs; only with DEATH on FIRST HUNT or RAGDOLL)
+                new()
+                {
+                    Label = "vanilla\norbs",
+                    Description = "on: the game's blue death orbs also rise in the hunter's shape over the falling body. off: only the body.",
+                    Value = () => _settings.DeathVanillaOrbs ? "ON" : "OFF",
+                    Check = () => _settings.DeathVanillaOrbs,
+                    NoLock = true, // (owner 2026-11-09: "doesn't need the lock picture")
+                    Step = _ => _settings.DeathVanillaOrbs = !_settings.DeathVanillaOrbs
                 },
                 new()
                 {
@@ -687,6 +753,15 @@ namespace MphRecomp.Frontend
                     Value = () => TrooperValue(ShownTrooper()),
                     Step = s => _settings.TrooperSkin = Next(_trooperSkins.ToArray(), ShownTrooper(), s)
                 },
+                // owner 2026-11-08: the same for a Sylux campaign file (original or Beyond's Sylux)
+                new()
+                {
+                    Label = "campaign sylux\ntype",
+                    Description = $"sylux's look on your sylux campaign files: {MphRecomp.Multiplayer.Characters.Label(ShownSylux()).ToLowerInvariant()}. "
+                        + "original is his vanilla look, or whichever sylux you've imported.",
+                    Value = () => MphRecomp.Multiplayer.Characters.Label(ShownSylux()),
+                    Step = s => _settings.SyluxSkin = Next(_syluxSkins.ToArray(), ShownSylux(), s)
+                },
                 new()
                 {
                     Label = "camera",
@@ -717,6 +792,22 @@ namespace MphRecomp.Frontend
                     Description = "prime: only rooms and corridors you've been in. move freely, the d-pad hops rooms. hunters: the game's own.",
                     Value = () => _settings.MapPrime ? "PRIME" : "HUNTERS",
                     Step = _ => _settings.MapPrime = !_settings.MapPrime
+                },
+                // owner 2026-10-31: the ship's logbook can list every scan (ShipLogbook); the percentages stay vanilla
+                new()
+                {
+                    Label = "logbook\nscans",
+                    Description = "vanilla: the ship's logbook lists what the game does. all: its object page also lists doors, shields, switches and the other scans the game leaves out. percentages don't change.",
+                    Value = () => _settings.LogbookAllScans ? "ALL" : "VANILLA",
+                    Step = _ => _settings.LogbookAllScans = !_settings.LogbookAllScans
+                },
+                // owner 2026-11-09: the campaign's alt-form hop, or MphRead's helper jump pads in its place (SceneSetup.CampaignAltHop)
+                new()
+                {
+                    Label = "alt form\nhop",
+                    Description = "on: in the campaign, jump hops any alt form up to bomb jump height. off: no hop, and the other hunters get helper jump pads instead.",
+                    Value = () => _settings.CampaignAltHop ? "ON" : "OFF",
+                    Step = _ => _settings.CampaignAltHop = !_settings.CampaignAltHop
                 },
                 // SAVES: vanilla DS saves in and out (RecompMenus.DsSave.cs, owner 2026-10-26 / 10-28)
                 DsSaveTransferRow(),
@@ -866,7 +957,7 @@ namespace MphRecomp.Frontend
                 new()
                 {
                     Label = "gyro\naxis",
-                    Description = "yaw: the screen's own up axis. player: true up, however you hold it. roll: tilt to steer.",
+                    Description = "yaw: the screen's own up axis. player: true up, however you hold it. roll: tilt to steer. yaw+roll: both, tilt to keep turning.",
                     Value = () => GyroAxisSetting.ToUpperInvariant(),
                     Step = s => GyroAxisSetting = Next(RecompSettings.GyroAxes, GyroAxisSetting, s)
                 },
@@ -1191,6 +1282,16 @@ namespace MphRecomp.Frontend
                     Value = () => MphRecomp.Replay.SharedReplays.Blocked(ReplayDir) ? "OFF" : "ON",
                     Step = step => { _ = MphRecomp.Replay.SharedReplays.SetBlockAsync(ReplayDir, !MphRecomp.Replay.SharedReplays.Blocked(ReplayDir), Conn); }
                 },
+                // (GitHub #12, owner 2026-11-04) Windows: the game's files in the user's AppData or beside the exe; moving them
+                // takes a restart (the Windows app moves them before it opens anything: DesktopPaths.cs)
+                new()
+                {
+                    Label = "data\nfolder",
+                    Description = "where the game keeps its files (settings, saves, replays, mods, your online identity). appdata: your windows user folder. portable: a data folder beside the game, to carry it on a usb stick. press to move them; the game restarts.",
+                    Value = () => DataFolderPlace() ?? "",
+                    Step = _ => AskDataFolderMove(),
+                    Action = true
+                },
                 // owner 2026-10-11: also checked once at launch in the background (ON by default), asking on the main menu
                 // only when an update is out (FrontendSession.TickLaunchCheck); OFF = only when CHECK is pressed
                 new()
@@ -1232,8 +1333,7 @@ namespace MphRecomp.Frontend
             // a public build leaves out the rows for what it doesn't ship: imported HD suits, the HD menu art and the
             // developer tools (the music quality row stays: owner 2026-10-05, all four modes are the game's own music)
             if (RecompSettings.PublicBuild) rows.RemoveAll(r => HiddenInPublic.Contains(r.Label));
-            if (RecompSettings.PublicBuild || RecompSettings.DesktopHost || !MphRecomp.FirstHunt.FirstHuntGame.Available(
-                _settingsPath != null ? System.IO.Path.GetDirectoryName(_settingsPath) : null))
+            if (!fhOffered)
             {
                 rows.RemoveAll(r => r.Label == "extras" || FirstHuntRows.Contains(r.Label));
             }
@@ -1244,10 +1344,18 @@ namespace MphRecomp.Frontend
                 rows.RemoveAll(r => HiddenOnDesktop.Contains(r.Label) && !(padGyro && r.Label.Contains("gyro")));
             }
             if (!RecompSettings.DesktopHost) rows.RemoveAll(r => r.Label == "frame\nrate"); // Android: the display picks
+            if (DataFolderPlace() == null) rows.RemoveAll(r => r.Label == "data\nfolder");
             if (!_settings.DeveloperMode) rows.RemoveAll(r => r.Label == "dev\ntools" || r.Label == "status\ntext");
             if (!_settings.SkipBootLogos) rows.RemoveAll(r => r.Label == "skip\nintro");
+            // (owner 2026-11-09: VANILLA ORBS only when DEATH isn't VANILLA)
+            if (!(_settings.DeathAnimation == "ragdoll" || _settings.DeathAnimation == "firsthunt" && fhOffered))
+            {
+                rows.RemoveAll(r => r.Label == "vanilla\norbs");
+            }
             // no Trooper imported, or no Trooper campaign file yet (owner 2026-10-28: only once he's unlocked and has a save)
             if (_trooperSkins.Count == 0 || !HasTrooperFile()) rows.RemoveAll(r => r.Label == "campaign trooper\ntype");
+            // no Sylux skin imported, or no Sylux campaign file yet (owner 2026-11-08: the same rule as the Trooper's)
+            if (_syluxSkins.Count == 0 || !HasSyluxFile()) rows.RemoveAll(r => r.Label == "campaign sylux\ntype");
             // (in categories, each its own page: RecompMenus.SettingsPages.cs)
             return rows;
         }
@@ -1260,6 +1368,8 @@ namespace MphRecomp.Frontend
             // the campaign's Prime radar + mini map (owner 2026-10-17: map work, not in the next release; a
             // multiplayer match's radar comes with the SHOW HUNTERS ON RADAR rule instead, every build)
             "hud",
+            // the pause map's PRIME mode (owner 2026-11-07: map work, gated; PRIME does nothing in public builds)
+            "map\nmode",
             // high frame rate (owner 2026-10-18: "leave high frame rate out for now"): the PC's frame rate and smooth
             // frames stay at the display's rate and off (CampaignRenderer, DesktopApp)
             "frame\nrate", "smooth\nframes",
@@ -1268,8 +1378,12 @@ namespace MphRecomp.Frontend
         // the FIRST HUNT tab's pieces (shown only when First Hunt is imported, as "extras")
         private static readonly HashSet<string> FirstHuntRows = new(StringComparer.Ordinal)
         {
-            "first hunt\npieces", "fh menu\nmusic", "fh training\nmusic", "fh match\nmusic", "fh\nobjects", "fh menu\nscreens"
+            "first hunt\npieces", "fh menu\nmusic", "fh training\nmusic", "fh match\nmusic", "fh\nobjects", "fh menu\nscreens",
         };
+
+        // First Hunt's rows and DEATH's FIRST HUNT are offered: imported, on Android, not a public build
+        private bool FirstHuntOffered() => !RecompSettings.PublicBuild && !RecompSettings.DesktopHost && MphRecomp.FirstHunt.FirstHuntGame.Available(
+            _settingsPath != null ? System.IO.Path.GetDirectoryName(_settingsPath) : null);
 
         private static string FhPieceValue(bool sh) => sh ? "SECOND HUNT" : "FIRST HUNT";
 
@@ -1344,12 +1458,15 @@ namespace MphRecomp.Frontend
             });
         }
 
+        // a mod's row: why it can't run (mod.json, requires / conflicts) or its last error in a game, else its description
         private List<RowModel> ModRows() => _mods.Select(m => new RowModel
         {
             Label = Short(m.Manifest.Name.Length > 0 ? m.Manifest.Name : m.Manifest.Id),
-            Description = $"{m.Manifest.Description ?? m.Manifest.Name} (v{m.Manifest.Version})".ToLowerInvariant()
+            Description = (ModTrouble(m) is string trouble ? "can't run: " + trouble
+                : $"{m.Manifest.Description ?? m.Manifest.Name} (v{m.Manifest.Version}{(m.Manifest.Gameplay ? ", gameplay: offline only, in replays" : "")})")
+                .ToLowerInvariant()
                 + (m.Manifest.Settings.Count > 0 ? " -- x: its settings" : ""),
-            Value = () => IsModEnabled(m.Manifest.Id) ? "ON" : "OFF",
+            Value = () => !IsModEnabled(m.Manifest.Id) ? "OFF" : m.LoadProblem != null ? "ERROR" : "ON",
             Step = _ =>
             {
                 if (!_settings.DisabledMods.Remove(m.Manifest.Id)) _settings.DisabledMods.Add(m.Manifest.Id);
@@ -1366,23 +1483,33 @@ namespace MphRecomp.Frontend
                 if (_modSettingsFilter != null ? mod.Id != _modSettingsFilter : !IsModEnabled(mod.Id)) continue;
                 foreach (ModSetting setting in mod.Settings)
                 {
-                    if (setting.Values.Count == 0) continue;
-                    string Current() => _settings.GetModSetting(mod.Id, setting.Id) ?? setting.DefaultValue;
+                    if (!setting.Usable) continue;
+                    // list / bool / int / range (mod.json "Type"); a running cosmetic mod hears setting_changed at once
+                    string Current() => setting.Normalize(_settings.GetModSetting(mod.Id, setting.Id));
                     rows.Add(new RowModel
                     {
                         Label = Short(setting.Name.Length > 0 ? setting.Name : setting.Id),
                         Description = $"{mod.Name}: {setting.Description ?? setting.Name}".ToLowerInvariant(),
-                        Value = () => Current().ToUpperInvariant(),
+                        Value = () => setting.Kind == "bool" ? (Current() == "true" ? "ON" : "OFF") : Current().ToUpperInvariant(),
                         Step = s =>
                         {
-                            int i = Math.Max(0, setting.Values.IndexOf(Current()));
-                            int n = setting.Values.Count;
-                            _settings.SetModSetting(mod.Id, setting.Id, setting.Values[((i + s) % n + n) % n]);
+                            string next = setting.Next(Current(), s);
+                            _settings.SetModSetting(mod.Id, setting.Id, next);
+                            LiveMods.SettingChanged(mod.Id, setting.Id, next);
                         }
                     });
                 }
             }
             return rows;
+        }
+
+        // why a mod can't run, or the last error it had in a game this session (LiveMods.LastErrors: "<id>: <what>")
+        private static string? ModTrouble(ModEntry m)
+        {
+            if (m.Problem != null) return m.Problem;
+            string prefix = $"{m.Manifest.Id}: ";
+            string? last = LiveMods.LastErrors.LastOrDefault(e => e.StartsWith(prefix, StringComparison.Ordinal));
+            return last?[prefix.Length..];
         }
 
         private static string Short(string s) => (s.Length > 22 ? s[..22] : s).ToLowerInvariant();
@@ -1705,6 +1832,25 @@ namespace MphRecomp.Frontend
             return result;
         }
 
+        // DATA FOLDER (Windows, set by the app): its value ("APPDATA" / "PORTABLE"; null: no row), the question before a move
+        // (Blocked: only why it can't), and the move itself, done at the next start
+        public static Func<string?> DataFolderPlace { get; set; } = () => null;
+        public static Func<(string Text, bool Blocked)>? DataFolderAsk { get; set; }
+        public static Action? DataFolderMove { get; set; }
+
+        private void AskDataFolderMove()
+        {
+            if (DataFolderAsk == null || Import.Popup == null) return;
+            (string text, bool blocked) = DataFolderAsk();
+            if (blocked) Import.Popup.Inform(text);
+            else Import.Popup.Ask(text, yes =>
+            {
+                if (!yes) return;
+                DataFolderMove?.Invoke();
+                Requested?.Invoke(FrontendRequestKind.QuitToDesktop);
+            });
+        }
+
         // QUIT TO DESKTOP (Windows): the same ask as QUIT TO MAIN MENU's, from the pause list and the title's corner button
         public void AskQuitToDesktop()
         {
@@ -1738,13 +1884,15 @@ namespace MphRecomp.Frontend
             int n = _p.ChoiceBoxes.Length;
             float step = n >= 2 ? _p.ChoiceBoxes[n - 1].Y - _p.ChoiceBoxes[n - 2].Y : 0; // (one box to the next)
             bool desktop = OperatingSystem.IsWindows(); // QUIT TO DESKTOP: Windows only, under QUIT TO MAIN MENU
-            float up = -step * ((chat ? 1 : 0) + (desktop ? 1 : 0));
+            // (rows past the ROM's four; a public build has no MOD SETTINGS, so CHAT or QUIT TO DESKTOP takes its row)
+            int extra = Math.Max(0, (chat ? 1 : 0) + (desktop ? 1 : 0) - (RecompSettings.PublicBuild ? 1 : 0));
+            float up = -step * extra;
             foreach (MenuItem it in _p.Frame.Where(it => HasWidget(it, "blackdrop") || HasWidget(it, "topdrop"))) // backdrop, top band
             {
                 bool panel = HasWidget(it, "blackdrop");
                 page.AddItem(i => Clone(it, i, 0, panel ? up : 0, stretchDown: panel ? MathF.Abs(up) : 0));
             }
-            if (!chat && !desktop)
+            if (extra == 0)
             {
                 int title = _strings.Add("PAUSED");
                 page.AddItem(i => Clone(_p.OptHeader, i, 0, 0, stringId: title));
@@ -1753,6 +1901,8 @@ namespace MphRecomp.Frontend
             {
                 ("resume", PauseResume), ("second hunt\nsettings", PauseSettings), ("mod\nsettings", PauseModSettings), ("quit to\nmain menu", PauseQuit)
             };
+            // MOD SETTINGS: hidden in public builds with OPTIONS' MODS (owner 2026-11-07 "remove for now")
+            if (RecompSettings.PublicBuild) choices.RemoveAll(c => c.Call == PauseModSettings);
             if (chat) choices.Insert(1, ("chat", PauseChatCall));
             if (desktop) choices.Add(("quit to\ndesktop", PauseQuitDesktop));
             const float dx = 66; // the boxes span x 8..116 on the Controls page; centred on the touch screen
@@ -1822,7 +1972,7 @@ namespace MphRecomp.Frontend
             if (pieces.Any(it => it == null))
             {
                 // not the expected page: the vanilla places, MODS and RECOMP SETTINGS in the stats row's, no IMPORT GAMES
-                Button("mods", "", 175, 76, OpenMods, out _modsValueString);
+                if (!RecompSettings.PublicBuild) Button("mods", "", 175, 76, OpenMods, out _modsValueString); // (gated, below)
                 Button("second hunt\nsettings", "open",225, 84, OpenSettings, out _);
                 UpdateModsCount();
                 return;
@@ -1850,7 +2000,8 @@ namespace MphRecomp.Frontend
             options.AddItem(i => Clone(pillText, i, importDx, 0, stringId: importString));
 
             // MODS and RECOMP SETTINGS under IMPORT GAMES and ERASE ALL DATA (a button's box is centred 1 left of its cx)
-            Button("mods", "", c[2] + 1, 76, OpenMods, out _modsValueString);
+            // MODS: hidden in public builds for now (owner 2026-11-07 "remove for now"; LiveMods.Attach runs none there either)
+            if (!RecompSettings.PublicBuild) Button("mods", "", c[2] + 1, 76, OpenMods, out _modsValueString);
             Button("second hunt\nsettings", "open",c[3] + 1, 84, OpenSettings, out _);
             UpdateModsCount();
             AddRulesLink(options); // the privacy / code of conduct / 13+ line (RecompMenus.OnlineRules.cs)
@@ -2164,7 +2315,19 @@ namespace MphRecomp.Frontend
 
         // ---- runtime ----
 
-        private RowsPage? RowsFor(int page) => AllRowPages().FirstOrDefault(p => p.Page == page);
+        // (looked up every frame: a loop over the kept fields, not AllRowPages' array and LINQ, 2026-11-11)
+        private RowsPage? RowsFor(int page)
+        {
+            if (_modsRows?.Page == page) return _modsRows;
+            if (_modSettingRows?.Page == page) return _modSettingRows;
+            if (_importRows?.Page == page) return _importRows;
+            if (_importGameRows?.Page == page) return _importGameRows;
+            if (_songRows?.Page == page) return _songRows;
+            if (_songFilterRows?.Page == page) return _songFilterRows;
+            if (_songGameRows?.Page == page) return _songGameRows;
+            if (_songAreaRows?.Page == page) return _songAreaRows;
+            return null;
+        }
 
         public void OnPageEntered(MenuEngine menu, int page)
         {

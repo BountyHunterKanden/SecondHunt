@@ -11,6 +11,8 @@ extracted/
 extract_out/
 # loose game-derived files and packaged kits (builds + media) kept at the root -- never commit
 *.webp
+# ...except the README's own clips (owner OK 2026-11-08)
+!docs/images/*.webp
 mph-recomp_kit_*.zip
 files.zip
 # other games' disc images, saves and keys the importers read (public beta audit S6) -- never commit

@@ -44,6 +44,63 @@ namespace MphRead.Entities
         // her own, nothing starts it over. And while a lift carries her up short of her node, hands off (BotLiftRide):
         // her stick and jumps steered her off the rising lift
         public static bool HostBotStuckVertical { get; set; }
+        // recomp (HostBotLedgeLand, MatchSettings.BotLedgeLand; replays before format 78 play without it): a climb toward a
+        // node above her (a link jump, the stuck fix's jumps) steers her in the air onto floor a body's width past the node,
+        // not at the node. Nodes are raw floor samples, some right at a lip (Mining Plaza's west stairs, node 67 0.05 inside
+        // it): her steering and the drift both stop within a unit of the node, so she hung in the air beside the lip, feet
+        // above it, bobbing jump after jump (owner's Team Defender 2026-11-01: Kanden, Trace, Spire, Weavel, minutes of it)
+        public static bool HostBotLedgeLand { get; set; }
+        // recomp (HostBotItemWalled, MatchSettings.BotItemWalled; replays before format 80 play without it): an item with a
+        // closed door-like entity (Mining Plaza's gate) between it and its closest node is skipped while it stays shut. Her
+        // path ends at the node, the item lies past the gate, and she hopped against it until killed (owner's Battle 11-04:
+        // Spire and Sylux after the Deathalt behind the shut gate, 1:03-1:13); T7's "beside it 3 s" never fired at 3.4 apart.
+        // Also: T7's skips and the covered looks go by the item itself, not its entity id (every placed pickup's is -1, so
+        // the first placed pickup looked at decided for them all). -botprobe Mining Plaza, 4 lineups: bot-seconds at the shut
+        // gate 156 -> 3
+        public static bool HostBotItemWalled { get; set; }
+        // recomp (HostBotOutOfReach, MatchSettings.BotOutOfReach; replays before format 81 play without it): on the ground,
+        // a node further above her than a double jump (OutOfReachRise) and steeper than any floor (more up than across)
+        // has no link from here; it is given up at once (the give-up below, avoid list and all), before she walks under
+        // it. MphRead's closest-node pick is a straight distance, made at any time: stepping off Mining Plaza's gate
+        // ledge it picked the ledge node right above the shut gate, and Kanden walked under it into the gate's face and
+        // jumped there for 2 s until the stuck fix gave it up (seeds 11 and 16 of the gate sweep, 11-05)
+        public static bool HostBotOutOfReach { get; set; }
+        // recomp (HostBotUnderGiveUp, MatchSettings.BotUnderGiveUp; replays before format 82 play without it): on the
+        // ground with her node right above her (1+ up, under 3 across) and half a second in one spot trying to move, the
+        // node is given up then (the out-of-reach give-up), not after the stuck fix's 2 climbs and 3 s. Mining Plaza's
+        // stairs: the climbs from under the landing never got her up, and Trooper, Spire, Noxus, Sylux, Weavel and Kanden
+        // stood there 3.1 s each time (owner's Battle 11-05, 0:29-0:37; -botprobe 12 seeds: 19 spells of 1.5 s+)
+        public static bool HostBotUnderGiveUp { get; set; }
+        // recomp (HostBotGrateItems, MatchSettings.BotGrateItems; replays before format 83 play without it): an item inside a
+        // grate's footprint (Shooting Gallery's pool items: 2 small health, 1 small missile) is skipped, grate up or broken.
+        // T7's covered look casts up from the item, but those items sit inside the grate's own slab (y 2.2 and 1.8 in a slab
+        // 1.8-2.35), so the ray started inside the grate and never hit it; Samus stood and hopped on the grates for 4-6 s at
+        // a time (owner's Battle 11-06). Broken, the item is in the acid: not worth the damage (owner: "just have them ignore
+        // these pickups")
+        public static bool HostBotGrateItems { get; set; }
+        // the grates' boxes in the room (EchoesBreakables.Extra, set with HostWallList), for HostBotGrateItems
+        public static System.Collections.Generic.IReadOnlyList<(Vector3 Min, Vector3 Max)>? HostGrateBoxes { get; set; }
+        // items the grate check skipped, one per half-second look (Tools -botprobe prints it)
+        public static int HostGrateItemCount;
+        // items the walled check skipped since the start, one per half-second look (Tools -botprobe prints it)
+        public static int HostItemWalledCount;
+        // recomp (HostBotItemNoGain, MatchSettings.BotItemNoGain; replays before format 84 play without it): T7's "beside it
+        // 3 s" counts while she stays within 3.5 of the item (not 2.5), and an item she has got no nearer for a second
+        // beside it is skipped then. Mining Plaza's west stairs: a small missile 2.4 past a step she can't get past, she
+        // ran at it, slid off, and wobbled in and out of 2.5, so the 3 s count kept starting over and she shook on the
+        // spot until killed (owner's Battle 11-06, Samus 3:34-3:38)
+        public static bool HostBotItemNoGain { get; set; }
+        // items the no-gain check gave up (Tools -botprobe prints it)
+        public static int HostItemNoGainCount;
+        // nodes given up at once as out of reach (HostBotOutOfReach) since the start (Tools -botprobe prints it)
+        public static int HostOutOfReachCount;
+        // (HostBotOutOfReach) a shut wall bots may never jump at (Mining Plaza's gate, MiningPlazaGate.Extra; null in other
+        // rooms): true for a bot next to it or headed at it (its node, or where its run carries it). Every bot jump (PlayerAi.ProcessInput's L, alt forms aside) is dropped there,
+        // the stuck fix's, the combat dodge's and the cling's alike. Owner 11-05: Dark Samus double-jumped at the shut gate
+        // in combat (~1:34), "make sure this never happened, not reduced it"
+        public static System.Func<PlayerEntity, bool>? HostBotNoJumpAt { get; set; }
+        // jumps HostBotNoJumpAt dropped since the start (Tools -botprobe prints it)
+        public static int HostNoJumpCount;
         // this room's link kinds: (from node id, to node id) -> ArenaNav.Link* (1 jump, 2 double jump, 3 gap, 4 boost)
         public static System.Collections.Generic.IReadOnlyDictionary<(int, int), int>? HostNavLinks { get; set; }
         // unmorphs, climbs, give-ups, drifts, link jumps, items skipped since the start (Tools -echoesarena jitter prints them)
@@ -68,6 +125,7 @@ namespace MphRead.Entities
             private int _unstickClimbs = 0;
             private int _unstickClimb = 0;
             private bool _unstickSecond = false;
+            private Vector3? _climbLand = null; // (HostBotLedgeLand) where this climb steers her once she is up
             private int _unstickUnmorphs = 0;
             private int _unstickDrifts = 0;
             private int _unstickDrift = 0;
@@ -96,7 +154,14 @@ namespace MphRead.Entities
             // T7: the item she is beside without getting it, for how long; items skipped (entity id, until _botTicks)
             private ItemInstanceEntity? _itemNear = null;
             private int _itemNearFrames = 0;
+            // (HostBotItemNoGain) her closest distance to it so far, steps since she got nearer
+            private float _itemNearBest = 0;
+            private int _itemNoGainFrames = 0;
             private readonly (int Id, int Until)[] _itemSkip = new (int, int)[8];
+            // (HostBotItemWalled) the skipped items themselves: placed pickups (PlacedPickups.cs) all have entity id -1, so
+            // by id alone one skip or one "covered" look counted for every placed pickup in the arena
+            private readonly ItemInstanceEntity?[] _itemSkipItem = new ItemInstanceEntity?[8];
+            private readonly System.Collections.Generic.Dictionary<ItemInstanceEntity, bool> _itemCoveredBy = new();
             private int _itemCoveredAt = -1;
             private readonly System.Collections.Generic.Dictionary<int, bool> _itemCovered = new();
 
@@ -113,6 +178,8 @@ namespace MphRead.Entities
             }
 
             // Tools traces: following nodes this step (1/0), and the unstick clock
+            public string HostLinkState => $"link {_navFrom?.Id}>{_navLast?.Id} kind {_navKind} tries {_navTries} land {(_climbLand is { } l ? $"{l.X:0.0},{l.Y:0.0},{l.Z:0.0}" : "-")} climb {_unstickClimb} 2nd {_unstickSecond}";
+            public bool HostButtonL => _buttons.L.IsDown;
             public string HostUnstickState => $"{((long)_scene.FrameCount - _unstickTravelAt <= 2 ? 1 : 0)}:{_unstickFrames} pin {_sightPin} try {UnstickTrying} gnd {UnstickGrounded} still {_padStill}";
 
             public bool HostUnstickSeesFoe => UnstickSeesFoe(); // (Tools traces)
@@ -132,6 +199,28 @@ namespace MphRead.Entities
             }
 
             private bool UnstickAbove => _node40 != null && _node40.Position.Y - _player.Position.Y > 1;
+            // (HostBotOutOfReach) her node can't be reached from where she stands: above by more than a double jump with
+            // a margin (ArenaNav's DoubleRise 3.6 from the feet, her position is ~0.6 up), and more up than across (no
+            // walkable slope climbs that). Not in water (the Gravity Boost climbs 7) or in a pad's throw
+            private const float OutOfReachRise = 4f;
+            private bool UnstickOutOfReach
+            {
+                get
+                {
+                    if (_node40 == null || !_player.Flags1.TestFlag(PlayerFlags1.Grounded) || _player.EchoesSubmerged
+                        || _unstickPadFlight != 0 || BotJustLaunched())
+                    {
+                        return false;
+                    }
+                    float up = _node40.Position.Y - _player.Position.Y;
+                    return up > OutOfReachRise && up * up > (_node40.Position - _player.Position).Xz.LengthSquared;
+                }
+            }
+            // (HostBotUnderGiveUp) her node right above her where she stands on the ground
+            private const int UnderGiveUpFrames = 15 * 2; // todo: FPS stuff
+            private bool UnstickUnder => _node40 != null && UnstickAbove && _player.Flags1.TestFlag(PlayerFlags1.Grounded)
+                && !_player.EchoesSubmerged && _unstickPadFlight == 0 && !BotJustLaunched()
+                && (_node40.Position - _player.Position).Xz.LengthSquared < 3 * 3;
             // her node is out of MphRead's reach (IsNodeInRange's distance, from half a unit up: 1.12 across the floor
             // but 0.2 up a curb is out of it, and no jump came: Crossfire Chaos, 2026-10-10)
             private bool UnstickAway => _node40 != null && !UnstickAt(_node40);
@@ -247,6 +336,10 @@ namespace MphRead.Entities
                     _unstickFrames = 0;
                     return;
                 }
+                if (travel && HostBotVanillaParity)
+                {
+                    BotEdgeGuard(); // (HostBotEdgeGuard) PlayerAiEdgeJump.cs: Echoes arenas' unstick too
+                }
                 if ((_player.Position - _unstickAt).Xz.LengthSquared > 2 * 2 || _player.Health == 0)
                 {
                     _unstickAt = _player.Position;
@@ -277,7 +370,12 @@ namespace MphRead.Entities
                     // (HostBotStuckVertical) falling or carried up: not stuck, the clock waits
                     return;
                 }
-                if (++_unstickFrames % UnstickStep != 0 || _unstickClimb > 0 || _unstickDrift > 0 || !(UnstickAbove || UnstickAway)
+                // (HostBotUnderGiveUp) under her node: the first climb at half a second, not 1.5 s (a stair step 1.1 up was
+                // given up before any jump, and she paced between its two nodes: Mining Plaza 11-05)
+                _unstickFrames++;
+                bool underClimb = HostBotUnderGiveUp && HostBotUnstick && _unstickClimbs == 0 && _unstickFrames >= UnderGiveUpFrames
+                    && !_player.IsAltForm && UnstickUnder;
+                if (!underClimb && _unstickFrames % UnstickStep != 0 || _unstickClimb > 0 || _unstickDrift > 0 || !(UnstickAbove || UnstickAway)
                     || EdgeJumpOn && EdgeBusy)
                 {
                     return;
@@ -324,12 +422,22 @@ namespace MphRead.Entities
             // is the closest she can see
             private void BotUnstick(AiContext context)
             {
+                if (HostIdleBots) // recomp: a frozen practice target never moves, so it isn't stuck (its give-ups cost frames)
+                {
+                    return;
+                }
                 if (BotUnstickSteer())
                 {
                     return;
                 }
                 bool edge = EdgeJumpOn;
-                if (_node40 == null || _unstickFrames < (edge ? UnstickStep * 6 : UnstickGiveUpFrames) || _unstickClimb > 0
+                bool outOfReach = HostBotUnstick && HostBotOutOfReach && (UnstickOutOfReach
+                    || HostBotUnderGiveUp && _unstickFrames >= UnderGiveUpFrames && _unstickClimbs > 0 && _unstickClimb == 0 && UnstickUnder);
+                if (outOfReach)
+                {
+                    HostOutOfReachCount++;
+                }
+                else if (_node40 == null || _unstickFrames < (edge ? UnstickStep * 6 : UnstickGiveUpFrames) || _unstickClimb > 0
                     || _unstickDrift > 0 || (_unstickClimbs < UnstickClimbsMax || edge && !EdgeRungsDone) && UnstickGrounded
                     && !_player.IsAltForm)
                 {
@@ -404,6 +512,7 @@ namespace MphRead.Entities
                 _unstickDriftDown = false;
                 _unstickClimb = 0;
                 _unstickSecond = false;
+                _climbLand = null;
                 return true;
             }
 
@@ -473,6 +582,7 @@ namespace MphRead.Entities
                 _unstickDriftDown = false;
                 _unstickClimb = 0;
                 _unstickSecond = false;
+                _climbLand = null;
                 return true;
             }
 
@@ -500,31 +610,47 @@ namespace MphRead.Entities
                 return best;
             }
 
+            // nearest first, so the first clear sight line is the answer, and only the nearest UnstickRays: a spot that sees
+            // no node at all (Mining Plaza's stand-in spawn at a locked door, 2026-10-31) tested every node twice on each
+            // give-up, 280 rays and 130 ms on the Odin; past them she takes the closest one, as with no node in sight
+            private const int UnstickRays = 12;
+            private readonly System.Collections.Generic.List<(float Dist, int Index)> _unstickOrder = new();
+
             private NodeData3? UnstickClosest(float? up)
             {
-                NodeData3? best = null;
-                float bestDist = float.MaxValue;
-                var result = new CollisionResult();
-                Vector3 from = _player.Position.AddY(up ?? 0);
+                _unstickOrder.Clear();
                 for (int i = 0; i < _nodeList.Count; i++)
                 {
                     NodeData3 node = _nodeList[i];
-                    float dist = Vector3.DistanceSquared(node.Position, _player.Position);
                     // not the node she stands on: she "reaches" it at once, the route sends her on to the node she gave
                     // up on, and the avoid list sends her back (Shooting Gallery 2026-10-16: Kanden on node 82, 83 given up,
                     // a half-unit circle round 82 for 21 s)
-                    if (dist >= bestDist || System.Array.IndexOf(_field7A, (ushort)i, 0, _field78) >= 0 || UnstickAvoided(i)
-                        || UnstickAt(node))
+                    if (System.Array.IndexOf(_field7A, (ushort)i, 0, _field78) >= 0 || UnstickAvoided(i) || UnstickAt(node))
                     {
                         continue;
                     }
-                    if (up == null || !CollisionDetection.CheckBetweenPoints(from, node.Position.AddY(up.Value), TestFlags.Players, _scene, ref result))
+                    _unstickOrder.Add((Vector3.DistanceSquared(node.Position, _player.Position), i));
+                }
+                if (_unstickOrder.Count == 0)
+                {
+                    return null;
+                }
+                _unstickOrder.Sort((a, b) => a.Dist != b.Dist ? a.Dist.CompareTo(b.Dist) : a.Index.CompareTo(b.Index));
+                if (up == null)
+                {
+                    return _nodeList[_unstickOrder[0].Index];
+                }
+                var result = new CollisionResult();
+                Vector3 from = _player.Position.AddY(up.Value);
+                for (int k = 0; k < _unstickOrder.Count && k < UnstickRays; k++)
+                {
+                    NodeData3 node = _nodeList[_unstickOrder[k].Index];
+                    if (!CollisionDetection.CheckBetweenPoints(from, node.Position.AddY(up.Value), TestFlags.Players, _scene, ref result))
                     {
-                        best = node;
-                        bestDist = dist;
+                        return node;
                     }
                 }
-                return best;
+                return null;
             }
 
             // off the ground and stuck (a steep edge that isn't floor holds her up): half a second of drift toward her
@@ -581,6 +707,32 @@ namespace MphRead.Entities
             private void BotClimb()
             {
                 int step = _unstickClimb++;
+                if (step == 1)
+                {
+                    _climbLand = HostBotLedgeLand && _navKind != 3 && _navKind != 4 ? BotLandingSpot() : null; // up a ledge, not across a gap
+                }
+                if (_climbLand != null && step > 4 * 2 && !_player.Flags1.TestFlag(PlayerFlags1.Grounded) // todo: FPS stuff
+                    && _player.Position.Y - 0.5f > _climbLand.Value.Y + 0.05f)
+                {
+                    // up there, feet over the lip: onto the floor past it (not before: pressed against the face under the lip,
+                    // a steep face takes her rise away, ArenaNav sim 7)
+                    Vector2 to = (_climbLand.Value - _player.Position).Xz;
+                    if (to.LengthSquared > 0.2f * 0.2f)
+                    {
+                        to = to.Normalized() * 0.15f;
+                        _player.Speed = new Vector3(to.X, _player.Speed.Y, to.Y);
+                    }
+                }
+                else if (_climbLand != null && _unstickSecond && _player.Speed.Y < -0.02f)
+                {
+                    _climbLand = null; // both jumps spent and falling short: normal steering again, not pinned in the air
+                }
+                else if (_climbLand != null && !_player.Flags1.TestFlag(PlayerFlags1.Grounded) && _player.Speed.Y > 0.01f)
+                {
+                    // feet still under the lip: straight up, off the face (held against a steep face under a lip, it stops
+                    // her rise: Mining Plaza's edge steps, 11-01)
+                    _player.Speed = new Vector3(0, _player.Speed.Y, 0);
+                }
                 if (step <= 4 * 2) // todo: FPS stuff
                 {
                     _buttons.L.IsDown = true;
@@ -598,7 +750,60 @@ namespace MphRead.Entities
                 {
                     _unstickClimb = 0;
                     _unstickSecond = false;
+                    _climbLand = null;
                 }
+            }
+
+            // (HostBotLedgeLand) floor at her node's height a body's width past it, with room around it: of 8 ways out of the
+            // node, the one most along her way in (the node itself when she is beside it already, or none above her)
+            private static readonly Vector2[] _landWays =
+            {
+                new Vector2(1, 0), new Vector2(0.70710677f, 0.70710677f), new Vector2(0, 1), new Vector2(-0.70710677f, 0.70710677f),
+                new Vector2(-1, 0), new Vector2(-0.70710677f, -0.70710677f), new Vector2(0, -1), new Vector2(0.70710677f, -0.70710677f)
+            };
+
+            private Vector3? BotLandingSpot()
+            {
+                if (_node40 == null)
+                {
+                    return null;
+                }
+                Vector3 node = _node40.Position;
+                if (node.Y - (_player.Position.Y - 0.5f) < 0.6f)
+                {
+                    return null;
+                }
+                Vector2 way = (node - _player.Position).Xz;
+                way = way.LengthSquared > 0.0001f ? way.Normalized() : Vector2.UnitX;
+                Vector3? best = null;
+                float bestScore = float.MinValue;
+                for (int i = 0; i < 8; i++)
+                {
+                    Vector2 d = _landWays[i];
+                    var perp = new Vector2(-d.Y, d.X);
+                    Vector2 spot = node.Xz + d * 1.2f;
+                    if (!BotFloorAt(spot, node.Y) || !BotFloorAt(spot + perp * 0.5f, node.Y)
+                        || !BotFloorAt(spot - perp * 0.5f, node.Y) || !BotFloorAt(spot + d * 0.5f, node.Y)
+                        || !BotFloorAt(node.Xz + d * 0.6f, node.Y))
+                    {
+                        continue;
+                    }
+                    float score = Vector2.Dot(d, way);
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = new Vector3(spot.X, node.Y, spot.Y);
+                    }
+                }
+                return best;
+            }
+
+            private bool BotFloorAt(Vector2 at, float y)
+            {
+                var result = new CollisionResult();
+                var from = new Vector3(at.X, y + 1.5f, at.Y);
+                return CollisionDetection.CheckBetweenPoints(from, from.WithY(y - 0.6f), TestFlags.Players, _scene, ref result)
+                    && result.Position.Y > y - 0.4f && result.Plane.Y > 0.5f;
             }
 
             // T7: the link she is following (from her last node to _node40) and, at its ledge, edge or under water, the jump
@@ -636,7 +841,9 @@ namespace MphRead.Entities
                 bool go = _navKind switch
                 {
                     // at the ledge: close to the node, or the wall in front of her
-                    1 or 2 => grounded && up > 0.6f && (across < 2 || BotWallAhead(dir)),
+                    // (HostBotLedgeLand: close to it only once it is in reach, a ramp under a ledge took her jumps low)
+                    1 or 2 => grounded && up > 0.6f && (across < 2 && (!HostBotLedgeLand || up < (_navKind == 1 ? 2.2f : 3.8f))
+                        || BotWallAhead(dir)),
                     // out of the water, held (the Gravity Boost lasts while the button is down)
                     4 => (grounded || _player.EchoesSubmerged) && up > 0.6f && across < 4,
                     // the gap's edge: no floor a step ahead
@@ -667,26 +874,51 @@ namespace MphRead.Entities
             }
 
             // T7: an item she has been beside for 3 s without getting it is skipped for 20 s
+            private const float ItemOutOfReachRise = 6;
             private void BotItemTick()
             {
                 ItemInstanceEntity? item = Flags2.TestFlag(AiFlags2.TargetItem) ? _itemC8 : null;
-                if (item == null || item != _itemNear || (item.Position - _player.Position).Xz.LengthSquared > 2.5f * 2.5f)
+                float nearRadius = HostBotItemNoGain ? 3.5f : 2.5f;
+                if (item == null || item != _itemNear || (item.Position - _player.Position).Xz.LengthSquared > nearRadius * nearRadius)
                 {
                     _itemNear = item;
                     _itemNearFrames = 0;
+                    _itemNearBest = float.MaxValue;
+                    _itemNoGainFrames = 0;
                     return;
                 }
-                if (++_itemNearFrames < 90 * 2) // todo: FPS stuff
+                bool noGain = false;
+                if (HostBotItemNoGain)
+                {
+                    // nearer by a quarter unit counts as getting there (a lift or a pad under it does, straight up)
+                    float dist = (item.Position - _player.Position).Length;
+                    if (dist < _itemNearBest - 0.25f || BotJustLaunched())
+                    {
+                        _itemNearBest = System.MathF.Min(dist, _itemNearBest);
+                        _itemNoGainFrames = 0;
+                    }
+                    noGain = ++_itemNoGainFrames >= 30 * 2; // todo: FPS stuff
+                }
+                // (HostBotUnderGiveUp) right under an item far above her on the ground (a ledge over Mining Plaza's stairs,
+                // 12 up): the item walk only steers at it, so she stood under it until the 3 s give-up (11-05). No jump reaches it;
+                // half a second in that spot first (a jump pad under an item throws her up it)
+                bool under = HostBotUnderGiveUp && UnstickGrounded && _unstickFrames >= UnderGiveUpFrames && !BotJustLaunched() && item.Position.Y - _player.Position.Y > ItemOutOfReachRise
+                    && (item.Position - _player.Position).Xz.LengthSquared < 2.5f * 2.5f;
+                if (++_itemNearFrames < 90 * 2 && !under && !noGain) // todo: FPS stuff
                 {
                     return;
                 }
+                if (noGain) HostItemNoGainCount++;
                 _itemNearFrames = 0;
+                _itemNearBest = float.MaxValue;
+                _itemNoGainFrames = 0;
                 int slot = 0;
                 for (int i = 1; i < _itemSkip.Length; i++)
                 {
                     if (_itemSkip[i].Until < _itemSkip[slot].Until) slot = i;
                 }
                 _itemSkip[slot] = (item.Id, _botTicks + 600 * 2); // todo: FPS stuff
+                _itemSkipItem[slot] = item;
                 HostUnstickCounts[5]++;
                 UpdateTargetItem(null);
             }
@@ -694,22 +926,49 @@ namespace MphRead.Entities
             // Func21377FC (MphRead's "not this item" for every item pick): skipped, or under a breakable's top
             private bool BotItemSkipped(ItemInstanceEntity item)
             {
-                foreach ((int id, int until) in _itemSkip)
+                for (int i = 0; i < _itemSkip.Length; i++)
                 {
-                    if (id == item.Id && until > _botTicks) return true;
+                    (int id, int until) = _itemSkip[i];
+                    if (id == item.Id && until > _botTicks && (!HostBotItemWalled || _itemSkipItem[i] == item)) return true;
                 }
                 if (_itemCoveredAt < 0 || _botTicks - _itemCoveredAt >= 30)
                 {
                     // grates break and come back: looked at again every half second
                     _itemCovered.Clear();
+                    _itemCoveredBy.Clear();
                     _itemCoveredAt = _botTicks;
                 }
-                if (!_itemCovered.TryGetValue(item.Id, out bool covered))
+                bool covered;
+                if (HostBotItemWalled ? !_itemCoveredBy.TryGetValue(item, out covered) : !_itemCovered.TryGetValue(item.Id, out covered))
                 {
                     var result = new CollisionResult();
                     covered = CollisionDetection.CheckBetweenPoints(item.Position, item.Position.AddY(1.3f), TestFlags.Players, _scene, ref result)
                         && result.EntityCollision != null;
-                    _itemCovered[item.Id] = covered;
+                    if (!covered && HostBotGrateItems && HostGrateBoxes != null)
+                    {
+                        Vector3 p = item.Position;
+                        foreach ((Vector3 min, Vector3 max) in HostGrateBoxes)
+                        {
+                            if (p.X > min.X - 0.5f && p.X < max.X + 0.5f && p.Z > min.Z - 0.5f && p.Z < max.Z + 0.5f
+                                && p.Y > min.Y - 2 && p.Y < max.Y + 1.3f)
+                            {
+                                covered = true;
+                                HostGrateItemCount++;
+                                break;
+                            }
+                        }
+                    }
+                    if (!covered && HostBotItemWalled && _nodeList.Count > 0)
+                    {
+                        // walled off from its node by an entity's collision (a shut gate): a level wall isn't an entity
+                        NodeData3 node = item.ClosestNode ?? FindClosestNonHazardNodeToPosition(item.Position);
+                        result = new CollisionResult();
+                        covered = CollisionDetection.CheckBetweenPoints(item.Position.AddY(0.5f), node.Position.AddY(0.5f), TestFlags.Players, _scene, ref result)
+                            && result.EntityCollision != null;
+                        if (covered) HostItemWalledCount++;
+                    }
+                    if (HostBotItemWalled) _itemCoveredBy[item] = covered;
+                    else _itemCovered[item.Id] = covered;
                 }
                 return covered;
             }

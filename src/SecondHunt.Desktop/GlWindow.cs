@@ -167,6 +167,16 @@ internal sealed unsafe class GlWindow : IDisposable
         SetWindowPos(hwnd, (IntPtr)1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // HWND_BOTTOM; SWP_NOSIZE | NOMOVE | NOACTIVATE
     }
 
+    long _lastNudge;
+
+    public void KeepResponsive()
+    {
+        long now = Environment.TickCount64;
+        if (now - _lastNudge < 1000) return;
+        _lastNudge = now;
+        PostMessage(GLFW.GetWin32Window(Window.WindowPtr), 0, IntPtr.Zero, IntPtr.Zero); // WM_NULL
+    }
+
     public void Dispose()
     {
         Window.Dispose();
@@ -179,5 +189,6 @@ internal sealed unsafe class GlWindow : IDisposable
     [DllImport("opengl32.dll", CharSet = CharSet.Ansi, BestFitMapping = false)] static extern IntPtr wglGetProcAddress(string name);
     [DllImport("gdi32.dll")] static extern bool SwapBuffers(IntPtr hdc);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 }

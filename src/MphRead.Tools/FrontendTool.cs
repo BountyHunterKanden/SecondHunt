@@ -255,6 +255,16 @@ namespace MphRead
                     MenuItem it = session.Menu.Page!.Items[g.Key];
                     Console.WriteLine(FormattableString.Invariant($"  item {g.Key} at ({it.X:0.#},{it.Y:0.#}) tris {g.Count()} x {x0:0.#}..{x1:0.#} y {y0:0.#}..{y1:0.#} state {session.Menu.ItemState(g.Key)}"));
                 }
+                // each item's touch rectangles (text coordinates, y up from the touch screen's bottom), hidden ones too
+                for (int i = 0; i < session.Menu.Page!.Items.Count; i++)
+                {
+                    foreach (MenuAction a in session.Menu.Page.Items[i].Actions)
+                    {
+                        if (!MenuEngine.TryRect(a, session.Menu.Page.Items[i], out float rx0, out float ry0, out float rx1, out float ry1)) continue;
+                        string calls = String.Join("/", a.Calls.Select(c => c.Item2));
+                        Console.WriteLine(FormattableString.Invariant($"  touch item {i} x {rx0:0.#}..{rx1:0.#} y {ry0:0.#}..{ry1:0.#} calls {calls} page {a.TargetPage} state {session.Menu.ItemState(i)}"));
+                    }
+                }
             }
             (int W, int H)[] sizes = { (960, 540), (1200, 540), (864, 540), (720, 540), (1260, 540) };
             int total = sizes.Sum(s => s.W) + 10 * (sizes.Length - 1);
@@ -465,6 +475,16 @@ namespace MphRead
                     if (frames) shots[^1].Img.SaveAsPng(Path.Combine(OutDir(), $"flow_{f}.png"));
                 }
                 session.Tick();
+                // FE_STATES=1: every item mid-transition after the tick (what slides under a popup that hides it)
+                if (Environment.GetEnvironmentVariable("FE_STATES") == "1" && session.Menu.Page != null)
+                {
+                    for (int i = 0; i < session.Menu.ItemCount; i++)
+                    {
+                        int code = session.Menu.ItemCode(i);
+                        if (MenuStateCode.IsTransition(code))
+                            log.Add($"{f}: item {i} {MenuStateCode.From(code)}->{session.Menu.ItemState(i)} text {session.Menu.Page.Items[i].IsText} {(session.Menu.Page.Items[i].IsText ? "" : Path.GetFileName(session.Menu.ItemModelPath(i)))}");
+                    }
+                }
             }
             const int cols = 8, tw = 320, th = 180;
             int rows = (shots.Count + cols - 1) / cols;
@@ -551,7 +571,7 @@ namespace MphRead
             log.Add($"logbook (new game): lore {ShipLogbook.Percent(fresh, LogCategory.Lore)}% bioform {ShipLogbook.Percent(fresh, LogCategory.Bioform)}%"
                 + $" object {ShipLogbook.Percent(fresh, LogCategory.Object)}% equipment {ShipLogbook.Percent(fresh, LogCategory.Equipment)}%"
                 + $" scans {ShipLogbook.Percent(fresh, LogCategory.Lore, LogCategory.Bioform, LogCategory.Object)}%; equipment entries: "
-                + String.Join(", ", ShipLogbook.Entries(fresh, LogCategory.Equipment).Select(e => e.Name)));
+                + String.Join(", ", ShipLogbook.Entries(fresh, LogCategory.Equipment).Where(e => e.Scanned).Select(e => e.Name)));
             menu.RedrawArt = Environment.GetEnvironmentVariable("FE_PIXELART") != "1";
             // FE_DESKTOP=1: OPTIONS as the Windows build has it (controller and keyboard & mouse tabs)
             menu.KeyboardControls = Environment.GetEnvironmentVariable("FE_DESKTOP") == "1";
@@ -820,7 +840,12 @@ namespace MphRead
             static int Areas(string? mask) => Enumerable.Range(0, 5).Where(i => mask != null && i < mask.Length && mask[i] == '1').Sum(i => 1 << (2 * i));
             string[] names = { "ALINOS", "CELESTIAL ARCHIVES", "VESPER DEFENSE OUTPOST", "ARCTERRA", "OUBLIETTE" };
             sel.KnownAreasChanged = k => log.Add($"known areas 0x{k:x}");
-            sel.Open(Areas(Environment.GetEnvironmentVariable("FE_PLANETS") ?? "01000"), Areas(Environment.GetEnvironmentVariable("FE_KNOWN") ?? "00000"), names, 1);
+            // FE_HUNTERS = StorySave.AreaHunters as 8 hex digits (planet 0 first, e.g. "00160000": Celestial Archives has
+            // Kanden, Trace and Noxus), FE_LOST = LostOctoliths in hex (e.g. "fff1ff41")
+            string? hunters = Environment.GetEnvironmentVariable("FE_HUNTERS");
+            byte[]? areaHunters = hunters == null ? null : Convert.FromHexString(hunters.PadRight(8, '0')[..8]);
+            uint lost = Convert.ToUInt32(Environment.GetEnvironmentVariable("FE_LOST") ?? "ffffffff", 16);
+            sel.Open(Areas(Environment.GetEnvironmentVariable("FE_PLANETS") ?? "01000"), Areas(Environment.GetEnvironmentVariable("FE_KNOWN") ?? "00000"), names, 1, areaHunters, lost);
             const int W = 1920, H = 1080;
             for (int i = 0; i < 300 && !sel.RedrawReady; i++)
             {

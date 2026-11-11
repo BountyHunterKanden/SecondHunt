@@ -10,7 +10,7 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.App;
 
-// Mining Plaza's sand crates breaking in Echoes' look and sound (stage 3). A crate's DEAD fires its GENR
+// Mining Plaza's sand crates breaking in Echoes' look and sound (thread 3d373d stage 3). A crate's DEAD fires its GENR
 // 'BLOW CRATE': RandomCount (12) picks of its DebrisExtended followers at the crate, each flown by CScriptDebris as the
 // Shooting Gallery grates' are (CampaignRenderer.TurretFx.cs: cone speed, random spin, life, gravity, fade, scale-out,
 // its death PART where its life ends), trailing its PART (982c7701); with the box's flash (418d14d4) and dust (a982d571)

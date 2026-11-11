@@ -66,6 +66,7 @@ internal sealed partial class CampaignRenderer
         public Vector3 Spawn, Pos, Dir, SimDir;
         public Vector3 Shift;      // tip - spawn, eased to nothing at FadeAt along the path (Zero: no shift)
         public float FadeAt = 1, Lead;
+        public float CatchUp = BlasterCatchUp; // shorter when it lands nearer (BoltPath): caught up by the landing
         public bool ArmPath;       // the arm-cannon thread's own path (HostDrawShift/HostDrawHide) is set: use it
         public bool OwnView;       // the main player's own shot seen in first person (BlasterOwnStart)
         public float Age;
@@ -309,20 +310,26 @@ internal sealed partial class CampaignRenderer
     // once per bolt: the drawn line from the tip (header)
     void BoltPath(BlasterBolt bolt, BeamProjectileEntity b)
     {
-        if (b.HostDrawShift != null || b.HostDrawHide > 0)
-        {
-            bolt.ArmPath = true; // ArmCannonBeamPath.cs already drew this shot from the Trooper's arm
-            return;
-        }
-        if (_host == null || b.Owner is not PlayerEntity p || BlasterTip(p) is not Vector3 tip) return;
+        if (_host == null) return;
         Vector3 start = b.SpawnPosition, dir = bolt.SimDir;
-        if ((tip - start).LengthSquared < 0.0025f) return; // already at the tip
         Scene scene = _host.Scene;
         float reach = b.MaxDistance > 0 ? MathF.Min(b.MaxDistance, 200) : 200;
         var res = new CollisionResult();
         Vector3 end = start + dir * reach;
         if (CollisionDetection.CheckBetweenPoints(start, end, TestFlags.Beams, scene, ref res)) end = res.Position;
         float range = (end - start).Length;
+        // landing on a player (ArmCannonBeamPath.cs), not only the wall behind, and caught up with the real shot by the
+        // landing (owner 2026-10-31: at 4 units the bolt vanished on Samus still behind and beside the real one)
+        if (PlayerOnPath(b, start, dir, range) is float body) range = body;
+        end = start + dir * range;
+        bolt.CatchUp = Math.Clamp(range - bolt.Lead, 0.25f, BlasterCatchUp);
+        if (b.HostDrawShift != null || b.HostDrawHide > 0)
+        {
+            bolt.ArmPath = true; // ArmCannonBeamPath.cs already drew this shot from the Trooper's arm
+            return;
+        }
+        if (b.Owner is not PlayerEntity p || BlasterTip(p) is not Vector3 tip) return;
+        if ((tip - start).LengthSquared < 0.0025f) return; // already at the tip
         res = new CollisionResult();
         if (CollisionDetection.CheckBetweenPoints(start, tip, TestFlags.Beams, scene, ref res)) return; // tip through a wall
         float fade;
@@ -345,7 +352,7 @@ internal sealed partial class CampaignRenderer
     static Vector3 BoltDrawn(BlasterBolt bolt, BeamProjectileEntity b)
     {
         float s = MathF.Max(0, Vector3.Dot(b.Position - bolt.Spawn, bolt.SimDir));
-        float lag = bolt.Lead * MathF.Max(0, 1 - (s - bolt.Lead) / BlasterCatchUp);
+        float lag = bolt.Lead * MathF.Max(0, 1 - (s - bolt.Lead) / bolt.CatchUp);
         float d = MathF.Max(0, s - lag);
         Vector3 point = bolt.Spawn + bolt.SimDir * d;
         if (bolt.ArmPath) return b.HostShifted(point);

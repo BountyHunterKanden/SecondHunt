@@ -154,7 +154,8 @@ namespace MphRead.Entities
         private void HostFloatPoseModel(Model model)
         {
             int anim = _bipedModel1.AnimInfo.Index[0];
-            float dt = MathF.Min(_scene.FrameTime, 0.1f);
+            // frozen: the float holds where it was (its bob, sway and idle frame stop with vanilla's clips, PlayerProcess)
+            float dt = _frozenTimer > 0 ? 0 : MathF.Min(_scene.FrameTime, 0.1f);
             bool on = HostFloatPose && _health > 0 && FloatAnim(anim);
             _floatWeight = on ? MathF.Min(1, _floatWeight + _floatEase * dt) : MathF.Max(0, _floatWeight - _floatEase * dt);
             _floatTime += dt;

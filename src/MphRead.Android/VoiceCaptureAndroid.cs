@@ -163,6 +163,48 @@ internal static class VoiceAndroid
         app.RegisterActivityLifecycleCallbacks(new Tracker());
         string dir = app.GetExternalFilesDir(null)?.AbsolutePath ?? app.FilesDir!.AbsolutePath;
         VoiceAudio.Install(dir, () => new VoiceCaptureAndroid());
+        VoiceDevices.OnLoudspeaker = OnLoudspeaker;
+    }
+
+    // no headset, headphones or hearing aid among the outputs = the game plays out of the speakers (looked up at most once
+    // a second; MusicDuck asks only while push to talk is held)
+    static long s_speakerAt = -10_000; // (not long.MinValue: now - MinValue overflows and never asks)
+    static volatile bool s_speaker;
+
+    static bool OnLoudspeaker()
+    {
+        long now = System.Environment.TickCount64;
+        if (now - s_speakerAt < 1000)
+        {
+            return s_speaker;
+        }
+        s_speakerAt = now;
+        bool speaker = true;
+        try
+        {
+            var am = (AudioManager?)Application.Context.GetSystemService(Android.Content.Context.AudioService);
+            AudioDeviceInfo[]? outputs = am?.GetDevices(GetDevicesTargets.Outputs);
+            foreach (AudioDeviceInfo d in outputs ?? Array.Empty<AudioDeviceInfo>())
+            {
+                if (d.Type is AudioDeviceType.WiredHeadset or AudioDeviceType.WiredHeadphones or AudioDeviceType.BluetoothA2dp
+                    or AudioDeviceType.BluetoothSco or AudioDeviceType.UsbHeadset or AudioDeviceType.HearingAid
+                    || (OperatingSystem.IsAndroidVersionAtLeast(31) && d.Type == AudioDeviceType.BleHeadset))
+                {
+                    speaker = false;
+                    break;
+                }
+            }
+        }
+        catch (Java.Lang.Exception ex)
+        {
+            AndroidLog.Warn("MPHVoice", "output devices: " + ex.Message);
+        }
+        if (speaker != s_speaker)
+        {
+            AndroidLog.Info("MPHVoice", speaker ? "sound on the speakers: music ducks while you push to talk" : "headphones: no self duck");
+        }
+        s_speaker = speaker;
+        return speaker;
     }
 
     // (the capture's thread): ask for RECORD_AUDIO once per run, from whatever screen is up

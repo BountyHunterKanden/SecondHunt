@@ -25,7 +25,18 @@ namespace MphRecomp.Campaign
             public EnemySpawnEntityData Mph { get; init; }
             public FhEnemySpawnEntityData Fh { get; init; }
             public string SourceRoom { get; init; } = "";
+            public Hunter? Hunter { get; init; }        // a hunter bot (Type is EnemyType.Hunter; H2, 11.2 item 7)
         }
+
+        // the hunters H2 can place: a hunter spawner (EnemyType.Hunter) whose bot is that hunter; the template is a story
+        // room's own spawner for that hunter, else the first hunter spawner found with its hunter swapped
+        public static readonly Hunter[] PlaceableHunters =
+        {
+            MphRead.Hunter.Samus, MphRead.Hunter.Kanden, MphRead.Hunter.Trace, MphRead.Hunter.Sylux, MphRead.Hunter.Noxus,
+            MphRead.Hunter.Spire, MphRead.Hunter.Weavel, MphRead.Hunter.Guardian,
+        };
+
+        public static string HunterId(Hunter h) => "mph:Hunter:" + h;
 
         // what H1 can place, in the D-pad's order (bosses and their parts, Slench, Gorea and the spawner/lock helpers
         // are left out: they need their rooms)
@@ -73,6 +84,8 @@ namespace MphRecomp.Campaign
         {
             var mph = new Dictionary<EnemyType, Entry>();
             var fh = new Dictionary<FhEnemyType, Entry>();
+            var hunters = new Dictionary<Hunter, (EnemySpawnEntityData Data, string Room)>();
+            (EnemySpawnEntityData Data, string Room)? anyHunter = null;
             foreach (RoomMetadata meta in Metadata.RoomList)
             {
                 if (meta.Multiplayer || meta.EntityPath == null)
@@ -92,6 +105,13 @@ namespace MphRecomp.Campaign
                 }
                 foreach (Entity entity in entities)
                 {
+                    if (!meta.FirstHunt && entity is Entity<EnemySpawnEntityData> hs && hs.Data.EnemyType == EnemyType.Hunter)
+                    {
+                        anyHunter ??= (hs.Data, meta.Name);
+                        var h = (Hunter)hs.Data.Fields.S09.HunterId;
+                        if (h <= MphRead.Hunter.Guardian && !hunters.ContainsKey(h)) hunters[h] = (hs.Data, meta.Name);
+                        continue;
+                    }
                     if (!meta.FirstHunt && entity is Entity<EnemySpawnEntityData> m && Array.IndexOf(PlaceableMph, m.Data.EnemyType) >= 0
                         && !mph.ContainsKey(m.Data.EnemyType))
                     {
@@ -117,6 +137,17 @@ namespace MphRecomp.Campaign
             {
                 if (mph.TryGetValue(t, out Entry? e)) list.Add(e);
             }
+            if (anyHunter != null)
+            {
+                foreach (Hunter h in PlaceableHunters)
+                {
+                    (EnemySpawnEntityData data, string room) = hunters.TryGetValue(h, out var own) ? own : anyHunter.Value;
+                    list.Add(new Entry
+                    {
+                        Id = HunterId(h), Label = "Hunter " + h, Type = EnemyType.Hunter, Mph = data, SourceRoom = room, Hunter = h,
+                    });
+                }
+            }
             foreach (FhEnemyType t in PlaceableFh)
             {
                 if (fh.TryGetValue(t, out Entry? e)) list.Add(e);
@@ -132,11 +163,11 @@ namespace MphRecomp.Campaign
         public readonly record struct Vulnerability(bool[] Beams, bool Bomb, bool Contact);
 
         // from the type's effectiveness table; a live instance's flags (Invincible / NoBombDamage, which also stops the
-        // contact alt forms, PlayerCollision) when there is one. First Hunt's enemies have no weaknesses: all hurt.
+        // contact alt forms, PlayerCollision) when there is one. First Hunt's enemies and hunter bots have no weaknesses: all hurt.
         public static Vulnerability VulnerabilityOf(Entry entry, EnemyInstanceEntity? live = null)
         {
             var beams = new bool[8];
-            if (entry.FirstHunt)
+            if (entry.FirstHunt || entry.Hunter != null || entry.Type == EnemyType.Hunter)
             {
                 Array.Fill(beams, true);
                 return new Vulnerability(beams, Bomb: true, Contact: true);

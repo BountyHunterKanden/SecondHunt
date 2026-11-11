@@ -123,6 +123,14 @@ namespace MphRead
         public static int[] FriendlyKills { get; } = new int[PlayerEntity.SlotCapacity];
         public static int[] HeadshotKills { get; } = new int[PlayerEntity.SlotCapacity];
         public static int[,] BeamKills { get; } = new int[PlayerEntity.SlotCapacity, 9];
+        // recomp (Gaming Hub stats): kills with the beams past the vanilla 9 (Pirate Blaster, Hyper Beam, Paralyzer...),
+        // indexed by BeamType; the longest run of kills this match; the seconds the match ran
+        public static int[,] ExtraBeamKills { get; } = new int[PlayerEntity.SlotCapacity, ExtraBeamSlots];
+        public const int ExtraBeamSlots = 16;
+        public static int[] BestKillStreak { get; } = new int[PlayerEntity.SlotCapacity];
+        // recomp (Gaming Hub stats): shots fired this match (each shot that spawned, where vanilla has its license todo)
+        public static int[] ShotsFired { get; } = new int[PlayerEntity.SlotCapacity];
+        public static float MatchSeconds { get; set; }
 
         public static int[] OctolithScores { get; } = new int[PlayerEntity.SlotCapacity]; // field260 in-game
         public static int[] OctolithDrops { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
@@ -135,6 +143,9 @@ namespace MphRead
         public static int[] PrimesKilled { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
 
         public static Action<Scene> ModeState { get; private set; } = ModeStateAdventure;
+        // host hook (Second Hunt's gameplay mods, mode.tick): when set, runs each frame in place of ModeState, which it may
+        // still call for the mode's own rules
+        public static Action<Scene>? HostModeTick { get; set; }
         private static bool _pausingDialog = false;
         private static bool _unpausingDialog = false;
         private static bool _pausingMenu = false;
@@ -269,6 +280,10 @@ namespace MphRead
         {
             // todo: update license info etc.
             HostLicenseTime?.Invoke(scene.FrameTime);
+            if (MatchState == MatchState.InProgress)
+            {
+                MatchSeconds += scene.FrameTime; // recomp (Gaming Hub stats)
+            }
             if (MatchTime > 0)
             {
                 MatchTime = MathF.Max(MatchTime - scene.FrameTime, 0);
@@ -328,7 +343,7 @@ namespace MphRead
                         // todo: stop music/SFX, state bits/disconnect message?
                     }
                 }
-                ModeState(scene);
+                if (HostModeTick != null) HostModeTick(scene); else ModeState(scene);
                 if (SinglePlayer && EscapeTimer != -1)
                 {
                     // bugfix?: this fade check seems to count things like the Omega Cannon flash
@@ -416,6 +431,7 @@ namespace MphRead
                     }
                     // todo: 1P time up? isn't that handled by death countdown etc.?
                     MatchState = MatchState.GameOver;
+                    if (GameEvents.Any) GameEvents.Raise("match_end", Mode.ToString()); // recomp: mod event (GameEvents.cs)
                     MatchTime = 90 / 30f;
                     if (PlayerEntity.HostFirstHunt)
                     {
@@ -1113,7 +1129,7 @@ namespace MphRead
                 || Mode == GameMode.BountyTeams || Mode == GameMode.Nodes || Mode == GameMode.NodesTeams)
             {
                 int teamPoints = TeamPoints[PlayerEntity.Main.TeamIndex];
-                if (voices && teamPoints != prevTeamPoints[PlayerEntity.Main.TeamIndex] && teamPoints == PointGoal - 1)
+                if (voices && teamPoints != prevTeamPoints[PlayerEntity.Main.TeamIndex] && teamPoints == PointGoal - 1) // recomp: MainCuesHeard
                 {
                     Sfx.QueueStream(VoiceId.VOICE_ONE_KILL_TO_WIN, delay: 1);
                 }
@@ -1145,7 +1161,7 @@ namespace MphRead
                 if (PlayerEntity.Main.LoadFlags.TestAny(LoadFlags.Active) && opponents == 1 && lastTeam != -1)
                 {
                     int teamDeaths = TeamDeaths[lastTeam];
-                    if (voices && teamDeaths != prevTeamDeaths[lastTeam] && teamDeaths == TeamLives(lastTeam))
+                    if (voices && teamDeaths != prevTeamDeaths[lastTeam] && teamDeaths == TeamLives(lastTeam)) // recomp: MainCuesHeard
                     {
                         Sfx.QueueStream(VoiceId.VOICE_ONE_KILL_TO_WIN, delay: 1);
                     }
@@ -1406,7 +1422,9 @@ namespace MphRead
                 }
                 return 1;
             }
-            if (Mode == GameMode.Capture || Mode == GameMode.NodesTeams || Mode == GameMode.BattleTeams)
+            // recomp: BountyTeams (vanilla 0x205B644 tests 9, 7, 11; was BattleTeams, already handled above, so team bounty
+            // always compared 0 and both teams read "tied for 1st place")
+            if (Mode == GameMode.Capture || Mode == GameMode.NodesTeams || Mode == GameMode.BountyTeams)
             {
                 if (points1 == points2 && kills1 == kills2)
                 {
@@ -1630,6 +1648,7 @@ namespace MphRead
             CommitSave();
             UpdateCleanSave(force: true);
             MatchState = MatchState.InProgress;
+            MatchSeconds = 0; // recomp (Gaming Hub stats)
             TransitionState = TransitionState.None;
             TransitionRoomId = -1;
             TransitionAltForm = false;
@@ -1669,6 +1688,12 @@ namespace MphRead
                 {
                     BeamKills[i, j] = 0;
                 }
+                for (int j = 0; j < ExtraBeamSlots; j++)
+                {
+                    ExtraBeamKills[i, j] = 0;
+                }
+                BestKillStreak[i] = 0;
+                ShotsFired[i] = 0;
             }
             PrimeHunter = -1;
             Teams = false;

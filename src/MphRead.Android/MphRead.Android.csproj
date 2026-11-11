@@ -39,6 +39,16 @@
     <AndroidEnvironment Include="gc_environment.txt" />
   </ItemGroup>
 
+  <!-- Allocation profiling on the device (2026-11-01, Mining Plaza GC dips): opt in with -p:MphProfile=true. Adds the
+       runtime's diagnostics component and turns on Mono's EventPipe allocation events; the app connects to a
+       diagnostic port on 127.0.0.1:9000 (adb reverse + dotnet-dsrouter on the PC, then dotnet-trace). Never in a release. -->
+  <PropertyGroup Condition="'$(MphProfile)' == 'true'">
+    <AndroidEnableProfiler>true</AndroidEnableProfiler>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(MphProfile)' == 'true'">
+    <AndroidEnvironment Include="profile_environment.txt" />
+  </ItemGroup>
+
   <!-- First-run compile hitches (2026-10-14, owner: dips at the Celestial Gateway spawn). The SDK's default "profiled
        AOT" precompiles only start-up code (~3% of MphRead), so every other method was JIT-compiled the first time it
        ran: ~300 at once in the first step after a landing movie (37 + 79 + 32 ms frames), more at every first fight,

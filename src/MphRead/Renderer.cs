@@ -500,6 +500,7 @@ namespace MphRead
                     StartMovie(movieId, FadeType.FadeOutInBlack, 0, FadeType.FadeOutWhite, 5 / 30f, afterMovieAction: AfterMovie.StartGame);
                 }
             }
+            if (GameEvents.Any) GameEvents.Raise("game_start", GameState.Mode.ToString(), meta.Name, _room.RoomId, PlayerEntity.PlayerCount); // recomp: mod event (GameEvents.cs)
         }
 
         public void SetRoomValues(RoomMetadata meta)
@@ -1595,6 +1596,7 @@ namespace MphRead
                 if (!GameState.DialogPause)
                 {
                     _frameCount++;
+                    if (GameEvents.Tick) GameEvents.Raise("tick", (double)_frameTime, _frameCount); // recomp: mod event (GameEvents.cs) (per-frame, so its own flag)
                 }
                 GameState.UpdateTime(this);
                 if (_movieFrameIndex != -1)
@@ -4238,6 +4240,10 @@ namespace MphRead
         // the width the HUD lays out across: the whole view, or the dialogs' 4:3 box
         private float HudLayoutWidth => _hudDialogBox ? MathF.Min(Size.X, Size.Y * 4 / 3f) : Size.X;
 
+        // recomp (wave 1, 2026-11-07): how much wider than 4:3 the HUD lays out (1 on 4:3, 1.33 on 16:9) = what mode 2
+        // stretches by; PlayerHud draws text and icons at their true shape with it
+        public float HudStretch => Size.Y > 0 ? HudLayoutWidth * 192 / (Size.Y * 256f) : 1;
+
         // DrawHudObject's placement maths, recorded as an NDC quad
         private void RecordHudObject(HudObjectInstance inst, int mode)
         {
@@ -4277,6 +4283,11 @@ namespace MphRead
             if (inst.FlipVertical)
             {
                 (bottomPos, topPos) = (topPos, bottomPos);
+            }
+            if (inst.HostSprite is HostHudSprite own) // recomp: its own pixels (HudObjectInstance.HostSprite)
+            {
+                HostHudQuad(own, leftPos, rightPos, topPos, bottomPos, inst.Alpha);
+                return;
             }
             if (inst.Live) // recomp: drawn from its HostTextures entry (re-uploaded when its Version changes)
             {

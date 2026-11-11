@@ -1,0 +1,2 @@
+MONO_DIAGNOSTICS=--diagnostic-mono-profiler=enable,alloc
+DOTNET_DiagnosticPorts=127.0.0.1:9000,nosuspend,connect

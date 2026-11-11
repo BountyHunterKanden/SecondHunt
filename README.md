@@ -98,18 +98,18 @@ plaza.
 <p><a href="#new-hunters"><img src="docs/images/hy-h3-new-hunters.png" width="100%" alt="New hunters"></a></p>
 
 
-- **The Trooper** from _Metroid Prime_: a Space Pirate with four skins, a wall cling and a Scout Drone alt form. His
+- **The Pirate Trooper** from _Metroid Prime_: a Space Pirate with four skins, a wall cling and a Scout Drone alt form. His
   Pirate Blaster marks a target with a full burst (Squad Mark), showing them through walls to him and his team.
 - **Dark Samus** from _Echoes_ or _Corruption_, with her final form from _Echoes_, **Overcharged Dark Samus**, as a skin
   with its own morph ball. No Dark Samus imported? Pick Limoki's low-poly Dark Samus.
-- **HD Samus suits** from every Prime game you import, the beta Phazon Suit included, and **Sylux in his _Metroid Prime 4:
+- **HD Samus suits** from the _Metroid Prime Trilogy_ games you import, the beta Phazon Suit included, and **Sylux in his _Metroid Prime 4:
   Beyond_ suit**
-- Playing with someone who hasn't imported a hunter? They still see you as a stand-in: the Trooper in his skin's
+- Playing with someone who hasn't imported a hunter? They still see you as a stand-in: the Pirate Trooper in his skin's
   colors, Dark Samus as Limoki's low-poly Dark Samus, and HD Samus or _Beyond_ Sylux as the original MPH Samus
   or Sylux.
 
 <p align="center">
-  <img src="docs/images/trooper.webp" width="400" alt="The Trooper wall clinging and firing the Pirate Blaster">
+  <img src="docs/images/trooper.webp" width="400" alt="The Pirate Trooper wall clinging and firing the Pirate Blaster">
   <img src="docs/images/hunters.webp" width="400" alt="Dark Samus from Echoes, Overcharged Dark Samus, Dark Samus from Corruption and Limoki's low-poly Dark Samus">
   <br>
   <img src="docs/images/sylux-flourish.webp" width="400" alt="Sylux in his Metroid Prime 4: Beyond suit, showing off">
@@ -126,10 +126,10 @@ plaza.
   and automatic rejoin if your connection drops
 - **LAN and bot matches** in every mode and arena. Bots run on the game's own bot code, take jump pads, ledges and
   drop-downs, and the new hunters fight as bots too.
-- **The Gaming Hub is back**: the old Nintendo WFC pages for _Hunters_, rebuilt in the game, with leaderboards and
+- **The Hunter Hub**: the old Nintendo WFC Gaming Hub pages for _Hunters_, rebuilt in the game, with leaderboards and
   everyone's license stats
-- **Hunter License**, rank and stats like the original. Bring your license over from your DS save, and pick your color
-  while seeing your hunter in each one.
+- **Hunter License**, rank and stats like the original. Bring your license over from your DS save, make the Pirate Trooper or
+  Dark Samus your hunter of choice, and pick your color while seeing your hunter in each one.
 - **STREAMING** switches hide your IP address, name and friend code on screen
 
 <a name="and-more"></a>
@@ -137,17 +137,17 @@ plaza.
 
 
 - **The whole campaign**, from the opening to Gorea, with the game's own menus, gunship, cutscenes, scans and both
-  endings. After your first clear, play it as any hunter, the Trooper included. Bring your DS save over, or export
-  yours back out.
+  endings. After your first clear, play it as any hunter, the Pirate Trooper included, and ALT FORM HOP lets every hunter
+  reach where Samus's bombs can. Bring your DS save over, or export yours back out.
 - **Replays** of your last ten matches, online ones included, with instant seeking, any player's view and a free
   camera. Send them to friends or save them as files.
 - **Music from every Prime game** you import, picked song by song for matches, menus and the lobby, and HQ music that
   takes out the DS's clicks and clipping
-- **Controls for today's hardware**: dual sticks, full rebinding, a weapon ring on L2, gyro aim, a touch overlay,
-  stylus aim like the DS, and SDL3 controllers on Windows (Switch Pro included)
+- **Controls for today's hardware**: dual sticks, full rebinding, a weapon ring on L2, gyro aim with a gyro button, a
+  touch overlay, stylus aim like the DS, and SDL3 controllers on Windows (Switch Pro included)
 - **Looks and options**: field of view up to 130, AIM VIEW (the view follows your aim instantly, or trails it like the
-  DS), HUD sway and opacity, a hit direction indicator, the campaign radar from the DS touch screen, third person, the
-  two DS screens merged into one, clean redrawn HUD lines, and the option to skip the boot logos
+  DS), ragdoll deaths, HUD sway and opacity, a hit direction indicator, the campaign radar from the DS touch screen,
+  third person, the two DS screens merged into one, clean redrawn HUD lines, and the option to skip the boot logos
 - **Plays like the original**: gameplay values are the DS game's, and anything that behaves differently is checked
   against it and fixed
 
@@ -161,7 +161,7 @@ plaza.
 - **Dark Samus's Hyper Mode**, with the Hyper Ball and Hyper Beam
 - **The Spider Ball for every hunter** on _Echoes_' spider tracks, and the Grapple Beam
 - **High frame rates**, 120 fps and up, with smooth frames on any screen
-- **New death animations**: _First Hunt_'s collapse, and ragdolls
+- **_First Hunt_'s death collapse** as a death animation
 - **Lua mods** and game modes made as mods, and a **Hard Mode** campaign with enemies from _First Hunt_ and the
   Prime games
 
@@ -176,6 +176,8 @@ Everything in detail: [Features](https://github.com/BountyHunterKanden/SecondHun
 - No rumble yet.
 - After you quit a LAN match from the pause menu you can't rejoin it (closing and reopening the app does).
 - Some save details aren't kept yet: the best-time records, part of the game timer, a few stats and the artifact flags.
+- Android's Play Protect may call the app harmful when you install it. Tap "More details", then "Install anyway".
+  Google has been asked to review it.
 
 The full list, and what's planned next:
 [Known issues and plans](https://github.com/BountyHunterKanden/SecondHunt/blob/master/docs/KNOWN_ISSUES.md)
@@ -219,6 +221,8 @@ Second Hunt wouldn't be where it is without these people:
     ([#10](https://github.com/BountyHunterKanden/SecondHunt/issues/10))
   - [@Swordman14](https://github.com/Swordman14): asking for a static reticle, which turned into AIM VIEW
     ([#11](https://github.com/BountyHunterKanden/SecondHunt/issues/11))
+  - [@extracoconut](https://github.com/extracoconut): a portable mode on Windows, which turned into the DATA FOLDER
+    choice ([#12](https://github.com/BountyHunterKanden/SecondHunt/issues/12))
 - **Everyone on Discord**, including finRatman, Limoki and Yaba, and every player who has sent in bug reports, logs,
   replays, screenshots and videos. Second Hunt is a lot better for it.
 

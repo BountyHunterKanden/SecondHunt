@@ -15,7 +15,8 @@ namespace MphRecomp.App;
 //   match (owner 2026-09-30, battle testing): FIRE (= B: shoot, NO in dialogs), JUMP (= A: jump/boost, OK/YES),
 //     MORPH (= X), MISSILE (= R1: missiles <-> power beam; reads POWER BEAM while missiles are selected, owner
 //     2026-10-04), WEAPON (= L2 held, Y until 2026-10-09: the weapon ring -- drag from the button towards a weapon and let go, like the DS
-//     stylus; owner 2026-10-04: "the touch overlay needs a weapon switcher"), PAUSE (Start); after the match a tap
+//     stylus; owner 2026-10-04: "the touch overlay needs a weapon switcher"; it opens at once), ZOOM (= Y, shown with the
+//     Imperialist in hand; owner 2026-11-02: its own button, WEAPON's quick press zoomed before), PAUSE (Start); after the match a tap
 //     anywhere continues. While the player flies the Trooper's Scout Drone (owner 2026-10-08 / 2026-10-11) the buttons turn
 //     into the drone's (the drone functions' default buttons; MORPH stays morph): FIRE reads BURST, JUMP RISE, MORPH RECALL, LASER (= L2)
 //     shows, and the hunter-only ones (MISSILE, WEAPON, OMEGA, VISOR, SCAN) hide until it comes back
@@ -54,12 +55,13 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
 
     sealed class Stick { public int Pointer = -1; public float OX, OY, X, Y; }
     readonly Stick _move = new(), _aim = new(), _wheel = new();
+    bool _wheelTrails; // the wheel is CHAT's: its middle trails the finger (Moved)
     // AIM WHILE FIRING (thread D 10-24, owner: "while holding the on-screen fire button to charge, sliding that thumb aims
     // like a stick"): the thumb on FIRE is a floating stick from where it pressed; a slack ring keeps a tap's wobble still
     readonly Stick _fire = new();
     const float FireSlack = 0.15f;
 
-    enum Press { Key, Start, Select, Wheel, Omega }
+    enum Press { Key, Start, Select, Wheel, Omega, Spider }
 
     sealed class TouchButton
     {
@@ -75,6 +77,8 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         public bool VoiceOnly; // shown only in an online game with voice chat in push-to-talk mode (O8)
         public bool ChatOnly; // shown only in an online game (O7: the quick-message wheel)
         public bool OmegaOnly; // shown only while the Omega Cannon waits in the third slot (T4 N15: vanilla's touch icon)
+        public bool ZoomOnly; // shown only with a weapon that zooms in hand (the Imperialist; owner 2026-11-02)
+        public bool SpiderOnly; // shown only in alt form on an Echoes spider-track arena (the spider ball's on/off toggle)
     }
     readonly TouchButton[] _buttons;
 
@@ -85,15 +89,24 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         new() { Label = "MORPH", DroneLabel = "RECALL", Key = PadButton.X, X = 0.78f, Y = 0.60f, R = 0.065f },
         new() { Label = "MISSILE", HunterOnly = true, Key = PadButton.R1, X = 0.91f, Y = 0.45f, R = 0.06f },
         new() { Label = "WEAPON", HunterOnly = true, Kind = Press.Wheel, Key = PadButton.L2, X = 0.80f, Y = 0.43f, R = 0.055f },
+        // the Imperialist's zoom, its own button (owner 2026-11-02: WEAPON's quick press zoomed until then, which held
+        // the ring back 0.25 s): the pad's Y, zoom's touch default (ControlBinds); left of WEAPON, above MORPH
+        new() { Label = "ZOOM", HunterOnly = true, ZoomOnly = true, Key = PadButton.Y, X = 0.69f, Y = 0.45f, R = 0.05f },
         new() { Label = "OMEGA", HunterOnly = true, Kind = Press.Omega, OmegaOnly = true, X = 0.855f, Y = 0.29f, R = 0.05f },
         new() { Label = "PAUSE", Kind = Press.Start, X = 0.50f, Y = 0.07f, R = 0.045f },
         // the Trooper's Scout Drone (owner 2026-10-08): its cutting laser, the pad's L2 (zoom, which the drone has no use
         // for); left of JUMP / MORPH, clear of FIRE (which reads BURST meanwhile)
         new() { Label = "LASER", Key = PadButton.L2, DroneOnly = true, X = 0.665f, Y = 0.73f, R = 0.07f },
+        // recomp: the spider ball's on/off toggle (owner 2026-11-06, docs/SPIDER_BALL.md): a tap turns it on, the next off;
+        // in LASER's place (that one is the drone's only, and the drone has no spider button)
+        new() { Label = "SPIDER", Kind = Press.Spider, SpiderOnly = true, X = 0.665f, Y = 0.73f, R = 0.065f },
         // online voice chat (O8): hold to talk = the pad's R3 (CampaignRenderer.BuildInput passes it on); top left of PAUSE
         new() { Label = "TALK", Key = PadButton.ThumbR, VoiceOnly = true, X = 0.36f, Y = 0.07f, R = 0.045f },
-        // online chat (O7, MatchChat.cs): drag from it towards a quick message and let go = the pad's Select held + right stick
-        new() { Label = "CHAT", Kind = Press.Wheel, Key = PadButton.Select, ChatOnly = true, X = 0.64f, Y = 0.07f, R = 0.045f },
+        // online chat (O7, MatchChat.cs): drag from it towards a quick message and let go = the pad's Select held + right stick;
+        // wave 1 (2026-11-07): top right (at 0.64 it sat on the HUD's ENERGY text); only visor frame art there, and a
+        // full drag right (StickRadius) still fits on screen; bottom edge (Y + R) kept above 0.104 of the height, where
+        // Spire's top-right weapon icon starts (vanilla 227,20)
+        new() { Label = "CHAT", Kind = Press.Wheel, Key = PadButton.Select, ChatOnly = true, X = 0.92f, Y = 0.055f, R = 0.042f },
     };
 
     static bool VoiceTalk => MphRecomp.Online.Voice.VoiceChat.Current != null
@@ -109,6 +122,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         new() { Label = "MORPH", DroneLabel = "RECALL", Key = PadButton.X, X = 0.775f, Y = 0.625f, R = 0.06f },
         new() { Label = "MISSILE", HunterOnly = true, Key = PadButton.R1, X = 0.925f, Y = 0.50f, R = 0.055f },
         new() { Label = "WEAPON", HunterOnly = true, Kind = Press.Wheel, Key = PadButton.L2, X = 0.82f, Y = 0.41f, R = 0.05f },
+        new() { Label = "ZOOM", HunterOnly = true, ZoomOnly = true, Key = PadButton.Y, X = 0.71f, Y = 0.43f, R = 0.045f }, // as the match's
         new() { Label = "VISOR", HunterOnly = true, Key = PadButton.DpadUp, X = 0.055f, Y = 0.42f, R = 0.05f }, // the pad's visor key
         new() { Label = "SCAN", HunterOnly = true, Key = PadButton.Y, X = 0.065f, Y = 0.58f, R = 0.06f },
         new() { Label = "MAP", Kind = Press.Select, X = 0.43f, Y = 0.065f, R = 0.042f },
@@ -357,11 +371,15 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
                 case Press.Omega:
                     _renderer.TouchOmegaPressed();
                     break;
+                case Press.Spider:
+                    _renderer.TouchSpiderOn = !_renderer.TouchSpiderOn;
+                    break;
                 case Press.Wheel:
                     // the wheel stick starts where the finger lands; the right stick follows it while Y is held
                     _wheel.Pointer = pointer;
                     _wheel.OX = _wheel.X = x;
                     _wheel.OY = _wheel.Y = y;
+                    _wheelTrails = b.Key == PadButton.Select;
                     UpdateSticks();
                     _renderer.Pad.SetTouch(b.Key, true);
                     break;
@@ -396,7 +414,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     bool Hits(TouchButton b, float x, float y, bool drone)
     {
         if (AimOnly || b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
-            || b.OmegaOnly && !_renderer.TouchOmega)
+            || b.OmegaOnly && !_renderer.TouchOmega || b.ZoomOnly && !_renderer.TouchCanZoom || b.SpiderOnly && !_renderer.TouchSpiderShown)
         {
             return false;
         }
@@ -423,6 +441,18 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
                 }
                 s.X = x;
                 s.Y = y;
+                if (s == _wheel && _wheelTrails)
+                {
+                    // CHAT sits in the corner, with no room to drag up or right (owner 2026-11-09: "make it so you can drag after
+                    // tapping to move in circles from any point"): past the ring's edge the wheel's middle follows the finger, so
+                    // a circle drawn anywhere on the screen goes round the eight messages
+                    float ox = x - s.OX, oy = y - s.OY, len = MathF.Sqrt(ox * ox + oy * oy);
+                    if (len > StickRadius)
+                    {
+                        s.OX = x - ox / len * StickRadius;
+                        s.OY = y - oy / len * StickRadius;
+                    }
+                }
             }
         }
         UpdateSticks();
@@ -539,16 +569,17 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         int dialog = _campaign ? _renderer.TouchDialog : 0;
         bool missile = _renderer.TouchMissileSelected;
         bool drone = _renderer.TouchDrone;
-        bool zoom = _renderer.TouchCanZoom; // the Imperialist: WEAPON's quick press zooms (CampaignRenderer.BuildInput)
+        bool zoom = _renderer.TouchCanZoom; // the Imperialist in hand: the ZOOM button shows
+        bool spider = _renderer.TouchSpiderShown, spiderOn = _renderer.TouchSpiderOn;
         float textSize = Height * 0.03f;
         foreach (TouchButton b in _buttons)
         {
             if ((AimOnly || b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
-                || b.OmegaOnly && !_renderer.TouchOmega) && b.Pointer == -1)
+                || b.OmegaOnly && !_renderer.TouchOmega || b.ZoomOnly && !zoom || b.SpiderOnly && !spider) && b.Pointer == -1)
             {
                 continue;
             }
-            bool down = b.Pointer != -1;
+            bool down = b.Pointer != -1 || b.Kind == Press.Spider && spiderOn; // (the toggle stays lit while on)
             float cx = b.X * Width, cy = b.Y * Height, r = b.R * Height;
             _fill.Color = Color.Argb(down ? 110 : 55, 255, 255, 255);
             canvas.DrawCircle(cx, cy, r, _fill);
@@ -556,7 +587,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
             canvas.DrawCircle(cx, cy, r, _ring);
             string label = (dialog == 2 ? b.YesNoLabel : dialog == 1 ? b.OkLabel : null)
                 ?? (b.Key == PadButton.R1 && missile ? "POWER\nBEAM" // what R1 switches to
-                    : b.Kind == Press.Wheel && zoom && !drone ? "WEAPON/\nZOOM"
+                    : b.Kind == Press.Spider && spiderOn ? "SPIDER\nON"
                     : drone && b.DroneLabel != null ? b.DroneLabel : b.Label); // the drone's: BURST, RISE, RECALL
             string[] lines = label.Split('\n');
             _text.TextSize = textSize;

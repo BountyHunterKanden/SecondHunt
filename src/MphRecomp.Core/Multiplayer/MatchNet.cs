@@ -218,6 +218,8 @@ namespace MphRecomp.Campaign
                 }
                 PlayerEntity p = PlayerEntity.Players[seat];
                 SetControls(p.Controls, 0, 0, CampaignButtons.None, BeamType.None);
+                p.HostMovePush = 1;
+                p.HostMoveAnalog = false;
                 p.NetBecomeBot(level);
                 Match.Players[seat].Bot = true;
                 Match.Players[seat].Remote = false;
@@ -560,6 +562,8 @@ namespace MphRecomp.Multiplayer
                 Buttons = input.Buttons & ~Campaign.CampaignButtons.WeaponMenu,
                 MoveX = (sbyte)(input.Move.X > Campaign.CampaignInput.MoveDeadZone ? 1 : input.Move.X < -Campaign.CampaignInput.MoveDeadZone ? -1 : 0),
                 MoveY = (sbyte)(input.Move.Y > Campaign.CampaignInput.MoveDeadZone ? 1 : input.Move.Y < -Campaign.CampaignInput.MoveDeadZone ? -1 : 0),
+                MovePush = input.MovePush,
+                MoveDir = input.MoveDir,
                 SelectWeapon = select,
                 Yaw = me.NetYaw,
                 Pitch = me.NetPitch,

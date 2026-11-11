@@ -9,7 +9,7 @@ namespace MphRecomp.Frontend
     // (SectionDrag: the rows follow the finger; on the bar, the thumb does), or lifts: then it is the tap it always was.
     public sealed partial class RecompMenus
     {
-        private int _dragKind; // what the touch took: 0 nothing, 1 the rows, 2 the scroll bar
+        private int _dragKind; // what the touch took: 0 nothing, 1 the rows, 2 the scroll bar, 3 the online CHAT log (OnlineMenus.Chat.cs), 4 / 5 the ALL FRIENDS lists' rows / scroll bar (OnlineMenus.Friends.cs), 6 / 7 GAMING HUB's online lately rows / bar (OnlineMenus.Hub.cs)
         private float _dragY0, _dragGrab; // where it landed (menu units, y up); on the bar: the thumb's top above the finger
         private int _dragScroll0;
 
@@ -17,11 +17,17 @@ namespace MphRecomp.Frontend
         private SectionPage? ScrollingSection(MenuEngine menu)
             => menu.Page is MenuPage page && SectionFor(page.Index) is SectionPage sp && MaxScroll(sp.Entries) > 0 ? sp : null;
 
+        // the online pages that scroll by a drag, the wheel and the right stick as the section pages do (CHAT, ALL FRIENDS)
+        public bool ListScrolls(MenuEngine menu) => ChatScrolls(menu) || FriendsScrolls(menu) || HubScrolls(menu);
+
         // what a touch at (x, y) (menu units, y up) takes on the page on screen: 0 nothing (the tap goes at once, as before),
         // 1 the rows, 2 the scroll bar (on its thumb: held where it was taken; elsewhere on the bar: by the thumb's middle)
         public int SectionGrab(MenuEngine menu, float x, float y)
         {
             _dragKind = 0;
+            if (ChatScrolls(menu)) return ChatGrab(x, y);
+            if (FriendsScrolls(menu)) return FriendsGrab(menu, x, y);
+            if (HubScrolls(menu)) return HubGrab(menu, x, y);
             if (ScrollingSection(menu) is not SectionPage sp) return 0;
             (float barTop, float barBottom, float thumb, float at) = ScrollBar(sp);
             if (x >= SecBarX0 - 4 && x <= SecBarX1 + 6 && y <= barTop + 2 && y >= barBottom - 2)
@@ -41,6 +47,21 @@ namespace MphRecomp.Frontend
         // the held touch now at y (menu units, y up): the rows move with it a row per row's pitch, or the thumb follows it
         public void SectionDrag(MenuEngine menu, float y)
         {
+            if (_dragKind >= 6)
+            {
+                HubDrag(menu, y);
+                return;
+            }
+            if (_dragKind >= 4)
+            {
+                FriendsDrag(menu, y);
+                return;
+            }
+            if (_dragKind == 3)
+            {
+                ChatDrag(menu, y);
+                return;
+            }
             if (_dragKind == 0 || ScrollingSection(menu) is not SectionPage sp) return;
             int to;
             if (_dragKind == 1)
@@ -59,6 +80,7 @@ namespace MphRecomp.Frontend
         // the wheel's and the right stick's rows (+ down the list)
         public void SectionScrollBy(MenuEngine menu, int rows)
         {
+            if (ChatScrollBy(menu, rows) || FriendsScrollBy(menu, rows) || HubScrollBy(menu, rows)) return;
             if (rows != 0 && ScrollingSection(menu) is SectionPage sp) ScrollSectionTo(menu, sp, sp.Scroll + rows);
         }
 

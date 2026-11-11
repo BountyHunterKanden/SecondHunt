@@ -220,7 +220,10 @@ namespace MphRecomp.Frontend
             var multiplayer = new MultiplayerMenu();
             if (!multiplayer.Bind(file, strings)) Console.Error.WriteLine("multiplayer menu: this ROM's pages 25-38 aren't the expected layout (old lobby)");
             if (settingsPath != null) multiplayer.ProfileDir = Path.GetDirectoryName(settingsPath); // the Hunter License (hunter_license.json) beside recomp_settings.json
+            multiplayer.ModsDir = modsDir; // GAME MODE's mod modes (MultiplayerMenu.ModModes.cs)
             multiplayer.SavesDir = savesDir; // vanilla's unlocks from the campaign's files (defeated hunters, gateways)
+            // (a DS save's license comes in from the license card's IMPORT SAVE, not the file select: owner 2026-11-06)
+            files.ExportUnlocks = multiplayer.DsSaveUnlocks;
             multiplayer.UnlockEverything = () => recomp.Settings.UnlockEverything; // RECOMP SETTINGS > UNLOCKS
             multiplayer.MusicSettings = () => recomp.Settings; // the rules pages' MUSIC row (RECOMP SETTINGS' match music)
             multiplayer.SaveMusicSettings = recomp.SaveSettings;
@@ -452,6 +455,12 @@ namespace MphRecomp.Frontend
             }
             if (Multiplayer.CaptureNavigate(Menu, dx, dy)) return;
             Multiplayer.RuleStepped = false;
+            if (dx == 0 && (Recomp.FriendsEdgeStep(Menu, dy) || Recomp.HubEdgeStep(Menu, dy))) // (ALL FRIENDS: up / down past the rows on screen scrolls the list)
+            {
+                _holdArrow = false;
+                _holdFrames = 0;
+                return;
+            }
             Menu.Direction(dx, dy);
             _holdArrow = dy == 0 && Multiplayer.RuleStepped;
             _holdFrames = 0;
@@ -653,7 +662,7 @@ namespace MphRecomp.Frontend
         private bool SectionPress(float x, float y)
         {
             if (_placements == null || Recomp.CaptureDevice != null || PopupOpen || Menu.Page == null
-                || !RecompMenus.IsSectionMenuPage(Menu.Page)) return false;
+                || !(RecompMenus.IsSectionMenuPage(Menu.Page) || Recomp.ListScrolls(Menu))) return false; // (+ the online CHAT log, ALL FRIENDS)
             for (int i = 0; i < _placements.Length; i++)
             {
                 (float mx, float my) = _placements[i].ToMenu(x, y);
@@ -667,7 +676,7 @@ namespace MphRecomp.Frontend
             return false;
         }
 
-        private bool SectionScrolls => Menu.Page != null && RecompMenus.IsSectionMenuPage(Menu.Page) && !PopupOpen && Recomp.CaptureDevice == null;
+        private bool SectionScrolls => Menu.Page != null && (RecompMenus.IsSectionMenuPage(Menu.Page) || Recomp.ListScrolls(Menu)) && !PopupOpen && Recomp.CaptureDevice == null;
 
         // the mouse wheel: notches up (+) scroll the list up, a couple of rows a notch (a touchpad's fractions add up)
         public void ScrollWheel(float notches)
@@ -1310,8 +1319,11 @@ namespace MphRecomp.Frontend
             string layoutSetting = "combined";
             if (_layoutPage != page.Index || _layoutSetting != layoutSetting || _layoutPaused != Paused)
             {
-                // (CONTROLS: its own frame in the pause menu too)
-                _layout = Paused ? RecompMenus.IsSectionMenuPage(page) ? MenuLayout.Replays() : MenuLayout.MainFamily()
+                // (CONTROLS: its own frame in the pause menu too; the online pages (the pause's CHAT, REPORT) and the keyboard keep
+                // theirs as well: in the main family's regions the quick messages' second column ran off the panel and the keyboard
+                // showed its whole green grid, owner screenshots 2026-11-09)
+                _layout = Paused && !RecompMenus.IsOnlinePage(page) && !MultiplayerMenu.IsKeyboardPage(page)
+                    ? RecompMenus.IsSectionMenuPage(page) ? MenuLayout.Replays() : MenuLayout.MainFamily()
                     : MenuLayout.For(Menu.File, page, dual: layoutSetting == "sidebyside");
                 _layoutPage = page.Index;
                 _layoutSetting = layoutSetting;
@@ -1340,8 +1352,11 @@ namespace MphRecomp.Frontend
             // -- except a model drawn across BOTH screens (the boot logos' oval-on-top + swirl-below), whose triangles
             // each go to their own screen's region. A triangle that itself covers a whole DS screen (a backdrop, flash
             // or fade) covers the whole canvas instead.
-            var itemRegion = new Dictionary<int, int>();
-            var bounds = new Dictionary<int, (float X0, float Y0, float X1, float Y1)>();
+            // (kept collections, cleared each frame: new ones every frame were garbage that froze the menus, 2026-11-11)
+            var itemRegion = _itemRegion;
+            var bounds = _itemBounds;
+            itemRegion.Clear();
+            bounds.Clear();
             foreach (WidgetTri t in _tris)
             {
                 var tb = Bounds(t);
@@ -1351,7 +1366,9 @@ namespace MphRecomp.Frontend
             }
             // a plain-colour item covering a whole screen or both (the fade into a game, the white flash) covers the
             // canvas, whatever its triangles look like
-            var flatItems = new HashSet<int>(bounds.Keys);
+            var flatItems = _flatItems;
+            flatItems.Clear();
+            foreach (int item in bounds.Keys) flatItems.Add(item);
             foreach (WidgetTri t in _tris)
             {
                 if (!IsFlatFill(t)) flatItems.Remove(t.Item);
@@ -1370,7 +1387,8 @@ namespace MphRecomp.Frontend
             // the title's TOUCH TO START bar end to end across the canvas, as it spans the DS touch screen (always, owner
             // 2026-10-04: no "touch bar" setting any more); the side-by-side layout draws whole DS screens, where it
             // already does
-            var wideBars = new HashSet<int>();
+            var wideBars = _wideBars;
+            wideBars.Clear();
             if (_layout.Kind == LayoutKind.MainFamily)
             {
                 foreach (int item in bounds.Keys)
@@ -1378,8 +1396,44 @@ namespace MphRecomp.Frontend
                     if (Menu.ItemModelPath(item).Contains("touch_bg", StringComparison.OrdinalIgnoreCase)) wideBars.Add(item);
                 }
             }
+            // RESULTS' mode band (topbar, x 70..256, y 39..53) runs under the medal on the DS; on the combined screen the
+            // medal goes to the left edge, so the band is cut in line with the name and place bands under it (Odin
+            // 2026-11-10: "bounty text bar ovelaps a little" -- its left end lay over the table). The item also holds the
+            // crossbar's top half (y 0..36, MultiplayerMenu.ReplacePreview): those pieces are drawn as they are, and
+            // the ones on the right (the name and place bands) give the cut's x
+            int splitBar = -1;
+            const float BandY0 = 37.5f;
+            float bandCut = MenuLayout.SetupSplitX;
+            if (_layout.Kind == LayoutKind.Setup && Menu.Page?.Index == MultiplayerMenu.ResultsPage)
+            {
+                foreach (int item in bounds.Keys)
+                {
+                    if (Menu.ItemModelPath(item).Contains("topbar", StringComparison.OrdinalIgnoreCase)) splitBar = item;
+                }
+                float lowBands = Single.MaxValue;
+                foreach (WidgetTri t in _tris)
+                {
+                    if (t.Item != splitBar) continue;
+                    var tb = Bounds(t);
+                    if (tb.Y1 < BandY0 && (tb.X0 + tb.X1) / 2 > MenuLayout.SetupSplitX) lowBands = MathF.Min(lowBands, tb.X0);
+                }
+                if (lowBands < Single.MaxValue) bandCut = lowBands;
+            }
+            // the SECOND HUNT logo under the game's logo, on every page that shows the game's logo (SETTINGS > LOOK, owner
+            // 2026-11-06: "anywhere the mph logo is the sh logo should be"): drawn straight after the game logo's
+            // triangles, so the page's own fades (the title's fade-in) cover it too
+            int shLogoAt = -1;
+            if (Settings.SecondHuntLogo && !Paused)
+            {
+                for (int i = 0; i < _tris.Count; i++)
+                {
+                    if (Menu.ItemModelPath(_tris[i].Item).Contains("toplogo_Model", StringComparison.OrdinalIgnoreCase)) shLogoAt = i + 1;
+                }
+            }
+            int triIndex = 0;
             foreach (WidgetTri t in _tris)
             {
+                if (triIndex++ == shLogoAt) DrawSecondHuntLogo(bounds, itemRegion);
                 int region = itemRegion[t.Item];
                 if (region == -1) continue;
                 if (region == FullScreenItem)
@@ -1410,11 +1464,21 @@ namespace MphRecomp.Frontend
                 if (region < 0) continue;
                 Placement p = _placements[region];
                 if (wideBars.Contains(t.Item) && EmitWideBar(t, p, width)) continue;
+                if (t.Item == splitBar && tb.Y0 >= BandY0)
+                {
+                    List<UiVertex> poly = ClipX(ClipTri(t), bandCut, keepAbove: true, _clipB);
+                    for (int i = 1; i + 1 < poly.Count; i++)
+                    {
+                        DrawList.Triangle(t.TextureId, t.WrapS, t.WrapT, UiBlend.Alpha, Place(p, poly[0]), Place(p, poly[i]), Place(p, poly[i + 1]));
+                    }
+                    continue;
+                }
                 DrawList.Triangle(t.TextureId, t.WrapS, t.WrapT, UiBlend.Alpha, Place(p, t.A), Place(p, t.B), Place(p, t.C));
             }
             (_pageFrom, _pageTo, _drawnWidth, _drawnHeight) = (pageFrom, DrawList.Vertices.Count, width, height);
             // the version, small and faint in the title's lower right (TOUCH TO START, page 13; owner 2026-10-15)
             if (Menu.Page?.Index == 13 && !string.IsNullOrEmpty(UpdateHost.AppVersion)) DrawVersion(width, height);
+            if (shLogoAt == _tris.Count) DrawSecondHuntLogo(bounds, itemRegion);
             _quitShown = false;
             if (Menu.Page?.Index == 13 && OperatingSystem.IsWindows() && !PopupOpen) DrawQuitButton(width, height);
             if (PopupOpen) DrawPopup(width, height);
@@ -1426,6 +1490,10 @@ namespace MphRecomp.Frontend
                 DrawList.Quad(-1, 0, 0, width, height, 0, 0, 0, 0, 1, 1, 1, white);
             }
         }
+
+        private readonly Dictionary<int, int> _itemRegion = new();
+        private readonly Dictionary<int, (float X0, float Y0, float X1, float Y1)> _itemBounds = new();
+        private readonly HashSet<int> _flatItems = new(), _wideBars = new();
 
         // The name keyboard over the license (MultiplayerMenu.KeyboardOverCard, owner 2026-10-08: "the keyboard floating over
         // the license"): the page's own triangles of the last frame drawn (after the backdrop, before the box), kept when
@@ -1497,6 +1565,53 @@ namespace MphRecomp.Frontend
             DrawList.Quad(-1, _quitX0, _quitY0, _quitX1, _quitY1, 0, 0, 0, 0, 0, 0, 0, 0.45f);
             Menu.Font.EmitCanvas(text, _quitX0 + pad, _quitY0 + pad, 0, s, 1, 1, 1, 0.75f, DrawList);
             _quitShown = true;
+        }
+
+        // The logo (Frontend/Art/second_hunt_logo.png, the SteamGridDB logo cropped) in the gap between the bottom of the
+        // game's logo (toplogo) and the top of the selected item's SELECT A GAME MODE line, at most the game logo's width.
+        // Measured from where both sit at rest on page 18, not from this frame's triangles: the line only appears ~20
+        // frames into the page, and the logo hopped about until it did (owner 2026-11-06). Upper part of the gap, close
+        // under the game's logo (owner: "a little higher a little closer to the mph logo"). The title (page 13) gets it at the
+        // same size and spot, so it doesn't change between the two screens (owner: "present on the touch to start screen too").
+        private const float ShLogoX0 = 26, ShLogoX1 = 230; // toplogo's quad, menu units
+        private const float ShLogoBottom = 74.2f + 4; // its art ends 4 texels (= units) above the quad's bottom
+        private const float ShTextTop = -11, ShTextX = 129, ShTextY = -15; // SELECT A GAME MODE (y -19..-11)
+
+        private void DrawSecondHuntLogo(Dictionary<int, (float X0, float Y0, float X1, float Y1)> bounds, Dictionary<int, int> itemRegion)
+        {
+            if (_placements == null) return;
+            int logoRegion = -1;
+            foreach (int item in bounds.Keys)
+            {
+                if (Menu.ItemModelPath(item).Contains("toplogo_Model", StringComparison.OrdinalIgnoreCase)
+                    && itemRegion.TryGetValue(item, out int r))
+                {
+                    logoRegion = r;
+                    break;
+                }
+            }
+            int textRegion = _layout.RegionOf(ShTextX, ShTextY, true);
+            if (logoRegion < 0 || logoRegion >= _placements.Length || textRegion < 0 || textRegion >= _placements.Length) return;
+            Placement lp = _placements[logoRegion];
+            (float lx0, float logoBottom) = lp.ToCanvas(ShLogoX0, ShLogoBottom);
+            (float lx1, _) = lp.ToCanvas(ShLogoX1, ShLogoBottom);
+            (_, float textTop) = _placements[textRegion].ToCanvas(ShTextX, ShTextTop);
+            float gap = textTop - logoBottom, logoW = MathF.Abs(lx1 - lx0);
+            if (gap <= 2) return;
+            UiTexture tex = Textures.GetOrAdd("second hunt logo", () =>
+            {
+                using Stream s = typeof(FrontendSession).Assembly.GetManifestResourceStream("second_hunt_logo.png")
+                    ?? throw new FileNotFoundException("second_hunt_logo.png");
+                using var img = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(s);
+                byte[] px = new byte[img.Width * img.Height * 4];
+                img.CopyPixelDataTo(px);
+                return (img.Width, img.Height, px);
+            });
+            float aspect = tex.Width / (float)tex.Height;
+            float h = gap * 0.8f, w = h * aspect;
+            if (w > logoW * 0.9f) (w, h) = (logoW * 0.9f, logoW * 0.9f / aspect);
+            float cx = (lx0 + lx1) / 2, top = logoBottom + gap * 0.04f;
+            DrawList.Quad(tex.Id, cx - w / 2, top, cx + w / 2, top + h, 0, 0, 1, 1, 1, 1, 1, 1);
         }
 
         private void DrawVersion(float width, float height)
@@ -1588,9 +1703,10 @@ namespace MphRecomp.Frontend
                 v.X = x;
                 return v;
             }
-            foreach ((float lo, float hi) in new[] { (float.NegativeInfinity, a), (a, b), (b, float.PositiveInfinity) })
+            for (int k = 0; k < 3; k++)
             {
-                List<UiVertex> poly = ClipX(ClipX(new List<UiVertex> { t.A, t.B, t.C }, lo, keepAbove: true), hi, keepAbove: false);
+                float lo = k == 0 ? float.NegativeInfinity : k == 1 ? a : b, hi = k == 0 ? a : k == 1 ? b : float.PositiveInfinity;
+                List<UiVertex> poly = ClipX(ClipX(ClipTri(t), lo, keepAbove: true, _clipB), hi, keepAbove: false, _clipC);
                 for (int i = 1; i + 1 < poly.Count; i++)
                 {
                     DrawList.Triangle(t.TextureId, t.WrapS, t.WrapT, UiBlend.Alpha, Map(poly[0]), Map(poly[i]), Map(poly[i + 1]));
@@ -1599,11 +1715,22 @@ namespace MphRecomp.Frontend
             return true;
         }
 
-        // the part of a polygon at x >= edge (keepAbove) or x <= edge, its corners interpolated where it is cut
-        private static List<UiVertex> ClipX(List<UiVertex> poly, float edge, bool keepAbove)
+        // (kept polygons, cleared each use: new lists per triangle every frame were garbage that froze the menus, 2026-11-11)
+        private readonly List<UiVertex> _clipA = new(), _clipB = new(), _clipC = new();
+
+        private List<UiVertex> ClipTri(WidgetTri t)
+        {
+            _clipA.Clear();
+            _clipA.Add(t.A); _clipA.Add(t.B); _clipA.Add(t.C);
+            return _clipA;
+        }
+
+        // the part of a polygon at x >= edge (keepAbove) or x <= edge, its corners interpolated where it is cut, into
+        // output (not poly; only good until output's next use)
+        private static List<UiVertex> ClipX(List<UiVertex> poly, float edge, bool keepAbove, List<UiVertex> output)
         {
             if (float.IsInfinity(edge)) return poly;
-            var output = new List<UiVertex>(poly.Count + 2);
+            output.Clear();
             for (int i = 0; i < poly.Count; i++)
             {
                 UiVertex v = poly[i], w = poly[(i + 1) % poly.Count];

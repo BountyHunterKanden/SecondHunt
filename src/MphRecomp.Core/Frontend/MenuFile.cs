@@ -147,9 +147,10 @@ namespace MphRecomp.Frontend
 
         public MenuItemState? GetState(int code)
         {
-            foreach (MenuItemState s in States)
+            // (an index loop: foreach over the interface boxed an enumerator on every call, many a frame)
+            for (int i = 0; i < States.Count; i++)
             {
-                if (s.Code == code) return s;
+                if (States[i].Code == code) return States[i];
             }
             return null;
         }

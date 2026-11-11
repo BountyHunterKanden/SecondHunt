@@ -45,6 +45,18 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotStuckSight = settings.BotStuckSight ?? true; // (PlayerAiUnstick.cs SightPinned)
             PlayerEntity.HostBotBreakWalls = settings.BotBreakWalls ?? true; // (PlayerAiWalls.cs)
             PlayerEntity.HostBotStuckVertical = settings.BotStuckVertical ?? true; // (PlayerAiUnstick.cs BotUnstickTick)
+            PlayerEntity.HostBotLedgeLand = settings.BotLedgeLand ?? true; // (PlayerAiUnstick.cs BotClimb)
+            PlayerEntity.HostBotEdgeGuard = settings.BotEdgeGuard ?? true; // (PlayerAiEdgeJump.cs BotEdgeGuard)
+            PlayerEntity.HostBotCrateNeed = settings.BotCrateNeed ?? true; // (PlayerAiCrates.cs CrateStep)
+            PlayerEntity.HostBotItemWalled = settings.BotItemWalled ?? true; // (PlayerAiUnstick.cs BotItemSkipped)
+            PlayerEntity.HostBotOutOfReach = settings.BotOutOfReach ?? true; // (PlayerAiUnstick.cs BotUnstick)
+            PlayerEntity.HostBotUnderGiveUp = settings.BotUnderGiveUp ?? true; // (PlayerAiUnstick.cs BotUnstick)
+            PlayerEntity.HostBotGrateItems = settings.BotGrateItems ?? true; // (PlayerAiUnstick.cs BotItemSkipped)
+            PlayerEntity.HostBotItemNoGain = settings.BotItemNoGain ?? true; // (PlayerAiUnstick.cs BotItemTick)
+            PlayerEntity.HostBotNodeOccupied = settings.BotNodeOccupied ?? true; // (PlayerAi.cs Nodes checks)
+            MphRecomp.Arenas.EchoesTurret.LeaverFootprint = settings.TurretLeaverFootprint ?? true; // (EchoesTurret.cs LeaverOut)
+            PlayerEntity.HostSeatSafe = settings.TurretSeatSafe ?? true; // (PlayerEntity.TakeDamage)
+            PlayerEntity.HostTurretBotNav = settings.TurretBotNav ?? true; // (PlayerEchoesSeat TurretErrand, EchoesTurretBots.Go)
             PlayerEntity.HostBotEdgeJump = settings.BotEdgeJump ?? true; // (PlayerAiEdgeJump.cs)
             PlayerEntity.HostBotEdgePadJump = settings.BotEdgePadJump ?? true;
             PlayerEntity.HostBotReleaseControls = settings.BotReleaseControls ?? true; // (PlayerAi.cs ProcessInput)
@@ -54,7 +66,9 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotEdgeHold = settings.BotEdgeHold ?? true; // (PlayerAiEdgeJump.cs EdgeHold)
             PlayerEntity.HostHitClaims = settings.HitClaims ?? true; // (only a host's remote seats keep shots: Net/HitClaims.cs)
             bool lighterBlaster = settings.LighterBlaster ?? true; // (the blaster's bolt damage: PirateBlaster.cs)
-            bool lighterBlaster2 = settings.LighterBlaster2 ?? true; // (9 / 13 instead of 10 / 14, 2026-10-20)
+            bool blasterBuff = settings.BlasterBuff ?? true; // (10 / 14 again and 4 UA a bolt, 2026-11-07)
+            bool lighterBlaster2 = (settings.LighterBlaster2 ?? true) && !blasterBuff; // (9 / 13 instead of 10 / 14, 2026-10-20)
+            PirateBlaster.HostBlasterBuff = blasterBuff;
             PirateBlaster.HostBoltDamage = !lighterBlaster ? 0 : lighterBlaster2 ? PirateBlaster.LighterBolt2 : PirateBlaster.LighterBolt;
             PirateBlaster.HostBoltHeadshot = !lighterBlaster ? 0
                 : lighterBlaster2 ? PirateBlaster.LighterHeadshot2 : PirateBlaster.LighterHeadshot;
@@ -73,6 +87,12 @@ namespace MphRecomp.Campaign
                 }
             });
             host = new CampaignHost(scene) { Match = settings };
+            // the DEATH look (owner 2026-11-07, Anim/DeathCollapse.cs): First Hunt's collapse added to this scene's fresh
+            // hunter models, this device's look only (the clip a death plays isn't sent or recorded)
+            PlayerEntity.HostDeathCollapse = MphRecomp.Anim.DeathCollapse.Root is string fhRoot
+                && !MatchSettings.IsFirstHuntArena(settings.Arena) && MphRecomp.Anim.DeathCollapse.Prepare(fhRoot);
+            // (the ragdoll is DEATH's RAGDOLL alone, no First Hunt import: PlayerRagdoll.cs)
+            PlayerEntity.HostRagdoll = MphRecomp.Anim.DeathCollapse.Ragdoll && !MatchSettings.IsFirstHuntArena(settings.Arena);
             PlayerEntity.MainPlayerIndex = settings.LocalSeat;
             PlayerEntity.NetClient = settings.IsClient;
             PlayerEntity.HostNoLocalSeat = settings.ServedHost && !settings.IsClient; // (a served match host: docs/DEDICATED_SERVERS.md)
@@ -111,6 +131,7 @@ namespace MphRecomp.Campaign
                 bool hyperBall = Characters.IsDarkSamus(seat) && (settings.HyperBall ?? !MphRecomp.Config.RecompSettings.PublicBuild);
                 player.HostBallJump = hyperBall && settings.NoBallJump == false; // hop removed (owner 10-18); old replays keep it
                 player.HostHyperBall = hyperBall;
+                player.HostAltHop = false; // (the campaign's alt-form hop only: PlayerAltHop.cs)
                 player.HostHyperBallCorruption = hyperBall && (settings.HyperBallCorruption ?? true);
                 player.HostSoloUa = settings.Solo; // the dev solo run: full UA for her Hyper Ball (no pickups to grab first)
                 player.HostPirateBlasterKey = settings.PirateBlasterKey ?? true;
@@ -163,6 +184,7 @@ namespace MphRecomp.Campaign
             if (settings.OctolithReset is bool reset) GameState.OctolithReset = reset;
             if (settings.RadarPlayers is bool radar) GameState.RadarPlayers = radar;
             if (settings.AffinityWeapons is bool affinity) GameState.AffinityWeapons = affinity;
+            MphRecomp.Mods.LiveMods.MatchSetup(); // gameplay mods' mode.setup (offline only: no gameplay mods run online)
             scene.OnLoad();
             return host;
         }

@@ -248,9 +248,10 @@ namespace MphRecomp.Multiplayer.Net
 
         private int NewestSeq() => _newest;
 
-        // what a held input must equal to count: the buttons, the move and the view
+        // what a held input must equal to count: the buttons, the move (how far the stick is pushed, its direction) and the view
         public static int KeyOf(in NetInput input) => HashCode.Combine(input.Buttons, input.MoveX, input.MoveY, input.SelectWeapon,
-            (int)MathF.Round(input.Yaw * 100), (int)MathF.Round(input.Pitch * 100), HashCode.Combine(input.Touching, input.TouchDx, input.TouchDy));
+            (int)MathF.Round(input.Yaw * 100), (int)MathF.Round(input.Pitch * 100), HashCode.Combine(input.Touching, input.TouchDx, input.TouchDy, input.MoveDir),
+            input.MovePush);
 
         public string Summary() => $"prediction: {Corrections} corrections (mean {(Corrections > 0 ? ErrorSum / Corrections : 0):0.000}, "
             + $"max {ErrorMax:0.00}), {Skipped} skipped, {Restarts} restarts, {Holds} report holds, {Diverges} divergence snaps, {GuestPushes} pushes run here ({GuestPushIgnored} small errors left in them)";

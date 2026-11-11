@@ -102,6 +102,35 @@ namespace MphRead
                         Console.WriteLine($"  {name}: copy {k + 5} -> recolor {rc} of {model.Recolors.Count} {(ok ? "OK" : "FAIL")}");
                     }
                 }
+                // the 2nd-4th Samus's ball (HunterColours.SamusBallFor): one index on her body, lod1 and alt
+                if (hunter == Hunter.Samus)
+                {
+                    for (int r = 1; r <= 3; r++)
+                    {
+                        int body = -1;
+                        foreach (string name in names.Take(3))
+                        {
+                            Model model = Read.GetModelInstance(name).Model;
+                            int rc = HunterColours.SamusBallFor(name, r);
+                            bool ok = rc >= 0 && rc < model.Recolors.Count && model.Recolors[rc].Name == $"hc_ball_{r}" && (body < 0 || rc == body);
+                            body = rc;
+                            if (!ok) fails++;
+                            Console.WriteLine($"  {name}: ball {r + 1} -> recolor {rc} of {model.Recolors.Count} {(ok ? "OK" : "FAIL")}");
+                        }
+                    }
+                }
+                // sheets: MPH's own six, then the 5th-8th (Samus: then her 2nd-4th ball sets)
+                if (outDir != null)
+                {
+                    foreach (string name in models)
+                    {
+                        Model model = Read.GetModelInstance(name).Model;
+                        var rcs = Enumerable.Range(0, Math.Min(6, model.Recolors.Count)).ToList();
+                        rcs.AddRange(Enumerable.Range(0, HunterColours.Copies).Select(k => HunterColours.RecolorFor(name, k)).Where(x => x >= 0));
+                        rcs.AddRange(Enumerable.Range(1, 3).Select(r => HunterColours.SamusBallFor(name, r)).Where(x => x >= 0));
+                        Sheet(model, rcs, Path.Combine(outDir, $"hc_{name}.png"));
+                    }
+                }
             }
             fails += RecountCheck();
             Console.WriteLine(fails == 0 ? "LOOKALIKES PASS" : $"LOOKALIKES FAIL ({fails})");
@@ -262,10 +291,15 @@ namespace MphRead
 
         static void Sheet(Model model, string name, LookAlikes.Look[] looks, string png)
         {
-            var mats = model.Materials.Where(m => m.TextureId >= 0).Select(m => (m.TextureId, m.PaletteId)).Distinct().ToList();
             // MPH's own six (pal_01-04, the two team palettes), then each look in each variant (same order)
             var recolors = Enumerable.Range(0, Math.Min(6, model.Recolors.Count)).ToList();
             recolors.AddRange(looks.SelectMany(l => Enum.GetValues<LookAlikes.Variant>().Select(v => LookAlikes.RecolorFor(l, v, name))));
+            Sheet(model, recolors, png);
+        }
+
+        static void Sheet(Model model, List<int> recolors, string png)
+        {
+            var mats = model.Materials.Where(m => m.TextureId >= 0).Select(m => (m.TextureId, m.PaletteId)).Distinct().ToList();
             int scale = 2;
             int rowH = mats.Max(m => model.Recolors[0].Textures[m.TextureId].Height) * scale + 4;
             int width = mats.Sum(m => model.Recolors[0].Textures[m.TextureId].Width * scale + 4);

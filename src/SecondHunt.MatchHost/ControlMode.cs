@@ -123,7 +123,7 @@ namespace SecondHunt.MatchHost
         // and team as RESULTS shows them (a team mode: the team's best place)
         private static string Result(NetMatchSession net)
         {
-            MatchResults r = MatchResults.Capture(0);
+            MatchResults r = MatchResults.Capture(0, net.Settings?.Arena);
             var rows = new List<object>();
             foreach (MatchResults.Player p in r.Rows)
             {
@@ -133,9 +133,10 @@ namespace SecondHunt.MatchHost
                     continue;
                 }
                 int place = r.Teams ? r.Rows.Where(x => x.Team == p.Team).Min(x => x.Place) : p.Place;
-                rows.Add(new { slot, place, team = r.Teams ? p.Team : -1 });
+                rows.Add(new { slot, place, team = r.Teams ? p.Team : -1, stats = MatchResults.HubStats(p) });
             }
-            return JsonSerializer.Serialize(new { teams = r.Teams, rows });
+            // (+ the Gaming Hub's mode, arena and length: docs/GAMING_HUB.md)
+            return JsonSerializer.Serialize(new { teams = r.Teams, rows, mode = r.ModeKey, arena = r.ArenaKey, seconds = r.Seconds }, OnlineProtocol.Json);
         }
 
         private static void ReadServer(NetMatchSession net, CancellationTokenSource stop)

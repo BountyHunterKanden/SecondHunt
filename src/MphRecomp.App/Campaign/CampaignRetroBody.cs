@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using MphRead;
 using MphRead.Entities;
+using MphRecomp.Anim;
 using MphRecomp.Assets;
 using MphRecomp.Campaign;
 using MphRecomp.Render;
@@ -42,7 +45,16 @@ internal sealed partial class CampaignRetroBody
         public GxMaterial Gx = null!;
         public GxShader.Params P = null!;
         public readonly int[] Tex = new int[8];
+        public bool KeepColour;     // Overcharged Dark Samus's insides, bones, skull and hand eye: drawn as imported under a seat tint
+        public bool Phazon;         // ... and her phazon: tinted, its sparkle kept
     }
+
+    // Overcharged Dark Samus (owner 2026-11-05): under a seat tint only her blue skin and phazon take the colour, their red
+    // veins and the phazon's sparkle kept (GxShader uTintWarm); her insides, bones, skull and hand eye stay as imported
+    static readonly string[] OverchargedSkin = { "0aa4aed0", "76c58b0b" };
+    static readonly string[] OverchargedPhazon = { "6294e431", "50c52d95" };
+    bool _warm;
+    bool _drone;                    // the Prime drone (Alpha): seat tints colour only its metal
 
     readonly List<Batch> _batches = new();
     float[]? _verts;
@@ -61,6 +73,8 @@ internal sealed partial class CampaignRetroBody
     public Vector4 SeatTint2 { get; set; }
     // the seat's double damage (CampaignSuit.DdTex / DdMtx: MphRead's DoubleDmgBindingId, 0 = off, DoubleDamageLook)
     public int DdTex { get; set; }
+    // recomp: the seat's fitted ice while it's frozen (SuitIce.cs; set by MatchSkins around its body's draw, null = none)
+    public IceLook? Ice { get; set; }
     public float[] DdMtx { get; } = new float[9];
     readonly Dictionary<(int, string), int> _u = new();
     readonly Dictionary<string, int> _texIds = new();
@@ -163,6 +177,17 @@ internal sealed partial class CampaignRetroBody
                 }
             }
             _batches.Add(batch);
+            if (id.Equals("MP2DarkSamusFinal", StringComparison.OrdinalIgnoreCase))
+            {
+                _warm = true;
+                bool skin = false;
+                for (int u = 0; u < 8; u++)
+                    if (Array.IndexOf(OverchargedPhazon, batch.P.Units[u]?.Name ?? "") >= 0) batch.Phazon = true;
+                    else if (Array.IndexOf(OverchargedSkin, batch.P.Units[u]?.Name ?? "") >= 0) skin = true;
+                batch.KeepColour = !skin && !batch.Phazon;
+            }
+            if (id.Equals("MP1AlphaDrone", StringComparison.OrdinalIgnoreCase))
+                _drone = true;
             for (int u = 0; u < 8; u++)
             {
                 string name = batch.P.Units[u]?.Name ?? "";
@@ -221,7 +246,10 @@ internal sealed partial class CampaignRetroBody
     public void Tick(PlayerEntity p)
     {
         NativeBodyAnimator a = AnimatorOf(p);
-        a.Step(p, p.Position, Dt);
+        FitRagdoll(p, a);
+        // frozen: the clip clocks hold (vanilla stops its clips while frozen, PlayerProcess), so no idle plays in the ice
+        bool frozen = p.NetFrozen && p.Health > 0;
+        if (!frozen) a.Step(p, p.Position, Dt);
         if (LogClips)
         {
             // dev (--es bodylog 1): each seat's clip changes, with its step count, to find poses in a replay
@@ -233,10 +261,123 @@ internal sealed partial class CampaignRetroBody
                 Log.Info(Tag, $"body {Path.GetFileName(Body.Dir)}: seat {p.SlotIndex} step {_steps[p]}: {now}");
             }
         }
-        if (p.Halfturret is HalfturretEntity t && p.HostScoutDrone && p.Flags2.TestFlag(PlayerFlags2.Halfturret)) AnimatorOf(t).StepStanding(Dt);
+        if (p.Halfturret is HalfturretEntity t && p.HostScoutDrone && p.Flags2.TestFlag(PlayerFlags2.Halfturret) && !frozen) AnimatorOf(t).StepStanding(Dt);
     }
 
     public static bool LogClips;
+
+    // -------- the DEATH look's RAGDOLL (owner 2026-11-08) --------
+
+    // each ragdoll's fit on this body (SuitRagdoll's native fit: the body's pose at death, turned by the ragdoll's drivers)
+    readonly ConditionalWeakTable<PlayerRagdoll, SuitRagdoll> _dollFits = new();
+    string?[]? _dsNames; // each bone's DS counterpart (Clips.Ragdoll)
+
+    // the step a seat dies, before its clips step on: a new ragdoll takes the body's pose then (the last step's clips) where
+    // the draw stood it
+    void FitRagdoll(PlayerEntity p, NativeBodyAnimator a)
+    {
+        if (Clips.Ragdoll == null || p.HostRagdollPose is not PlayerRagdoll doll || _dollFits.TryGetValue(doll, out _)) return;
+        DsNames();
+        Vector3 facing = a.WallFacing ?? new Vector3(p.Field70, 0, p.Field74);
+        Matrix4 model = Body.ModelMatrix(p.Hunter, p.Position, facing, Clips.Lift);
+        Matrix4[] bones = a.Pose(p) ? (Matrix4[])Body.World.Clone() : BindWorld();
+        var fit = new SuitRagdoll(doll, bones, Body.Data.Parent, _dsNames!, model);
+        if (!fit.Ok) Log.Warn(Tag, $"body {Id}: ragdoll: no bone for {fit.Missing}, the seat's body stands");
+        _dollFits.AddOrUpdate(doll, fit);
+    }
+
+    string?[]? DsNames()
+    {
+        if (_dsNames == null && Clips.Ragdoll != null)
+        {
+            _dsNames = new string?[Body.World.Length];
+            foreach ((string bone, string ds) in Clips.Ragdoll)
+            {
+                int i = Body.Bone(bone);
+                if (i >= 0 && i < _dsNames.Length) _dsNames[i] = ds;
+            }
+        }
+        return _dsNames;
+    }
+
+    // -------- fitted ice (SuitIce.cs, owner 2026-11-09) --------
+
+    Task<IceShell?>? _iceJob;
+
+    // the shell's fit started now, on its worker (MatchSkins, as the body first draws), not at its first freeze: started
+    // there, Prime 4 Sylux's first freeze showed no ice for the 0.9 s the fit took on the Odin (owner 2026-11-10)
+    public void WarmIce(FittedIce.IceReference? r)
+    {
+        if (_iceJob == null && r != null) IceShellOf(new IceLook { Ref = r });
+    }
+
+    // vanilla's ice shell fitted to this body's bind pose: its pieces by the DS nodes the ragdoll maps its bones to, each
+    // on the bone mapped to that node (or the nearest mapped node above it)
+    IceShell? IceShellOf(IceLook look)
+    {
+        if (look.Ref is not FittedIce.IceReference r) return null;
+        if (_iceJob != null) return SuitIce.Fit(ref _iceJob, "body " + Id, () => null);
+        if (DsNames() is not string?[] ds) return null;
+        HdGun d = Body.Data;
+        var mats = new HashSet<int>();
+        foreach (Batch b in _batches) if (b.Pass != 2) mats.Add(b.Material);
+        return SuitIce.Fit(ref _iceJob, "body " + Id, () =>
+        {
+            // each bone's shell node: its own DS counterpart's, else the nearest one above it
+            var node = new int[ds.Length];
+            for (int b = 0; b < node.Length; b++)
+            {
+                int x = b, depth = 0;
+                while ((uint)x < (uint)ds.Length && ds[x] == null && depth++ < 64) x = d.Parent[x];
+                node[b] = (uint)x < (uint)ds.Length ? Array.IndexOf(r.Names, ds[x]) : -1;
+            }
+            var clouds = new List<Vector3>[r.Names.Length];
+            for (int i = 0; i < clouds.Length; i++) clouds[i] = new List<Vector3>();
+            var tris = new List<Vector3[]>();
+            const int F = HdGun.FloatsPerVertex;
+            foreach (int m in mats)
+            {
+                HdGun.Material mat = d.Materials[m];
+                for (int v = 0; v + 2 < mat.VertexCount; v += 3)
+                {
+                    var t = new Vector3[3];
+                    for (int k = 0; k < 3; k++)
+                    {
+                        int o = (v + k) * F, j = 0;
+                        t[k] = new Vector3(mat.Vertices[o], mat.Vertices[o + 1], mat.Vertices[o + 2]);
+                        for (int w = 1; w < 4; w++) if (mat.Vertices[o + 15 + w] > mat.Vertices[o + 15 + j]) j = w;
+                        int slot = (int)(mat.Vertices[o + 11 + j] + 0.5f);
+                        int bone = (uint)slot < (uint)mat.Palette.Length ? mat.Palette[slot] : -1;
+                        int n = (uint)bone < (uint)node.Length ? node[bone] : -1;
+                        if (n >= 0) clouds[n].Add(t[k]);
+                    }
+                    tris.Add(t);
+                }
+            }
+            // each shell node's bone: one mapped to it, else its parent node's
+            int BoneOf(int n)
+            {
+                for (int depth = 0; depth < 64 && (uint)n < (uint)r.Names.Length; depth++, n = r.Parents[n])
+                {
+                    int b = Array.IndexOf(ds, r.Names[n]);
+                    if (b >= 0) return b;
+                }
+                return 0;
+            }
+            return new IceShell(FittedIce.ShellOnModel(r, clouds, tris), BoneOf);
+        });
+    }
+
+    Matrix4[] BindWorld()
+    {
+        var w = new Matrix4[Body.World.Length];
+        for (int i = 0; i < w.Length; i++) w[i] = Matrix4.CreateTranslation(Body.Data.Bind[i]);
+        return w;
+    }
+
+    // the ragdoll's pose on the body now, into Body.World (false: none, the seat's clips pose it)
+    SuitRagdoll? RagdollPose(PlayerEntity? who) => who?.HostRagdollPose is PlayerRagdoll doll && _dollFits.TryGetValue(doll, out SuitRagdoll? fit)
+        && fit.Pose(doll, Body.World) ? fit : null;
 
     // the Trooper's Scout Drone on its own body (Core DroneBody, bodies/MP1AlphaDrone | MP1GammaDrone): one clip clock per
     // seat, stepped after each sim step while that seat's drone flies
@@ -246,6 +387,7 @@ internal sealed partial class CampaignRetroBody
     {
         if (!_drones.TryGetValue(p, out DroneBody.Animator? d)) _drones[p] = d = new DroneBody.Animator(Body, Clips);
         string was = d.Playing;
+        if (p.NetFrozen && p.Health > 0) return; // frozen: held, as the body's clocks (Tick)
         d.Step(p, Dt);
         if (LogClips && d.Playing != was) Log.Info(Tag, $"body {Id}: seat {p.SlotIndex} drone: {d.Playing}");
     }
@@ -406,8 +548,14 @@ internal sealed partial class CampaignRetroBody
             bool fade = alpha < 0.999f && _fadeOk;
             bool own = !(fade && p == 0);
             bool moved = fade && p == 1;
-            if (!(own && Has(p)) && !(moved && Has(0))) return;
-            if (!a.Pose(who)) return;
+            bool ice = Ice != null && who != null && p == 1 && !rebuild; // (the fitted ice over it, in the blended pass: SuitIce.cs)
+            if (!(own && Has(p)) && !(moved && Has(0)) && !ice) return;
+            if (RagdollPose(who) is SuitRagdoll fit) model = fit.Model; // dead: the ragdoll's pose where it fell from
+            else
+            {
+                if (!a.Pose(who)) return;
+                if (who != null && a.GrappleArm(who, model) is Vector3 hand) who.HostGrappleHand = hand; // the Echoes grapple's arm
+            }
             Begin(view, proj, model);
             double s = Environment.TickCount64 / 1000.0;
             if (moved) DrawFaded(alpha, s);
@@ -424,6 +572,14 @@ internal sealed partial class CampaignRetroBody
                 }
             }
             else if (own) DrawPass(p, fade ? alpha : 1f, s);
+            if (ice && IceShellOf(Ice!) is IceShell shell && SuitIce.Begin(Ice!, _mvp16, view, _m16))
+            {
+                _cur = 0;
+                for (int k = 0; k < shell.Bones.Length; k++) HunterRig.ToArray(Body.Data.InvBind[shell.Bones[k]] * Body.World[shell.Bones[k]], _pal, k * 16);
+                SuitIce.Bones(_pal, shell.Bones.Length);
+                shell.Draw();
+                SuitIce.End("body " + Id);
+            }
         }
         catch (Exception ex)
         {
@@ -506,7 +662,7 @@ internal sealed partial class CampaignRetroBody
         if (P.Blend)
         {
             GLES30.GlEnable(GLES30.GlBlend);
-            GLES30.GlBlendFunc(SrcFactor(P.BlendSrc), DstFactor(P.BlendDst));
+            GLES30.GlBlendFunc(CampaignSuit.FadedSrc(P.BlendSrc, fade), DstFactor(P.BlendDst)); // (additive parts fade too)
             GLES30.GlDepthMask(b.BlendDepth);
         }
         else
@@ -600,6 +756,10 @@ internal sealed partial class CampaignRetroBody
             GLES30.GlUniform1i(U(prog, "uBlendAlpha"), P.Blend ? 1 : 0);
             GLES30.GlUniform1i(U(prog, "uNmap"), P.NmapUnit + 1); GLES30.GlUniform1i(U(prog, "uNmapTc"), P.NmapCoord);
             GLES30.GlUniform1i(U(prog, "uTintUnit"), -1);
+            bool seat = _tint.W > 2.5f && _tint.W < 10.5f, warm = _warm && seat;
+            GLES30.GlUniform1i(U(prog, "uTintWarm"), _drone && seat ? 4 : !warm ? 0 : b.Phazon ? 3 : 1);
+            Vector4 t = warm && b.KeepColour ? Vector4.Zero : _tint;
+            GLES30.GlUniform4f(U(prog, "uTint"), t.X, t.Y, t.Z, t.W);
         }
         GlUniforms.Uniform4fv(U(prog, "uReg"), 4, P.Reg, 0); GlUniforms.Uniform4fv(U(prog, "uKonst"), 4, P.Konst, 0);
         GlUniforms.Uniform4iv(U(prog, "uColCtrl"), 2, P.ColCtrl, 0); GlUniforms.Uniform4iv(U(prog, "uAlpCtrl"), 2, P.AlpCtrl, 0);

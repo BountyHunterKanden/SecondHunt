@@ -297,19 +297,24 @@ namespace MphRead
             var audio = new Pak(gc.ReadFile("AudioGrp.pak"), "AudioGrp.pak");
             // the turret HUD's textures
             var hud = new Pak(gc.ReadFile("NoARAM.pak"), "NoARAM.pak");
+            // the grapple beam's effects
+            var gunFx = new Pak(gc.ReadFile("SamGunFx.pak"), "SamGunFx.pak");
+            // (a story room as an arena: its own disc file, Def.Pak)
+            var paks = new Dictionary<string, Pak> { ["Metroid6.pak"] = pak };
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
                 if (which != "all" && EchoesArena.Find(which) != def) continue;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
+                if (!paks.TryGetValue(def.Pak, out Pak? defPak)) paks[def.Pak] = defPak = new Pak(gc.ReadFile(def.Pak), def.Pak);
                 // out=<dir> (T6 2026-10-10): one folder per arena there (the in-app import's layout, pads not tuned), not
                 // the shared staged file system
                 if (Arg(args, "out") is string outDir)
                 {
-                    EchoesArena.Import(pak, def, EchoesArena.Layout.Folder(Path.Combine(outDir, def.Key)), scale, null, Console.WriteLine, audio: audio, hud: hud);
+                    EchoesArena.Import(defPak, def, EchoesArena.Layout.Folder(Path.Combine(outDir, def.Key)), scale, null, Console.WriteLine, audio: audio, hud: hud, gunFx: gunFx);
                     Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
                     continue;
                 }
-                EchoesArena.Import(pak, def, Paths.FileSystem, scale, Console.WriteLine, audio, hud);
+                EchoesArena.Import(defPak, def, Paths.FileSystem, scale, Console.WriteLine, audio, hud, gunFx);
                 Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
             }
             if (Arg(args, "out") == null) ArenaMusic.Import(gc, Paths.FileSystem, Console.WriteLine);
@@ -322,7 +327,8 @@ namespace MphRead
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
                 if (which != null && EchoesArena.Find(which) != def) continue;
-                Mrea area = Mrea.Read(pak.Get(def.Mrea));
+                Pak defPak = def.Pak == "Metroid6.pak" ? pak : new Pak(gc.ReadFile(def.Pak), def.Pak);
+                Mrea area = Mrea.Read(defPak.Get(def.Mrea));
                 // (SCRIPTS_GENERATED=1: with the generated layer, where generators' templates live)
                 List<Mrea.ScriptObject> objs = area.ReadScripts(includeGenerated: Environment.GetEnvironmentVariable("SCRIPTS_GENERATED") == "1")
                     .Where(o => type == "*" || o.Type == type).ToList();
@@ -341,7 +347,8 @@ namespace MphRead
                         {
                             foreach (Mrea.Property c in pr.Children ?? new List<Mrea.Property>())
                             {
-                                string v = c.Data.Length == 4 ? $" = 0x{c.U32:x8} ({c.F32:0.###})" : c.Data.Length == 1 ? $" = {c.Data[0]}" : $" [{c.Data.Length} bytes]";
+                                string v = c.Data.Length == 4 ? $" = 0x{c.U32:x8} ({c.F32:0.###})" : c.Data.Length == 1 ? $" = {c.Data[0]}"
+                                    : c.Data.Length <= 16 ? $" = [{Convert.ToHexString(c.Data)}]" : $" [{c.Data.Length} bytes]";
                                 Console.WriteLine($"{indent}{c.Id:x8}{v}");
                                 if (c.Children != null && indent.Length < 10) Dump(c, indent + "  ");
                             }
@@ -364,6 +371,7 @@ namespace MphRead
             OpenTK.Mathematics.Vector3 Map(float x, float y, float z) => new OpenTK.Mathematics.Vector3(x, z, -y) * scale;
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
+                if (!pak.Contains(def.Mrea)) continue;   // (a story room: not in Metroid6.pak)
                 Mrea area = Mrea.Read(pak.Get(def.Mrea));
                 List<Mrea.ScriptObject> scripts = area.ReadScripts();
                 Mrea.Collision col = area.ReadCollision();
@@ -451,6 +459,7 @@ namespace MphRead
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
                 if (which != null && EchoesArena.Find(which) != def) continue;
+                if (!pak.Contains(def.Mrea)) continue;   // (a story room: not in Metroid6.pak)
                 Mrea area = Mrea.Read(pak.Get(def.Mrea));
                 Cmdl geo = area.ReadGeometry();
                 var render = new List<(OpenTK.Mathematics.Vector3 A, OpenTK.Mathematics.Vector3 B, OpenTK.Mathematics.Vector3 C)>();
@@ -1854,6 +1863,7 @@ namespace MphRead
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
                 if (only != null && EchoesArena.Find(only) != def) continue;
+                if (!pak.Contains(def.Mrea)) continue;   // (a story room: not in Metroid6.pak)
                 Mrea area = Mrea.Read(pak.Get(def.Mrea));
                 List<Mrea.ScriptObject> scripts = area.ReadScripts();
                 List<Mrea.ScriptObject> waters = scripts.Where(o => o.Type == "WATR").ToList();
@@ -1957,6 +1967,7 @@ namespace MphRead
             OpenTK.Mathematics.Vector3 Map(float x, float y, float z) => new OpenTK.Mathematics.Vector3(x, z, -y) * scale;
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
+                if (!pak.Contains(def.Mrea)) continue;   // (a story room: not in Metroid6.pak)
                 Mrea area = Mrea.Read(pak.Get(def.Mrea));
                 List<Mrea.ScriptObject> scripts = area.ReadScripts();
                 List<Mrea.ScriptObject> walls = scripts.Where(o => o.Layer == 0 && o.Active && o.Type == "PLAT" && o.Name == "wall").ToList();
@@ -2078,6 +2089,7 @@ namespace MphRead
             var texCache = new Dictionary<uint, (byte[] Rgba, int W, int H)?>();
             foreach (EchoesArena.Def def in EchoesArena.All)
             {
+                if (!pak.Contains(def.Mrea)) continue;   // (a story room: not in Metroid6.pak)
                 Mrea area = Mrea.Read(pak.Get(def.Mrea));
                 List<Mrea.ScriptObject> scripts = area.ReadScripts();
                 List<Mrea.Light> lights = area.ReadLights()[0];

@@ -77,6 +77,12 @@ namespace MphRecomp.Multiplayer
                     }
                 }
             }
+            // the dev placement editor's mode elements replace the room's own for this mode (PlacedPickups.Extra)
+            if (MphRecomp.Arenas.PlacedPickups.Files.TryGetValue(arena.Id, out MphRecomp.Arenas.PickupPlacement.FileData? file)
+                && MphRecomp.Arenas.PickupPlacement.HasModeElements(file, mode))
+            {
+                (flags, bases, nodes) = MphRecomp.Arenas.PickupPlacement.ModeCounts(file, mode);
+            }
             var census = new ArenaCensus(spawns, flags, bases, nodes);
             _census[(arena.Name, mode, players)] = census;
             return census;

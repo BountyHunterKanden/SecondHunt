@@ -83,6 +83,9 @@ namespace MphRecomp.Frontend
 
         public FileSelect(string? savesDir) => _savesDir = savesDir;
 
+        // EXPORT: the Hunter License as DS unlocks (arenas, hunters, beaten/100% marks) for the save's options + license
+        public Func<CartUnlocks?>? ExportUnlocks { get; set; }
+
         // the HD models (<profile>/hd): the hunter box offers the Trooper when one of his skins is there
         public string? HdRoot { get; set; }
 
@@ -276,7 +279,9 @@ namespace MphRecomp.Frontend
             if (!Bound || _savesDir == null || FocusedSlot < 0) return false;
             int slot = FocusedSlot;
             var saves = new CampaignSaves(_savesDir);
-            CloseDialog(menu);
+            // a box opens over the slots at once (the hunter box, or SAVING...): whatever closing the dialog hides goes at
+            // once rather than sliding out under it (the check's own links had just shown file B's model; owner 11-07)
+            CloseDialog(menu, hideAtOnce: true);
             void Create(CampaignPick pick)
             {
                 saves.CreateNew(slot + 1, pick.Hunter, pick.Character, pick.Skin);
@@ -342,10 +347,14 @@ namespace MphRecomp.Frontend
         // place it starts (FileSelect.DrawSaveData)
         private float _transferGap;
         private readonly Dictionary<int, float> _entrance = new();
-        // the label's centre: "save data" spans x 145..201, 10 px short of MOVIES' label (x 211.5..247.5); it, its icon and
-        // highlight centred past x 166 so the file select's footer-right region pins them to the right corner with MOVIES
-        // (MenuLayout.MainFamily; DELETE, x 160.5, stays in the middle)
+        // the label's centre: "save data" spans x 145..201, 10 px short of MOVIES' label (x 211.5..247.5). The button sits
+        // TransferDrop under the footer in menu space, where nothing else is: at the footer's height its touch area (x
+        // 151.5..191.5) covered DELETE's (140.5..180.5), and a tap on DELETE opened the SAVE DATA box (owner 2026-11-07).
+        // MenuLayout.MainFamily's footer-saves region draws it in the corner row with MOVIES, TransferShift further left
+        // than MOVIES' region would, which puts it under COPY as DELETE is over MOVIES (owner 11-07: "align the buttons in
+        // the lower right hand corner")
         private const float TransferX = 172;
+        public const float TransferDrop = 64, TransferShift = 11;
 
         private void BindTransfer(MenuFile file, MenuStrings strings, MenuPage page, Func<MenuItem, string, bool> hasWidget,
             Func<Func<MenuItem, bool>, int> find, int copyHighlight)
@@ -359,21 +368,22 @@ namespace MphRecomp.Frontend
                 return;
             }
             MenuItem moviesIcon = page.Items[icon], moviesHighlight = page.Items[highlight], moviesLabel = page.Items[label];
-            float dx = TransferX - moviesLabel.X;
-            _transferGap = -dx;
+            float dx = TransferX - moviesLabel.X, dy = -TransferDrop;
+            // (on screen it sits TransferShift further from MOVIES than in menu space)
+            _transferGap = -dx + TransferShift;
             int newIcon = page.Items.Count;
-            page.AddItem(i => RecompMenus.Clone(moviesIcon, i, dx, 0, links: Array.Empty<MenuLink>(), actions: Array.Empty<MenuAction>()));
+            page.AddItem(i => RecompMenus.Clone(moviesIcon, i, dx, dy, links: Array.Empty<MenuLink>(), actions: Array.Empty<MenuAction>()));
             _transferIcon = newIcon;
             int newLabel = page.Items.Count;
             int labelString = strings.Add("save data");
-            page.AddItem(i => RecompMenus.Clone(moviesLabel, i, dx, 0, stringId: labelString));
+            page.AddItem(i => RecompMenus.Clone(moviesLabel, i, dx, dy, stringId: labelString));
             // MOVIES' highlight lights its icon and label: ours lights these
             MenuLink[] links = moviesHighlight.Links.Select(l => l with
             {
                 Target = l.Target == icon ? newIcon : l.Target == label ? newLabel : l.Target
             }).ToArray();
             MenuAction movies = moviesHighlight.Actions.First(a => a.TargetPage != 0xFF);
-            MenuItem added = page.AddItem(i => RecompMenus.Clone(moviesHighlight, i, dx, 0, links: links, actions: new[]
+            MenuItem added = page.AddItem(i => RecompMenus.Clone(moviesHighlight, i, dx, dy, links: links, actions: new[]
             {
                 new MenuAction
                 {
@@ -388,9 +398,9 @@ namespace MphRecomp.Frontend
 
         // FrontendSession's draw pass: the SAVE DATA icon (MOVIES' clone) draws our arrows instead of MOVIES' picture, and
         // its icon and highlight come in from where MOVIES' do (owner 10-29: "the save data button is visible before
-        // sliding"). The cloned slide starts 54.6 px right of its place, which for a button 56.5 px left of MOVIES is still
+        // sliding"). The cloned slide starts 54.6 px right of its place, which for a button 67.5 px left of MOVIES on screen is still
         // on screen: MOVIES' starts off it. So ours goes the further distance in the same frames: its offset from its place
-        // stretched by (54.6 + 56.5) / 54.6, starting with MOVIES past the screen's right edge and landing with it.
+        // stretched by (54.6 + 67.5) / 54.6, starting with MOVIES past the screen's right edge and landing with it.
         public void DrawSaveData(MenuEngine menu, List<WidgetTri> tris, int start)
         {
             if (_transferIcon < 0 || menu.Page?.Index != Page || _transferIcon >= menu.Page.Items.Count) return;
@@ -409,7 +419,10 @@ namespace MphRecomp.Frontend
         private void SlideFromOffScreen(MenuEngine menu, List<WidgetTri> tris, int start, int item)
         {
             int code = menu.ItemCode(item);
-            // the slide is its Hidden -> Idle look (any other look that doesn't move right of its place is left alone)
+            // the slide is its Hidden -> Idle look, and only that: its exit (Idle -> Hidden, pressing MOVIES or the back
+            // button) also starts right of its place, and stretching it by the gap drew our icon on MOVIES' spot for a couple
+            // of frames (owner 2026-11-07: "when you click the movies button it briefly becomes the import button")
+            if (!MenuStateCode.IsTransition(code) || MenuStateCode.From(code) != MenuState.Hidden) return;
             if (menu.Page!.Items[item].GetState(code) is not { WidgetIndex: >= 0 } visual) return;
             float left = Single.MaxValue;
             for (int t = start; t < tris.Count; t++)
@@ -537,7 +550,7 @@ namespace MphRecomp.Frontend
                 CampaignSaveFile file = new CampaignSaves(_savesDir!).Load(slot + 1)
                     ?? throw new IOException($"file {letter} can't be read");
                 string path = Path.Combine(Path.GetTempPath(), $"second-hunt-file-{letter}.sav");
-                File.WriteAllBytes(path, CartSave.Export(file));
+                File.WriteAllBytes(path, CartSave.Export(file, unlocks: ExportUnlocks?.Invoke()));
                 Log?.Invoke($"file select: file {letter} ({sum.CompletionPercent}%) exported -> {path}");
                 ExportFile(path);
             }
@@ -614,9 +627,23 @@ namespace MphRecomp.Frontend
             void Import(CartSaveFile from)
             {
                 var saves = new CampaignSaves(_savesDir);
-                saves.Save(slot + 1, cart.ToCampaign(from.Index)); // a beaten file opens the hunter pick (CampaignSaves.Save)
+                string? kept = null;
+                try
+                {
+                    kept = saves.KeepBeforeImport(slot + 1);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Log?.Invoke($"file select: file {(char)('A' + slot)} not copied before the import: {ex.Message}");
+                }
+                CampaignSaveFile file = cart.ToCampaign(from.Index);
+                // what the imported story had opened stays off the license (HunterLicense.FromStory)
+                (int arenas, int hunters) = HunterLicense.StoryUnlocks(file.Story);
+                (file.ImportedArenas, file.ImportedHunters) = (arenas, hunters);
+                saves.Save(slot + 1, file); // a beaten file opens the hunter pick (CampaignSaves.Save)
                 Log?.Invoke($"file select: file {(char)('A' + slot)} imported from the ds save's file {from.Letter}"
-                    + $" ({from.CompletionPercent}%, {from.Octoliths} octoliths{(from.Cleared ? ", ending reached" : "")})");
+                    + $" ({from.CompletionPercent}%, {from.Octoliths} octoliths{(from.Cleared ? ", ending reached" : "")})"
+                    + (kept != null ? $"; the old file kept as {Path.GetFileName(kept)}" : ""));
                 void ShowFile()
                 {
                     if (menu.Page?.Index != Page) return; // (from SECOND HUNT SETTINGS: the file select draws itself on entry)
@@ -693,7 +720,8 @@ namespace MphRecomp.Frontend
             bool arrows = true) => DrawChoiceAt(tris, font, c, bx, by + HunterBoxHeight / 2f, name, arrows);
 
         // one choice line centred on DS pixel row midY (the IMPORT / EXPORT box has two)
-        private static void DrawChoiceAt(List<WidgetTri> tris, MenuFont font, (float R, float G, float B) c, int bx, float midY,
+        // (also the Hunter License's IMPORT SAVE box: MultiplayerMenu.LicenseSavePicked)
+        internal static void DrawChoiceAt(List<WidgetTri> tris, MenuFont font, (float R, float G, float B) c, int bx, float midY,
             string name, bool arrows = true, float alpha = 1)
         {
             const float z = 3001, lineHeight = 9;
@@ -844,12 +872,46 @@ namespace MphRecomp.Frontend
             menu.SetState(item, visible ? MenuState.Idle : MenuState.Hidden);
         }
 
-        // B while "create a new game in this slot?" is up (callback 85): close it, as NO does
-        public void CloseDialog(MenuEngine menu)
+        // B while "create a new game in this slot?" is up (callback 85): close it, as NO does. The files go back to their
+        // looks from the saves: the backdrop's tap (a tap in the box off the check and cross) also selects the check,
+        // whose links show the empty file as a used one with nothing written (owner 2026-11-07: "the save is created
+        // anyway and it cant be deleted or copied ... when you reload the app its gone"); CreateFile's file is written
+        // and shown after this.
+        // The check's links (a tap or A on it) and the dialog's own hide links show the used file's items (its COMPLETE /
+        // OCTOLITHS labels) just before ApplySlot hides them again, which then slid out under the box (owner 2026-11-07,
+        // item 3: "it creates a [file] briefly which then swipes away"): an item that ends where it started, or that is
+        // hidden again before its entrance finished, is put back without its animation.
+        public void CloseDialog(MenuEngine menu, bool hideAtOnce = false)
         {
+            var before = new MenuState[menu.ItemCount];
+            var beforeCode = new int[before.Length];
+            for (int i = 0; i < before.Length; i++)
+            {
+                before[i] = menu.ItemState(i);
+                beforeCode[i] = menu.ItemCode(i);
+            }
             foreach (int d in _dialogs)
             {
                 if (menu.ItemState(d) != MenuState.Hidden) menu.SetState(d, MenuState.Hidden);
+            }
+            for (int s = 0; s < 3; s++)
+            {
+                ApplySlot(menu, menu.Strings, s);
+            }
+            for (int i = 0; i < before.Length; i++)
+            {
+                if (!MenuStateCode.IsTransition(menu.ItemCode(i))) continue;
+                MenuState now = menu.ItemState(i);
+                // the dialog itself too, when a box opens over it (owner 11-07: it stayed up a moment under the hunter box)
+                if (Array.IndexOf(_dialogs, i) >= 0)
+                {
+                    if (hideAtOnce && now == MenuState.Hidden) menu.Settle(i, MenuState.Hidden);
+                    continue;
+                }
+                if (now == before[i]) menu.Settle(i, now);
+                else if (hideAtOnce && now == MenuState.Hidden) menu.Settle(i, MenuState.Hidden);
+                else if (now == MenuState.Hidden && MenuStateCode.IsTransition(beforeCode[i])
+                    && MenuStateCode.From(beforeCode[i]) == MenuState.Hidden) menu.Settle(i, MenuState.Hidden);
             }
         }
 

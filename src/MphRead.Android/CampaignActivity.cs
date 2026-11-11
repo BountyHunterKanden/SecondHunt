@@ -45,7 +45,7 @@ public class CampaignActivity : Activity
         _view.SetRenderer(new GlScreenRenderer(_renderer));
         var root = new FrameLayout(this);
         root.AddView(_view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
-        _status = new TextView(this) { TextSize = 12f, Text = "loading " + (args.Get("room") ?? "UNIT2_LAND") + "..." };
+        _status = new TextView(this) { TextSize = 12f, Text = _renderer.StatusTextOn ? "loading " + (args.Get("room") ?? "UNIT2_LAND") + "..." : "" }; // players: no debug line over the load (owner 11-06)
         _status.SetTextColor(Android.Graphics.Color.White);
         _status.SetShadowLayer(3f, 1f, 1f, Android.Graphics.Color.Black);
         _status.SetPadding(24, 16, 24, 16);

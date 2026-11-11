@@ -49,7 +49,7 @@ discs: see section 10.
 - **A way for non-MPH entities to plug in.** The turret (`EchoesTurretEntity`) and the Echoes breakables already
   subclass the enemy base class and enter rooms through `SceneSetup.HostExtraEntities`. The campaign builds an
   ordinary MphRead Scene, so that hook runs there too.
-- **A skinned Retro body runtime.** `NativeBody` + `NativeBodyAnimator` (Trooper, Dark Samus) do GPU skinning, clip
+- **A skinned Retro body runtime.** `NativeBody` + `NativeBodyAnimator` (Pirate Trooper, Dark Samus) do GPU skinning, clip
   cross-fades, a layered torso and GX TEV materials.
 - **Retro effect runtimes, ported from Metaforce (MIT):**
   - `RetroParticles` (PART);
@@ -153,6 +153,15 @@ them, with the shared kit paid for once.
 Prime 4; D2 one owner-set table, overridable per placement; D3 (a) Metaforce as the credited reference, checked
 against the retail DOL; D4 leave out by default; D5 (b) fallback enemy per placement; D6 true size; D7 GameCube
 retail is ground truth).
+
+**Hunter decisions (owner 2026-10-30):**
+- **Grapple:** adapt the grapple hunters now, and build a real grapple beam as its own project (the owner wants grapple
+  for everyone anyway, starting with the Shooting Gallery grapple point). Plan: docs/GRAPPLE.md.
+- **Hypermode / Phazon:** hunter-only. The hunter enters Hypermode and uses its Hypermode attacks; the player gets no
+  Hypermode.
+- **Echoes Dark Samus' Freeze Beam:** adapt Echoes' own freeze (its freeze effect and timing, read from the disc) onto
+  the MPH player, marked as an adaptation.
+- **First hunter port:** Echoes Dark Samus.
 
 - **D1. Order of games after H1.** Recommended: Echoes, then Prime 1, then Corruption, then Prime 4. Echoes has the
   best source (the turret's method), and Prime 4 has no readable logic yet.
@@ -295,7 +304,7 @@ Pirate Blaster keeps the Power row), with the table in 8.3 kept editable for lat
   Annihilator → Volt Driver rather than Omega; Shock Coil sharing Volt Driver's family.
 - **V2.** Shield tint (8.5): recommended (b), on by default.
 - **V3.** Pirate Blaster: keep the Power row (recommended), or count it as Prime's enemy-weapon type. That's more
-  1:1, but most Prime enemies ignore their own side's fire, so the Trooper couldn't hurt pirates.
+  1:1, but most Prime enemies ignore their own side's fire, so the Pirate Trooper couldn't hurt pirates.
 
 ## 9. Next step
 
@@ -303,6 +312,8 @@ Pirate Blaster keeps the Power row), with the table in 8.3 kept editable for lat
    before the first Prime enemy (E1); it isn't needed for R1 or H1.
 2. ~~Run R1 (the census) and H1 (the Hard Mode foundation) as two threads.~~ R1 done 2026-10-26 (section 10); H1 is
    its own thread. The owner now picks enemies from section 10 for E1 (Echoes first, per D1).
+3. 2026-10-30: the goal is every enemy and hunter of every Prime game (section 11). Work that needs no owner is
+   queued in 11.2, items 1-8.
 
 ## 10. Enemy catalogue (R1 census, 2026-10-26)
 
@@ -531,117 +542,119 @@ Same 75 RSO files on both. Types are matched to RSOs **by name** (the PWE MP3 te
 
 | Type | Name | RSO | Tier | Notes |
 |---|---|---|---|---|
-| ATMA | AtomicAlpha | RSO_AtomicAlpha | named RSO; reader work first |  |
-| AUR1 | AuroraUnit1 | RSO_AuroraUnit1 | named RSO; reader work first |  |
-| AUR2 | AuroraUnit2 | RSO_AuroraUnit2 | named RSO; reader work first |  |
-| BLWF | BlinkWolf | RSO_BlinkWolf | named RSO; reader work first |  |
-| BOS3 | SeedBoss3 | RSO_SeedBoss3 | named RSO; reader work first |  |
-| BSKR | Berserker | RSO_Berserker | named RSO; reader work first |  |
-| BSTR | BeastRider | RSO_BeastRider | named RSO; reader work first |  |
-| CMBT | CombatTrooper | RSO_CombatTrooper | named RSO; reader work first |  |
-| DEFM | DefenseMechanoid | RSO_DefenseMechanoid | named RSO; reader work first |  |
-| DKSE | DarkSamusEcho | RSO_DarkSamusEcho | named RSO; reader work first | Dark Samus; Hypermode / Phazon rules (D4) |
-| DRKS | DarkSamus | RSO_DarkSamus | named RSO; reader work first | Dark Samus; Hypermode / Phazon rules (D4) |
-| EYEP | EyePod | RSO_EyePod | named RSO; reader work first |  |
-| FGHT | FargullHatcher | RSO_FargullHatcher (+FargullHatcherSwarm) | named RSO; reader work first |  |
-| FLYP | FlyingPirate | RSO_FlyingPirate | named RSO; reader work first |  |
-| FRND | Friendly | RSO_Friendly | named RSO; reader work first |  |
-| GAND | Gandrayda | RSO_Gandrayda | named RSO; reader work first |  |
-| GHOR | GhorLowerBody | RSO_Ghor | named RSO; reader work first | lower/upper body, one RSO |
-| GHRU | GhorUpperBody | RSO_Ghor | named RSO; reader work first | lower/upper body, one RSO |
-| GNTB | GunTurretBase | RSO_GunTurret | named RSO; reader work first | base + top, one RSO |
-| GNTT | GunTurretTop | RSO_GunTurret | named RSO; reader work first | base + top, one RSO |
-| GRFL | GragnolFlyer | RSO_GragnolFlyer | named RSO; reader work first |  |
-| GSAC | GellSac | RSO_GellSac | named RSO; reader work first |  |
-| KRAK | Korakk | none by that name | DOL or another RSO (unresolved) | check when E3 starts |
-| KRBM | KorbaMaw | RSO_KorbaMaw | named RSO; reader work first |  |
-| MHAT | MetroidHatcher | RSO_MetroidHatcher | named RSO; reader work first |  |
-| MHOP | MetroidHopper | RSO_MetroidHopper | named RSO; reader work first |  |
-| MINI | MinorIng | RSO_MinorIng | named RSO; reader work first |  |
-| MPHZ | MetroidPhazeoid | RSO_MetroidPhazeoid | named RSO; reader work first |  |
-| MREE | Metaree | RSO_Metaree | named RSO; reader work first |  |
-| MYSF | MysteryFlyer | RSO_MysteryFlyer | named RSO; reader work first |  |
-| NOTU | NoseTurret | RSO_NoseTurret | named RSO; reader work first |  |
-| PARA | Parasite | RSO_Parasite | named RSO; reader work first |  |
-| PDRN | PirateDrone | RSO_PirateDrone | named RSO; reader work first |  |
-| PHHR | PhazonHarvester | RSO_PhazonHarvester | named RSO; reader work first |  |
-| PHPF | PhazonPuffer | RSO_PhazonPuffer | named RSO; reader work first |  |
-| PHZD | Phaazoid | RSO_Phaazoid | named RSO; reader work first |  |
-| PILL | PillBug | RSO_PillBug | named RSO; reader work first |  |
-| PIRT | SpacePirate | RSO_SpacePirate | named RSO; reader work first |  |
-| PLCH | PhazonLeech | RSO_PhazonLeech | named RSO; reader work first |  |
-| PTNT | PhazonTentacle | RSO_PhazonTentacle | named RSO; reader work first |  |
-| PUFR | Puffer | RSO_Puffer | named RSO; reader work first |  |
-| REPH | ReptilicusHunter | RSO_ReptilicusHunter | named RSO; reader work first |  |
-| RID1 | Ridley1 | RSO_Ridley1 | named RSO; reader work first |  |
-| RUND | Rundas | RSO_Rundas | named RSO; reader work first |  |
-| SAMF | SamusForm | none by that name | DOL or another RSO (unresolved) | check when E3 starts |
-| SB2G | SeedBoss2GiantForm | RSO_SeedBoss2 | named RSO; reader work first |  |
-| SB2P | SeedBoss2PrimeBot | RSO_SeedBoss2 | named RSO; reader work first |  |
-| SB2X | SeedBoss2BotSwarm | RSO_SeedBoss2Bot | named RSO; reader work first |  |
-| SBO1 | SeedBoss1Orb | RSO_SeedBoss1 | named RSO; reader work first |  |
-| SDB1 | SeedBoss1 | RSO_SeedBoss1 | named RSO; reader work first |  |
-| SDRN | SteamDrone | RSO_SteamDrone | named RSO; reader work first |  |
-| SHBG | ShellBug | RSO_ShellBug | named RSO; reader work first |  |
-| SHIP | Ship | RSO_Ship | named RSO; reader work first |  |
-| SPRT | Sprite | RSO_Sprite | named RSO; reader work first |  |
-| STMB | SteamBot | RSO_SteamBot | named RSO; reader work first |  |
-| STML | SteamLord | RSO_SteamLord | named RSO; reader work first |  |
-| SWBT | SwarmBot | RSO_SwarmBot | named RSO; reader work first |  |
-| WEED | VenomWeed | RSO_VenomWeed | named RSO; reader work first |  |
+| ATMA | AtomicAlpha | RSO_AtomicAlpha | data read; ANIM3/PART next | 80 / 15; immune to every listed weapon (killed another way) |
+| AUR1 | AuroraUnit1 | RSO_AuroraUnit1 | data read; ANIM3/PART next | 4000 / 20; immune to every listed weapon (boss scripted) |
+| AUR2 | AuroraUnit2 | RSO_AuroraUnit2 | data read; ANIM3/PART next | 4000 / 25; immune to every listed weapon (boss scripted) |
+| BLWF | BlinkWolf | RSO_BlinkWolf | data read; ANIM3/PART next | 400 / 5; Plasma, Nova 50; IceMissile 300 |
+| BOS3 | SeedBoss3 | RSO_SeedBoss3 | data read; ANIM3/PART next | 500 / 0.1; immune to every listed weapon (boss scripted) |
+| BSKR | Berserker | RSO_Berserker | data read; ANIM3/PART next | 250 or 150 / 10; Phazon 100 or 25; PhazonBall 20-25 |
+| BSTR | BeastRider | RSO_BeastRider | data read; ANIM3/PART next | 125 / 0; immune to ball, bomb, screw |
+| CMBT | CombatTrooper | RSO_CombatTrooper | data read; ANIM3/PART next | 20 / 0; immune to every listed weapon |
+| DEFM | DefenseMechanoid | RSO_DefenseMechanoid | data read; ANIM3/PART next | 700 / 10; immune to every listed weapon |
+| DKSE | DarkSamusEcho | RSO_DarkSamusEcho | no placed instances | **no placed instances** (spawned by DarkSamus at run time). Dark Samus; Hypermode / Phazon rules (D4) |
+| DRKS | DarkSamus | RSO_DarkSamus | data read; ANIM3/PART next | 6500 / 30; PhazonCharge 75, PhazonMissile 50, PhazonBall 50. Dark Samus; Hypermode / Phazon rules (D4) |
+| EYEP | EyePod | RSO_EyePod | data read; ANIM3/PART next | 25 / 15 |
+| FGHT | FargullHatcher | RSO_FargullHatcher (+FargullHatcherSwarm) | data read; ANIM3/PART next | 500 / 0 |
+| FLYP | FlyingPirate | RSO_FlyingPirate | data read; ANIM3/PART next | 100 / 5 (2 immune scripted variants) |
+| FRND | Friendly | RSO_Friendly | data read; ANIM3/PART next | 50 / 0; immune to player weapons (friendly troopers) |
+| GAND | Gandrayda | RSO_Gandrayda | data read; ANIM3/PART next | 2000 / 10; Phazon 25 |
+| GHOR | GhorLowerBody | RSO_Ghor | data read; ANIM3/PART next | 10000 or 5 / 10; immune (damage goes through parts). Lower/upper body, one RSO |
+| GHRU | GhorUpperBody | RSO_Ghor | data read; ANIM3/PART next | 5 / 10; immune. Lower/upper body, one RSO |
+| GNTB | GunTurretBase | RSO_GunTurret | data read; ANIM3/PART next | 25 / 5. Base + top, one RSO |
+| GNTT | GunTurretTop | RSO_GunTurret | data read; ANIM3/PART next | 50-150 (99999 on invulnerable ones) / 1.5-5. Base + top, one RSO |
+| GRFL | GragnolFlyer | RSO_GragnolFlyer | data read; ANIM3/PART next | 15 or 50 / 0 |
+| GSAC | GellSac | RSO_GellSac | data read; ANIM3/PART next | 150 / 2.5 |
+| KRAK | Korakk | RSO_BeastRider (class CKorakk; BossKorakk) | data read; ANIM3/PART next | 400 / 2; Phazon 25 |
+| KRBM | KorbaMaw | RSO_KorbaMaw | data read; ANIM3/PART next | 200 / 0; immune (scripted) |
+| MHAT | MetroidHatcher | RSO_MetroidHatcher | data read; ANIM3/PART next | 500 / 10 |
+| MHOP | MetroidHopper | RSO_MetroidHopper | data read; ANIM3/PART next | 50 / 70 / 300 / 15 health by variant; contact 5 or 25 |
+| MINI | MinorIng | RSO_MinorIng | data read; ANIM3/PART next | 125 or 200 / 0 |
+| MPHZ | MetroidPhazeoid | RSO_MetroidPhazeoid | data read; ANIM3/PART next | 100 / 5 |
+| MREE | Metaree | RSO_Metaree | data read; ANIM3/PART next | 5 or 10 / 0 |
+| MYSF | MysteryFlyer | RSO_MysteryFlyer | no placed instances | **no placed instances** |
+| NOTU | NoseTurret | RSO_NoseTurret | data read; ANIM3/PART next | 100 (99999 invulnerable) / 0 |
+| PARA | Parasite | RSO_Parasite | no placed instances | **no placed instances** (class CParasite, a CWallCrawler, still in the RSO) |
+| PDRN | PirateDrone | RSO_PirateDrone | data read; ANIM3/PART next | 15 / 2 |
+| PHHR | PhazonHarvester | RSO_PhazonHarvester | data read; ANIM3/PART next | 10000; immune (scripted) |
+| PHPF | PhazonPuffer | RSO_PhazonPuffer | data read; ANIM3/PART next | 225 / 0 |
+| PHZD | Phaazoid | RSO_Phaazoid | data read; ANIM3/PART next | 300 / 20; only Phazon weapons hurt it |
+| PILL | PillBug | RSO_PillBug | data read; ANIM3/PART next | 5 / 2.5; immune |
+| PIRT | SpacePirate | RSO_SpacePirate | data read; ANIM3/PART next | 100 / 50 / 150 health by variant; contact 10; Phazon 50 on most, Electrical 5000 on 8 |
+| PLCH | PhazonLeech | RSO_PhazonLeech | data read; ANIM3/PART next | 8 / 5 |
+| PTNT | PhazonTentacle | RSO_PhazonTentacle | no placed instances | **no placed instances** |
+| PUFR | Puffer | RSO_Puffer | data read; ANIM3/PART next | 15 / 20 |
+| REPH | ReptilicusHunter | RSO_ReptilicusHunter | data read; ANIM3/PART next | 150 or 300 / 2.5; Plasma, Nova 50; IceMissile 200-300 |
+| RID1 | Ridley1 | RSO_Ridley1 | data read; ANIM3/PART next | 700 / 0 |
+| RUND | Rundas | RSO_Rundas | data read; ANIM3/PART next | 2500 (150 for Gandrayda posing as Rundas) / 10 |
+| SAMF | SamusForm | RSO_Gandrayda (Gandrayda's Samus form, "MorphToSamusForm") | data read; ANIM3/PART next | 120 / 0; Phazon 25 |
+| SB2G | SeedBoss2GiantForm | RSO_SeedBoss2 | data read; ANIM3/PART next | 1,000,000 (scripted) |
+| SB2P | SeedBoss2PrimeBot | RSO_SeedBoss2 | data read; ANIM3/PART next | 3500; immune to PhazonBall, Screw |
+| SB2X | SeedBoss2BotSwarm | RSO_SeedBoss2Bot | data read; ANIM3/PART next | 300; immune |
+| SBO1 | SeedBoss1Orb | RSO_SeedBoss1 | data read; ANIM3/PART next | 180 or 120; every weapon 40 |
+| SDB1 | SeedBoss1 | RSO_SeedBoss1 | data read; ANIM3/PART next | 1500 / 10 |
+| SDRN | SteamDrone | RSO_SteamDrone | data read; ANIM3/PART next | 100 / 5; immune to missiles |
+| SHBG | ShellBug | RSO_ShellBug | data read; ANIM3/PART next | 5 or 1 / 1 |
+| SHIP | Ship | RSO_Ship | data read; ANIM3/PART next | 5000 |
+| SPRT | Sprite | RSO_Sprite | no placed instances | **no placed instances** |
+| STMB | SteamBot | RSO_SteamBot | data read; ANIM3/PART next | 25 or 100 / 5; Phazon 500, PhazonCharge 5000 |
+| STML | SteamLord | RSO_SteamLord | data read; ANIM3/PART next | 250 / 20; Phazon 25; immune to grapple |
+| SWBT | SwarmBot | RSO_SwarmBot | data read; ANIM3/PART next | 30 / 0 |
+| WEED | VenomWeed | RSO_VenomWeed | data read; ANIM3/PART next | 10 placements in 1 area, no PatternedAI (a plant actor, no health table) |
 
 ### 10.6 Prime 1 (GC DOL, `rs5mp1_p.dol` and `default.dol`)
 
-Prime 1 has no per-enemy modules, so every enemy is **DOL unnamed**. The IDs and names below are the PWE MP1 templates (a research reference; the license is unchecked, so nothing here ships). Per D3 the names are checked against Metaforce (MIT) and then against the DOL before E2 uses them. "Patterned" means the template shares the PatternedAI struct. Only Thardus (0x58) and its rock projectile (0x5F) name an AFSM/FSM2 asset directly in the template; the other patterned enemies are code-driven. Damage tables are **not read yet** (needs the MP1 SCLY reader, E2).
+Prime 1 has no per-enemy modules, so every enemy is **DOL unnamed**. The IDs and names below are the PWE MP1 templates (a research reference; the license is unchecked, so nothing here ships). Per D3 the names are checked against Metaforce (MIT) and then against the DOL before E2 uses them. "Patterned" means the template shares the PatternedAI struct. Correction 2026-10-30: nearly every patterned enemy names an AFSM in its script object (map in 11.3), not only Thardus (0x58) and its rock (0x5F). Health, contact damage and vulnerabilities are **read from the disc** (11.2 item 2, 2026-10-30): `Import/Retro/Scly1.cs` reads every room's script layers (276 areas on mp1.iso, 54,670 objects, 0 failures) and finds each object's PatternedInfo block; `MphRead.Tools -mp1scly census` prints this table, `-mp1scly types` every object type.
 
-| Object ID | Name | Patterned AI | Tier |
-|---|---|---|---|
-| 0xE | NewIntroBoss | yes | DOL unnamed |
-| 0x16 | Beetle | yes | DOL unnamed |
-| 0x21 | WarWasp | yes | DOL unnamed |
-| 0x24 | SpacePirate | yes | DOL unnamed |
-| 0x25 | FlyingPirate | yes | DOL unnamed |
-| 0x26 | ElitePirate | yes | DOL unnamed |
-| 0x27 | MetroidBeta | yes | DOL unnamed |
-| 0x28 | ChozoGhost | yes | DOL unnamed |
-| 0x2D | BloodFlower | yes | DOL unnamed |
-| 0x2E | FlickerBat | yes | DOL unnamed |
-| 0x31 | PuddleSpore | yes | DOL unnamed |
-| 0x34 | PuddleToadGamma | yes | DOL unnamed |
-| 0x36 | FireFlea | yes | DOL unnamed |
-| 0x37 | MetareeAlpha | yes | DOL unnamed |
-| 0x3B | SpankWeed | yes | DOL unnamed |
-| 0x3D | Parasite | yes | DOL unnamed |
-| 0x3F | Ripper | yes | DOL unnamed |
-| 0x43 | Drone | yes | DOL unnamed |
-| 0x44 | MetroidAlpha | yes | DOL unnamed |
-| 0x4B | IceSheegoth | yes | DOL unnamed |
-| 0x4D | Flaahgra | yes | DOL unnamed |
-| 0x54 | JellyZap | yes | DOL unnamed |
-| 0x58 | Thardus | yes, names an AFSM/FSM2 | DOL unnamed + needs AFSM |
-| 0x5A | WallCrawlerSwarm | no (own struct) | DOL unnamed |
-| 0x5C | FlaahgraTentacle | yes | DOL unnamed |
-| 0x5F | ThardusRockProjectile | yes, names an AFSM/FSM2 | DOL unnamed + needs AFSM |
-| 0x64 | GunTurret | no (own struct) | DOL unnamed |
-| 0x66 | Babygoth | yes | DOL unnamed |
-| 0x67 | Eyeball | yes | DOL unnamed |
-| 0x6B | Magdolite | yes | DOL unnamed |
-| 0x6D | SnakeWeedSwarm | no (own struct) | DOL unnamed |
-| 0x6F | Oculus | yes | DOL unnamed |
-| 0x70 | Geemer | yes | DOL unnamed |
-| 0x72 | AtomicAlpha | yes | DOL unnamed |
-| 0x77 | AtomicBeta | yes | DOL unnamed |
-| 0x78 | IceZoomer | yes | DOL unnamed |
-| 0x79 | Puffer | yes | DOL unnamed |
-| 0x7A | Tryclops | yes | DOL unnamed |
-| 0x7B | Ridley | yes | DOL unnamed |
-| 0x7C | Seedling | yes | DOL unnamed |
-| 0x7F | Burrower | yes | DOL unnamed |
-| 0x83 | MetroidPrimeStage2 | yes | DOL unnamed |
-| 0x84 | MetroidPrimeStage1 | no (own struct) | DOL unnamed |
-| 0x86 | OmegaPirate | yes | DOL unnamed |
-| 0x88 | PhazonHealingNodule | yes | DOL unnamed |
-| 0x8B | EnergyBall | yes | DOL unnamed |
+How to read the new columns: **Instances** = script objects of that type on the disc (layers included). **Health** and **contact damage** are the values per instance, "×n" = how many instances carry that value (the top four, "(+n)" more values). **Vulnerable to** is one letter per weapon in Prime 1's order: Power, Ice, Wave, Plasma, Bomb, Power Bomb, Missile, Boost Ball, Phazon. W weak (double), N normal, D deflect, I immune, P pass-through; a small "d" in front = direct hits only (no charge or splash), as Prime 1 marks it. A "*" means instances differ and the letter is the most common one (Space Pirate variants, Parasite vs Platform Zoomer, Metroid kinds). Boss values are the script's **base** block only: Thardus (5), Flaahgra tentacles (10000), Metroid Prime's exo (5) and PuddleSpore (50000/1000000) keep their real health and weak points elsewhere (parts, their own structs, or scripted states), so they need their own read in the port.
+
+| Object ID | Name | Instances | Health | Contact damage | Vulnerable to (P I W Pl B PB M BB Ph) | Tier |
+|---|---|---|---|---|---|---|
+| 0xE | NewIntroBoss | 1 | 480 | 0 | W W W W W W W W W | DOL unnamed |
+| 0x16 | Beetle | 49 | 10×42, 30×4, 40×3 | 10×46, 20×3 | N N N N* N N N N N | DOL unnamed |
+| 0x21 | WarWasp | 15 | 4×14, 2×1 | 10×11, 5×4 | N N N N* N N N N N | DOL unnamed |
+| 0x24 | SpacePirate | 168 | 60×67, 70×35, 100×17, 150×14 (+5) | 10×120, 5×45, 2×3 | dN* dN* dN* N* N* N* N* D* N | DOL unnamed |
+| 0x25 | FlyingPirate | 40 | 90×35, 120×5 | 10 | N N N N N N N N N | DOL unnamed |
+| 0x26 | ElitePirate | 7 | 300×6, 700×1 | 25 | dN dN dN dN D D dN D dN | DOL unnamed |
+| 0x27 | MetroidBeta | 10 | 1 | 32 | I I I I D N I D D* | DOL unnamed |
+| 0x28 | ChozoGhost | 23 | 200 | 5 | N P P P P* P* P P P | DOL unnamed |
+| 0x2D | BloodFlower | 4 | 100 | 0.2 | I I I W I I I I N | DOL unnamed |
+| 0x2E | FlickerBat | 17 | 4 | 10 | N N N N N N N N N | DOL unnamed |
+| 0x31 | PuddleSpore | 5 | 50000×3, 1000000×2 | 10×3, 2×2 | D D D D D D D D D | DOL unnamed |
+| 0x34 | PuddleToadGamma | 6 | 1×5, 10×1 | 0 | D* D* D* D* N N D* D* D* | DOL unnamed |
+| 0x36 | FireFlea | 8 | 4 | 10 | N N N N N N N N N | DOL unnamed |
+| 0x37 | MetareeAlpha | 92 | 1 | 5 | N N N N N N N N N | DOL unnamed |
+| 0x3B | SpankWeed | 47 | 2×40, 1000000×7 | 10×44, 20×3 | N N N N N N N N N | DOL unnamed |
+| 0x3D | Parasite | 98 | 5×63, 6×25, 2×7, 10×3 | 10×63, 2×30, 0×5 | D* D* D* N* N* N* N* D* D* | DOL unnamed |
+| 0x3F | Ripper | 5 | 5 | 0 | D I D D D D D D D | DOL unnamed |
+| 0x43 | Drone | 16 | 40×15, 120×1 | 10 | N N N N N N N N N | DOL unnamed |
+| 0x44 | MetroidAlpha | 61 | 1×56, 5×5 | 5×59, 0×2 | I I I I D N* I* D D* | DOL unnamed |
+| 0x4B | IceSheegoth | 5 | 400×2, 250×2, 500×1 | 20×4, 10×1 | D D D N W N D D D | DOL unnamed |
+| 0x4D | Flaahgra | 1 | 2000 | 16 | N N N N D D N D N | DOL unnamed |
+| 0x54 | JellyZap | 22 | 30 | 5 | N N N N N N N N N | DOL unnamed |
+| 0x58 | Thardus | 1 | 5 | 10 | D D D D D D D D D | DOL unnamed + needs AFSM (64a97140, c44a40c9) |
+| 0x5A | WallCrawlerSwarm | — | — | — | no PatternedInfo (own struct) | DOL unnamed |
+| 0x5C | FlaahgraTentacle | 4 | 10000 | 20 | D D D D D D D D D | DOL unnamed |
+| 0x5F | ThardusRockProjectile | 1 | 6 | 7 | N N N N N N N N N | DOL unnamed + needs AFSM (ff3c0ddc) |
+| 0x64 | GunTurret | — | — | — | no PatternedInfo (own struct) | DOL unnamed |
+| 0x66 | Babygoth | 14 | 6 | 10 | N D N W N N N D N | DOL unnamed |
+| 0x67 | Eyeball | 14 | 10 | 5×13, 10×1 | I I I I I W I D D | DOL unnamed |
+| 0x6B | Magdolite | 9 | 100 | 5 | N N N N N N N D N | DOL unnamed |
+| 0x6D | SnakeWeedSwarm | — | — | — | no PatternedInfo (own struct) | DOL unnamed |
+| 0x6F | Oculus | 14 | 5 | 10 | dI dI dI dI dI dI dI* dI dI | DOL unnamed |
+| 0x70 | Geemer | 5 | 1000000 | 10 | I I I I I N I I I | DOL unnamed |
+| 0x72 | AtomicAlpha | 28 | 18×26, 10×2 | 30 | D D N D D D D D D* | DOL unnamed |
+| 0x77 | AtomicBeta | 19 | 18 | 16×11, 18×8 | D D N D D D D D D | DOL unnamed |
+| 0x78 | IceZoomer | — | — | — | not placed on the disc | DOL unnamed |
+| 0x79 | Puffer | 71 | 2 | 0 | N* N* N* N* N* N* N N* N* | DOL unnamed |
+| 0x7A | Tryclops | 12 | 5 | 5 | D N D D N N D D D | DOL unnamed |
+| 0x7B | Ridley | 1 | 2000 | 20 | N N N N N N N N N | DOL unnamed |
+| 0x7C | Seedling | 13 | 5 | 10 | N N N N N N N N N | DOL unnamed |
+| 0x7F | Burrower | 23 | 2 | 10 | N N N N* N N N N N | DOL unnamed |
+| 0x83 | MetroidPrimeStage2 | 1 | 36667 | 30 | D D D D D D D D N | DOL unnamed |
+| 0x84 | MetroidPrimeStage1 | 4 | 5 | 25 | D D D D D D D D D | DOL unnamed |
+| 0x86 | OmegaPirate | 1 | 600 | 50 | dN dN dN dN D D dN D dN | DOL unnamed |
+| 0x88 | PhazonHealingNodule | 9 | 75 | 20 | N N N N N N N N N | DOL unnamed |
+| 0x8B | EnergyBall | 12 | 30 | 0 | N N N N N N N N N | DOL unnamed |
 
 ### 10.7 What the census found (flags for the owner)
 
@@ -666,13 +679,184 @@ Prime 1 has no per-enemy modules, so every enemy is **DOL unnamed**. The IDs and
   are listed in 10.3 with that note and have no damage data.
 - **Corruption:** 58 patterned types from the template. Korakk and SamusForm have no RSO under that name. Damage
   tables, health and exported symbol names are not read.
-- **Prime 1:** 46 object types, no names in the DOL itself. Damage, health and the object-ID table from the DOL are
+- **Prime 1:** 46 object types, no names in the DOL itself. Health, contact damage and vulnerabilities are now read
+  (10.6, 2026-10-30); IceZoomer (0x78) has no instance on the disc. Immune-to-almost-everything rows (softlock risk,
+  8.6): MetroidBeta and MetroidAlpha (Power Bomb only, plus freezing in the real game), Eyeball (Power Bomb), Geemer
+  0x70 (Power Bomb), BloodFlower (Plasma, Phazon), Oculus (direct hits immune: scripted). The DOL object-ID table is
   not read.
 
 ### 10.8 Open items R1 did not cover
 
 1. Corruption's DOL (not extractable yet), RSO export names, and MREA3 vulnerability data (E3).
-2. Prime 1's DOL enumeration and the MP1 SCLY health and damage tables (E2).
+2. Prime 1's DOL enumeration (E2). ~~The MP1 SCLY health and damage tables~~ read 2026-10-30 (10.6).
 3. The "needs abilities" flags (Ing guardians, Emperor Ing, swamp boss, Chozo Ghost, Corruption grapple enemies) are
    from game knowledge; confirm in E1 and E3.
-4. The AFSM/FSM2 reader is the first blocker for every "named module + needs AFSM/FSM2" row (section 3 gap).
+4. ~~The AFSM/FSM2 reader is the first blocker~~ Resolved 2026-10-30: `Import/Retro/Fsm.cs` reads all of them (11.3).
+
+## 11. The full roster, hunters included (owner 2026-10-30)
+
+Owner, 2026-10-30: "I want to be able to import all enemies from all prime games, hunters included. I know prime 4
+may not be possible yet. That's ok."
+
+So the goal is now explicit: **every enemy, boss and hunter** of First Hunt, MPH, Prime 1, Echoes and Corruption gets
+a catalogue entry and a 1:1 port (section 1). Prime 4 follows when its readers exist (P4); until then it's a research
+item, not a promise. The order doesn't change: Hard Mode's picks first, then the rest of each game's wave (D1). In
+section 6, "the rest" now means every row of section 10 plus every row of 11.1, not a subset.
+
+Abilities rules (D4) still apply: an enemy whose fight needs a visor, grapple, Hypermode or the light/dark world is
+still in the roster. It waits behind its flag until the owner says leave out, adapt or build the ability.
+
+### 11.1 Hunters per game
+
+"Hunter" means a bounty hunter or a hunter-class rival fought like one (Dark Samus). Bosses that aren't hunters stay
+in B1.
+
+| Game | Hunter fights | Catalogue ids | Where the logic is | What's in hand | Blockers |
+|---|---|---|---|---|---|
+| MPH | The 6 rival hunters as campaign encounters: Kanden, Spire, Trace, Noxus, Sylux, Weavel (`EnemyType.Hunter` = 48, spawned with a `HunterId`, driven by the bot brain `PlayerAi*` and the ROM's personality data). Also Gorea's Guardians (`Hunter.Guardian`) | `mph:Hunter.<name>`, `mph:Guardian` | MphRead (C#), already 1:1 (bot parity checked 10-24) | everything | none. H1 left hunters and bosses out of the placer (`EnemyCatalogue.PlaceableMph`), so they need H2 |
+| MPH extras (our characters) | Pirate Trooper, Dark Samus stand-in, Zero Suit Samus as AI rivals, on the same bot brain | `sh:Hunter.<name>` | our code (bot support exists for Pirate Trooper/Dark Samus, thread A) | everything | Not 1:1 with any game: an **adaptation** (D4 label), owner's call per character |
+| First Hunt | none | | | | |
+| Prime 1 | none (no bounty hunters in Prime 1) | | | | |
+| Echoes | Dark Samus (DRKS, 4 SP instances, health 600-1800) + her arena controller DarkSamusBattleStage (DSBS) | `mp2:DarkSamus` | `DarkSamus.rel` / `RSO_DarkSamus` (named) | model, anims, effects readers; the Dark Samus body already runs as a playable character | FSM2 9f23ac7b parses (11.3; 59 states, 92 transitions); next: the K1 kit, then a port |
+| Corruption | Rundas (RUND), Ghor (GHOR lower + GHRU upper body), Gandrayda (GAND), Dark Samus (DRKS) + her echoes (DKSE) | `mp3:Rundas`, `mp3:Ghor`, `mp3:Gandrayda`, `mp3:DarkSamus` | `RSO_Rundas`, `RSO_Ghor`, `RSO_Gandrayda`, `RSO_DarkSamus`, `RSO_DarkSamusEcho` (named) | CMDL3/CHAR3/SKIN3/ANIM3 v1, sound | E3 readers (MREA3, ANIM3 v2, CHAR3 events, PART v3), the DOL out of the Wii image; D4 flags: grapple (Rundas, Ghor, Gandrayda), Hypermode / Phazon (Dark Samus, Gandrayda) |
+| Prime 4 | Sylux | `mp4:Sylux` | `main` NSO (AArch64), no names | Sylux's model + skeleton + animations (CR6 clean-room importer) | no script, AI, effects or sound readers; 1:1 needs NSO RE per move. P4 spike; owner: OK if it isn't possible yet |
+
+Dark Samus appears in two games with two different fights, so she gets two ids. Hunters are boss-class: each is
+room-bound (a big enough room, or a built arena later) and gets the mini-boss gate and health bar.
+
+### 11.2 Work that needs no owner
+
+Everything below is PC-only research or code with a PC test. None of it needs an owner pick, an Odin check or a disc
+the owner hasn't already given us. Items 1-4 are mechanical reader work, a good fit for a cheaper-model session. The
+owner judges the results when back (look checks by eye, Odin installs as usual).
+
+| # | Work | Unblocks | Output | Done when |
+|---|---|---|---|---|
+| 1 | **DONE 10-30** (11.3). **AFSM/FSM2 reader** (Prime 1 AFSM, Echoes FSM2): states, triggers, conditions, parameter names | Echoes Dark Samus and every "needs AFSM/FSM2" row; Thardus | `Import/Retro/Fsm.cs` + a `-fsmdump` Tools switch | every AFSM/FSM2 asset on the Prime 1 and Echoes discs parses and dumps readably |
+| 2 | **DONE 10-30** (10.6; reader in `Import/Retro/Scly1.cs`, not `Mrea.cs`, which belongs to the Echoes arenas). **Prime 1 script layers (SCLY)** | E2; section 10.6 health and damage columns | catalogue rows filled from the disc | every MP1 enemy type in 10.6 has health + damage values |
+| 3 | **DONE 2026-10-30.** **Corruption DOL + MREA3 script data**: pull the DOL out of the Wii image with our disc readers, read MREA3 script instances | E3; 10.5 health/damage; resolves Korakk and SamusForm | catalogue rows filled | every 10.5 row has values and a module |
+| 4 | **RSO/REL part DONE 10-30** (11.4, docs/ENEMY_MODULES.md); Prime 1 DOL entry points open. **Module symbol index**: export/import names of every REL/RSO (Echoes, Trilogy MP2/MP3), the DOL entry point per Prime 1 enemy (Metaforce names checked against the DOL, D3) | every port's "where is the logic" step | appendix per enemy and hunter | every catalogue row points at its code |
+| 5 | **K1 kit, pilot-free parts**: enemy clip driver on NativeBody, EVNT runtime dispatch (sounds, particles, locators on frames), Retro physics actor on MPH collision, damage table from `enemies/damage_map.json` (8.3 rows) | every Retro enemy | Core + MphRead host hooks, each with a PC test | tests pass on an Echoes body dropped into an MPH room |
+| 6 | **K1 pilot**: one simple Echoes enemy end to end (recommended Grenchler, named first in E1; Splinter as backup) | proves the kit | `mp2:Grenchler` in the catalogue + `-enemytest grenchler` | PC test drives every state; Dolphin side-by-side ready for the owner's eye |
+| 7 | **Hunters + Guardians DONE 10-30** (`mph:Hunter:<name>` x8; a live-placed hunter gets a bot slot via `EnemyPlacement.AttachBot`, delete frees it; a defeated story hunter keeps threshold+1 health and flees, as vanilla; bosses still to do). **H2: MPH hunters + bosses in the placer**: hunter encounters (any of the 6, personality from the ROM), Guardians, and room-bound bosses only in their own room | Hard Mode can place hunters now | `EnemyCatalogue` + `EnemyPlacement` | `-enemyplacetest` places and kills a hunter encounter; installed for the owner |
+| 8 | **DONE 10-30** (11.5). **Hunter census detail** for 11.1: per hunter, module, AI asset, clip count, attacks, projectiles, D4 flags (read, not from knowledge) | B1 hunter scopes | table rows here | every 11.1 row has data from the disc |
+
+Owner-only items, for when they're back: the H1 check on the Odin (still open from 10-26), the 8.3 damage numbers
+before the first Prime enemy, Hard Mode enemy picks, look checks by eye, and the D4 calls on grapple and Hypermode
+hunters.
+
+**Effort.** About 150 regular enemies, 27 bosses and 6 non-MPH hunters across MP1-3. The kit is paid once; then a
+simple enemy is about one session, a pirate-class one two or three, a boss or hunter more. This is a long track,
+worked in the order above.
+
+### 11.3 State machine map (item 1, done 2026-10-30)
+
+Reader: `src/MphRecomp.Core/Import/Retro/Fsm.cs` (format notes in its header). Tool: `MphRead.Tools -fsmdump`
+(`extract out=<dir>`, `dump [disc=] [id=<hex>]` prints states, transitions and conditions, `refs [disc=]` finds the
+script objects that name each machine). Every state machine on both discs parses to its end: **Prime 1 53 AFSM**
+(65 distinct conditions), **Echoes 110** (89 FSM2 v1 + 21 AFSM; 612 distinct conditions/actions). FSM2 version 1 is
+the only version on the disc. The conditions and actions are the list a port must implement per enemy (`dump id=`).
+
+**Correction to 10.6:** almost every Prime 1 patterned enemy names an AFSM in its script object, not only Thardus.
+So E2 is "DOL unnamed + needs AFSM" for most rows. Prime 1 map (object -> AFSM):
+
+| Enemy | AFSM | Enemy | AFSM | Enemy | AFSM |
+|---|---|---|---|---|---|
+| Metroid Prime (exo) | 09689750 | Metroid Prime (essence) | 52f9b74d | Ridley | 0f5e66f8 |
+| Thardus | 64a97140, c44a40c9 | Thardus rock | ff3c0ddc | Flaahgra | 5774382b |
+| Flaahgra tentacle | cf5c25a3 | Omega Pirate | ac15b86b | Elite Pirate | c163b9e9 |
+| Sheegoth | 713eb1f2 | Baby Sheegoth | 7ed253fb | NewIntroBoss (Parasite Queen) | 2f9e3665 |
+| Space Pirate | 5652a12f (main), 293020fb (melee), c47e1c06, db7f4702, f3084465 | Flying Pirate | 7a71739a, 7bfec237 | Chozo Ghost | 0da425c6 |
+| Metroid | 6655c185 | Metroid (beta) | ccc63521 | Seedling | 0b44f92c |
+| Ice Beetle | 173239ed | Beetle | e23dfb53 | Tryclops | 214e18eb |
+| Phazon healing nodule | 28a73fae | Parasite | 29735bba | Flickerbat | 2fd93b36 |
+| War Wasp | 394913ad, ddd32d4a | Atomic Alpha / Beta | bb79601e / 44b2a0af | Puffer | 4cb31e59 |
+| Puddle toad | 610a94c7, d2d84757 | Puddle spore | 935dae5d | Metaree | 62c39ad6 |
+| Zoomer | 6f59fdf1 | Geemer | 88376e6a | Eyeball | 71614ee4 |
+| Magdolite | 804dcf11 | Water tentacle (SpankWeed) | 84490a92 | Jelly Zap | acb45853 |
+| Blood flower | bbb29f1d | Ripper | bfa1a122 | Burrower | c2109366 |
+| Fire flea | c6f9280f | Energy ball | d5dccd02 | Drone (Aqua/Pirate) | ea5c85b9, ff23b218 |
+| Oculus | f302f2ec | | | | |
+
+Echoes: the 10.3 table already carries each enemy's machine id (those came from the SP script data and all parse).
+Not in 10.3: Dark Samus 9f23ac7b (59 states, 92 transitions: missile deflect, scatter shot, dive, super missile, sweep beam, boost ball, phazon enrage; the hunter port's spine), Emperor Ing stages 8b81a2d1 / 2bdfd033 + tentacle
+7bf0e942, Chykka (SwampBoss) d6859416 / 69694bf8, Amorbis (SandBoss) c6533129, Bomb Guardian 728f751c.
+
+About 40 Echoes FSM2 are named only in MLVL dependency lists, not by a script object directly: boss phases and
+sub-machines the boss module loads itself. Identified by their state names (read from the data, confirm when that boss
+is ported):
+
+| Likely owner | Machines (state / action names that say so) |
+|---|---|
+| Quadraxis | 0f8c588b (ProtectKnees), fcbf5deb (DetachFromBody, DeploySplitters), 3d31822b (BombedReaction, FollowRetreatPath), cdb2a199 (SpinAttack, BounceOffPlayer) |
+| Amorbis | dfd06bb7 (SuckBall, DestroySphere, UnderGround), 59054130 (Stampede), b7e90122 (SnapJaws, LockSphere), fb018737 (AttachToSphere) |
+| Chykka | 6bea7bd4 (SpitWater, Swoop, SpitBarrage), 7b757d6d (DarkLurk, DropFlyer) |
+| Caretaker / water boss | 905adf4b (Beach, TongueLoop, ExposeBelly, ShreddersOff), c5b1710e (SplashJump) |
+| Bomb Guardian | d1cc2808 (BombFountainAttack, BombTossAttack) |
+| Rezbit variants | 268df298 (BecomeDeRezzed, VirusAttack), 4cde1caf (BecomeRezzed, CuttingLaserAttack) |
+| Ing variants (Warrior Ing, Darkling, hive) | 10e929e4, 227ec252, 3734ed3f, 4077ee81, bd9dea3f, d48297bc (BecomeIngSpot, IngSpotPathFind), 79e9eaa2 (ExitPortal, SnatchTarget) |
+| Dark Pirate class | 3d81d9da, f99b115f (Alert, Taunt, StartRangedAttack), 43aebe16 (ShadowDash, FireEMP) |
+| Emperor Ing / Dark Samus phases (to check) | 5d1fc5f5 (MiniPortalAttack), 6d34ea6f (MistIn, MistAttack), 8915aab2 (VortexAttack), 492b912b (AngryAttack, Shockwave), c5cdd27d (EyeShut, DarkBeamAttack), ecbc50ad (PulseAttack, MissileAttack, ChargeAttack) |
+| Small flyers / turrets | 0edeee9d (RaiseShields), 1164f360 (Patrol, TookDamage), 655d3bea, 6fc98f3c (DeathHeadAttack), 95872429 (LaserSweep), ad112d87, c331cd18 (LaserPulse), f548e6e4 (LegStabAttack) |
+| Player / animation, not enemies | AFSM 118a0532, 94d64095, e7a1018c, ff492ea2 (Holstered, MorphToBall, PlayerJump) |
+
+Nothing runs a state machine yet; running one is part of the K1 kit (item 5) and each port.
+
+
+### 11.4 Module symbol index (item 4, RSO/REL part done 2026-10-30)
+
+`-moduleindex out=docs/ENEMY_MODULES.md` (Tools `ModuleIndexTool.cs`) reads every code module on the three discs and
+writes [ENEMY_MODULES.md](ENEMY_MODULES.md). That file is generated, so rerun the tool instead of editing it. It covers 327 modules:
+Trilogy 167 RSO (MP2 + MP3), Echoes GC 86 REL, and Corruption Wii 74 RSO, of which 69 match their Trilogy copy and are listed once.
+
+What a module tells us:
+- **Base classes (RSO only).** RSOs export only `_prolog`/`_epilog`, so a module's own functions have no names. The DOL
+  functions it imports do have mangled names, and the classes whose `AcceptScriptMsg`/`Think` it imports are its
+  base classes. Counts: CPatterned alone 51, CActor 18, CEntity 11, CRenderActor 10, CWallCrawler 8, CPatterned +
+  CBoneTracking 8 (Grenchler is one), CPatterned + CPathMeshConstraint 6, CSwarmBasics 4, and others. CPatterned
+  appears in 85 modules. The 17 with no base are support modules (rhbm, Tweaks, PirateRagDoll, SwarmBasics,
+  WallCrawler, map screen, teleporter attributes), not enemies.
+- **AI vocabulary (RSO and REL).** The data sections hold the state and trigger function names that the FSM assets
+  (11.3) refer to by name, plus locator and effect names. This is how a state in a dumped FSM is matched to the module
+  that runs it (for example, RSO_SteamLord lists StateOver, ShotAt and IsCombatReady). RELs import by address, so for
+  Echoes GC only the strings are listed. The Trilogy RSO of the same enemy gives the names.
+
+**Still open: Prime 1 DOL entry points.** Prime 1 has no enemy modules (its `rhbm` and `selfile.sel` only), and its DOL
+carries no symbols, so the Metaforce class names cannot be checked against it by name. Doing that needs signature
+matching against the Trilogy MP1 code (which shares the engine) or vtable walking from the SCLY loader table. That is
+left for each Prime 1 port's "where is the logic" step.
+
+### 11.5 Hunter census (item 8, done 2026-10-30)
+
+Read from the discs with `-mp3scly hunters` (Corruption, default disc) and
+`-mp3scly hunters disc=<prime>/echoes_retail.rvz [types=DRKS,...]` (Echoes). Per hunter type: health and contact damage
+for each PatternedAITypedef block (Corruption has three: normal, Easy, Elite), every named DamageInfo outside those
+blocks (the attacks, with base damage), the assets the object references by type (WPSC = projectile definitions,
+PART = particle effects, CAUD = sound), and the animation character with its animation and clip counts. The state and
+attack vocabulary comes from the module strings (docs/ENEMY_MODULES.md). Nothing here is from memory of the games.
+
+MPH's own hunters and Guardians are not in this table: they already run 1:1 in MphRead (bot brain, parity checked
+10-24) and are in the placer since H2.
+
+| Hunter | Module | AI asset | Character | Health (contact) | Attacks (base damage) | Assets | D4 flags |
+|---|---|---|---|---|---|---|---|
+| Echoes Dark Samus (DRKS, 4 objects in 4 areas: "DarkSamus 001" x2, "DarkSamus Battle 2" x2) | `DarkSamus.rel` | FSM2 9f23ac7b (59 states, 92 transitions, 11.3) | ANCS 39900a11, 3 characters (Dark_Samus, Battle_2, Battle_3): 76 animations, 66 clips | 600 / 1380 / 1500 / 1800 by fight (10) | Melee 20, DiveAttack 40, ScatterShot 2, NormalMissile 20, SuperMissile 40, FreezeBeam 40, SweepBeam 20, BoostBall 30, PhazonSuperMissile 10, PhazonProjectile 10, PhazonEnrageSphere contact 0 | PART 11, WPSC 7, TXTR 2, SWHC 2, CRSC 1, CMDL 1, CSKR 1 | Phazon enrage; freeze beam (MPH has no freeze: translate to a slow, owner's call) |
+| Rundas (RUND, 2 objects: Rundas, and Gandrayda posing as him) | `RSO_Rundas` | in the module (the object references no FSM asset) | CHAR "Rundas": 81 animations, 76 clips (the second CHAR, 18659a2ab4827a79, is not in Metroid3.pak) | 2500 on all 3 blocks; 150 for the Gandrayda copy (10) | DamageInfo 50, IceGrenade 15 (10 on Easy), IceSword 15, DamageInfo 10, MorningStar 50, SurfingProjectile 5 | PART 14, CMDL 12, WPSC 6, CAUD 2, TXTR 1, SCAN 1 | grapple; Hypermode (EnterHypermode in the module); ice surf (Surf state) |
+| Ghor lower body (GHOR, 6 objects in 2 areas: Easy, Normal, Hard and Hyper are separate objects) | `RSO_Ghor` | in the module | CHAR "lower_body_ghor": 51 animations, 51 clips | 10000 (x4) or 5 (x2); damage goes through parts (10) | Damage 20, 30 | CMDL 11, PART 2 | grapple (armour pulled off); Hypermode |
+| Ghor upper body (GHRU, 6 objects) | `RSO_Ghor` | in the module | CHAR "Ghor_upper_body": 101 animations, 100 clips | 5 (10) | CollisionDamage 100, BeamDamage 10/15, ChargeAttack 10/15, Slam 15/30, Throw 10/30, Melee 10, Damage 5/7/7.5/15, ContactDamage 10/15 | CMDL 20, CAUD 14, WPSC 6, PART 6, TXTR 4, SWHC 2 | as GHOR (one fight, two objects) |
+| Gandrayda (GAND, 1 object "Base Form") | `RSO_Gandrayda` | in the module | CHAR "Gandrayda_Corrupted": 94 animations, 94 clips | 2000 (10) | Melee 10/15, RadialMelee 10/15, ThrownProjectile 5, EnergyWaveProjectile 10/15, GrapplePull 10, Grapple 0.17 (per tick), Damage 20 | WPSC 9, PART 9, CAUD 9, ELSC 9, CMDL 3 | grapple (hers and yours); morphs into other hunters (needs their bodies: Rundas, Samus); cloak; Hypermode |
+| Corruption Dark Samus (DRKS, 1 object) | `RSO_DarkSamus` | in the module | CHAR "Dark_Samus": 118 animations, 112 clips | 6500 on all 3 blocks (30) | Melee 30, MegaBlaster 15, MegaBoostTrail 10, MegaBoostThruPlayer 27.5, PhazonBarrageBeam 100, Damage 25, HomingMissile 25, EnergyWave 50, EchoBlast 50, SuperLoop 30, ShellGameContact 10 | PART 12, WPSC 7, CAUD 6, TXTR 5, SCAN 2 | Hypermode / Phazon; splits into echoes (DKSE) |
+| Dark Samus echo (DKSE) | `RSO_DarkSamusEcho` | in the module | uses Dark Samus' character | spawned at run time: 0 placed objects | PhazonBallAttack, MorphballAttack (module strings; numbers come from the parent's properties) | | as DRKS |
+| Prime 4 Sylux | `main` NSO | none readable | CR6 importer: model, skeleton, animations | not readable yet (no script reader) | not readable yet | | P4 spike |
+
+What this changes in the plan:
+- Every hunter's numbers and clip lists are now known, so a K1 kit (item 5) can be sized per hunter: Corruption
+  Dark Samus (112 clips) and Ghor's upper body (100) are the biggest, Ghor's lower body (51) the smallest.
+- None of the Corruption hunter objects references an FSM asset (their asset lists above), so their AI is in the RSO
+  code and porting them
+  is code reading per state (module strings give the state names), like MPH's bosses. Echoes Dark Samus is the one
+  hunter whose behaviour is data (FSM2): she is the best first hunter port.
+- Corruption Easy/Elite blocks change little for hunters (only Rundas' IceGrenade, 15 -> 10 on Easy); Hard Mode can
+  use the normal block and scale like MPH's own enemies.
+- D4 per hunter is above; grapple (3 of 4 Corruption hunters) is the main ability gap, then Hypermode.
+

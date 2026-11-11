@@ -15,7 +15,7 @@ internal sealed class DesktopUpdater : IUpdateInstaller
 {
     const string ZipFolder = "Second Hunt/";
     const string Exe = "SecondHunt.exe";
-    const string AfterUpdateArg = "--after-update";
+    internal const string AfterUpdateArg = "--after-update";
 
     readonly string _installDir = AppContext.BaseDirectory;
     readonly string[] _args;

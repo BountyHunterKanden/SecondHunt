@@ -89,6 +89,8 @@ namespace MphRecomp.Frontend
             Add("aff", s.AffinityWeapons);
             Add("xp", s.PirateBlaster);
             Add("xc", s.ExtraCharacters);
+            // a gameplay mod's mode (MatchSettings.ModMode), offline matches only: never written with a net role
+            if (net == null && s.ModMode != null) parts.Add("mm=" + Uri.EscapeDataString(s.ModMode));
             foreach (MatchPlayer p in s.Players)
             {
                 parts.Add(string.Create(ci, $"p={p.Hunter},{p.Recolor},{p.Team},{(p.Bot ? 1 : 0)},{(p.Remote ? 1 : 0)},{p.BotLevel},")
@@ -127,6 +129,7 @@ namespace MphRecomp.Frontend
                 case "aff": s.AffinityWeapons = Bool(); break;
                 case "xp": s.PirateBlaster = Bool(); break;
                 case "xc": s.ExtraCharacters = Bool(); break;
+                case "mm": s.ModMode = Uri.UnescapeDataString(value); break;
                 case "net": break; // NetRole
                 case "p":
                 {

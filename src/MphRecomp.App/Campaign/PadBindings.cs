@@ -173,6 +173,9 @@ internal sealed class PadBindings
     }
     public bool Pressed(string id) => _held[Index[id]] && !_prev[Index[id]];
 
+    // has this function a controller button (the GYRO button: CampaignGyroAim.cs)
+    public bool Bound(string id) => _binds[Index[id]].Length > 0;
+
     // does any function have this button, alone or in a combo (L3 keeps its own actions while it has none: ControlBinds)
     public bool Uses(PadButton b)
     {

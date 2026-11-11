@@ -88,10 +88,10 @@ namespace MphRead.Entities
             }
             shotVec = shotVec.Normalized();
             WeaponInfo curWeapon = EquipInfo.Weapon;
-            bool affinity = IsPrimeHunter || curWeapon == PirateBlaster.WeaponMPAffinity;
+            bool affinity = IsPrimeHunter || curWeapon == PirateBlaster.WeaponMPAffinity || curWeapon == PirateBlaster.WeaponMPAffinity4;
             if (PirateBlaster.HostBoltCost)
             {
-                EquipInfo.Weapon = affinity ? PirateBlaster.WeaponMPAffinity : PirateBlaster.WeaponMP; // pays its own shot
+                EquipInfo.Weapon = PirateBlaster.Info(BeamType.PirateBlaster, affinity); // pays its own shot (4 UA with HostBlasterBuff)
             }
             else
             {

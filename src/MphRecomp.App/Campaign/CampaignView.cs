@@ -74,6 +74,12 @@ internal sealed partial class CampaignRenderer
     // button shows (MphRead PlayerScoutDrone.cs; owner 2026-10-08). A frame stale at worst, as above.
     public bool TouchDrone => _host?.Player is { HostScoutDrone: true, IsAltForm: true };
 
+    // UI thread, the touch overlay: the SPIDER on/off toggle shows in alt form on an Echoes arena with spider track
+    // (docs/SPIDER_BALL.md, owner 2026-11-06). While it's on, BuildInput holds the spider ball for the player.
+    public bool TouchSpiderShown => MphRead.Entities.PlayerEntity.HostSpiderBall && MphRead.Entities.PlayerEntity.HostSpiderTrackHere
+        && _host?.Player is { HostScoutDrone: false, IsAltForm: true };
+    public volatile bool TouchSpiderOn;
+
     // UI thread, the touch overlay (T11): in this morph ball the touch area is the DS stylus pad -- a drag rolls the
     // ball, a flick boosts (MphRead PlayerTouch.cs) -- instead of the aim stick. A frame stale at worst, as above.
     public bool TouchStylusRolls => _host?.Player.HostTouchRolls == true;

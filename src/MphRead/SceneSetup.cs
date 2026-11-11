@@ -70,7 +70,9 @@ namespace MphRead
             Music.TryPlayRoomMusic(room.RoomId, GameState.SinglePlayer && (((int)GameState.StorySave.BossFlags >> (2 * scene.AreaId)) & 3) != 0 ? 1 : 0);
             if (GameState.SinglePlayer)
             {
-                UpdateAreaHunters();
+                // recomp: a host whose gunship rolls the hunters (as the game does, in the ship scene's init) keeps them
+                if (HostShipRollsHunters) Array.Fill(GameState.CompletedRandomEncounterRooms, false);
+                else UpdateAreaHunters();
                 InitHunterSpawns(scene, entities, initialize: false); // see: "probably revisit this"
             }
             AiPersonality.LoadAll(mode);
@@ -206,6 +208,10 @@ namespace MphRead
         // recomp: test hosts make every hunter spawn's chance roll pass (the roll still runs, so the RNG sequence is
         // unchanged); default off
         public static bool HostForceEncounters { get; set; }
+
+        // recomp: the host rolls StorySave.AreaHunters itself when the gunship scene opens (0x2103adc, the ShipInSpace
+        // init), so the planet select's enemy panel shows who is there; a room load then keeps them. Default off
+        public static bool HostShipRollsHunters { get; set; }
 
         // recomp: a host's own entities for a room, added to the ones its entity file gives (e.g. Echoes arenas' weapon
         // crates): (scene, room id, the room's entities) -> the list to load; default null (nothing added)
@@ -1119,11 +1125,28 @@ namespace MphRead
             return beams;
         }
 
+        // recomp (dev, owner 2026-11-07): true turns off the other hunters' campaign helpers below (teleporters, moved
+        // pickups, Spire's Processor Core zones) to try the vanilla rooms with the alt-form hop; CampaignLaunch "helpers off"
+        public static bool AltHuntersHelpersOff { get; set; }
+
+        // recomp (owner 2026-11-09): the campaign's ALT FORM HOP setting (RecompSettings.CampaignAltHop); the App sets it
+        // before a room loads and CampaignHost gives the player the hop from it. Off brings back MphRead's helper jump
+        // pads and the lowered Sic Transit energy tank that the hop replaced; on keeps those rooms vanilla
+        public static bool CampaignAltHop { get; set; } = true;
+
+        // recomp: the other hunters' campaign helpers, settled for the next release (owner 2026-11-10). Upstream's list:
+        // github.com/NoneGiven/MphRead/wiki/Adventure-Mode-Alterations-for-Other-Hunters
+        // - always on, owner-checked: Alinos Gateway missile; Ice Hive Trace/Sylux teleporters (Sylux both); Frost
+        //   Labyrinth key for Kanden/Weavel; Magma Drop Trace/Sylux teleporters, UA exit lift, spawn + arrival facing
+        // - always on, vanilla rule: Spire's lava immunity in Magma Drop and Processor Core (damage volumes off)
+        // - ALT FORM HOP off only: every jump pad, Sic Transit energy tank lowered, Frost Labyrinth key for Trace.
+        //   The pads the owner hasn't tried by hand (Cortex CPU, Ice Hive Noxus/Weavel, Frost Labyrinth Noxus/Spire,
+        //   Magma Drop Noxus/Spire/Weavel, Piston Cave) are kept as upstream made them
         private static IReadOnlyList<EntityBase> GetExtraEntities(int roomId, IReadOnlyList<EntityBase> entities, Scene scene)
         {
             // todo: load entities into unused rooms to make them playable
             Hunter hunter = PlayerEntity.Main.Hunter;
-            if (!GameState.SinglePlayer || hunter == Hunter.Samus || !Features.AlternateHunters1P)
+            if (!GameState.SinglePlayer || hunter == Hunter.Samus || !Features.AlternateHunters1P || AltHuntersHelpersOff)
             {
                 return entities;
             }
@@ -1141,6 +1164,10 @@ namespace MphRead
                 throw new ProgramException("Could not find entity to update.");
             }
 
+            // recomp (owner 2026-11-07, 11-09): MphRead's helper jump pads for these hunters are left out while the
+            // campaign's alt-form hop is on (PlayerAltHop.cs, CampaignAltHop): it jumps as high as the highest of them,
+            // so their rooms are vanilla again
+            bool pads = !CampaignAltHop;
             short nextId = 30000;
             JumpPadEntity CreateJumpPad(string nodeName, Vector3 position, float speed, float radius = 1,
                 float height = 1, float offset = 0, ushort frames = 20, TriggerFlags flags = TriggerFlags.PlayerAlt)
@@ -1169,11 +1196,11 @@ namespace MphRead
                 EntityBase missileSpawn = GetEntity(EntityType.ItemSpawn, 13);
                 missileSpawn.Position = new Vector3(-60, 6.5f, 33.6f);
             }
-            else if (roomId == 28 && (hunter == Hunter.Noxus || hunter == Hunter.Trace)) // Echo Hall
+            else if (pads && roomId == 28 && (hunter == Hunter.Noxus || hunter == Hunter.Trace)) // Echo Hall
             {
                 list.Add(CreateJumpPad("rmC0B", new Vector3(-14.3f, 0, -8.9f), 0.25f, 0.75f));
             }
-            else if (roomId == 67 && (hunter == Hunter.Noxus || hunter == Hunter.Spire
+            else if (pads && roomId == 67 && (hunter == Hunter.Noxus || hunter == Hunter.Spire
                 || hunter == Hunter.Trace || hunter == Hunter.Weavel)) // Cortex CPU
             {
                 if (hunter != Hunter.Weavel)
@@ -1185,18 +1212,19 @@ namespace MphRead
                     list.Add(CreateJumpPad("rmMain", new Vector3(8.7f, 3.4f, 0), 0.5f, 0.5f));
                 }
             }
-            else if (roomId == 79 && (hunter == Hunter.Noxus || hunter == Hunter.Trace)) // Sic Transit
+            else if (pads && roomId == 79 && (hunter == Hunter.Noxus || hunter == Hunter.Trace)) // Sic Transit
             {
+                // recomp (owner 2026-11-09): lowered only without the hop, which reaches the vanilla height
                 EntityBase energyTankSpawn = GetEntity(EntityType.ItemSpawn, 29);
                 energyTankSpawn.Position = energyTankSpawn.Position.AddY(-1.5f);
             }
-            else if (roomId == 78 && hunter == Hunter.Noxus) // Ice Hive
+            else if (pads && roomId == 78 && hunter == Hunter.Noxus) // Ice Hive
             {
                 list.Add(CreateJumpPad("rmChamberE", new Vector3(18.5f, 33.5f, -38.6f), 0.3f, 0.4f, frames: 35)); // same v
                 list.Add(CreateJumpPad("rmChamberE", new Vector3(16.4f, 35.5f, -38.6f), 0.3f, 0.4f, frames: 35));
                 list.Add(CreateJumpPad("rmChamberE", new Vector3(19.1f, 40.5f, -38.6f), 0.3f, 0.4f, frames: 35));
             }
-            else if (roomId == 78 && hunter == Hunter.Weavel) // Ice Hive
+            else if (pads && roomId == 78 && hunter == Hunter.Weavel) // Ice Hive
             {
                 list.Add(CreateJumpPad("rmChamberE", new Vector3(18.5f, 33.5f, -38.6f), 0.3f, 0.4f, frames: 35)); // same ^
             }
@@ -1205,18 +1233,19 @@ namespace MphRead
                 var position = new Vector3(18.5f, 33, -38.6f);
                 var targetPos = new Vector3(16.8f, 35.5f, -38.6f);
                 list.Add(CreateTeleporter(position, targetPos, -Vector3.UnitZ, "rmChamberE", "rmChamberE"));
-                if (hunter == Hunter.Trace)
-                {
-                    position = new Vector3(19.1f, 40, -38.6f);
-                    targetPos = new Vector3(17.4f, 43.3f, -22.5f);
-                    list.Add(CreateTeleporter(position, targetPos, -Vector3.UnitZ, "rmChamberE", "rmChamberE"));
-                }
+                // recomp: Sylux gets the upper teleporter too (owner 2026-11-07: he needs the same helper as Trace)
+                position = new Vector3(19.1f, 40, -38.6f);
+                targetPos = new Vector3(17.4f, 43.3f, -22.5f);
+                list.Add(CreateTeleporter(position, targetPos, -Vector3.UnitZ, "rmChamberE", "rmChamberE"));
             }
             else if (roomId == 80) // Frost Labyrinth
             {
                 if (hunter == Hunter.Noxus || hunter == Hunter.Spire)
                 {
-                    list.Add(CreateJumpPad("rmC0b", new Vector3(8, 0, 12.1f), 0.5f, 0.3f, frames: 60));
+                    if (pads)
+                    {
+                        list.Add(CreateJumpPad("rmC0b", new Vector3(8, 0, 12.1f), 0.5f, 0.3f, frames: 60));
+                    }
                 }
                 else if (hunter == Hunter.Kanden)
                 {
@@ -1228,15 +1257,17 @@ namespace MphRead
                     EntityBase keySpawn = GetEntity(EntityType.ItemSpawn, 31);
                     keySpawn.Position = keySpawn.Position.AddY(-2);
                 }
-                else if (hunter == Hunter.Trace)
+                else if (hunter == Hunter.Trace && pads)
                 {
+                    // recomp (owner 2026-11-09): lowered only without the hop, which reaches the key at its vanilla height
                     EntityBase keySpawn = GetEntity(EntityType.ItemSpawn, 31);
                     keySpawn.Position = keySpawn.Position.WithY(0);
                 }
             }
             else if (roomId == 30) // Magma Drop
             {
-                if (hunter == Hunter.Noxus || hunter == Hunter.Spire || hunter == Hunter.Trace || hunter == Hunter.Weavel)
+                if (pads && (hunter == Hunter.Noxus || hunter == Hunter.Spire || hunter == Hunter.Trace
+                    || hunter == Hunter.Weavel))
                 {
                     list.Add(CreateJumpPad("rmLava", new Vector3(0.6f, -26.5f, 4.8f), 0.15f, 0.5f, offset: 2.2f));
                     list.Add(CreateJumpPad("rmLava", new Vector3(0.6f, 3.2f, -14.6f), 0.6f, 0.5f));
@@ -1246,30 +1277,45 @@ namespace MphRead
                         list.Add(CreateJumpPad("rmLava", new Vector3(0.6f, 73.5f, -9.4f), 0.5f, 0.5f));
                         list.Add(CreateJumpPad("rmLava", new Vector3(0.6f, 94.2f, -15.5f), 0.5f, 0.5f));
                     }
-                    else
-                    {
-                        ((AreaVolumeEntity)GetEntity(EntityType.AreaVolume, 4)).Active = false;
-                    }
+                }
+                if (hunter == Hunter.Spire)
+                {
+                    // upstream: "so that Spire is not damaged by magma"
+                    ((AreaVolumeEntity)GetEntity(EntityType.AreaVolume, 4)).Active = false;
                 }
                 if (hunter == Hunter.Trace || hunter == Hunter.Sylux)
                 {
+                    // recomp (owner 2026-11-09): upstream passed the facing and the target swapped, so these sent the
+                    // player to (-1, 0, 0) and skewed the pads; target then facing, as CreateTeleporter takes them
                     var position = new Vector3(0.59f, -27.63f, -11.91f);
                     var targetPos = new Vector3(0.59f, -20.63f, -6.81f);
-                    list.Add(CreateTeleporter(position, -Vector3.UnitX, targetPos, "rmLava", "rmLava"));
+                    list.Add(CreateTeleporter(position, targetPos, -Vector3.UnitX, "rmLava", "rmLava"));
                     position = new Vector3(0.59f, -23.03f, -10.61f);
                     targetPos = new Vector3(0.59f, -28.43f, -10.61f);
-                    list.Add(CreateTeleporter(position, -Vector3.UnitX, targetPos, "rmLava", "rmLava"));
+                    list.Add(CreateTeleporter(position, targetPos, -Vector3.UnitX, "rmLava", "rmLava"));
+                    // recomp (owner 2026-11-09): the shaft from the UA ledge up to exit teleporter 29 is 1 unit deep, and
+                    // their 0.63 alt-form radius catches on a lip at y ~112.5, 2 units short of the exit; lift them past it
+                    position = new Vector3(0.59f, 110.6f, -15.3f);
+                    targetPos = new Vector3(0.59f, 113.9f, -15.3f);
+                    list.Add(CreateTeleporter(position, targetPos, -Vector3.UnitX, "rmLava", "rmLava"));
+                    // recomp (owner 2026-11-09): they steer relative to their facing, and the spawn faces the screen in
+                    // this side view, so left and right were swapped; spawn facing the other way
+                    ((PlayerSpawnEntity)GetEntity(EntityType.PlayerSpawn, 0)).FacingFlipped = true;
+                    // and the same when coming back in from High Ground, through either teleporter
+                    ((TeleporterEntity)GetEntity(EntityType.Teleporter, 28)).ArrivalFlipped = true;
+                    ((TeleporterEntity)GetEntity(EntityType.Teleporter, 29)).ArrivalFlipped = true;
                 }
             }
             else if (roomId == 41 && hunter == Hunter.Spire) // Processor Core
             {
+                // upstream: "so that Spire is not damaged by lava" (Spire ignores lava in vanilla, PlayerProcess OnLava)
                 ((AreaVolumeEntity)GetEntity(EntityType.AreaVolume, 3)).Active = false;
                 ((AreaVolumeEntity)GetEntity(EntityType.AreaVolume, 11)).Active = false;
                 ((AreaVolumeEntity)GetEntity(EntityType.AreaVolume, 12)).Active = false;
                 ((AreaVolumeEntity)GetEntity(EntityType.AreaVolume, 13)).Active = false;
                 ((AreaVolumeEntity)GetEntity(EntityType.AreaVolume, 16)).Active = false;
             }
-            else if (roomId == 38 && (hunter == Hunter.Noxus || hunter == Hunter.Trace)) // Piston Cave
+            else if (pads && roomId == 38 && (hunter == Hunter.Noxus || hunter == Hunter.Trace)) // Piston Cave
             {
                 list.Add(CreateJumpPad("rmMain", new Vector3(-1.4f, 0.3f, 29.1f), 0.3f, 0.4f));
                 list.Add(CreateJumpPad("rmMain", new Vector3(29.1f, 0.3f, 1.4f), 0.3f, 0.4f));
@@ -1277,7 +1323,7 @@ namespace MphRead
                 list.Add(CreateJumpPad("rmend", new Vector3(-19.6f, 12, -28.3f), 0.3f, 0.4f)); // same v
                 list.Add(CreateJumpPad("rmend", new Vector3(-39.9f, 17, -24.5f), 0.5f, 0.4f));
             }
-            else if (roomId == 38 && hunter == Hunter.Weavel) // Piston Cave
+            else if (pads && roomId == 38 && hunter == Hunter.Weavel) // Piston Cave
             {
                 list.Add(CreateJumpPad("rmend", new Vector3(-10.8f, 9.6f, -28.3f), 0.3f, 0.4f)); // same ^
                 list.Add(CreateJumpPad("rmend", new Vector3(-19.6f, 12, -28.3f), 0.3f, 0.4f)); // same ^

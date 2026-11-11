@@ -56,6 +56,7 @@ namespace SecondHunt.Server
             AddColumn("reports", "note", "TEXT");
             AddColumn("reports", "handled_at", "INTEGER NOT NULL DEFAULT 0");
             CreateReplayTables(); // (0.9.0: shared replays, StoreReplays.cs)
+            CreateStatsTables(); // (0.10.0: the Gaming Hub, StoreStats.cs)
             int merged = SeparateFriendsAndRivals();
             if (merged > 0)
             {
@@ -649,6 +650,7 @@ namespace SecondHunt.Server
                 Exec("DELETE FROM links WHERE a = $c OR b = $c", ("$c", code));
                 Exec("DELETE FROM recent WHERE a = $c OR b = $c", ("$c", code));
                 Exec("DELETE FROM records WHERE a = $c OR b = $c", ("$c", code));
+                Exec("DELETE FROM stats WHERE code = $c", ("$c", code)); // (the Gaming Hub: boards, shares, STATS)
                 Exec("DELETE FROM players WHERE code = $c", ("$c", code));
             }
         }

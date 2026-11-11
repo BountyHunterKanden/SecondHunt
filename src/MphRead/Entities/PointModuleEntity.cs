@@ -36,7 +36,9 @@ namespace MphRead.Entities
 
         public override bool Process()
         {
-            if (_current == null && (Id == StartId || FirstHuntStart))
+            // First Hunt starts at the module flagged active (module 3 in the course); its module 50 is an ordinary
+            // course module, so MPH's fixed start id would make it current (and show 3) if it processed first
+            if (_current == null && ((!PlayerEntity.HostFirstHunt && Id == StartId) || FirstHuntStart))
             {
                 SetCurrent();
             }
@@ -55,6 +57,11 @@ namespace MphRead.Entities
 
         private void UpdateChain(PointModuleEntity? entity, bool state)
         {
+            if (PlayerEntity.HostFirstHunt)
+            {
+                FirstHuntUpdateChain(entity, state);
+                return;
+            }
             int i = 0;
             while (entity != null && i < 5)
             {

@@ -12,6 +12,7 @@ namespace MphRead.Entities
         public bool IsActive => _active;
         public bool Availability => _data.Availability != 0;
         public ushort Cooldown { get; set; }
+        public bool FacingFlipped { get; set; } // recomp: SceneSetup (Magma Drop, Trace/Sylux)
 
         public PlayerSpawnEntity(PlayerSpawnEntityData data, string nodeName, Scene scene)
             : base(EntityType.PlayerSpawn, nodeName, scene)
@@ -25,6 +26,10 @@ namespace MphRead.Entities
         {
             base.Initialize();
             SetTransform(_data.Header.FacingVector, _data.Header.UpVector, _data.Header.Position);
+            if (FacingFlipped)
+            {
+                SetTransform(-FacingVector, UpVector, Position);
+            }
             if (GameState.Mode == GameMode.SinglePlayer)
             {
                 bool active = Cheats.SkipPlanetIntros ? true : (_data.Active != 0);

@@ -111,6 +111,41 @@ namespace MphRead.Entities
             return Read.GetModelInstance("morphBall", firstHunt: true);
         }
 
+        // turning left (aim X > 3): the cart has a clip each way, d-pad right its 23 (MPH's Turn slot, played as MPH plays
+        // Turn) and left its 22 (our 27) played forward, where MPH plays Turn reversed. 0x200f92c/0x200f940: the +0x350
+        // binding adds to the yaw speed +0xac (0x2011ee8: + = facing turns left) and picks clip 22, +0x354 subtracts
+        // and picks 23, both looping with flags 0 (0x2010c74). The release back to centre stays MPH's (PlayerInput)
+        private void FirstHuntTurnLeft(ref PlayerAnimation anim, ref AnimFlags flags)
+        {
+            if (!HostFirstHunt) return;
+            anim = (PlayerAnimation)27;
+            flags = AnimFlags.None;
+            if (FirstHuntLeftTurn(Biped1Anim)) _bipedModel1.AnimInfo.Flags[0] &= ~(AnimFlags.NoLoop | AnimFlags.Reverse);
+            if (FirstHuntLeftTurn(Biped2Anim)) _bipedModel2.AnimInfo.Flags[0] &= ~(AnimFlags.NoLoop | AnimFlags.Reverse);
+        }
+
+        private bool FirstHuntLeftTurn(PlayerAnimation anim) => HostFirstHunt && anim == (PlayerAnimation)27;
+
+        // MphRead's death (every death): the cart's collapse (0x200bc18..0x200bc70), not MPH's death particles. The body
+        // plays clip 0 (26 in MPH's order) once on both layers and stays drawn on its last frame until the respawn hides
+        // it (PlayerDraw); in the ball, the ball's clip 0 once. The cart's HUD and visor frame go off for the main player
+        // (DISPCNT: BG0 only), as FirstHuntHud already does while dead
+        private void FirstHuntDeath()
+        {
+            if (!HostFirstHunt)
+            {
+                return;
+            }
+            if (IsAltForm)
+            {
+                _altModel.SetAnimation(0, AnimFlags.NoLoop);
+            }
+            else
+            {
+                SetBipedAnimation((PlayerAnimation)26, AnimFlags.NoLoop);
+            }
+        }
+
         // its 12 clips, which the gun update (0x20124c8) sets by index through 0x2012470: MPH's GunAnimation order without
         // Switch (0-3 FullCharge ChargeShot Charging Idle, 4-9 the missile clips, 10 UpDown, 11 Shot; 4-9 set the open-gun
         // flag like MPH's 5-10). The cart doesn't animate a beam switch: Switch keeps or restarts Idle

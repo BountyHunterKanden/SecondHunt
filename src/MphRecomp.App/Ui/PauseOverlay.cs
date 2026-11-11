@@ -39,6 +39,9 @@ internal sealed class PauseOverlay
     // the campaign's saves (CampaignLaunch), null elsewhere: SECOND HUNT SETTINGS' CAMPAIGN TROOPER TYPE shows with a
     // Trooper file there
     public string? SavesDir { get; set; }
+    // the campaign (CampaignLaunch): who the file being played is (RecompMenus.CampaignPlays), so CAMPAIGN TROOPER/SYLUX
+    // TYPE show only on his own file
+    public Func<string?>? CampaignPlays { get; set; }
 
     public PauseOverlay(string settingsPath, string modsDir)
     {
@@ -82,6 +85,7 @@ internal sealed class PauseOverlay
                 // the ship's OPTIONS saves the file too: start from it, so a save here doesn't put old values back
                 _session.Settings.ReloadFrom(_settingsPath);
             }
+            _session.Recomp.CampaignPlays = CampaignPlays;
             _session.Recomp.InNetMatch = NetMatch;
             _session.Recomp.InOnlineMatch = NetMatch && OnlineChat != null; // the camera row greys out (RecompMenus); LAN can switch it
             _session.Recomp.PauseChat = OnlineChat is { Disposed: false } chat ? chat : null; // CHAT (RecompMenus.PausePage)

@@ -209,11 +209,45 @@ namespace MphRecomp.Replay
     //   until she lands, PlayerAiEdgeJump.EdgeHold); older files read it as off, so they play exactly.
     //   Format 74 adds each seat's MatchPlayer.ColourPick after BotEdgeHold (an sbyte per seat, -1 = auto: the lobby's colour
     //   pick, LookAlikes.CopyIndices); drawn only, so older files read them as auto and look as they did.
-    //   Format 75 adds the gameplay mods the match ran with after the ColourPicks: ModSeed (their
+    //   Format 75 adds the gameplay mods the match ran with after the ColourPicks (docs/MOD_API.md §4.13): ModSeed (their
     //   random streams' seed), then a count and per mod its id, version, files' sha256, settings and mod.save data (JSON)
     //   as the match started. Playback needs the same mods (ReplayPlayer.CheckBeforeStart); older files read none.
     //   Format 76: the same layout; homing shots turn at the game's rate, homing / 4 per frame, not MphRead's / 2
     //   (Settings.VanillaHoming, PlayerEntity.HostVanillaHoming); older files read it as off, so they play exactly.
+    //   Format 77: the same layout; a hit claim record's flags byte (b[5]) bit 2 = a head upgrade: the host's own copy of the
+    //   shot hit the body, the shooter's screen the head (Net/HitClaims.cs HeadUpgrade); older files hold none, so they play
+    //   exactly, and an older app refuses 77 instead of dropping the upgrade.
+    //   Format 78: the same layout; a bot's climb toward a node above it lands it past the node, and its link jump waits
+    //   until the ledge is in reach (Settings.BotLedgeLand, PlayerEntity.HostBotLedgeLand); older files read it as off.
+    //   Format 79: the same layout; a grounded bot walking over a drop while its node lies another way steps for the node
+    //   (Settings.BotEdgeGuard, PlayerEntity.HostBotEdgeGuard); older files read it as off.
+    //   Also from 79: a bot carrying the octolith leaves crates alone, and one with ammo to spare shoots only near crates
+    //   without walking to them (Settings.BotCrateNeed, PlayerEntity.HostBotCrateNeed); older files read it as off.
+    //   Format 80: the same layout; a bot skips an item while a shut gate stands between it and its closest node
+    //   and its item skips go by the item, not the entity id every placed pickup shares (Settings.BotItemWalled,
+    //   PlayerEntity.HostBotItemWalled); older files read it as off.
+    //   Format 81: the same layout; a grounded bot gives up at once a node further above it than a double jump and steeper
+    //   than any floor (Settings.BotOutOfReach, PlayerEntity.HostBotOutOfReach); older files read it as off.
+    //   Format 82: the same layout; a grounded bot half a second in one spot under its node gives the node up
+    //   (Settings.BotUnderGiveUp, PlayerEntity.HostBotUnderGiveUp); older files read it as off.
+    //   Format 83: the same layout; a bot skips items inside a grate's footprint (Settings.BotGrateItems,
+    //   PlayerEntity.HostBotGrateItems); older files read it as off.
+    //   Format 84: the same layout; a bot beside an item it has got no nearer for a second skips it, and its 3 s "beside
+    //   it" count holds within 3.5 (Settings.BotItemNoGain, PlayerEntity.HostBotItemNoGain); older files read it as off.
+    //   Format 85: the same layout; Nodes bots' "our node is occupied" checks read the node's seats (Settings.BotNodeOccupied,
+    //   PlayerEntity.HostBotNodeOccupied); older files read it as off.
+    //   Format 86: the same layout; the Echoes turret keeps its shell off for the player who jumped out while they're still
+    //   under the ball's footprint (Settings.TurretLeaverFootprint, EchoesTurret.LeaverFootprint); older files read it as off.
+    //   Format 87: the same layout; the Pirate Blaster's bolts deal 10 / 14 again and cost 4 UA each (Settings.BlasterBuff,
+    //   PirateBlaster.HostBlasterBuff); older files read it as off.
+    //   Format 88: each step's input ends with the move stick's push (CampaignInput.MovePush, a byte: 0 = the whole push,
+    //   1..15 = 16ths; PlayerStickPush.cs); older files read it as the whole push, which is how they played.
+    //   Format 89: then the move stick's direction (CampaignInput.MoveDir, a byte: 0 = the d-pad's bits steer, 1..120 = its
+    //   angle; Input/StickCurve.cs); older files read it as 0, the d-pad's eight directions, which is how they played.
+    //   Format 90: the same layout as 89; the Echoes turret's occupant takes no damage while seated, dying only with the
+    //   turret (Settings.TurretSeatSafe, PlayerEntity.HostSeatSafe); older files read it as off.
+    //   Format 91: the same layout; bots on an Echoes turret errand steer a strafing alt form (Trace, Weavel) the way it
+    //   moves and re-plan a route they've lost (Settings.TurretBotNav, PlayerEntity.HostTurretBotNav); older files read it as off.
     //   Format 46: the same layout; an online host's lag compensation no longer shifts a homing beam (the Shock Coil, homing
     //   missiles) off its own target or Weavel's turret's shots, and shifts bombs, Lockjaw's lines + snare and the drone's laser
     //   (Settings.LagCompFix, PlayerEntity.HostLagFix);
@@ -225,7 +259,7 @@ namespace MphRecomp.Replay
     //   MatchSettings.Validate refuses at the start, so it saves the file and refuses to play it, never plays it wrong.
     public sealed class ReplayFile
     {
-        public const int FormatVersion = 76;
+        public const int FormatVersion = 91;
         // Bump when a code change alters how a match plays: an old replay then is refused instead of drifting.
         // (R2c: golden replays checked on every build say when.)
         // 2 (R1): matches play with Scene.HostDrawFreeSim (Spire's rocks placed whether or not a frame draws).
@@ -239,7 +273,21 @@ namespace MphRecomp.Replay
         // 7 (2026-10-31): in an Echoes arena a face too steep to stand on pushes a player out sideways only (no lift up it,
         //    PlayerCollision.cs; Mining Plaza's centre structure was climbable in jumps); steep = normal Y 0.1..0.5, or up to 0.85 on a face
         //    that isn't Echoes floor material (Prime's floor rule; arenas importer 13).
-        public const int CurrentSimVersion = 7;
+        // 8 (2026-11-07): Sylux's Lockjaw ride-height spring runs at vanilla's 30 Hz rate (it bobbed ~40% faster with half
+        //    the swing; checked against BizHawk, PlayerCollision.cs); docs/ACCURACY.md.
+        // 9 (2026-11-07): Trace, Sylux and Weavel's alt forms speed up at vanilla's rate (the whole traction every 60 Hz frame
+        //    sped them up ~2x) and top out at vanilla's speed (PlayerInput.cs); docs/ACCURACY.md A12.
+        // 10 (2026-11-08): those three alt forms push into a slanted lip or ledge edge at vanilla's whole per-tick traction
+        //    (the A12 weighting halved it, so they stuck on edges, PlayerInput.cs); docs/ACCURACY.md A12.
+        // 11 (2026-11-08): not into an edge where an upright wall faces the same way (a wall's edge: the push climbed it a
+        //    little each frame and dropped back, a bob in corners that never settled, PlayerAltCamMove.cs); ACCURACY A12.
+        // 12 (2026-11-08): a part move-stick push walks and rolls at that part of the traction and top speed (PlayerStickPush.cs;
+        //    a whole push, keys and bots as before), and the strafing alt forms top out at vanilla's speed (A12's cap was
+        //    2-8% slow, PlayerInput.cs); docs/ACCURACY.md A12.
+        // 13 (2026-11-08): alt-form friction and Sylux's ride spring drop the remainder like vanilla's fixed point (a ball
+        //    coasted and bobbed on forever), and the alt form's face and edge push-out depth is the cart's fx32 math, the edge
+        //    depth linear (PlayerInput.cs, PlayerCollision.cs); docs/ACCURACY.md A13.
+        public const int CurrentSimVersion = 13;
         private static ReadOnlySpan<byte> Magic => "MPHRPLY\0"u8;
 
         public int SimVersion { get; set; } = CurrentSimVersion;
@@ -426,7 +474,7 @@ namespace MphRecomp.Replay
             byte[] data = payload.ToArray();
             using var head = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true);
             head.Write(Magic);
-            head.Write((ushort)FormatVersion);
+            head.Write((ushort)SavedFormat(Settings));
             head.Write(Crc32(data));
             head.Write(data.Length);
             head.Flush();
@@ -578,6 +626,19 @@ namespace MphRecomp.Replay
             file.Settings.VanillaZoom = format >= 39 ? null : false; // not written: on from format 39
             file.Settings.ShockCoilGrace = format >= 40 ? null : false; // not written: on from format 40
             file.Settings.VanillaHoming = format >= 76 ? null : false; // not written: on from format 76
+            file.Settings.BotLedgeLand = format >= 78 ? null : false; // not written: on from format 78
+            file.Settings.BotEdgeGuard = format >= 79 ? null : false; // not written: on from format 79
+            file.Settings.BotCrateNeed = format >= 79 ? null : false; // not written: on from format 79
+            file.Settings.BotItemWalled = format >= 80 ? null : false; // not written: on from format 80
+            file.Settings.BotOutOfReach = format >= 81 ? null : false; // not written: on from format 81
+            file.Settings.BotUnderGiveUp = format >= 82 ? null : false; // not written: on from format 82
+            file.Settings.BotGrateItems = format >= 83 ? null : false; // not written: on from format 83
+            file.Settings.BotItemNoGain = format >= 84 ? null : false; // not written: on from format 84
+            file.Settings.BotNodeOccupied = format >= 85 ? null : false; // not written: on from format 85
+            file.Settings.TurretLeaverFootprint = format >= 86 ? null : false; // not written: on from format 86
+            file.Settings.BlasterBuff = format >= 87 ? null : false; // not written: on from format 87
+            file.Settings.TurretSeatSafe = format >= 90 ? null : false; // not written: on from format 90
+            file.Settings.TurretBotNav = format >= 91 ? null : false; // not written: on from format 91
             file.Settings.EchoesTurretBots = format >= 41 ? null : false; // not written: on from format 41
             file.Settings.RecolorPerSkin = format >= 43 ? null : false; // not written: on from format 43
             file.Settings.NoBallJump = format >= 44 ? null : false; // not written: on from format 44
@@ -734,6 +795,28 @@ namespace MphRecomp.Replay
             return file;
         }
 
+        // the format a file is stamped with: formats 75-87 share one layout and differ only in rules that aren't written
+        // but read from the format, so a loaded older file saved again (a live feed, a shared or renamed copy) keeps the
+        // format that turns its rules off, instead of turning them on and drifting
+        static int SavedFormat(MatchSettings s)
+        {
+            int f = FormatVersion;
+            if (s.TurretBotNav == false) f = 90;
+            if (s.TurretSeatSafe == false) f = Math.Min(f, 89);
+            if (s.BlasterBuff == false) f = 86;
+            if (s.TurretLeaverFootprint == false) f = Math.Min(f, 85);
+            if (s.BotNodeOccupied == false) f = Math.Min(f, 84);
+            if (s.BotItemNoGain == false) f = Math.Min(f, 83);
+            if (s.BotGrateItems == false) f = Math.Min(f, 82);
+            if (s.BotUnderGiveUp == false) f = Math.Min(f, 81);
+            if (s.BotOutOfReach == false) f = Math.Min(f, 80);
+            if (s.BotItemWalled == false) f = Math.Min(f, 79);
+            if (s.BotEdgeGuard == false || s.BotCrateNeed == false) f = Math.Min(f, 78);
+            if (s.BotLedgeLand == false) f = Math.Min(f, 77);
+            if (s.VanillaHoming == false) f = Math.Min(f, 75);
+            return f;
+        }
+
         public void Save(string path)
         {
             using FileStream fs = File.Create(path);
@@ -796,6 +879,19 @@ namespace MphRecomp.Replay
             copy.VanillaZoom = s.VanillaZoom; // format 39 (not written)
             copy.ShockCoilGrace = s.ShockCoilGrace; // format 40 (not written)
             copy.VanillaHoming = s.VanillaHoming; // format 76 (not written)
+            copy.BotLedgeLand = s.BotLedgeLand; // format 78 (not written)
+            copy.BotEdgeGuard = s.BotEdgeGuard; // format 79 (not written)
+            copy.BotCrateNeed = s.BotCrateNeed; // format 79 (not written)
+            copy.BotItemWalled = s.BotItemWalled; // format 80 (not written)
+            copy.BotOutOfReach = s.BotOutOfReach; // format 81 (not written)
+            copy.BotUnderGiveUp = s.BotUnderGiveUp; // format 82 (not written)
+            copy.BotGrateItems = s.BotGrateItems; // format 83 (not written)
+            copy.BotItemNoGain = s.BotItemNoGain; // format 84 (not written)
+            copy.BotNodeOccupied = s.BotNodeOccupied; // format 85 (not written)
+            copy.TurretLeaverFootprint = s.TurretLeaverFootprint; // format 86 (not written)
+            copy.BlasterBuff = s.BlasterBuff; // format 87 (not written)
+            copy.TurretSeatSafe = s.TurretSeatSafe; // format 90 (not written)
+            copy.TurretBotNav = s.TurretBotNav; // format 91 (not written)
             copy.EchoesTurretBots = s.EchoesTurretBots; // format 41 (not written)
             copy.RecolorPerSkin = s.RecolorPerSkin; // format 43 (not written)
             copy.NoBallJump = s.NoBallJump; // format 44 (not written)
@@ -943,6 +1039,8 @@ namespace MphRecomp.Replay
             w.Write(input.TouchDown); // format 26
             w.Write(input.TouchDx);
             w.Write(input.TouchDy);
+            w.Write(input.MovePush); // format 88
+            w.Write(input.MoveDir); // format 89
         }
 
         private static CampaignInput ReadInput(BinaryReader r, int format)
@@ -962,6 +1060,14 @@ namespace MphRecomp.Replay
                 input.TouchDown = r.ReadBoolean();
                 input.TouchDx = r.ReadSByte();
                 input.TouchDy = r.ReadSByte();
+            }
+            if (format >= 88)
+            {
+                input.MovePush = r.ReadByte();
+            }
+            if (format >= 89)
+            {
+                input.MoveDir = r.ReadByte();
             }
             return input;
         }

@@ -55,6 +55,8 @@ namespace MphRecomp.Arenas
         // a match client: the turret follows the host's (NetTurret) instead of running its own (set by MatchStart;
         // cleared when this device takes over as host)
         public static bool Mirror { get; set; }
+        // LeaverOut also waits while the leaver is under the ball's footprint (MatchSettings.TurretLeaverFootprint, format 86)
+        public static bool LeaverFootprint { get; set; } = true;
 
         // Echoes' sequences (seconds; the arena's SequenceTimers, the same on both discs)
         public const float ControlAt = 2.0f;          // Enter: STRT to the turret
@@ -1713,7 +1715,12 @@ namespace MphRecomp.Arenas
         {
             if (_leaver == null) return;
             float reach = EntityCollision[0]?.MaxDistance ?? 0;
-            if (State == TurretState.Leaving && _leaver.Health > 0 && (_leaver.Position - PivotNow).Length < reach + Fixed.ToFloat(_leaver.Values.MaxPickupHeight)) return;
+            // 11-06: also while still under the ball's footprint, however high it is; the owner's "sd" replay landed
+            // on the column under the raised ball, the shell came back on and the lowering ball pushed them down
+            // through its underside into the lift pit
+            Vector3 off = _leaver.Position - PivotNow;
+            if (State == TurretState.Leaving && _leaver.Health > 0
+                && (off.Length < reach + Fixed.ToFloat(_leaver.Values.MaxPickupHeight) || EchoesTurret.LeaverFootprint && off.Xz.Length < reach)) return;
             _leaver = null;
             SetShape(_shape);
         }
@@ -1905,6 +1912,32 @@ namespace MphRecomp.Arenas
             return CollisionDetection.CheckBetweenPoints(a, b, flags, _scene, ref res) && res.EntityCollision?.Entity != this;
         }
 
+        // `at` stands inside the risen column (a bot's width round it): Shooting Gallery's nav node beside the seat
+        // (-1.28,6.1,15.15) is, and the routes up to the slot went through it
+        internal bool ColumnCovers(Vector3 at)
+        {
+            const float width = 0.6f;
+            if (!ColumnOn || _t.ColumnMin is not { Length: 3 } min || _t.ColumnMax is not { Length: 3 } max) return false;
+            return at.X > min[0] - width && at.X < max[0] + width && at.Z > min[2] - width && at.Z < max[2] + width
+                && at.Y > min[1] - 2 && at.Y < max[1];
+        }
+
+        // the first thing between a and b is the seat's column or the lift under it (the bots' routes skip links through
+        // it while it's up; HostTurretBotNav)
+        internal bool ColumnBetween(Vector3 a, Vector3 b)
+        {
+            var res = new CollisionResult();
+            if (!CollisionDetection.CheckBetweenPoints(a, b, TestFlags.Players, _scene, ref res) || res.EntityCollision is not { } hit) return false;
+            return hit == EntityCollision[1] || BaseEntity != null && hit.Entity == BaseEntity;
+        }
+
+        // the room itself (no entity) between a and b
+        internal bool RoomBetween(Vector3 a, Vector3 b)
+        {
+            var res = new CollisionResult();
+            return CollisionDetection.CheckBetweenPoints(a, b, TestFlags.Players, _scene, ref res) && res.EntityCollision == null;
+        }
+
         // dev (EchoesTurretBots.ForceSeat): p dropped on the enter box, TryEnter seats her next step
         internal void PutIn(PlayerEntity p) => p.Teleport(EnterCentre.WithY(_enterMax.Y), -Vector3.UnitZ, _scene.GetNodeRefContaining(EnterCentre));
 
@@ -2055,7 +2088,8 @@ namespace MphRecomp.Arenas
             if (info.Sender is not BeamProjectileEntity beam || beam.Owner?.Type == EntityType.EnemyInstance) return;
             // its own shots pass the turret (Echoes: the shot ignores its platform)
             if (beam.Equip == _equip) return;
-            Hit(EchoesBreakables.Damage(beam.Beam, beam.Damage, beam.Flags.TestFlag(BeamFlags.Charged)), beam.Owner as PlayerEntity);
+            int damage = EchoesBreakables.Damage(beam.Beam, beam.Damage, beam.Flags.TestFlag(BeamFlags.Charged));
+            Hit(damage, beam.Owner as PlayerEntity);
         }
 
         // damage (EchoesBreakables' points) to the turret while it's up, by a player or not
@@ -2309,11 +2343,23 @@ namespace MphRecomp.Arenas
 
         enum Job { None, Seat, Slot }
         const int Slots = 16;
-        const float Reach = 30, Close = 4, Level = 1.5f, HopReached = 1.2f, JumpFrom = 2.5f;
+        const float Reach = 30, Close = 4, Level = 1.5f, HopReached = 1.2f, JumpFrom = 2.5f, OverSlot = 1;
         static readonly Job[] _job = new Job[Slots];
         static readonly int[] _until = new int[Slots], _rest = new int[Slots];
+        static readonly int[] _asked = new int[Slots]; // the frame she was last asked (HostTurretBotNav: a gap is a death)
         static readonly bool[] _rolling = new bool[Slots];
         static readonly NodeData3?[] _hop = new NodeData3?[Slots], _prev = new NodeData3?[Slots];
+        // her route's watch (PlayerEntity.HostTurretBotNav; issue turret-bot-stall 2026-11-11): the closest she has come to
+        // her hop, when she last got closer, the tries at it (a jump, then giving it up), and the steps she gave up this
+        // errand (from node id -> to node id; from -1: the node itself)
+        const float Gain = 0.3f, Lost = 4, Stray = 12;
+        const int StuckFrames = 50, JumpFrames = 30, Banned = 8;
+        static readonly float[] _best = new float[Slots];
+        static readonly int[] _since = new int[Slots], _tries = new int[Slots], _jumpUntil = new int[Slots];
+        static readonly (int Back, int Hop)[] _cut = new (int, int)[Slots]; // the corner cut she's turned back on
+        static readonly List<(int From, int To)>[] _banned = Enumerable.Range(0, Slots).Select(_ => new List<(int, int)>()).ToArray();
+        static List<int>[]? _links;
+        static HashSet<(int, int)>? _cuts; // links through the risen column (Cuts)
         static IReadOnlyList<NodeData3>? _nodes;
         static NodeData3? _seatNode, _slotNode;
         static bool _graph;
@@ -2324,12 +2370,16 @@ namespace MphRecomp.Arenas
             Array.Clear(_job);
             Array.Clear(_until);
             Array.Clear(_rest);
+            Array.Clear(_asked);
             Array.Clear(_rolling);
             Array.Clear(_hop);
             Array.Clear(_prev);
+            Watch(-1, 0);
             Array.Clear(Counts);
             _forceAt = 0;
             _nodes = null;
+            _links = null;
+            _cuts = null;
             _seatNode = _slotNode = null;
             _graph = false;
         }
@@ -2359,13 +2409,24 @@ namespace MphRecomp.Arenas
                 if (_job[s] != Job.None) End(s, now, 20);
                 return null;
             }
+            // (HostTurretBotNav: an errand she died on ends, and she picks afresh from her spawn; the AI isn't asked while
+            // she's dead, so the old one ran on and ran out a few steps after she respawned, in Dark Water's pit)
+            int last = _asked[s];
+            _asked[s] = now;
+            if (PlayerEntity.HostTurretBotNav && _job[s] != Job.None && now - last > 30)
+            {
+                End(s, now, 0);
+            }
             switch (_job[s])
             {
             case Job.Seat:
-                if (t.State != EchoesTurretEntity.TurretState.Free || now > _until[s]) break;
+                // (HostTurretBotNav: and still within half again her reach of it; her errand outlived her death, then ran
+                // on from her spawn across the room)
+                if (t.State != EchoesTurretEntity.TurretState.Free || now > _until[s] || PlayerEntity.HostTurretBotNav && !Within(p, t.EnterCentre, 1.5f)) break;
                 return Go(t, p, s, t.EnterCentre, _seatNode, slot: false);
             case Job.Slot:
-                if (t.State != EchoesTurretEntity.TurretState.Active || !Enemy(t.Occupant, p) || now > _until[s]) break;
+                if (t.State != EchoesTurretEntity.TurretState.Active || !Enemy(t.Occupant, p) || now > _until[s]
+                    || PlayerEntity.HostTurretBotNav && !Within(p, t.SlotCentre, 1.5f)) break;
                 return Go(t, p, s, t.SlotCentre, _slotNode, slot: true);
             default:
                 if (ForceSeat && t.State == EchoesTurretEntity.TurretState.Free)
@@ -2399,6 +2460,29 @@ namespace MphRecomp.Arenas
         // feet and the morph moves her: the close test alone flipped every few steps, morphing her in and out)
         static PlayerEntity.BotErrand Go(EchoesTurretEntity t, PlayerEntity p, int s, Vector3 goal, NodeData3? goalNode, bool slot)
         {
+            PlayerEntity.BotErrand e = GoStep(t, p, s, goal, goalNode, slot);
+            _to[s] = e.To;
+            _jumpOf[s] = e.Jump;
+            return e;
+        }
+
+        // a slot run's last stretch, lined up: the slot sits in a recess facing the seat, and a ball rolling at it on a
+        // slant hits the recess frame and bounces back (Shooting Gallery: Trace 13 s against the left jamb, x -1 z 21.4).
+        // Off the seat-to-slot line by more than 0.4, she aims at the recess mouth on that line first
+        static Vector3 Mouth(EchoesTurretEntity t, PlayerEntity p, Vector3 goal)
+        {
+            Vector3 axis = (goal - t.EnterCentre).WithY(0);
+            if (axis.LengthSquared < 0.01f) return goal;
+            axis = axis.Normalized();
+            Vector3 off = (p.Position - goal).WithY(0);
+            float along = Vector3.Dot(off, axis);
+            float side = (off - axis * along).LengthSquared;
+            // (in the opening already, she keeps on in: on foot she stops at its back, 0.6 short)
+            return side < 0.16f || along > -1.2f && side < 0.75f * 0.75f ? goal : goal - axis * 1.6f;
+        }
+
+        static PlayerEntity.BotErrand GoStep(EchoesTurretEntity t, PlayerEntity p, int s, Vector3 goal, NodeData3? goalNode, bool slot)
+        {
             Vector3 d = goal - p.Position;
             float flat = d.X * d.X + d.Z * d.Z;
             bool close = flat < Close * Close && MathF.Abs(d.Y) < Level
@@ -2406,17 +2490,29 @@ namespace MphRecomp.Arenas
             _rolling[s] = slot && (close || _rolling[s] && flat < 4 * Close * Close && MathF.Abs(d.Y) < 2 * Level);
             if (close || _rolling[s] || _nodes == null || goalNode == null)
             {
-                return new PlayerEntity.BotErrand(goal.WithY(p.Position.Y), ball: slot, bomb: slot && p.HostSlotHeld, jump: 0);
+                Vector3 aim = slot && PlayerEntity.HostTurretBotNav ? Mouth(t, p, goal) : goal;
+                // a strafing alt form (Trace, Weavel) crawls, and won't climb the recess's step into the slot (Shooting
+                // Gallery: Trace's crawler stopped on it at z 21.1 and slid back, over and over). She walks in on foot
+                // and forms over the slot (on foot she stops 0.6 short of its centre); out of it and not held, she stands back up
+                bool ball = slot && (!PlayerEntity.HostTurretBotNav || p.Values.AltFormStrafe == 0 || p.HostSlotHeld
+                    || flat < OverSlot * OverSlot);
+                return new PlayerEntity.BotErrand(aim.WithY(p.Position.Y), ball, bomb: slot && p.HostSlotHeld, jump: 0);
             }
-            NodeData3 hop = _hop[s] ?? NearestSeen(t, p.Position);
+            int now = t.Frames;
+            bool nav = PlayerEntity.HostTurretBotNav;
+            NodeData3 hop = _hop[s] ?? NearestSeen(t, p.Position, nav ? _banned[s] : null);
             if (Reached(p, hop))
             {
                 _prev[s] = hop;
                 if (hop != goalNode)
                 {
-                    hop = NextHop(hop, goalNode);
+                    hop = nav && (_banned[s].Count > 0 || t.State == EchoesTurretEntity.TurretState.Active) ? Route(t, s, hop, goalNode) : NextHop(hop, goalNode);
                     Counts[4]++;
                 }
+            }
+            if (nav)
+            {
+                hop = Replan(t, p, s, hop, now);
             }
             _hop[s] = hop;
             // a jump link (or a node well above her) from her last node: jump as she reaches its foot
@@ -2429,7 +2525,240 @@ namespace MphRecomp.Arenas
                 jump = kind == 1 && h.Y < 1.5f ? 1 : 2;
                 Counts[5]++;
             }
-            return new PlayerEntity.BotErrand(hop.Position, ball: false, bomb: false, jump);
+            else if (nav && now < _jumpUntil[s])
+            {
+                jump = 2;
+                Counts[5]++;
+            }
+            else if (nav && h.Y > 0.5f && h.Y < 2.5f && Ledge(t, p, h))
+            {
+                // a ledge before her hop, under it (Shooting Gallery's Dark Water trench once its grates are shot out: the
+                // graph knows the grates' floor, and she walked into the wall below it)
+                jump = 1;
+                Counts[5]++;
+            }
+            else if (nav && _prev[s] is NodeData3 foot && hop.Position.Y - foot.Position.Y > 2.5f && h.Y > 2.5f && h.Y < 4.5f
+                && Flat(foot.Position - p.Position) < JumpFrom && Ledge(t, p, h))
+            {
+                // a climb from the node she's just left, too tall for a tap, its wall at her knee: a double jump, held
+                // through its second press like her stuck jump (once she's off the floor the climb left is under 2.5 and
+                // the tap rule would cut it to a single jump, topping out 2.5 up). Shooting Gallery's (3.2,2.4,10.6) up
+                // 3.7 to (-1.3,6.1,15.1), 6 away: she slid along the wall 2 s to her stuck jump
+                _jumpUntil[s] = now + JumpFrames;
+                jump = 2;
+                Counts[5]++;
+            }
+            else if (nav && h.Y > -0.5f && h.Y <= 0.5f && now - _since[s] > 10 && Lip(t, p, h))
+            {
+                // a lip on the level, walled at her middle and clear just over it, and she's getting no closer: a hop
+                // (Shooting Gallery's (16.7,2.9,-2.9) to (12.2,3.4,-2.9): a step at x 15 too tall to walk up; she slid
+                // along it 2 s to her stuck jump)
+                jump = 1;
+                Counts[5]++;
+            }
+            // the room between her and a hop no higher than her, clear from the node she reached it by: she turned for it
+            // early (within HopReached) and cut a corner into the wall; back to that node's line first. Shooting Gallery's
+            // upper deck node (-10.3,8.3,-11.9) to the floor at (-5.8,2.4,-7.4): a pillar at the deck's corner, x -9.5..-8.3
+            // z -9; she pushed into it until her stuck jump and ban, 2 s, then dropped off past it
+            // once turned back she keeps on to the node (Shooting Gallery's upper deck (7.7,5.9,10.6) to (3.2,5.9,15.1): 0.8
+            // from the node her way to the hop came clear and blocked by turns, every 6 frames, too quick for her to
+            // turn either way; she shuffled on the spot 2 s to her stuck jump)
+            Vector3 to = hop.Position;
+            if (nav && _prev[s] is NodeData3 back && hop.Position.Y + 0.5f < p.Position.Y + Level
+                && Clear(t, back.Position.AddY(0.5f), hop.Position) && Clear(t, p.Position, back.Position.AddY(0.5f)))
+            {
+                // (only near it: carried well off it, by a stuck jump say, she takes the hop when it comes clear)
+                float off = Flat(back.Position - p.Position);
+                bool near = off > 0.4f && off < 2;
+                bool turned = near && _cut[s] == (back.Id, hop.Id);
+                if (turned || !Clear(t, p.Position, hop.Position))
+                {
+                    to = back.Position;
+                    _cut[s] = near ? (back.Id, hop.Id) : (-1, -1);
+                }
+                else
+                {
+                    _cut[s] = (-1, -1);
+                }
+            }
+            return new PlayerEntity.BotErrand(to, ball: false, bomb: false, jump);
+        }
+
+        // no room between a and the point at a's height over b, a bot's width either side
+        static bool Clear(EchoesTurretEntity t, Vector3 a, Vector3 b)
+        {
+            Vector3 c = b.WithY(a.Y);
+            Vector3 d = c - a;
+            float f = Flat(d);
+            if (f < 0.01f) return true;
+            Vector3 side = new Vector3(-d.Z / f, 0, d.X / f) * 0.4f;
+            return !t.RoomBetween(a, c) && !t.RoomBetween(a + side, c + side) && !t.RoomBetween(a - side, c - side);
+        }
+
+        // her hop, watched: a new hop starts a new watch. Carried off (a jump pad, the unstick, a fall: farther than Lost
+        // past her closest, or Stray from a hop she can't see) she re-plans from where she is; no closer for StuckFrames,
+        // she jumps at it, then gives it up (the step to it is banned for the rest of the errand) and re-plans around it
+        static NodeData3 Replan(EchoesTurretEntity t, PlayerEntity p, int s, NodeData3 hop, int now)
+        {
+            float dist = Flat(hop.Position - p.Position);
+            if (hop != _hop[s])
+            {
+                Watch(s, now);
+                _best[s] = dist;
+                return hop;
+            }
+            if (dist < _best[s] - Gain)
+            {
+                _best[s] = dist;
+                _since[s] = now;
+                return hop;
+            }
+            bool lost = dist > _best[s] + Lost
+                || dist > Stray && t.Blocked(p.Position.AddY(0.5f), hop.Position.AddY(0.5f), TestFlags.Players);
+            bool stuck = now - _since[s] > StuckFrames;
+            if (!lost && !stuck) return hop;
+            if (stuck && !lost && _tries[s]++ == 0)
+            {
+                _jumpUntil[s] = now + JumpFrames;
+                _since[s] = now;
+                return hop;
+            }
+            NodeData3 next;
+            if (stuck && !lost)
+            {
+                // the step from her last node, or (none: the node she was sent to from where she stood) the node; then
+                // from the nearest other node she can see, around it
+                List<(int, int)> banned = _banned[s];
+                if (banned.Count == Banned) banned.RemoveAt(0);
+                banned.Add((_prev[s]?.Id ?? -1, hop.Id));
+                next = NearestSeen(t, p.Position, banned, hop);
+            }
+            else
+            {
+                next = NearestSeen(t, p.Position, _banned[s]);
+            }
+            _prev[s] = null;
+            Watch(s, now);
+            _best[s] = Flat(next.Position - p.Position);
+            return next;
+        }
+
+        // a new watch for slot s (s < 0: every slot, and their bans)
+        static void Watch(int s, int now)
+        {
+            for (int i = s < 0 ? 0 : s; i < (s < 0 ? Slots : s + 1); i++)
+            {
+                _best[i] = Single.MaxValue;
+                _since[i] = now;
+                _tries[i] = 0;
+                _jumpUntil[i] = 0;
+                _cut[i] = (-1, -1);
+                if (s < 0) _banned[i].Clear();
+            }
+        }
+
+        static float Flat(Vector3 d) => MathF.Sqrt(d.X * d.X + d.Z * d.Z);
+
+        // the room in her way at her knees within a step toward her hop (h: hop minus her position), clear over it
+        static bool Ledge(EchoesTurretEntity t, PlayerEntity p, Vector3 h)
+        {
+            float f = Flat(h);
+            if (f < 0.01f) return false;
+            Vector3 step = new Vector3(h.X / f, 0, h.Z / f) * MathF.Min(f, 1.5f);
+            Vector3 knee = p.Position.AddY(0.3f);
+            Vector3 over = p.Position.AddY(h.Y + 0.5f);
+            return t.Blocked(knee, knee + step, TestFlags.Players) && !t.Blocked(over, over + step, TestFlags.Players);
+        }
+
+
+        // the room in her way at her middle within a step toward her hop, clear 0.4 over that
+        static bool Lip(EchoesTurretEntity t, PlayerEntity p, Vector3 h)
+        {
+            float f = Flat(h);
+            if (f < 0.01f) return false;
+            Vector3 step = new Vector3(h.X / f, 0, h.Z / f) * MathF.Min(f, 1);
+            Vector3 over = p.Position.AddY(0.4f);
+            return t.Blocked(p.Position, p.Position + step, TestFlags.Players) && !t.Blocked(over, over + step, TestFlags.Players);
+        }
+
+        // the next node from `from` toward dest on the shortest way that takes none of slot s's given-up steps (Dijkstra
+        // over the graph's links, ties to the lower id); none: the graph's own next hop
+        static NodeData3 Route(EchoesTurretEntity t, int s, NodeData3 from, NodeData3 dest)
+        {
+            List<(int From, int To)> banned = _banned[s];
+            List<int>[] links = Links();
+            HashSet<(int, int)>? cuts = t.State == EchoesTurretEntity.TurretState.Active ? Cuts(t) : null;
+            int count = _nodes!.Count;
+            var dist = new float[count];
+            var first = new int[count];
+            var done = new bool[count];
+            Array.Fill(dist, Single.MaxValue);
+            Array.Fill(first, -1);
+            int start = from.Id, end = dest.Id;
+            if (start >= count || end >= count) return NextHop(from, dest);
+            dist[start] = 0;
+            while (true)
+            {
+                int u = -1;
+                for (int i = 0; i < count; i++)
+                {
+                    if (!done[i] && dist[i] < Single.MaxValue && (u < 0 || dist[i] < dist[u])) u = i;
+                }
+                if (u < 0 || u == end) break;
+                done[u] = true;
+                foreach (int v in links[u])
+                {
+                    if (done[v] || banned.Contains((-1, v)) || banned.Contains((u, v)) || cuts?.Contains((u, v)) == true
+                        || cuts != null && v != end && t.ColumnCovers(_nodes[v].Position)) continue;
+                    float dv = dist[u] + (_nodes[v].Position - _nodes[u].Position).Length;
+                    if (dv < dist[v])
+                    {
+                        dist[v] = dv;
+                        first[v] = u == start ? v : first[u];
+                    }
+                }
+            }
+            return first[end] >= 0 ? _nodes[first[end]] : NextHop(from, dest);
+        }
+
+        // the links the risen column stands across (first asked with the turret up; the column doesn't move while it is)
+        static HashSet<(int, int)> Cuts(EchoesTurretEntity t)
+        {
+            if (_cuts != null) return _cuts;
+            _cuts = new HashSet<(int, int)>();
+            List<int>[] links = Links();
+            for (int u = 0; u < links.Length; u++)
+            {
+                foreach (int v in links[u])
+                {
+                    if (t.ColumnBetween(_nodes![u].Position.AddY(0.5f), _nodes[v].Position.AddY(0.5f))) _cuts.Add((u, v));
+                }
+            }
+            return _cuts;
+        }
+
+        // each node's links: the distinct next hops in its table (the game's own neighbour list, PlayerAi.Func213A0A4)
+        static List<int>[] Links()
+        {
+            if (_links != null) return _links;
+            int count = _nodes!.Count;
+            _links = new List<int>[count];
+            for (int n = 0; n < count; n++)
+            {
+                var list = new List<int>();
+                NodeData3 head = _nodes[n];
+                int total = 0;
+                for (int index = 0; total < count && head.Index1 + index + 1 < head.Values.Count; index += 2)
+                {
+                    int next = head.Values[head.Index1 + index + 1];
+                    if (next < count && next != n && !list.Contains(next)) list.Add(next);
+                    int run = head.Values[head.Index1 + index];
+                    if (run == 0) break;
+                    total += run;
+                }
+                _links[n] = list;
+            }
+            return _links;
         }
 
         static bool Reached(PlayerEntity p, NodeData3 n)
@@ -2460,20 +2789,24 @@ namespace MphRecomp.Arenas
             return i < _nodes!.Count ? _nodes[i] : dest;
         }
 
-        // the closest node with nothing between (half a unit up at both ends), else the closest
-        static NodeData3 NearestSeen(EchoesTurretEntity t, Vector3 at)
+        // the closest node with nothing between (half a unit up at both ends; HostTurretBotNav: nor the risen column),
+        // else the closest; never one she gave up (HostTurretBotNav: this errand) or `not`
+        static NodeData3 NearestSeen(EchoesTurretEntity t, Vector3 at, List<(int From, int To)>? banned = null, NodeData3? not = null)
         {
             NodeData3? best = null, seen = null;
             float bestD = Single.MaxValue, seenD = Single.MaxValue;
+            bool column = PlayerEntity.HostTurretBotNav && t.State == EchoesTurretEntity.TurretState.Active;
             foreach (NodeData3 n in _nodes!)
             {
+                if (n == not || banned?.Contains((-1, n.Id)) == true || column && t.ColumnCovers(n.Position)) continue;
                 float d = (n.Position - at).LengthSquared;
                 if (d < bestD)
                 {
                     best = n;
                     bestD = d;
                 }
-                if (d < seenD && d < 15 * 15 && !t.Blocked(at.AddY(0.5f), n.Position.AddY(0.5f), TestFlags.Players))
+                if (d < seenD && d < 15 * 15 && !t.Blocked(at.AddY(0.5f), n.Position.AddY(0.5f), TestFlags.Players)
+                    && !(column && t.ColumnBetween(at.AddY(0.5f), n.Position.AddY(0.5f))))
                 {
                     seen = n;
                     seenD = d;
@@ -2504,6 +2837,7 @@ namespace MphRecomp.Arenas
                 _job[s] = job;
                 _until[s] = now + seconds * 60;
                 _hop[s] = _prev[s] = null;
+                _banned[s].Clear();
                 return true;
             }
             _rest[s] = now + restSeconds * 60;
@@ -2516,6 +2850,27 @@ namespace MphRecomp.Arenas
             _rolling[s] = false;
             _rest[s] = now + restSeconds * 60;
             _hop[s] = _prev[s] = null;
+            _banned[s].Clear();
+        }
+
+        // dev (Tools -echoesturret botsweep): bot slot s's errand now (0 none, 1 the seat, 2 the slot) and her next node
+        public static int JobOf(int s) => s >= 0 && s < Slots ? (int)_job[s] : 0;
+        public static Vector3? HopOf(int s) => s >= 0 && s < Slots ? _hop[s]?.Position : null;
+        public static Vector3 ToOf(int s) => s >= 0 && s < Slots ? _to[s] : default;
+        public static int JumpOf(int s) => s >= 0 && s < Slots ? _jumpOf[s] : 0;
+        static readonly Vector3[] _to = new Vector3[Slots];
+        static readonly int[] _jumpOf = new int[Slots];
+
+        // dev (botsweep trace=): each node, its links, and the links the risen column cuts (once asked with it up)
+        public static IEnumerable<string> GraphLines()
+        {
+            if (_nodes == null) yield break;
+            List<int>[] links = Links();
+            for (int n = 0; n < _nodes.Count; n++)
+            {
+                Vector3 at = _nodes[n].Position;
+                yield return $"{n} ({at.X:0.00},{at.Y:0.00},{at.Z:0.00}) -> {String.Join(" ", links[n].Select(v => $"{v}{(PlayerEntity.HostNavLinks?.TryGetValue((n, v), out int k) == true ? "jdgb"[k - 1].ToString() : "")}{(_cuts?.Contains((n, v)) == true ? "x" : "")}"))}";
+            }
         }
 
         static bool Taken(Job job) => Array.IndexOf(_job, job) >= 0;
@@ -2523,7 +2878,7 @@ namespace MphRecomp.Arenas
         static bool Enemy(PlayerEntity? occupant, PlayerEntity p) =>
             occupant != null && occupant != p && !(GameState.Teams && occupant.TeamIndex == p.TeamIndex);
 
-        static bool Within(PlayerEntity p, Vector3 to) => (to - p.Position).LengthSquared < Reach * Reach;
+        static bool Within(PlayerEntity p, Vector3 to, float scale = 1) => (to - p.Position).LengthSquared < Reach * Reach * scale * scale;
     }
 
     // The lift's solid base (Echoes' 'Dummy Base' PLAT, TurretSpot.BaseMin/BaseMax): a box under the turret that rides up

@@ -17,6 +17,12 @@ namespace MphRead.Entities
     public partial class PlayerEntity
     {
         public static bool HostBotCrates { get; set; }
+        // recomp (2026-11-01, owner: bots stopped on the way to drop off an octolith to shoot far-off crates; "they should
+        // only shoot and route to nearby ones they need"): a bot carrying the octolith leaves crates alone, one with no weapon
+        // to pick up or short of Universal Ammo looks out to CrateNeedRange (not 32), and one with both only shoots crates
+        // within CrateNearRange and doesn't walk to them. Host-guarded
+        // (MatchSettings.BotCrateNeed; replays before format 79 play without it).
+        public static bool HostBotCrateNeed { get; set; }
         // the arena's crates (Core: EchoesCrates.Extra); null = none
         public static IReadOnlyList<EnemyInstanceEntity>? HostCrateList { get; set; }
 
@@ -24,6 +30,8 @@ namespace MphRead.Entities
         {
             private const float CrateSeeRange = 32;   // a crate further off isn't looked at
             private const float CrateShootRange = 20; // past this it walks closer as it shoots
+            private const float CrateNearRange = 14;  // (HostBotCrateNeed) the reach for a bot that needs no weapon or ammo
+            private const float CrateNeedRange = 24;  // (HostBotCrateNeed) and for one that does
             private const float CrateDropReach = 32;  // a drop further off is left to its own item search
             private const int CrateLookEvery = 10;    // frames between looks for a crate
             private const int CrateMaxFrames = 6 * 60;
@@ -43,7 +51,8 @@ namespace MphRead.Entities
 
             // counts for -botprobe
             public static readonly int[] HostCrateCounts = new int[11]; // crates picked, shots at crates, crates seen break, drops reached,
-                                                                       // given up: time, out of sight, fight; drops: too far, no floor, timed out
+                                                                       // given up: time, out of sight, fight; drops: too far, no floor, timed out;
+                                                                       // frames carrying the octolith on a crate
             public bool HostCrateAim => _crateAim; // -botprobe
 
             // Process, after the turret errand, before the unstick (its climbs and drifts win)
@@ -52,7 +61,7 @@ namespace MphRead.Entities
                 _crateAim = false;
                 if (!HostBotCrates || HostCrateList == null || HostCrateList.Count == 0 || HostIdleBots || _player.Health == 0
                     || _player.IsAltForm || _player.IsMorphing || _player.IsUnmorphing || _player.HostSeatShell != null
-                    || _errandOn || _player.WallClinging || _perchFrames > 0
+                    || _errandOn || _player.WallClinging || _perchFrames > 0 || HostBotCrateNeed && _player.OctolithFlag != null
                     || _targetPlayer != null && _targetPlayer.Health > 0 && Flags2.TestFlag(AiFlags2.TargetPlayer)
                         && IsPlayerVisible(_player, _targetPlayer))
                 {
@@ -89,7 +98,7 @@ namespace MphRead.Entities
                         }
                         return;
                     }
-                    if (++_crateFrames > CrateMaxFrames || !CrateInSight(_crate, out _))
+                    if (++_crateFrames > CrateMaxFrames || !CrateInSight(_crate, out float now) || now > CrateReach * CrateReach)
                     {
                         HostCrateCounts[_crateFrames > CrateMaxFrames ? 4 : 5]++;
                         _crate = null;
@@ -98,7 +107,7 @@ namespace MphRead.Entities
                 if (_crate == null && (_crateTick + _player.SlotIndex * 3) % CrateLookEvery == 0
                     && _player.CurrentWeapon != BeamType.OmegaCannon)
                 {
-                    float best = CrateSeeRange * CrateSeeRange;
+                    float best = CrateReach * CrateReach;
                     for (int i = 0; i < HostCrateList.Count; i++)
                     {
                         EnemyInstanceEntity crate = HostCrateList[i];
@@ -140,11 +149,18 @@ namespace MphRead.Entities
                 {
                     HostCrateCounts[1]++;
                 }
-                if (Vector3.DistanceSquared(center, _player.Position) > CrateShootRange * CrateShootRange)
+                if (Vector3.DistanceSquared(center, _player.Position) > CrateShootRange * CrateShootRange
+                    && (!HostBotCrateNeed || CrateNeed))
                 {
                     WalkTo(center);
                 }
             }
+
+            // (HostBotCrateNeed) no weapon besides the Power Beam and missiles, or its Universal Ammo all but gone: a crate's
+            // weapon gives both (a bot starts with no Universal Ammo, so "low" can't be a share of the cap)
+            private bool CrateNeed => _player._weaponSlots[2] == BeamType.None || _player._ammo[0] < _player._ammoMax[0] / 8;
+
+            private float CrateReach => !HostBotCrateNeed ? CrateSeeRange : CrateNeed ? CrateNeedRange : CrateNearRange;
 
             // eye to the crate's centre, the line a beam takes (grates and other players don't hide it)
             private bool CrateInSight(EnemyInstanceEntity crate, out float distSquared)

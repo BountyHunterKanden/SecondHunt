@@ -119,13 +119,30 @@ namespace MphRead
         private static string? SamplePick(string name)
         {
             if (name is "ONYX" or "ECHO") return null;
+            // recolour=1: the friends pick TROOPER (each skin) / DARK SAMUS, their cards' icons the look-alike recolour where
+            // this device has no picture of that skin (run it without pictures= to see the fallback)
+            if (_recolour && name switch
+            {
+                "KANDEN" => ("trooper", "MP1PowerTrooper"), "ZEPHYR" => ("trooper", "MP1IceTrooper"), "AURORA" => ("trooper", "MP1WaveTrooper"),
+                "MAGMOOR" => ("trooper", "MP1PlasmaTrooper"), "VESPER" or "BLITZ" => ("darksamus", "MP2DarkSamus"),
+                "NOXUS" => ("darksamus", "MP3DarkSamus"), _ => default((string, string)?),
+            } is (string id, string skin))
+            {
+                var c = MphRecomp.Multiplayer.Characters.All.First(k => k.Id == id);
+                var lic = new HunterLicense { OnlineMatches = 3, ChoiceHunter = (int)c.Base, ChoiceCharacter = id };
+                lic.SkinChoice[id] = skin;
+                return System.Text.Json.JsonSerializer.Serialize(lic);
+            }
             int hunter = Enum.TryParse(name, true, out Hunter h) && h <= Hunter.Weavel ? (int)h : (name.Length * 7 + name[0]) % 7;
             return "{\"V\":1,\"OnlineMatches\":3,\"FavoriteHunter\":" + hunter + "}";
         }
 
+        private static bool _recolour;
+
         public static void Preview(string[] args)
         {
             if (!ToolPaths.UseDesktopExtraction()) return;
+            _recolour = args.Contains("recolour=1");
             // noextra=1: ONLINE SETTINGS' NO EXTRA ARENA GAMES on (the Echoes game's JOINs greyed, "extra arenas off", where
             // Echoes is imported; without Echoes they grey anyway: "needs echoes import")
             string previewDir = Path.Combine(Path.GetTempPath(), "online-menu-preview");
@@ -133,6 +150,11 @@ namespace MphRead
             string onlineSettings = Path.Combine(previewDir, "online_settings.json");
             if (args.Contains("noextra=1")) File.WriteAllText(onlineSettings, "{\"NoExtraArenas\":true}");
             else File.Delete(onlineSettings);
+            // hd= / pictures=: the HD models and their head pictures (CharacterPictures), for TROOPER / DARK SAMUS's hub
+            // portraits (without them: their black framed square)
+            Dictionary<string, string> a = Args(args);
+            if (a.TryGetValue("hd", out string? hdRoot)) MultiplayerMenu.CharacterHdRoot = hdRoot;
+            if (a.TryGetValue("pictures", out string? picDir)) MultiplayerMenu.CharacterPicturesDir = picDir;
             FrontendSession s = Session(previewDir);
             string version = OnlineMatch.VersionKey(RomKey);
             PlayerCard kanden = Card("KANDEN", 4412, Presence.Lobby, friend: true, game: "g1");
@@ -216,6 +238,25 @@ namespace MphRead
                 Run(s, 20);
                 Shot(s, "online_friends_" + tabs[t]);
             }
+            // the lists scroll, no pages (owner 2026-10-31): RECENT (6 hunters, 5 rows shown) a row on by the wheel / stick, the
+            // D-pad down off its last row, L / R step the tabs
+            s.Recomp.SectionScrollBy(s.Menu, 1);
+            Run(s, 10);
+            Shot(s, "online_friends_recent_scrolled");
+            int scrolled = s.Recomp.OnlineFriendsView.FriendsOffset;
+            s.Recomp.SectionScrollBy(s.Menu, -5);
+            Run(s, 6);
+            int back = s.Recomp.OnlineFriendsView.FriendsOffset;
+            for (int i = 0; i < 6; i++) { s.Navigate(0, -1); Run(s, 4); }
+            int edged = s.Recomp.OnlineFriendsView.FriendsOffset;
+            Console.WriteLine($"{(scrolled == 1 && back == 0 && edged == 1 ? "PASS" : "FAIL")} online friends: RECENT scrolls a row (wheel {scrolled}, back {back}, D-pad past the last row {edged})");
+            s.Press(MenuKeys.R);
+            Run(s, 10);
+            int rTab = s.Recomp.OnlineFriendsView.FriendsTab;
+            s.Press(MenuKeys.L);
+            Run(s, 10);
+            int lTab = s.Recomp.OnlineFriendsView.FriendsTab;
+            Console.WriteLine($"{(rTab == 0 && lTab == 3 ? "PASS" : "FAIL")} online friends: R from RECENT wraps to FRIENDS ({rTab}), L back to RECENT ({lTab})");
             s.Recomp.OnCall(s.Menu, 2604, inPause: false); // ADD
             Run(s, 90);
             string[] ways = { "search", "code", "recent" };
@@ -265,6 +306,9 @@ namespace MphRead
             Run(s, 30);
             Shot(s, "online_license_stranger");
 
+            // GAMING HUB, LEADERBOARDS and the license's STATS / FAVOURITES (server 0.10.0; sample answers)
+            HubPreview(s);
+
             // ONLINE SETTINGS, its backup code shown, and the first-visit notice over the hub
             s.Menu.GoTo(RecompMenus.OnlineSettingsPage);
             Run(s, 90);
@@ -278,6 +322,161 @@ namespace MphRead
             Run(s, 40);
             Shot(s, "online_notice");
             s.Popup?.Close();
+        }
+
+        // GAMING HUB (each board's #1, everyone's favourites, online lately: 9 hunters, 6 rows shown), LEADERBOARDS (a tie, the
+        // asker's place under the top 10, FRIENDS), STATS / FAVOURITES on a license, MY LICENSE, and the hub hidden where the
+        // server is older than 0.10.0
+        private static void HubPreview(FrontendSession s)
+        {
+            string me = Card("SAMUS", 815).Code;
+            (HubMsg hub, Dictionary<string, LeadersMsg> leaders, StatsMsg stats) = HubSample.Build(me, "SAMUS", 815, n => Card(n, 0).Code);
+            s.Recomp.OnlinePreviewHub(hub, leaders, stats);
+            (int ghub, int leadersPage, int button) = s.Recomp.OnlineHubPages;
+            s.Recomp.PreviewNoHub = false;
+            s.Recomp.OpenOnline(s.Menu);
+            Run(s, 60);
+            bool shown = s.Menu.ItemState(button) != MenuState.Hidden;
+            Shot(s, "online_hub_gaming");
+            s.Recomp.OnCall(s.Menu, 2400, inPause: false); // GAMING HUB
+            Run(s, 60);
+            Console.WriteLine($"{(shown && s.Menu.Page?.Index == ghub ? "PASS" : "FAIL")} gaming hub: the button shows on a 0.10.0 server and opens GAMING HUB (shown {shown}, page {s.Menu.Page?.Index})");
+            Shot(s, "online_ghub");
+            // online lately scrolls as the friends lists do: the wheel a row on, to the end, back
+            s.Recomp.SectionScrollBy(s.Menu, 1);
+            Run(s, 10);
+            int scrolled = s.Recomp.OnlineHubView.Offset;
+            Shot(s, "online_ghub_scrolled");
+            s.Recomp.SectionScrollBy(s.Menu, 10);
+            Run(s, 6);
+            int end = s.Recomp.OnlineHubView.Offset;
+            s.Recomp.SectionScrollBy(s.Menu, -10);
+            Run(s, 6);
+            int back = s.Recomp.OnlineHubView.Offset;
+            Console.WriteLine($"{(scrolled == 1 && end == 3 && back == 0 ? "PASS" : "FAIL")} gaming hub: online lately scrolls (a row {scrolled}, the end {end}, back {back})");
+
+            // a board opens LEADERBOARDS on it; R / L step the boards and wrap; the scope tabs
+            s.Recomp.OnCall(s.Menu, 2410, inPause: false); // OVERALL POINTS
+            Run(s, 60);
+            bool onPoints = s.Menu.Page?.Index == leadersPage && s.Recomp.OnlineHubView.Category == HubCategory.Points;
+            Console.WriteLine($"{(onPoints ? "PASS" : "FAIL")} leaderboards: a board on the hub opens it (page {s.Menu.Page?.Index}, {s.Recomp.OnlineHubView.Category})");
+            Shot(s, "online_leaders_points");
+            s.Press(MenuKeys.R);
+            Run(s, 20);
+            string next = s.Recomp.OnlineHubView.Category;
+            Shot(s, "online_leaders_games");
+            s.Press(MenuKeys.R);
+            Run(s, 20);
+            string third = s.Recomp.OnlineHubView.Category;
+            Shot(s, "online_leaders_winrate");
+            for (int i = 0; i < 3; i++)
+            {
+                s.Press(MenuKeys.L);
+                Run(s, 10);
+            }
+            string wrapped = s.Recomp.OnlineHubView.Category;
+            Console.WriteLine($"{(next == HubCategory.Games && third == HubCategory.WinRate && wrapped == "all" ? "PASS" : "FAIL")} leaderboards: R / L step the boards and wrap ({next}, {third}, L x3 {wrapped})");
+            s.Press(MenuKeys.R);
+            Run(s, 10);
+            s.Recomp.OnCall(s.Menu, 2447, inPause: false); // FRIENDS
+            Run(s, 20);
+            Console.WriteLine($"{(s.Recomp.OnlineHubView.Scope == LeadersReq.Friends ? "PASS" : "FAIL")} leaderboards: the FRIENDS tab ({s.Recomp.OnlineHubView.Category}/{s.Recomp.OnlineHubView.Scope})");
+            Shot(s, "online_leaders_friends");
+            s.Recomp.OnCall(s.Menu, 2446, inPause: false); // ALL
+            Run(s, 10);
+            // the hub's "see all" opens ALL BOARDS (the eight cards); a card opens its board
+            s.Recomp.OnCall(s.Menu, 2418, inPause: false);
+            Run(s, 60);
+            string allCat = s.Recomp.OnlineHubView.Category;
+            Shot(s, "online_leaders_all");
+            s.Recomp.OnCall(s.Menu, 2482, inPause: false); // the WIN RATE card
+            Run(s, 20);
+            string cardCat = s.Recomp.OnlineHubView.Category;
+            Console.WriteLine($"{(allCat == "all" && cardCat == HubCategory.WinRate ? "PASS" : "FAIL")} leaderboards: see all shows every board, a card opens it ({allCat}, {cardCat})");
+            s.Recomp.OnCall(s.Menu, 2418, inPause: false);
+            Run(s, 10);
+            s.Recomp.OnCall(s.Menu, 2480, inPause: false); // back on OVERALL POINTS
+            Run(s, 20);
+
+            // a row opens that hunter's license on STATS; R to FAVOURITES, R again wraps to the card's first tab
+            s.Recomp.OnCall(s.Menu, 2450, inPause: false);
+            Run(s, 60);
+            int view = s.Recomp.OnlineHubView.View;
+            Console.WriteLine($"{(s.Menu.Page?.Index == RecompMenus.OnlineLicensePage && view == 1 ? "PASS" : "FAIL")} license: a leaderboard row opens it on STATS (page {s.Menu.Page?.Index}, view {view})");
+            Shot(s, "online_license_stats");
+            s.Press(MenuKeys.R);
+            Run(s, 20);
+            int favs = s.Recomp.OnlineHubView.View;
+            Shot(s, "online_license_favourites");
+            // a picked character on top (seat icon, no license portrait)
+            Dictionary<string, int> vanillaPicks = stats.Hunters;
+            stats.Hunters = new() { ["dark_samus"] = 52, ["trooper"] = 30, ["samus"] = 12 };
+            Run(s, 10);
+            Shot(s, "online_license_favourites_picks");
+            // their most played skins (the licence's SkinChoice): Dark Samus in Corruption, an Ice trooper, Sylux in
+            // Prime 4, Samus in the Dark Suit
+            {
+                HunterLicense skinLic = s.Recomp.OnlineLicenseShown ?? SampleLicense();
+                s.Recomp.PreviewLicenseShown(skinLic);
+                skinLic.SkinChoice["darksamus"] = "MP3DarkSamus";
+                skinLic.SkinChoice["trooper"] = "MP1IceTrooper";
+                skinLic.SkinChoice["sylux"] = "MP4Sylux";
+                skinLic.SkinChoice["samus"] = "MP2DarkSuit";
+                stats.Hunters = new() { ["sylux"] = 52, ["samus"] = 30, ["trooper"] = 12 };
+                Run(s, 10);
+                Shot(s, "online_license_favourites_skins");
+                stats.Hunters = new() { ["dark_samus"] = 52, ["trooper"] = 30, ["sylux"] = 12 };
+                Run(s, 10);
+                Shot(s, "online_license_favourites_skins2");
+                skinLic.SkinChoice.Clear();
+            }
+            stats.Hunters = vanillaPicks;
+            Run(s, 2);
+            s.Press(MenuKeys.R);
+            Run(s, 20);
+            int wrap = s.Recomp.OnlineHubView.View, tab = s.Recomp.OnlineLicenseTab;
+            Console.WriteLine($"{(favs == 2 && wrap == 0 && tab == 0 ? "PASS" : "FAIL")} license: R to FAVOURITES ({favs}), R wraps to the card's first tab (view {wrap}, tab {tab})");
+            s.Recomp.OnCall(s.Menu, 2472, inPause: false); // a tap on FAVOURITES
+            Run(s, 10);
+            Console.WriteLine($"{(s.Recomp.OnlineHubView.View == 2 ? "PASS" : "FAIL")} license: the FAVOURITES tab ({s.Recomp.OnlineHubView.View})");
+
+            // GAMING HUB's MY LICENSE: your own card on CARD, STATS beside it; no online matches yet: it says so; back: on MY LICENSE
+            s.Recomp.OnCall(s.Menu, 2400, inPause: false);
+            Run(s, 30);
+            s.Recomp.OnCall(s.Menu, 2419, inPause: false); // MY LICENSE
+            Run(s, 60);
+            bool mineOpen = s.Menu.Page?.Index == RecompMenus.OnlineLicensePage && s.Recomp.OnlineLicenseCard?.Code == me;
+            int mineView = s.Recomp.OnlineHubView.View;
+            Shot(s, "online_license_mine");
+            s.Recomp.OnCall(s.Menu, 2471, inPause: false); // a tap on STATS
+            Run(s, 20);
+            int mineStats = s.Recomp.OnlineHubView.View;
+            Shot(s, "online_license_mine_stats");
+            long games = stats.Totals[HubCategory.Games];
+            stats.Totals[HubCategory.Games] = 0;
+            Run(s, 10);
+            Shot(s, "online_license_mine_nomatches");
+            stats.Totals[HubCategory.Games] = games;
+            s.Recomp.OnCall(s.Menu, 2592, inPause: false); // back
+            Run(s, 30);
+            bool backOn = s.Menu.Page?.Index == ghub && s.Menu.FocusedItem() == s.Recomp.OnlineHubMine;
+            Console.WriteLine($"{(mineOpen && mineView == 0 && mineStats == 1 && backOn ? "PASS" : "FAIL")} gaming hub: MY LICENSE opens your card on CARD, STATS beside it, back on it (open {mineOpen}, view {mineView}, STATS {mineStats}, back {backOn})");
+
+            // an older server: no GAMING HUB button, no STATS / FAVOURITES on the license
+            s.Recomp.PreviewNoHub = true;
+            s.Recomp.OpenOnline(s.Menu);
+            Run(s, 60);
+            bool hidden = s.Menu.ItemState(button) == MenuState.Hidden;
+            Shot(s, "online_hub_nohub");
+            s.Recomp.OnCall(s.Menu, 2400, inPause: false);
+            Run(s, 20);
+            bool stayed = s.Menu.Page?.Index != ghub;
+            s.Recomp.OnlineOpenLicense(s.Menu, Card("KANDEN", 4412));
+            Run(s, 40);
+            int oldView = s.Recomp.OnlineHubView.View;
+            Shot(s, "online_license_nohub");
+            Console.WriteLine($"{(hidden && stayed && oldView == 0 ? "PASS" : "FAIL")} gaming hub: hidden on an older server (button hidden {hidden}, didn't open {stayed}, license view {oldView})");
+            s.Recomp.PreviewNoHub = false;
         }
 
         // a license with something on every tab (an elite hunter who plays Kanden)
@@ -942,6 +1141,156 @@ namespace MphRead
                 if (cc != null) Wait(cc.DisposeAsync().AsTask().ContinueWith(_ => 0));
                 Console.WriteLine(fail == null ? "PASS onlinefriendstest: search + ADD FRIEND, both codes, REQUESTS OK; both rosters agree"
                     : "FAIL onlinefriendstest: " + fail);
+            }
+        }
+
+        // -onlinehubtest [server=]: the Gaming Hub's screens against a 0.10.0+ server (default a local SecondHunt.Server on
+        // ws://127.0.0.1:8080/v1/ws, so test results never land on the live boards): three PC hunters play ten reported matches (A wins
+        // them all), then the menus open GAMING HUB, a board, the next boards, A's row -> A's license on STATS, FAVOURITES
+        public static void HubTest(string[] args)
+        {
+            if (!ToolPaths.UseDesktopExtraction()) return;
+            Dictionary<string, string> a = Args(args);
+            var uri = new Uri(a.GetValueOrDefault("server", "ws://127.0.0.1:8080/v1/ws"));
+            RecompMenus.OnlineServerOverride = uri.ToString();
+            int run = Random.Shared.Next(10000, 100000);
+            Console.WriteLine($"onlinehubtest: {uri}");
+            string? fail = "it didn't finish";
+            string dir = Path.Combine(Path.GetTempPath(), "online-hub-test-" + Guid.NewGuid().ToString("N")[..6]);
+            FrontendSession s = Session(dir);
+            var pcs = new List<OnlineClient>();
+            void Shoot(string name)
+            {
+                Run(s, 30);
+                Shot(s, name);
+            }
+            try
+            {
+                foreach (string n in new[] { "HUBA", "HUBB", "HUBC" })
+                    pcs.Add(Wait(OnlineClient.ConnectAsync(uri, OnlineIdentity.Create(), n + run, "onlinehubtest")));
+                OnlineClient h = pcs[0];
+                if (!h.ServerAtLeast(HubReq.SinceServer))
+                {
+                    fail = $"server {h.ServerVersion} has no Gaming Hub (needs {HubReq.SinceServer})";
+                    return;
+                }
+                var info = new GameInfo { Mode = "Battle", Arena = "Combat Hall", MaxPlayers = 4, Public = true, Version = "onlinehubtest" };
+                string id = Wait(h.RequestAsync<GameMsg>(new HostGameReq { Info = info })).Game.Id;
+                foreach (OnlineClient g in pcs.Skip(1)) Wait(g.RequestAsync<GameMsg>(new JoinGameReq { GameId = id, Version = "onlinehubtest" }));
+                string[] hunters = { "kanden", "samus", "noxus", "trooper" }, arenas = { "mp1_sanctorus", "mp4_highground", "mp9_cryochasm" };
+                string[] weapons = { "power_beam", "volt_driver", "imperialist", "shock_coil" };
+                for (int m = 0; m < 10; m++)
+                {
+                    if (m > 0) Wait(h.RequestAsync<OkMsg>(new StartGameReq { Started = false }));
+                    Wait(h.RequestAsync<OkMsg>(new StartGameReq { Started = true }));
+                    var result = new MatchResultReq
+                    {
+                        GameId = id, MatchKey = Guid.NewGuid().ToString("N"), Mode = m % 4 == 3 ? "capture" : "battle",
+                        Arena = arenas[m % arenas.Length], Seconds = 240 + 30 * m,
+                        Rows = pcs.Select((c, i) => new ResultRow
+                        {
+                            Code = c.Me!.Code, Place = i,
+                            Stats = new ResultStats
+                            {
+                                Hunter = hunters[(i + m) % hunters.Length], Kills = 9 - 3 * i, Deaths = 2 + i, Headshots = 3 - i,
+                                AltKills = i == 0 ? 1 : 0, BestStreak = 4 - i, Shots = 30 - 5 * i,
+                                Weapons = new() { [weapons[(i + m) % weapons.Length]] = 9 - 3 * i },
+                            },
+                        }).ToList(),
+                    };
+                    Wait(h.RequestAsync<OkMsg>(result));
+                }
+                Console.WriteLine($"  10 matches reported: A {h.Me} won them all, B {pcs[1].Me}, C {pcs[2].Me}");
+
+                (int ghub, int leaders, int _) = s.Recomp.OnlineHubPages;
+                s.Recomp.OpenOnline(s.Menu);
+                if (!RunUntil(s, () => s.Recomp.OnlineConnected && s.Recomp.OnlineMeCard?.Code.Length > 0, 20))
+                {
+                    fail = "the menus didn't connect";
+                    return;
+                }
+                Run(s, 30);
+                Shoot("online_live_hub_gaming"); // (the hub page with its GAMING HUB button)
+                s.Recomp.OnCall(s.Menu, 2400, inPause: false); // GAMING HUB
+                if (!RunUntil(s, () => s.Menu.Page?.Index == ghub && s.Recomp.OnlineHubData.Hub?.Matches >= 10, 10))
+                {
+                    fail = $"GAMING HUB didn't open with the matches (page {s.Menu.Page?.Index}, {s.Recomp.OnlineHubData.Error})";
+                    return;
+                }
+                HubMsg hub = s.Recomp.OnlineHubData.Hub!;
+                // A: 10 games, 10 wins, 90 kills, 30 headshots, 100.0% = 40 + 40 + 9 + 1 + 10 Overall Points; star points
+                // +4 a match (2 a beaten opponent) = 40, super hunter
+                if (!hub.Leaders.TryGetValue(HubCategory.Points, out LeaderRow? top) || top.Value != 100 || top.Rank != 1 || hub.Players < 3
+                    || hub.Recent.All(r => r.Code != h.Me!.Code) || hub.Arenas.Count != 3)
+                {
+                    fail = $"the hub's numbers are off: points #1 {top?.Name} {top?.Value} rank {top?.Rank}, {hub.Players} players, {hub.Recent.Count} recent, {hub.Arenas.Count} arenas";
+                    return;
+                }
+                Shoot("online_live_ghub");
+                Console.WriteLine($"  1 ok: GAMING HUB, {hub.Players} players, {hub.Matches} matches, points #1 {top.Name}");
+
+                s.Recomp.OnCall(s.Menu, 2410, inPause: false); // the OVERALL POINTS board
+                if (!RunUntil(s, () => s.Menu.Page?.Index == leaders && s.Recomp.OnlineHubData.Board is { Category: HubCategory.Points } b
+                    && b.Rows.Count >= 3, 10) || s.Recomp.OnlineHubData.Board!.Rows.All(r => r.Code != h.Me!.Code || r.Place != 1))
+                {
+                    fail = $"OVERALL POINTS didn't open with A first (page {s.Menu.Page?.Index}, {s.Recomp.OnlineHubData.Error})";
+                    return;
+                }
+                Shoot("online_live_leaders_points");
+                s.Recomp.OnCall(s.Menu, 2441, inPause: false); // next board: GAMES PLAYED
+                s.Recomp.OnCall(s.Menu, 2441, inPause: false); // WIN RATE
+                if (!RunUntil(s, () => s.Recomp.OnlineHubData.Board is { Category: HubCategory.WinRate } b && b.Rows.Count > 0, 10)
+                    || s.Recomp.OnlineHubData.Board!.Rows.FindIndex(r => r.Code == h.Me!.Code && r.Place == 1 && r.Value == 1000) is not (>= 0 and var mine))
+                {
+                    fail = $"WIN RATE didn't show A at 100.0% ({s.Recomp.OnlineHubView.Category}, {s.Recomp.OnlineHubData.Error})";
+                    return;
+                }
+                Shoot("online_live_leaders_winrate");
+                Console.WriteLine("  2 ok: LEADERBOARDS: points A first, > > win rate A 100.0%");
+
+                s.Recomp.OnCall(s.Menu, 2450 + mine, inPause: false); // A's row (other test runs' hunters can tie with A on a reused server)
+                int licensePage = RecompMenus.OnlineLicensePage;
+                if (!RunUntil(s, () => s.Menu.Page?.Index == licensePage && s.Recomp.OnlineHubView.View == 1
+                    && s.Recomp.OnlineHubData.Stats?.Code == h.Me.Code, 10))
+                {
+                    fail = $"A's row didn't open A's license on STATS (page {s.Menu.Page?.Index}, view {s.Recomp.OnlineHubView.View}, {s.Recomp.OnlineHubData.Error})";
+                    return;
+                }
+                StatsMsg st = s.Recomp.OnlineHubData.Stats!;
+                if (st.Totals.GetValueOrDefault(HubCategory.Games) != 10 || st.Totals.GetValueOrDefault("wins") != 10
+                    || st.Totals.GetValueOrDefault(HubCategory.Shots) != 300 || st.Totals.GetValueOrDefault(HubCategory.RankPoints) != 40
+                    || st.Places.GetValueOrDefault(HubCategory.Points) != 1 || st.Arenas.Count != 3)
+                {
+                    fail = $"A's stats are off: games {st.Totals.GetValueOrDefault(HubCategory.Games)}, wins {st.Totals.GetValueOrDefault("wins")}, "
+                        + $"shots {st.Totals.GetValueOrDefault(HubCategory.Shots)}, star points {st.Totals.GetValueOrDefault(HubCategory.RankPoints)}, "
+                        + $"points place {st.Places.GetValueOrDefault(HubCategory.Points)}, {st.Arenas.Count} arenas";
+                    return;
+                }
+                Shoot("online_live_license_stats");
+                s.Recomp.OnCall(s.Menu, 2472, inPause: false); // FAVOURITES
+                Run(s, 10);
+                fail = s.Recomp.OnlineHubView.View != 2 ? $"FAVOURITES didn't open (view {s.Recomp.OnlineHubView.View})" : null;
+                if (fail == null) Shoot("online_live_license_favourites");
+                if (fail == null) Console.WriteLine("  3 ok: A's row -> A's license on STATS (10 games, 10 wins, #1 points), FAVOURITES");
+            }
+            catch (Exception ex) when (ex is OnlineException or System.Net.WebSockets.WebSocketException or IOException or InvalidOperationException
+                or System.Net.Http.HttpRequestException)
+            {
+                fail = ex.GetType().Name + ": " + ex.Message;
+            }
+            finally
+            {
+                foreach (OnlineClient c in pcs)
+                {
+                    // (the PC hunters leave the server again: their stats, boards and recent rows go with the profile)
+                    try { if (c.ServerAtLeast(DeleteProfileReq.SinceServer)) Wait(c.RequestAsync<OkMsg>(new DeleteProfileReq())); }
+                    catch (Exception ex) when (ex is OnlineException or System.Net.WebSockets.WebSocketException or IOException
+                        or InvalidOperationException) { }
+                    Wait(c.DisposeAsync().AsTask().ContinueWith(_ => 0));
+                }
+                try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                Console.WriteLine(fail == null ? "PASS onlinehubtest: GAMING HUB, LEADERBOARDS and license STATS / FAVOURITES from the server"
+                    : "FAIL onlinehubtest: " + fail);
             }
         }
 

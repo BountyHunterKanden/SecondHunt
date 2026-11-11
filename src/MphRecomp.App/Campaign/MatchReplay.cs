@@ -119,6 +119,10 @@ internal sealed partial class CampaignRenderer
                 Log.Warn("MPHReplay", $"refused {_replayPath}: {refused}");
                 return null;
             }
+            // the gameplay mods it was recorded with, from their recorded data, settings and seed (Core Mods/LiveMods.cs);
+            // their Lua state isn't in a checkpoint or keyframe, so with mods a seek back restarts the match instead
+            bool modded = _replayPlayer.File.Mods.Count > 0;
+            MphRecomp.Mods.LiveMods.StartMatch(_replayPlayer.File, out _);
             CampaignHost played = _replayPlayer.Start(collectDrawItems: true, viewWidth: width, viewHeight: height);
             if (_replayPlayer.CheckAfterStart() is string why)
             {
@@ -127,9 +131,10 @@ internal sealed partial class CampaignRenderer
                 return played;
             }
             // a new match: new checkpoints (one that went wrong stays off for this replay), the first one at its start
-            if (_replayCheckpoints?.Broken != true) _replayCheckpoints = new ReplayCheckpoints();
+            if (modded) _replayCheckpoints = null;
+            else if (_replayCheckpoints?.Broken != true) _replayCheckpoints = new ReplayCheckpoints();
             TakeCheckpoint(played);
-            StartKeyframes(played);
+            if (!modded) StartKeyframes(played);
             return played;
         }
         bool keep = ReplayDataDir != null && RecompSettings.Load(SettingsPath).RecordReplays
@@ -148,6 +153,8 @@ internal sealed partial class CampaignRenderer
             RecompSettings.ChangeLog(SettingsPath, "a bot match started with RecordReplays off");
             Log.Warn("MPHReplay", "RECORD REPLAYS is off: this match isn't recorded");
         }
+        // the player's gameplay mods start over for each match (none online / LAN: LiveMods wasn't attached there)
+        List<MphRecomp.Replay.ReplayMod> mods = MphRecomp.Mods.LiveMods.StartMatch(null, out ulong modSeed, settings);
         CampaignHost host = CampaignHost.StartMatch(settings, collectDrawItems: true, viewWidth: width, viewHeight: height);
         if (_netSession != null) StartReplayLink(settings, keep);
         if (recorder != null)
@@ -156,13 +163,16 @@ internal sealed partial class CampaignRenderer
             else recorder.Started(host.Scene);
             // an online host's shot check of its guests' shots and claimed hits, in the file (format 47)
             ReplayFile recording = recorder.File;
+            // the gameplay mods that ran (format 75): a replay plays them again, or is refused without them
+            recording.Mods.AddRange(mods);
+            recording.ModSeed = modSeed;
             MphRecomp.Multiplayer.Net.ShotCheck.Settled = _netSession != null ? check => recording.ShotChecks.Add(check) : null;
             // room for the whole match up front (no list growth mid-match): its time limit, else 10 minutes
             float seconds = Math.Min(settings.TimeLimitSeconds ?? 600, 3600);
             recorder.File.Steps.Capacity = (int)(seconds * 60) + 600;
             _replayRecorder = recorder;
             _replayFeed?.End();
-            _replayFeed = _netSession == null && ReplayDataDir is string feedDir && ReplayPrepHost.Start != null
+            _replayFeed = _netSession == null && mods.Count == 0 && ReplayDataDir is string feedDir && ReplayPrepHost.Start != null
                 && RecompSettings.Load(SettingsPath).PrepareReplays is not ("after" or "off")
                 ? new ReplayFeed(recorder.File, feedDir) : null;
         }
@@ -212,6 +222,15 @@ internal sealed partial class CampaignRenderer
                 Log.Info("MPHReplayDump", line);
             }
         }
+        if (!_replayStepUnseen && step % 10 == 0 && !MphRecomp.Config.RecompSettings.PublicBuild)
+        {
+            // dev: each bot's line every 10 steps of a replay watched (not a seek's unseen steps): logcat MPHBot
+            for (int i = 0; i < PlayerEntity.MaxPlayers; i++)
+            {
+                PlayerEntity p = PlayerEntity.Players[i];
+                if (p.IsBot && p.LoadFlags.TestFlag(LoadFlags.Active)) Log.Info("MPHBot", PlayerEntity.HostBotTraceLine(p, step));
+            }
+        }
         bool exact = _replayPlayer.Check(_host.Scene);
         if (!_replayPlayer.File.HasMarks)
         {
@@ -225,7 +244,9 @@ internal sealed partial class CampaignRenderer
         }
         if (exact)
         {
-            TakeCheckpoint(_host);
+            // a checkpoint only on a seek's unseen steps: one taken while the replay plays on screen held that frame
+            // ~30 ms each second on Mining Plaza (Odin 11-06); the prepared keyframes cover the seeks played past
+            if (_replayStepUnseen) TakeCheckpoint(_host);
         }
         else if (_restoredFrom >= 0 && _restoredKeyframe)
         {
@@ -806,6 +827,7 @@ internal sealed partial class CampaignRenderer
             _replayCam = (ReplayCamKind)(((int)_replayCam + 1) % 3); // first person -> third person -> free cam
             _freeCamInit = false;
             ResetFreeCamTouch();
+            if (_replayCam == ReplayCamKind.Free && _host != null) EnterFreeCamSound(_host.Scene);
             break;
         case HudButton.Hide:
             _replayUiHidden = !_replayUiHidden;
@@ -968,7 +990,7 @@ internal sealed partial class CampaignRenderer
         return true;
     }
 
-    // after a checked step: a checkpoint when one's due (ReplayCheckpoints: every 5 s of play, once each)
+    // after a checked step: a checkpoint when one's due (ReplayCheckpoints: every 60 steps, once each)
     void TakeCheckpoint(CampaignHost host)
     {
         if (_replayCheckpoints == null || _replayPlayer == null) return;
@@ -1076,6 +1098,7 @@ internal sealed partial class CampaignRenderer
         catch (Exception ex)
         {
             KeyframesOff(ex.GetType().Name + ": " + ex.Message);
+            Log.Warn("MPHReplay", ex.ToString()); // (the throw site: a bare message hid it, 11-05)
         }
     }
 
@@ -1182,7 +1205,11 @@ internal sealed partial class CampaignRenderer
     bool WatchingOwnView => _replayCam == ReplayCamKind.FirstPerson && !ReplaySeatless
         && WatchedSeat == (_replayPlayer?.File.Settings.LocalSeat ?? 0);
 
+    // the seat shown while the watched one isn't in the arena yet (PlaceReplayView), else -1
+    int _replayStandIn = -1;
+
     string ReplayCamText => _replayCam == ReplayCamKind.Free ? "FREE CAM"
+        : _replayStandIn >= 0 ? $"{ReplaySeatName(WatchedSeat)} not in yet: watching {ReplaySeatName(_replayStandIn)}"
         : WatchingOwnView ? "" : $"watching {ReplaySeatName(WatchedSeat)}";
 
     string ReplaySeatName(int seat)
@@ -1213,6 +1240,24 @@ internal sealed partial class CampaignRenderer
         };
         bool own = WatchingOwnView;
         int seat = WatchedSeat;
+        // (10-31) a seat not in the arena yet (a served match's slow joiner) waits at the origin, outside the walls: its view
+        // is black. Until it spawns, the view (and HUD) is the first seat that is in; the bar still names the watched seat
+        int standIn = _replayStandIn;
+        _replayStandIn = -1;
+        if (!own && _replayCam != ReplayCamKind.Free && !PlayerEntity.Players[seat].LoadFlags.TestFlag(LoadFlags.Spawned))
+        {
+            for (int i = 0; i < PlayerEntity.Players.Count; i++)
+            {
+                if (PlayerEntity.Players[i].LoadFlags.TestFlag(LoadFlags.Spawned))
+                {
+                    seat = _replayStandIn = i;
+                    own = _replayCam == ReplayCamKind.FirstPerson && !ReplaySeatless
+                        && seat == (_replayPlayer?.File.Settings.LocalSeat ?? 0);
+                    break;
+                }
+            }
+        }
+        if (_replayStandIn != standIn) Log.Info("MPHReplay", ReplayCamText.Length > 0 ? ReplayCamText : "own view");
         PlayerEntity p = PlayerEntity.Players[seat];
         // another seat's first person goes to its own ball camera while it's morphed, like play (MphRead switches every
         // player's camera on morph), and back in the head when it unmorphs
@@ -1221,6 +1266,8 @@ internal sealed partial class CampaignRenderer
         PlayerEntity.HostHideReticle = !own && !seatEyes;
         PlayerEntity.HostMainSoundsPlaced = !own && !(_replayCam == ReplayCamKind.ThirdPerson && seat == _replayPlayer!.File.Settings.LocalSeat);
         PlayerEntity.HostHideSeat = -1;
+        // DEATH's follow cam on the watched seat's ragdoll (the main player's own view follows its own: Scene.HostView)
+        PlayerEntity.HostDeathFollowSeat = _replayCam == ReplayCamKind.Free || own ? -1 : seat;
         // T9: from another seat's eyes its own first-person gun (or arm cannon) and HUD; anywhere but the main player's
         // own eyes, the main player's body (MphRead draws only its gun in first person)
         PlayerEntity.HostFirstPersonSeat = seatEyes ? seat : -1;
@@ -1240,7 +1287,8 @@ internal sealed partial class CampaignRenderer
         {
             var facing = FreeCamFacing;
             scene.HostCameraOffset = Vector3.Zero;
-            scene.HostView = new HostView(_freeCamPos, _freeCamPos + facing, Vector3.UnitY, FovY: 0);
+            // its own field of view, never the main player's (FovY 0 would take Main's CameraInfo.Fov: an Imperialist zoom)
+            scene.HostView = new HostView(_freeCamPos, _freeCamPos + facing, Vector3.UnitY, FovY: ReplayViewFov);
             return true;
         }
         if (own)
@@ -1251,6 +1299,14 @@ internal sealed partial class CampaignRenderer
         scene.HostCameraOffset = Vector3.Zero;
         CameraInfo eye = p.CameraInfo;
         float fov = eye.Fov > 0 ? eye.Fov : 0; // the seat's own field of view (an Imperialist zoom)
+        if (p.DeathFollowed)
+        {
+            // the watched seat died as a ragdoll: the view follows the body, then MPH's free camera, as the player saw it
+            // (owner 2026-11-09), in first and third person alike
+            scene.HostView = p.DeathFollowView ?? new HostView(eye.Position, eye.Target,
+                eye.TrueUp.LengthSquared > 0.0001f ? eye.TrueUp : Vector3.UnitY, fov);
+            return true;
+        }
         if (_replayCam == ReplayCamKind.FirstPerson)
         {
             // (B3) the seat's own view exactly: its eye, target (with any shake) and up, as CameraInfo.ViewMatrix has them
@@ -1277,8 +1333,19 @@ internal sealed partial class CampaignRenderer
         var back = new Vector3(s.Facing.X, 0, s.Facing.Z);
         back = back.LengthSquared > 0.0001f ? back.Normalized() : Vector3.UnitZ;
         scene.HostView = new HostView(s.Position - back * 3 + Vector3.UnitY * 1.5f,
-            s.Position + Vector3.UnitY * 0.5f, Vector3.UnitY, FovY: 0);
+            s.Position + Vector3.UnitY * 0.5f, Vector3.UnitY, FovY: ReplayViewFov); // (outside the head: no zoom)
         return true;
+    }
+
+    const float ReplayViewFov = 78; // MPH's normal view (every hunter's NormalFov 39 x 2)
+
+    // into free cam (owner 2026-11-08: "free cam needs to be its own thing"): what the main player's seat had going stops
+    // there, as MphRead's cues for it are off in free cam (PlayerEntity.MainCuesHeard): a node's capture rings and the
+    // capture / flag-carry music go back to the room's own track. Sound only; the match state is unchanged.
+    static void EnterFreeCamSound(Scene scene)
+    {
+        MphRead.Sound.Sfx.Instance.StopFreeSfxScripts();
+        if (scene.RoomId >= 0) Music.PlayRoomMusic(scene.RoomId, track: 0);
     }
 
     // A bot's eyes (T9, owner 2026-10-10: "the angle is weird"): MPH's bots carry their aim tilted far up or down while
@@ -1330,6 +1397,7 @@ internal sealed partial class CampaignRenderer
         PlayerEntity.HostHideReticle = false;
         PlayerEntity.HostMainSoundsPlaced = false;
         PlayerEntity.HostHideSeat = -1;
+        PlayerEntity.HostDeathFollowSeat = -1;
         PlayerEntity.HostFirstPersonSeat = -1;
         PlayerEntity.HostFirstPersonTurn = Quaternion.Identity;
         PlayerEntity.HostMainSpectated = false;

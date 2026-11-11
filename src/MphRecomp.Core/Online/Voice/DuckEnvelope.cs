@@ -8,17 +8,41 @@ namespace MphRecomp.Online.Voice
     // it comes back slower than it went down. Pure: the caller gives the time, so -ducktest drives it without a clock.
     public sealed class DuckEnvelope
     {
-        public const float DuckGain = 0.3f;     // about -10 dB
+        public const float DuckGain = 0.15f;    // about -16 dB (owner 2026-10-31 "should probably be more intense"; was 0.3, -10 dB)
         public const int OnsetMs = 350;         // heard this long before the fade starts
         public const int HoldMs = 900;          // stays down this long after the last sound
         public const int AttackMs = 250;        // full gain -> DuckGain
         public const int ReleaseMs = 900;       // DuckGain -> full gain
+
+        // your own push to talk on a loudspeaker (2026-10-31, owner: "the music should also duck significantly when you
+        // yourself are pushing to talk too so players dont get your loud music"): deeper, no onset (the first word must
+        // already go out without the music), quick down, short hold, then back
+        public const float SelfDuckGain = 0.08f; // about -22 dB
+        public const int SelfHoldMs = 250;
+        public const int SelfAttackMs = 80;
+        public const int SelfReleaseMs = 600;
+
+        private readonly float _duckGain;
+        private readonly int _onsetMs, _holdMs, _attackMs, _releaseMs;
 
         private long _lastMs;
         private long _heardSince;               // 0 = not heard now
         private long _lastHeard;
         private bool _down;                     // the target is DuckGain
         private float _gain = 1;
+
+        public DuckEnvelope() : this(DuckGain, OnsetMs, HoldMs, AttackMs, ReleaseMs) { }
+
+        public DuckEnvelope(float duckGain, int onsetMs, int holdMs, int attackMs, int releaseMs)
+        {
+            _duckGain = duckGain;
+            _onsetMs = onsetMs;
+            _holdMs = holdMs;
+            _attackMs = attackMs;
+            _releaseMs = releaseMs;
+        }
+
+        public static DuckEnvelope Self() => new(SelfDuckGain, 0, SelfHoldMs, SelfAttackMs, SelfReleaseMs);
 
         public float Gain => _gain;
 
@@ -35,16 +59,16 @@ namespace MphRecomp.Online.Voice
             {
                 if (_heardSince == 0) _heardSince = nowMs;
                 _lastHeard = nowMs;
-                if (nowMs - _heardSince >= OnsetMs) _down = true;
+                if (nowMs - _heardSince >= _onsetMs) _down = true;
             }
             else
             {
                 _heardSince = 0;
-                if (_down && nowMs - _lastHeard >= HoldMs) _down = false;
+                if (_down && nowMs - _lastHeard >= _holdMs) _down = false;
             }
-            float span = 1 - DuckGain;
-            if (_down) _gain = MathF.Max(DuckGain, _gain - span * dt / AttackMs);
-            else _gain = MathF.Min(1, _gain + span * dt / ReleaseMs);
+            float span = 1 - _duckGain;
+            if (_down) _gain = MathF.Max(_duckGain, _gain - span * dt / _attackMs);
+            else _gain = MathF.Min(1, _gain + span * dt / _releaseMs);
             return _gain;
         }
     }

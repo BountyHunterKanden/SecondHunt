@@ -236,7 +236,14 @@ namespace MphRecomp.Frontend
             foreach (SectionPage sp in _settingSections) yield return sp;
         }
 
-        private SectionPage? SectionFor(int page) => SectionPages().FirstOrDefault(p => p.Page == page && page >= 0);
+        // (looked up every frame: a loop, not the iterator and LINQ, 2026-11-11)
+        private SectionPage? SectionFor(int page)
+        {
+            if (page < 0) return null;
+            if (_ctl != null && _ctl.Page == page) return _ctl;
+            foreach (SectionPage sp in _settingSections) if (sp.Page == page) return sp;
+            return null;
+        }
 
         // OPTIONS > CONTROLS (and its RECOMP SETTINGS copy) go to CONTROLS (FrontendSession's MenuEngine.Redirect), except
         // with the dev-only CLASSIC controls page
@@ -403,6 +410,44 @@ namespace MphRecomp.Frontend
                 });
                 Header("ZOOM");
                 foreach (RowModel row in ZoomLookRows(keys)) Setting(row);
+                if (!keys)
+                {
+                    // the move stick's curve (owner 2026-11-08: "subtle movements are subtle and quick movements are quick"; Input/StickCurve.cs)
+                    Header("MOVE");
+                    Setting(new RowModel
+                    {
+                        Label = "stick\ncurve",
+                        Describe = () => ControlHints.For("stickcurve." + StickCurveNow),
+                        Value = () => StickCurveNow.ToUpperInvariant(),
+                        Step = _ => _settings.StickCurve = StickCurveNow == "classic" ? "modern" : "classic",
+                        Reset = () => _settings.StickCurve = d.StickCurve,
+                        AtDefault = () => StickCurveNow == d.StickCurve
+                    });
+                }
+                else
+                {
+                    // subtle moves on a keyboard (owner 2026-11-09): the mouse rolls the ball as the DS stylus did, and the
+                    // slow move key's speed (App Campaign/KeyboardMouseInput.cs)
+                    Header("MOVE");
+                    Setting(new RowModel
+                    {
+                        Label = "mouse\nroll",
+                        Describe = () => ControlHints.For(_settings.MouseRoll ? "mouseroll.on" : "mouseroll.off"),
+                        Value = () => _settings.MouseRoll ? "ON" : "OFF",
+                        Step = _ => _settings.MouseRoll = !_settings.MouseRoll,
+                        Reset = () => _settings.MouseRoll = d.MouseRoll,
+                        AtDefault = () => _settings.MouseRoll == d.MouseRoll
+                    });
+                    Setting(new RowModel
+                    {
+                        Label = "slow move\nspeed",
+                        Describe = () => ControlHints.For($"slowmove.{SlowMoveNow}%"),
+                        Value = () => $"{SlowMoveNow}%",
+                        Step = s => { int[] all = RecompSettings.SlowMovePercents; int i = Math.Max(0, Array.IndexOf(all, SlowMoveNow)); _settings.SlowMovePercent = all[((i + s) % all.Length + all.Length) % all.Length]; },
+                        Reset = () => _settings.SlowMovePercent = d.SlowMovePercent,
+                        AtDefault = () => SlowMoveNow == d.SlowMovePercent
+                    });
+                }
                 Practice();
                 ResetAll("reset\naim", "resetaim", "reset every aim setting to default?", ResetAim, () => AimAtDefault(keys));
                 break;
@@ -411,13 +456,41 @@ namespace MphRecomp.Frontend
                 // the gyro and the touch controls (owner 2026-10-17: every control setting on CONTROLS; SettingRows has them)
                 Header(sub);
                 foreach (RowModel row in (sub == "GYRO" ? gyroLabels : touchLabels).Select(DeviceRow).OfType<RowModel>()) Setting(row);
+                if (sub == "GYRO")
+                {
+                    // (finRatman via owner 11-07) a button that holds, pauses or toggles gyro aim; its button on the row below
+                    Header("GYRO BUTTON");
+                    Setting(new RowModel
+                    {
+                        Label = "gyro\nbutton",
+                        Describe = () => ControlHints.For("gyrobutton." + _settings.GyroButton),
+                        Value = () => _settings.GyroButton switch
+                        {
+                            "hold" => "HOLD TO AIM",
+                            "pause" => "HOLD TO PAUSE",
+                            "toggle" => "TOGGLE",
+                            _ => "ALWAYS ON",
+                        },
+                        Step = s =>
+                        {
+                            string[] modes = RecompSettings.GyroButtons;
+                            int i = Math.Max(0, Array.IndexOf(modes, _settings.GyroButton));
+                            _settings.GyroButton = modes[((i + s) % modes.Length + modes.Length) % modes.Length];
+                        },
+                        Reset = () => _settings.GyroButton = DefaultSettings.GyroButton,
+                        AtDefault = () => _settings.GyroButton == DefaultSettings.GyroButton
+                    });
+                    Binds(ControlBinds.Functions(false).Where(f => f.Id == ControlBinds.Gyro));
+                }
                 Practice();
                 if (sub == "GYRO") ResetAll("reset\ngyro", "resetgyro", "reset every gyro setting to default?\n\ngyro aim stays as it is.", ResetGyro, GyroAtDefault);
                 else ResetAll("reset\ntouch", "resettouch", "reset every touch setting to default?", ResetTouch, TouchAtDefault);
                 break;
             default:
                 {
-                    ControlBinds.Function[] all = ControlBinds.Functions(keys);
+                    // (the spider ball is wave 2: no row in public builds, owner 2026-11-07)
+                    ControlBinds.Function[] all = ControlBinds.Functions(keys)
+                        .Where(f => f.Id != ControlBinds.Spider || !RecompSettings.PublicBuild).ToArray();
                     Header(keys ? "KEYS AND MOUSE BUTTONS" : "CONTROLLER BUTTONS");
                     // a PC pad's face buttons by letter or by position (thread D 10-24, D6c: DesktopInput reads it)
                     if (!keys && RecompSettings.DesktopHost)
@@ -437,7 +510,7 @@ namespace MphRecomp.Frontend
                             AtDefault = () => _settings.PadLayout == d.PadLayout
                         });
                     }
-                    Binds(all.Where(f => f.Group != ControlBinds.Drone && !(keys && ControlBinds.IsWeapon(f.Id))));
+                    Binds(all.Where(f => f.Group != ControlBinds.Drone && f.Id != ControlBinds.Gyro && !(keys && ControlBinds.IsWeapon(f.Id))));
                     if (keys)
                     {
                         // (owner 2026-10-15: a key for each weapon; C9: the keyboard only)
@@ -478,7 +551,7 @@ namespace MphRecomp.Frontend
         private void ResetButtons(bool keys)
         {
             RecompSettings d = DefaultSettings;
-            ControlBinds.Reset(_settings, keys);
+            ControlBinds.Reset(_settings, keys, ControlBinds.Gyro); // (the GYRO button is GYRO's)
             _settings.ChatToggle = d.ChatToggle;
             _settings.DroneDialsSwapped = d.DroneDialsSwapped;
             if (!keys && RecompSettings.DesktopHost) _settings.PadLayout = d.PadLayout;
@@ -486,29 +559,31 @@ namespace MphRecomp.Frontend
         private bool ButtonsAtDefault(bool keys)
         {
             RecompSettings d = DefaultSettings;
-            return ControlBinds.IsDefault(_settings, keys) && _settings.ChatToggle == d.ChatToggle && _settings.DroneDialsSwapped == d.DroneDialsSwapped
+            return ControlBinds.IsDefault(_settings, keys, ControlBinds.Gyro) && _settings.ChatToggle == d.ChatToggle && _settings.DroneDialsSwapped == d.DroneDialsSwapped
                 && (keys || !RecompSettings.DesktopHost || _settings.PadLayout == d.PadLayout);
         }
         private void ResetAim()
         {
             RecompSettings d = DefaultSettings, s = _settings;
-            if (_controlsKeys) (s.MouseSens, s.ZoomMouseSens, s.MouseInvertY, s.MouseInvertX, s.MousePitchPercent) = (d.MouseSens, d.ZoomMouseSens, d.MouseInvertY, d.MouseInvertX, d.MousePitchPercent);
-            else (s.GameSensitivity, s.ZoomSensitivity, s.GameLookInvert, s.GameLookInvertX, s.AimPitchPercent) = (d.GameSensitivity, d.ZoomSensitivity, d.GameLookInvert, d.GameLookInvertX, d.AimPitchPercent);
+            if (_controlsKeys) (s.MouseSens, s.ZoomMouseSens, s.MouseInvertY, s.MouseInvertX, s.MousePitchPercent, s.MouseRoll, s.SlowMovePercent) = (d.MouseSens, d.ZoomMouseSens, d.MouseInvertY, d.MouseInvertX, d.MousePitchPercent, d.MouseRoll, d.SlowMovePercent);
+            else (s.GameSensitivity, s.ZoomSensitivity, s.GameLookInvert, s.GameLookInvertX, s.AimPitchPercent, s.StickCurve) = (d.GameSensitivity, d.ZoomSensitivity, d.GameLookInvert, d.GameLookInvertX, d.AimPitchPercent, d.StickCurve);
             (s.ZoomSensPaired, s.ZoomStep, s.ZoomReadyIcon) = (d.ZoomSensPaired, d.ZoomStep, d.ZoomReadyIcon);
         }
         private bool AimAtDefault(bool keys)
         {
             RecompSettings d = DefaultSettings, s = _settings;
             bool own = keys ? s.MouseSens == d.MouseSens && s.ZoomMouseSens == d.ZoomMouseSens && s.MouseInvertY == d.MouseInvertY && s.MouseInvertX == d.MouseInvertX
-                    && s.MousePitchPercent == d.MousePitchPercent
+                    && s.MousePitchPercent == d.MousePitchPercent && s.MouseRoll == d.MouseRoll && SlowMoveNow == d.SlowMovePercent
                 : s.GameSensitivity == d.GameSensitivity && s.ZoomSensitivity == d.ZoomSensitivity && s.GameLookInvert == d.GameLookInvert
-                    && s.GameLookInvertX == d.GameLookInvertX && s.AimPitchPercent == d.AimPitchPercent;
+                    && s.GameLookInvertX == d.GameLookInvertX && s.AimPitchPercent == d.AimPitchPercent && StickCurveNow == d.StickCurve;
             return own && s.ZoomSensPaired == d.ZoomSensPaired && s.ZoomStep == d.ZoomStep && s.ZoomReadyIcon == d.ZoomReadyIcon;
         }
         // the AIM tab's look invert: the mouse's (KEYBOARD & MOUSE) or the controller's
         private bool LookInvertY(bool keys) => keys ? _settings.MouseInvertY : _settings.GameLookInvert;
         private bool LookInvertX(bool keys) => keys ? _settings.MouseInvertX : _settings.GameLookInvertX;
         private int AimYPercent(bool keys) => keys ? _settings.MousePitchPercent : _settings.AimPitchPercent;
+        private string StickCurveNow => _settings.StickCurve == "classic" ? "classic" : "modern"; // (an unknown stored value plays as modern)
+        private int SlowMoveNow => Array.IndexOf(RecompSettings.SlowMovePercents, _settings.SlowMovePercent) >= 0 ? _settings.SlowMovePercent : 40; // (a hand-edited value plays as 40%)
 
         // the gyro axis row's setting: a controller has its own (PadGyroAxis, "player" by default): always on a PC,
         // on Android while a controller with a gyro is connected (MphRead.Android CampaignGyro.cs PadGyros)
@@ -531,6 +606,8 @@ namespace MphRecomp.Frontend
                 (d.GyroSensitivity, d.GyroAxis, d.PadGyroAxis, d.GyroPitchSensitivity, d.GyroInvertPitch, d.GyroInvertYaw);
             (s.GyroDeadband, s.GyroSmoothing, s.GyroAccel) = (d.GyroDeadband, d.GyroSmoothing, d.GyroAccel);
             (s.GyroZoomPaired, s.GyroZoomSensitivity) = (d.GyroZoomPaired, d.GyroZoomSensitivity);
+            s.GyroButton = d.GyroButton;
+            ControlBinds.ResetOne(s, false, ControlBinds.Gyro);
         }
         private bool GyroAtDefault()
         {
@@ -539,7 +616,8 @@ namespace MphRecomp.Frontend
                 && s.GyroPitchSensitivity == d.GyroPitchSensitivity
                 && s.GyroInvertPitch == d.GyroInvertPitch && s.GyroInvertYaw == d.GyroInvertYaw
                 && s.GyroDeadband == d.GyroDeadband && s.GyroSmoothing == d.GyroSmoothing
-                && s.GyroAccel == d.GyroAccel && s.GyroZoomPaired == d.GyroZoomPaired && s.GyroZoomSensitivity == d.GyroZoomSensitivity;
+                && s.GyroAccel == d.GyroAccel && s.GyroZoomPaired == d.GyroZoomPaired && s.GyroZoomSensitivity == d.GyroZoomSensitivity
+                && s.GyroButton == d.GyroButton && ControlBinds.IsDefaultOne(s, false, ControlBinds.Gyro);
         }
         private void ResetTouch()
         {
@@ -1250,9 +1328,9 @@ namespace MphRecomp.Frontend
                             if (on)
                             {
                                 Fill(SecC0X0 + 2.6f, top - 2.6f, bx1 - 2.6f, bottom + 2.6f, FrameOrange.R, FrameOrange.G, FrameOrange.B, 1, tag);
-                                Picture(ImportCardPictures.Lock, bx1 + 3, top + 0.5f, SecH + 1, off: false, tag);
+                                if (!row.NoLock) Picture(ImportCardPictures.Lock, bx1 + 3, top + 0.5f, SecH + 1, off: false, tag);
                             }
-                            TextS(on ? "on" : "off", bx1 + (on ? SecH + 7 : 4), textTop, 0, White, tag, SizeM);
+                            TextS(on ? "on" : "off", bx1 + (on && !row.NoLock ? SecH + 7 : 4), textTop, 0, White, tag, SizeM);
                         }
                         else
                         {

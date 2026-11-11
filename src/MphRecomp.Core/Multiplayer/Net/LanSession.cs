@@ -31,7 +31,7 @@ namespace MphRecomp.Multiplayer.Net
     {
         public const int GamePort = 47770;
         public const int BeaconPort = 47771;
-        private const byte Protocol = 24; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
+        private const byte Protocol = 25; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
                                          // 5: JOIN carries the game logic version (Replay ReplayFile.CurrentSimVersion);
                                          // 6: JOIN and the players carry the Hunter License rank level;
                                          // 7: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
@@ -63,6 +63,9 @@ namespace MphRecomp.Multiplayer.Net
                                          // 23: JOIN and the players carry the seat's colour pick after the look
                                          //     (MatchPlayer.ColourPick, sbyte, -1 = auto; LookAlikes.CopyIndices)
                                          // 24: LOOK, a joiner's colour pick changed in the lobby (sbyte; SendLook)
+                                         // 25: inputs carry the move stick's push (NetInput.MovePush, the move byte's
+                                         //     top 4 bits; PlayerStickPush.cs) and its direction (NetInput.MoveDir, the
+                                         //     touch byte's top 7 bits)
         private const byte MsgBeacon = 1, MsgJoin = 2, MsgWelcome = 3, MsgRefuse = 4, MsgInput = 5, MsgSnapshot = 6, MsgBye = 7,
             MsgStart = 8, MsgLobby = 9, MsgLook = 10;
         // SNAPSHOT: type, the joiner's input ack (u16), frames held on it (u8), then the snapshot (protocol 17)

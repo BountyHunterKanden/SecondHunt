@@ -17,7 +17,7 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Arenas
 {
-    // Mining Plaza's two collapsing pillars (owner 2026-10-31: "collapse to missiles/Screw Attack
+    // Mining Plaza's two collapsing pillars (thread 3d373d stage 2, owner 2026-10-31: "collapse to missiles/Screw Attack
     // like in Echoes and STAY collapsed for the match"). Each is Echoes' own: the column platform (PLAT 'Pillar', its DCLN)
     // with its top, middle and bottom chunks, the stone cover by its foot, and the rubble it lands in (DCLN). Echoes' fall,
     // read from the room's timers and relays and the platform's waypoint (MiningPlaza.Pillars), on one timeline from the

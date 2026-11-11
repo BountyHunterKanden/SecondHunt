@@ -5,7 +5,8 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.App;
 
-// Pickups, jump pads and flags behind the arena's walls aren't drawn (Mining Plaza frame dips, 2026-11-01). MPH's own rooms hide them through their room node's visibility (EntityBase.IsVisible); an imported Echoes
+// Pickups, jump pads and flags behind the arena's walls aren't drawn (Mining Plaza frame dips, Call 3, 2026-11-01).
+// MPH's own rooms hide them through their room node's visibility (EntityBase.IsVisible); an imported Echoes
 // arena has no MPH nodes, so after the frustum cull (CampaignRenderer.PickupCull.cs) Mining Plaza still drew ~250 pickup
 // items a frame (Combat Hall: ~7). Each frame, right after the arena's opaque depth (DrawArena pass 0), one invisible
 // padded box per entity is drawn in a GPU occlusion query; a later frame reads the result without waiting. An entity

@@ -20,7 +20,9 @@ internal static class Program
 #if MPH_PUBLIC
         options.Launch = null; // a public build starts at the menus only (the launch shortcuts are for dev builds)
 #endif
-        DesktopPaths.Init(options.Data);
+        System.Windows.Forms.Application.EnableVisualStyles(); // (the first start's data folder question: a task dialog)
+        // a fresh install asks where its files go; a test run or replay prepare never does
+        DesktopPaths.Init(options.Data, ask: !options.Background && !args.Contains("--replayprep"));
         // --replayprep <replay> --sidecar <file>: this app as a replay's keyframe prepare, started by the game itself at a
         // low priority (ReplayPrepHost; thread B fast seeking): no window, its own log, gone when done
         int prep = Array.IndexOf(args, "--replayprep"), side = Array.IndexOf(args, "--sidecar");
@@ -36,6 +38,10 @@ internal static class Program
         RecompSettings.DesktopHost = true;
         MphRecomp.Frontend.RecompMenus.PadConnected = () => DesktopInput.PadSeen;
         MphRecomp.Frontend.RecompMenus.PadGyro = () => DesktopInput.PadGyroSeen;
+        // SETTINGS > APP > FILES (GitHub #12): AppData or the game folder; a move happens at the next start
+        MphRecomp.Frontend.RecompMenus.DataFolderPlace = () => DesktopPaths.Place;
+        MphRecomp.Frontend.RecompMenus.DataFolderAsk = DesktopPaths.MoveQuestion;
+        MphRecomp.Frontend.RecompMenus.DataFolderMove = DesktopPaths.RequestMove;
         RecompSettings.AppId = BuildFlags.AppName;
         // RECOMP SETTINGS > UPDATES (Core Update/): this build's version and its installer; a dev build reads a test
         // server's base URL from update_feed.txt in its data folder
@@ -56,16 +62,23 @@ internal static class Program
         };
         // this app draws and plays everything itself: MphRead's own window, sound device and OpenAL stay closed
         MphRead.Scene.Headless = true;
+        foreach (string note in DesktopPaths.Notes) Log.Info("MPHDesktop", note);
         Log.Info("MPHDesktop", $"data folder: {DesktopPaths.Root}");
+        if (DesktopPaths.MoveResult is string moved && !options.Background)
+        {
+            System.Windows.Forms.MessageBox.Show(moved, BuildFlags.AppName, System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Information);
+        }
         try
         {
-            DesktopPlatform.Install();
+            DesktopPlatform.Install(options.Sound);
             using (var app = new DesktopApp(options))
             {
                 DesktopImport.Install(app.Defer); // IMPORT GAMES' file dialog (between frames, on this STA thread)
                 app.Run();
             }
             DesktopPlatform.Shutdown();
+            if (DesktopPaths.RestartPending) Restart(args);
             return 0;
         }
         catch (Exception ex)
@@ -77,6 +90,31 @@ internal static class Program
                 + (report != null ? $"A crash report was saved to\n{report}" : "No crash report could be saved."),
                 BuildFlags.AppName, System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
             return 1;
+        }
+    }
+
+    // after SETTINGS > APP > FILES: this exe again, which waits for this process (DesktopUpdater.AfterUpdate) and then moves
+    // the data folder; if it can't start, the move happens whenever the game is opened next
+    private static void Restart(string[] args)
+    {
+        try
+        {
+            // out of the data folder first: the new process inherits a handle to this one's current folder, and a folder
+            // that's open can't be moved (11-09: "access is denied" moving PORTABLE -> APPDATA)
+            Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+            var start = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "SecondHunt.exe"))
+            {
+                UseShellExecute = false,
+                WorkingDirectory = AppContext.BaseDirectory
+            };
+            foreach (string a in args) start.ArgumentList.Add(a);
+            start.ArgumentList.Add(DesktopUpdater.AfterUpdateArg);
+            start.ArgumentList.Add(Environment.ProcessId.ToString());
+            System.Diagnostics.Process.Start(start);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
+        {
+            Log.Warn("MPHDesktop", "restart for the data move failed: " + ex.Message);
         }
     }
 

@@ -351,6 +351,7 @@ namespace MphRead.Entities
             _scanningEntity.OnScanned();
             int scanId = _scanningEntity.GetScanId();
             int altScanId = _scanningEntity.GetScanId(alternate: true);
+            if (GameEvents.Any) GameEvents.Raise("scan", SlotIndex, scanId, _scanningEntity.Type.ToString()); // recomp: mod event (GameEvents.cs)
             GameState.StorySave.UpdateLogbook(scanId);
             if (altScanId != scanId)
             {

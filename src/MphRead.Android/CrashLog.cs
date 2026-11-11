@@ -182,7 +182,29 @@ public static class CrashLog
         var sb = new StringBuilder();
         sb.AppendLine($"MPH Recomp log, {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz} (shared by the player, no crash)");
         sb.Append(_header);
-        sb.AppendLine().AppendLine("--- last log lines (this process only) ---").AppendLine(LastLogLines(LogLines));
+        // the whole run from the app's log file (11-04: logcat's shared buffer had dropped the start of a match by the
+        // time SHARE LOG was tapped); logcat's last lines when there's no file
+        string? whole = AndroidFileLog.ReadAll();
+        if (whole != null)
+        {
+            // the run before too (11-06): players often restart after a bad match and share from the new run. It goes
+            // first so the file reads in order, and ForIntent's cut takes its middle before this run's lines
+            string? previous = AndroidFileLog.ReadPrevious(PreviousRunMax);
+            if (previous != null)
+            {
+                sb.AppendLine().AppendLine("--- the run before this one (" + AndroidFileLog.PreviousPath + ") ---").AppendLine(previous);
+            }
+            string? service = AndroidFileLog.ReadService(ServiceLogMax);
+            if (service != null)
+            {
+                sb.AppendLine().AppendLine("--- replay keyframe service, its latest run (" + AndroidFileLog.ServicePath + ") ---").AppendLine(service);
+            }
+            sb.AppendLine().AppendLine("--- this run's log (" + AndroidFileLog.Path + ") ---").AppendLine(whole);
+        }
+        else
+        {
+            sb.AppendLine().AppendLine("--- last log lines (this process only) ---").AppendLine(LastLogLines(LogLines));
+        }
         string text = sb.ToString();
         if (_dir != null)
         {
@@ -197,7 +219,9 @@ public static class CrashLog
     }
 
     // (a whole match's network lines, a few hundred KB: too big for a share intent's text, see ForIntent)
-    const int LogLines = 3000;
+    const int LogLines = 3000; // (logcat fallback only)
+    const int ServiceLogMax = 1_000_000;
+    const int PreviousRunMax = 8_000_000; // chars of the run before (a long session's whole log is a few MB at most)
 
     static void Write(Exception? ex, string kind)
     {
@@ -212,7 +236,8 @@ public static class CrashLog
             sb.AppendLine($"kind: {kind}; thread: {Thread.CurrentThread.Name ?? "(unnamed)"} #{Environment.CurrentManagedThreadId}");
             sb.Append(_header);
             sb.AppendLine().AppendLine(ex.ToString());
-            sb.AppendLine().AppendLine("--- last log lines (this process only) ---").AppendLine(LastLogLines(400));
+            string? tail = AndroidFileLog.ReadAll(200_000); // (the log file's last ~200 KB; logcat's when there's no file)
+            sb.AppendLine().AppendLine("--- last log lines (this process only) ---").AppendLine(tail ?? LastLogLines(400));
             string path = Path.Combine(_dir, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
             File.WriteAllText(path, sb.ToString());
             Android.Util.Log.Error(Tag, "crash report written: " + path);

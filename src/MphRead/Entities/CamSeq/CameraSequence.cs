@@ -261,8 +261,27 @@ namespace MphRead.Formats
             }
         }
 
+        // recomp: a story bot's intro AI node keeps it invulnerable until its camseq's SetCamSeqAi keyframe arrives
+        // (Kanden in Data Shrine 3); a camseq ended or refused before that keyframe left the bot invulnerable for good,
+        // so its owed starts are handed to the bot, which takes them once no camseq is playing (PlayerAi.Process)
+        public void OweCamSeqAi(int fromIndex = 0)
+        {
+            for (int i = fromIndex; i < Keyframes.Count; i++)
+            {
+                CameraSequenceKeyframe frame = Keyframes[i];
+                if ((Message)frame.MessageId == Message.SetCamSeqAi && frame.MessageTarget is PlayerEntity player && player.IsBot)
+                {
+                    player.CamSeqAiOwed = true;
+                }
+            }
+        }
+
         public void End()
         {
+            if (Current == this && !Flags.TestFlag(CamSeqFlags.Complete))
+            {
+                OweCamSeqAi(_keyframeIndex); // recomp
+            }
             Flags |= CamSeqFlags.CanEnd;
             Flags |= CamSeqFlags.Complete;
             _keyframeElapsed = 0;

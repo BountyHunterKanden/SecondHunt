@@ -267,6 +267,9 @@ namespace MphRecomp.Multiplayer
                 // two-tone copies (owner 10-12, sheet_looks_v6): a body colour over the armour by brightness, the lights
                 // in their own colour
                 var (a, b) = dark ? DarkCopy[n] : TrooperCopy[n];
+                // (troopers: his near-black armour kept, the colour only where his own is, the bright plates and lights,
+                // as on a real body; owner 2026-11-06)
+                if (!dark) return s with { Highlight = Scale(a, 0.97f), Glow = b, Lift = b };
                 return s with { Shadow = Lerp(Scale(a, 0.08f), (0.04f, 0.04f, 0.04f), 0.4f), Armour = Scale(a, 0.44f),
                     Highlight = Scale(a, 0.97f), Glow = b, Lift = b, Gamma = 0.9f };
             }
@@ -307,21 +310,45 @@ namespace MphRecomp.Multiplayer
             ((0.70f, 1f, 0.10f), (0.70f, 1f, 0.10f)),     // 7 lime
             ((1f, 0.70f, 0.0f), (1f, 0.70f, 0.0f)),       // 8 gold (was bronze: dull; 0.62 read orange, 0.80 read as Power, owner 2026-10-29)
         };
+        // Dark Samus copies: her lights sit a neighbouring hue from the body and much brighter (vanilla navy 220 -> cyan 198), so
+        // each copy's lights are derived the same way (Accent) instead of a contrasting colour (owner 2026-11-06: too
+        // high-contrast). White has no hue and keeps red.
         static readonly ((float R, float G, float B), (float R, float G, float B))[] DarkCopy =
         {
             default, default,
-            ((0.55f, 0.20f, 1f), (1f, 0.90f, 0.20f)),     // 2 violet, yellow lights
-            ((0.15f, 0.90f, 0.20f), (1f, 1f, 1f)),        // 3 green, white
-            ((1f, 0.12f, 0.10f), (0.45f, 0.85f, 1f)),     // 4 crimson, her cyan
+            Dark((0.55f, 0.20f, 1f)),                     // 2 violet
+            Dark((0.15f, 0.90f, 0.20f)),                  // 3 green
+            Dark((1f, 0.12f, 0.10f)),                     // 4 crimson
             ((0.90f, 0.92f, 0.95f), (1f, 0.15f, 0.10f)),  // 5 white, red
-            ((0.15f, 0.35f, 1f), (1f, 0.90f, 0.20f)),     // 6 royal blue, yellow (was yellow-gold: too close to 5's white, owner 2026-10-29)
-            ((1f, 0.40f, 0.02f), (0.30f, 1f, 0.20f)),     // 7 orange, green
-            ((1f, 0.45f, 0.85f), (1f, 1f, 1f)),           // 8 light pink, white
+            Dark((0.02f, 0.70f, 0.75f)),                  // 6 teal (was royal blue: too close to her own navy, owner 2026-11-06)
+            Dark((1f, 0.40f, 0.02f)),                     // 7 orange
+            Dark((1f, 0.45f, 0.85f)),                     // 8 light pink
         };
+
+        static ((float R, float G, float B), (float R, float G, float B)) Dark((float R, float G, float B) c) => (c, Accent(c));
+
+        // the lights colour for a body colour: 22 degrees round the wheel (whichever side reads brighter), saturation 0.75 at full value
+        static (float R, float G, float B) Accent((float R, float G, float B) c)
+        {
+            float mx = MathF.Max(c.R, MathF.Max(c.G, c.B)), mn = MathF.Min(c.R, MathF.Min(c.G, c.B));
+            float h = c.R == mx ? (c.G - c.B) / (mx - mn) : c.G == mx ? 2f + (c.B - c.R) / (mx - mn) : 4f + (c.R - c.G) / (mx - mn);
+            h = (h * 60f + 360f) % 360f;
+            var a = Hsv(h - 22f); var b = Hsv(h + 22f);
+            return 0.3f * a.R + 0.59f * a.G + 0.11f * a.B >= 0.3f * b.R + 0.59f * b.G + 0.11f * b.B ? a : b;
+            static (float R, float G, float B) Hsv(float hh)
+            {
+                hh = (hh + 360f) % 360f / 60f; float m = 0.25f, x = m + 0.75f * (1f - MathF.Abs(hh % 2f - 1f));
+                return (int)hh switch { 0 => (1f, x, m), 1 => (x, 1f, m), 2 => (m, 1f, x), 3 => (m, x, 1f), 4 => (x, m, 1f), _ => (1f, m, x) };
+            }
+        }
 
         // a copy's lights colour on a real body (GxShader uTint2 with w 9+k), zero otherwise
         public static (float R, float G, float B) BodyLight(bool darkSamus, Variant v) =>
-            Copy(v) is int n ? (darkSamus ? DarkCopy[n] : TrooperCopy[n]).Item2 : (0f, 0f, 0f);
+            Copy(v) is int n ? darkSamus ? Scale(DarkCopy[n].Item2, DarkLightBoost[n]) : TrooperCopy[n].Item2 : (0f, 0f, 0f);
+
+        // her flowing lights on a real body a little brighter where the derived colour reads dim: violet, green, pink
+        // (owner 2026-11-06); over 1 is fine, GxShader clamps the lit colour
+        static readonly float[] DarkLightBoost = { 1f, 1f, 1.3f, 1.3f, 1f, 1f, 1f, 1f, 1.3f };
 
         // the same variants on a REAL (imported) body, as a draw tint (GxShader uTint): w 3+k pulls the whole colour toward
         // the team's by its brightness (7+k: its bright parts lit well above the rest), w 9+k the copies' two tones (uTint2 =

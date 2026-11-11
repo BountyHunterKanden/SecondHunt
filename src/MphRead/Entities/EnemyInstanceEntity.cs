@@ -78,6 +78,10 @@ namespace MphRead.Entities
             Metadata.LoadEffectiveness(_data.Type, BeamEffectiveness);
             Flags = EnemyFlags.CollidePlayer | EnemyFlags.CollideBeam;
             EnemyInitialize();
+            if (GameFilters.EnemySpawn) // mph-recomp: gameplay mods' enemy_spawn filter (GameFilters.cs)
+            {
+                _health = _healthMax = GameFilters.EnemySpawnHealth(_data.Type.ToString(), _scene.RoomId, _health);
+            }
             // the game sets parent collision transform here, but enemies that need it (e.g. spawner, Cretaphid)
             // handle it themselves by just checking the parent spawner's ent col fields
             _prevPos = Position;
@@ -373,6 +377,11 @@ namespace MphRead.Entities
             {
                 return;
             }
+            if (GameFilters.EnemyDamage) // mph-recomp: gameplay mods' enemy_damage filter (GameFilters.cs)
+            {
+                EntityBase? by = source is BeamProjectileEntity shot ? shot.Owner : source;
+                damage = GameFilters.EnemyHit(EnemyType.ToString(), (by as PlayerEntity)?.SlotIndex ?? -1, damage);
+            }
             ushort prevHealth = _health;
             Effectiveness effectiveness = Effectiveness.Normal;
             BeamProjectileEntity? beamSource = null;
@@ -457,6 +466,7 @@ namespace MphRead.Entities
                     {
                         GameState.StorySave.Stats.EnemyKills++;
                     }
+                    if (GameEvents.Any) GameEvents.Raise("enemy_killed", _data.Type.ToString(), Id, (beamSource?.Owner as PlayerEntity)?.SlotIndex ?? -1); // recomp: mod event (GameEvents.cs)
                     if (_data.Type == EnemyType.Temroid) // condition is not strictly necessary
                     {
                         Detach();

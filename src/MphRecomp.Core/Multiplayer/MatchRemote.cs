@@ -38,8 +38,10 @@ namespace MphRecomp.Campaign
                 RemoteView[seat] = input.ViewTick; // (the hit claims' check: Net/HitClaims.cs; as sent, before the cap)
             }
             SetControls(p.Controls, input.MoveX, input.MoveY, input.Buttons, input.SelectWeapon);
+            MphRecomp.Input.StickCurve.ToPlayer(p, input.MovePush, input.MoveDir); // a part stick push, any direction (PlayerStickPush.cs)
             p.HostZoomButtons((input.Buttons & CampaignButtons.ZoomStep) != 0, (input.Buttons & CampaignButtons.ZoomIn) != 0,
                 (input.Buttons & CampaignButtons.ZoomOut) != 0); // ZOOM STEP (CampaignHost.CampaignButtons)
+            p.HostSpiderButton = (input.Buttons & CampaignButtons.Spider) != 0; // SPIDER BALL (docs/SPIDER_BALL.md)
             // T11: the touch controls' stylus (PlayerTouch.cs: touch roll, flick boost, double-tap jump)
             p.HostTouchDown = input.Touching;
             p.HostTouchDx = input.TouchDx;
@@ -86,6 +88,8 @@ namespace MphRecomp.Campaign
             PlayerEntity p = PlayerEntity.Players[seat];
             p.LoadFlags &= ~LoadFlags.Connected;
             p.HostTouchDown = false;
+            p.HostMovePush = 1;
+            p.HostMoveAnalog = false;
             SetControls(p.Controls, 0, 0, CampaignButtons.None, BeamType.None);
         }
 

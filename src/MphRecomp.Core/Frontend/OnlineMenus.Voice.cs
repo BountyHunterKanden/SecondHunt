@@ -176,9 +176,10 @@ namespace MphRecomp.Frontend
             if (_lbTalk >= 0 && LobbyTalkShown())
             {
                 bool held = voice.PushToTalkHeld;
+                bool noMic = held && !voice.MicOpen && voice.CaptureError != null; // (held but nothing goes out: say so)
                 Bar(Mx(LbTalkX0), My(LbTalkY), Mx(LbTalkX1), My(LbTalkY + LbTalkH), _lbTalk, glows);
-                TextS(held ? "talking: tap to stop" : "tap to talk", Mx((LbTalkX0 + LbTalkX1) / 2), My(LbTalkY + 21), 2,
-                    held ? Green : Orange, _lbTalk, SizeX);
+                TextS(noMic ? "no microphone" : held ? "talking: tap to stop" : "tap to talk", Mx((LbTalkX0 + LbTalkX1) / 2), My(LbTalkY + 21), 2,
+                    noMic ? Red : held ? Green : Orange, _lbTalk, SizeX);
             }
         }
 

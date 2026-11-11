@@ -15,10 +15,11 @@ namespace MphRecomp.Campaign
     {
         public const float PickRadius = 0.5f; // how far the stick leans to point at a slot (SetWheelPointer's 0.25 squared)
         public const float RestRadius = 0.2f; // how close to the middle counts as back at rest (stick aim comes back)
-        // with a weapon that zooms equipped (the Imperialist) the button has to be held this many sim steps (0.25 s; 10
-        // was "a touch" short, owner 2026-10-09) before the ring opens; a shorter press is a tap = zoom, so zoom and ring
-        // share L2 (owner 2026-10-09). With any other weapon the ring opens on the press
-        public const int HoldFrames = 15;
+        // with a weapon that zooms equipped (the Imperialist) the button has to be held this many sim steps (0.2 s; 10
+        // was "a touch" short, owner 2026-10-09; 15 a little too long, owner 2026-11-06) before the ring opens; a
+        // shorter press is a tap = zoom, so zoom and ring share L2 (owner 2026-10-09). With any other weapon, or with
+        // zoom on a button of its own, the ring opens on the press (Hold's tapZooms)
+        public const int HoldFrames = 12;
         private int _sector = -1; // the slot picked since the ring opened, -1 none yet
         private bool _open;
         private int _heldFrames;
@@ -33,14 +34,18 @@ namespace MphRecomp.Campaign
 
         // one sim step of the button itself (before Step): true while the ring is open (held HoldFrames or longer).
         // `zoom` is true on the step a tap is let go with a weapon that zooms equipped: send CampaignButtons.Zoom for that
-        // one step (MphRead toggles the zoom on its press)
-        public bool Hold(bool held, PlayerEntity player, out bool zoom)
+        // one step (MphRead toggles the zoom on its press). `tapZooms` = this press shares its button with zoom (the
+        // binds put both on it); false = zoom has a button of its own, so there's no tap to wait for and the ring opens
+        // at once (owner 2026-11-02: no ring delay in any control scheme when the two are on different buttons)
+        public bool Hold(bool held, PlayerEntity player, out bool zoom, bool tapZooms = true)
         {
             zoom = false;
-            bool canZoom = player.EquipInfo.Weapon != null && (player.EquipInfo.Weapon.Flags & MphRead.WeaponFlags.CanZoom) != 0;
+            bool canZoom = tapZooms && player.EquipInfo.Weapon != null
+                && (player.EquipInfo.Weapon.Flags & MphRead.WeaponFlags.CanZoom) != 0;
             if (held)
             {
-                // without a weapon that zooms there's nothing to tap for: the ring opens at once (owner 2026-10-09)
+                // without a weapon that zooms (or a tap that zooms) there's nothing to wait for: the ring opens at once
+                // (owner 2026-10-09)
                 if (!canZoom)
                 {
                     _heldFrames = HoldFrames;

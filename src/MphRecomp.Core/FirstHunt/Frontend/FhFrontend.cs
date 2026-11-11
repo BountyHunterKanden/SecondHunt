@@ -204,6 +204,9 @@ namespace MphRecomp.FirstHunt
             _result = result;
             _match = match;
             _matchRecorded = false;
+            // (the app stops the music for a movie between Starts -- the opening, PLAY MOVIE -- so the page's theme starts
+            // again rather than being taken as still playing)
+            _music = -1;
             Open(match != null ? FhMenuData.MultiHiScore : result != null ? FhMenuData.TrainingHiScore : FhMenuData.Title);
         }
 

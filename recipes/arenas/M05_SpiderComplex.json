@@ -3,6 +3,10 @@
   "discId": "G2ME01",
   "pak": "Metroid6.pak",
   "pakSha1": "b8b92af37dc772ecd8234fb1ce664be0493188f6",
+  "audioPak": "AudioGrp.pak",
+  "audioPakSha1": "8d0282eec11ea74288772bd4b7ee795ca913bab1",
+  "spiderFxPak": "TestAnim.pak",
+  "spiderFxPakSha1": "e258890ddd904ce38a0680e2e02795775851914d",
   "scale": 0.5925926,
   "crates": [
     "ShockCoil",

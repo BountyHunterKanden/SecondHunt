@@ -63,6 +63,9 @@ namespace MphRead.Entities
         public int HostLookRecolor { get; set; } = -1;
         // recomp: the seat's picked character's name (D7: TROOPER, DARK SAMUS) for the target health bar; null = the hunter's
         public string? HostCharacterName { get; set; }
+        // recomp: the seat's picked character's portrait (a custom character's face in its hunter's frame, HudPortraits) for
+        // the target health bar and scoreboard; null = the hunter's
+        public Scene.HostHudSprite? HostPortrait { get; set; }
         // recomp: world positions of these body nodes in the pose just drawn (HostTrackedPoints, in order; HostTrackedPoses
         // counts the poses), e.g. a look-alike's glows on its shoulders. Null = none (default).
         public string[]? HostTrackNodes { get; set; }
@@ -130,7 +133,9 @@ namespace MphRead.Entities
                 HostMainBipedAlpha = 0;
             }
             HostBipedAlpha = 0;
-            if (IsMainPlayer && HostHideMainPlayer || SlotIndex == HostHideSeat)
+            // recomp: the turret's occupant isn't drawn (PlayerEchoesSeat.cs): the MPH body poked through the turret's head
+            // as it turned, and Echoes shows only the closed turret from outside
+            if (IsMainPlayer && HostHideMainPlayer || SlotIndex == HostHideSeat || HostSeated)
             {
                 // recomp: a hidden seat's charge glow / muzzle flash off too (else they stay where it was last drawn)
                 _chargeEffect?.SetDrawEnabled(false);
@@ -142,7 +147,7 @@ namespace MphRead.Entities
             {
                 DrawScanModels();
             }
-            if (Flags2.TestFlag(PlayerFlags2.HideModel))
+            if (Flags2.TestFlag(PlayerFlags2.HideModel) && !KeptWhileDead) // recomp: (PlayerDeathAnim.cs)
             {
                 return;
             }
@@ -173,7 +178,7 @@ namespace MphRead.Entities
                     || IsMainPlayer && (HostShowMainBiped || HostMainSpectated); // (only non-main: HostFirstPersonView)
                 if (IsAltForm)
                 {
-                    _modelTransform.Row3.Xyz = Position;
+                    _modelTransform.Row3.Xyz = Position + SpiderDrawOffset; // recomp: PlayerSpiderBall.cs
                     if (_timeSinceDamage < Values.DamageFlashTime * 2) // todo: FPS stuff
                     {
                         PaletteOverride = Metadata.RedPalette;
@@ -236,6 +241,7 @@ namespace MphRead.Entities
                     float angle = MathF.Atan2(sin, cos);
                     spineNode.AfterTransform = DetMatrix.CreateRotationZ(angle);
                     Model model = _bipedModel1.Model;
+                    DeathOrbPose(model, spineNode); // recomp: DEATH's VANILLA ORBS pose (PlayerDeathAnim.cs), off unless on and dead
                     model.AnimateNodes(index: 0, false, Matrix4.Identity, Vector3.One, HostFloatLegAnim(model)); // recomp: the float's still legs (PlayerHostFloat.cs), else _bipedModel1.AnimInfo
                     spineNode.AnimIgnoreChild = false;
                     model.AnimateNodes(spineNode.ChildIndex, false, Matrix4.Identity, Vector3.One, HostFloatUpperAnim(model)); // recomp: the float's still upper body (PlayerHostFloat.cs), else _bipedModel2.AnimInfo
@@ -260,8 +266,10 @@ namespace MphRead.Entities
                         node.Animation *= transform; // todo?: could do this in the shader
                     }
                     WallClingPoseWorld(model, lateral); // recomp: legs turned out of the wall while clinging
+                    GrapplePoseWorld(model); // recomp: the left arm up at the grapple beam (PlayerGrapple.cs), off unless grappling
+                    RagdollPoseWorld(model, lod); // recomp: the DEATH look option's RAGDOLL (PlayerRagdoll.cs), off unless shown
                     model.UpdateMatrixStack();
-                    if (_health > 0)
+                    if (_health > 0 || DrawnWhileDead) // recomp: First Hunt's body stays, collapsing (FirstHuntDeath, DeathCollapse)
                     {
                         if (_timeSinceDamage < Values.DamageFlashTime * 2) // todo: FPS stuff
                         {
@@ -311,20 +319,13 @@ namespace MphRead.Entities
                                 _muzzleEffect.Transform(_gunVec2, _gunVec1, muzzlePos);
                             }
                         }
-                        if (_frozenGfxTimer > 0)
+                        if (_frozenGfxTimer > 0 || HostIceProbe != 0) // (the probe: a dev launch's always-iced look, PlayerFittedIce.cs)
                         {
-                            for (int i = 0; i < _bipedIceModel.Model.Nodes.Count; i++)
-                            {
-                                _bipedIceModel.Model.Nodes[i].Animation = _bipedModel1.Model.Nodes[i].Animation;
-                                _bipedIceTransforms[i] = _bipedModel1.Model.Nodes[i].Animation;
-                            }
-                            _bipedIceModel.Model.UpdateMatrixStack();
-                            UpdateMaterials(_bipedIceModel, recolor: 0);
-                            GetDrawItems(_bipedIceModel, _bipedIceModel.Model.Nodes[0], alpha: 1, recolor: 0);
+                            DrawBodyIce(_bipedModel1.Model); // recomp: the shell, or the body's fitted ice (PlayerFittedIce.cs)
                         }
                     }
                     _modelTransform = transform;
-                    if (_health == 0)
+                    if (_health == 0 && (!DrawnWhileDead || HostDeathOrbs)) // recomp: (PlayerDeathAnim.cs)
                     {
                         DrawDeathParticles();
                     }
@@ -347,15 +348,15 @@ namespace MphRead.Entities
                             }
                         }
                     }
-                    // recomp: see-through (Trace's cloak), the gun's own faces don't stack: on the DS a translucent
-                    // pixel never takes a second fragment of its polygon ID, and the whole gun is one ID (RenderItem.HostOneLayer)
+                    // recomp: see-through (Trace's cloak), the gun fades as one piece: its items leave the layers and the
+                    // host draws them as the opaque gun, then blends that nearest surface once at the gun's alpha, the lights
+                    // and strips with the casing (RenderItem.HostOneLayer; owner 11-06, "every element should fade together")
                     _scene.HostOneLayerItems = _curAlpha < 1;
-                    // recomp: owner 10-28, Trace's cloaked gun keeps its lights (the unlit FullBright/Glow meshes) at
-                    // their own alpha, on their own polygon ID so the casing's one-layer stencil doesn't drop them (10-28 round 2:
-                    // only the lesion/strip nodes -- the unlit body panels stayed solid red)
-                    _hostLightsId = _curAlpha < 1 && Hunter == Hunter.Trace ? _scene.GetNextPolygonId() : -1;
-                    GetDrawItems(_gunModel, _gunModel.Model.Nodes[0], _curAlpha);
-                    _hostLightsId = -1;
+                    // owner 11-06: the cloaked gun stays as visible as on the DS, where alpha a blends at (a+1)/32 and BizHawk
+                    // rev 1 measures the gun at 0.85/0.64/0.46/0.27 of opaque for a = 23/15/9/5: about 1.5 layers of that
+                    // weight (a/31 in one layer left it far fainter, nearly gone at full cloak)
+                    bool cloakGun = _curAlpha < 1 && Hunter == Hunter.Trace;
+                    GetDrawItems(_gunModel, _gunModel.Model.Nodes[0], cloakGun ? CloakGunAlpha(_curAlpha) : _curAlpha);
                     _scene.HostOneLayerItems = false;
                     if (Flags1.TestFlag(PlayerFlags1.DrawGunSmoke))
                     {
@@ -436,7 +437,12 @@ namespace MphRead.Entities
             GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
         }
 
-        private int _hostLightsId = -1; // recomp: Trace's cloaked gun lights, see Draw
+        // recomp: Trace's cloaked first-person gun, 1 - (1 - (a+1)/32)^1.5 for the 5-bit alpha a (see Draw)
+        private static float CloakGunAlpha(float alpha)
+        {
+            float a = MathF.Round(alpha * 31);
+            return a >= 31 ? 1 : 1 - MathF.Pow(1 - (a + 1) / 32f, 1.5f);
+        }
 
         private void GetDrawItems(ModelInstance inst, Node node, float alpha, int polygonId = -1, int recolor = -1)
         {
@@ -465,22 +471,9 @@ namespace MphRead.Entities
                     Vector4? color = null;
                     SelectionType selectionType = SelectionType.None;
                     int? bindingOverride = GetBindingOverride(inst, material, mesh.MaterialId);
-                    // recomp: _hostLightsId -- the lesions and the glow strips (TraceGun's Lesion*/z_* nodes, unlit); the Body node's
-                    // big FullBright panels are unlit too but cloak with the casing
-                    bool hostLight = _hostLightsId != -1 && material.Lighting == 0
-                        && (node.Name.StartsWith("Lesion") || node.Name.StartsWith("z_"));
-                    bool oneLayer = _scene.HostOneLayerItems;
-                    if (hostLight)
-                    {
-                        _scene.HostOneLayerItems = false;
-                    }
-                    // 10-28 round 3: the lesion spots fade with the cloak like on the DS (BizHawk, cloaked Trace in Combat Hall);
-                    // only the strips stay at full alpha
-                    float itemAlpha = hostLight && node.Name.StartsWith("z_") ? 1 : alpha;
-                    _scene.AddRenderItem(material, hostLight ? _hostLightsId : polygonId, itemAlpha, emission, GetLightInfo(), texcoordMatrix,
+                    _scene.AddRenderItem(material, polygonId, alpha, emission, GetLightInfo(), texcoordMatrix,
                         node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
                         PaletteOverride, selectionType, node.BillboardMode, _drawScale, bindingOverride);
-                    _scene.HostOneLayerItems = oneLayer;
                 }
                 if (node.ChildIndex != -1)
                 {
@@ -703,12 +696,12 @@ namespace MphRead.Entities
             for (int i = 1; i < _bipedModel1.Model.Nodes.Count; i++)
             {
                 Node node = _bipedModel1.Model.Nodes[i];
-                var nodePos = new Vector3(node.Animation.Row3);
+                Vector3 nodePos = DeathOrbNode(i); // recomp: was new Vector3(node.Animation.Row3)
                 nodePos.Y += offset;
                 if (node.ChildIndex != -1)
                 {
                     Debug.Assert(node.ChildIndex > 0);
-                    var childPos = new Vector3(_bipedModel1.Model.Nodes[node.ChildIndex].Animation.Row3);
+                    Vector3 childPos = DeathOrbNode(node.ChildIndex); // recomp: (as nodePos)
                     childPos.Y += offset;
                     for (int j = 1; j < 5; j++)
                     {
@@ -724,7 +717,7 @@ namespace MphRead.Entities
                 if (node.NextIndex != -1)
                 {
                     Debug.Assert(node.NextIndex > 0);
-                    var nextPos = new Vector3(_bipedModel1.Model.Nodes[node.NextIndex].Animation.Row3);
+                    Vector3 nextPos = DeathOrbNode(node.NextIndex); // recomp: (as nodePos)
                     nextPos.Y += offset;
                     for (int j = 1; j < 5; j++)
                     {

@@ -49,6 +49,10 @@ namespace MphRead.Entities
         // recomp: whose own-player sounds play (pickups, double damage / cloak loops, alarm, zoom, beam switch, own hurt
         // and death sounds): the same seat as HudViewer. Sound only; the match state behind each cue is unchanged.
         internal bool SoundViewer => HudViewer;
+        // recomp: the cues MphRead plays from the main player's side or seat (its team's octolith / node voices and
+        // stingers, capture rings, flag-carry loop): none in a replay's free cam (HostNoViewer), which is nobody's ears.
+        // The announcer's voices are kept there (owner 2026-11-08), as the last-viewed seat hears them. Sound only; the match state behind each cue is unchanged.
+        internal static bool MainCuesHeard => !HostNoViewer;
 
         internal void HostUpdateSeatHud()
         {
@@ -551,7 +555,7 @@ namespace MphRead.Entities
                     {
                         SwitchVisors(reset: false);
                     }
-                    _soundSource.PlayFreeSfx(SfxId.HUD_WEAPON_SWITCH1);
+                    if (SoundViewer) _soundSource.PlayFreeSfx(SfxId.HUD_WEAPON_SWITCH1); // recomp: SoundViewer (a replay's free cam / watched seat)
                 }
                 _hudWeaponMenuOpen = true;
                 UpdateWeaponSelect();
@@ -831,7 +835,7 @@ namespace MphRead.Entities
             }
             if (selection != _hudPreviousWeaponSelection)
             {
-                _soundSource.PlayFreeSfx(SfxId.HUD_WEAPON_SWITCH2);
+                if (SoundViewer) _soundSource.PlayFreeSfx(SfxId.HUD_WEAPON_SWITCH2); // recomp: SoundViewer
                 _hudPreviousWeaponSelection = selection;
             }
         }
@@ -1286,6 +1290,12 @@ namespace MphRead.Entities
                 {
                     DrawEscapeTime();
                 }
+                // recomp (2026-11-06): the turret's seat keeps the health box of whoever its shots hit (owner: "the vanilla
+                // damage indicator from when you shoot an enemy and see their picture and health")
+                if (Health > 0 && HostSeated && !GameState.DialogPause && !GameState.SinglePlayer)
+                {
+                    DrawOpponent();
+                }
                 // recomp: the turret's seat has its own HUD in place of the combat HUD (CampaignRenderer.TurretHud.cs)
                 if (Health > 0 && !HostSeated)
                 {
@@ -1698,7 +1708,7 @@ namespace MphRead.Entities
                     }
                     color = new ColorRgba((byte)(rg * 255), (byte)(rg * 255), 255, 255);
                 }
-                DrawScoreboardPlayer(60, posY, color, _hunterInsts[(int)player.Hunter], slot);
+                DrawScoreboardPlayer(60, posY, color, PortraitOf(player), slot);
                 DrawScoreboardPing(slot, ScoreboardPingRight, posY, pingBarsX); // recomp: online, bars + ms on the value line (PlayerScoreboardPing.cs)
                 DrawText2D(160, posY, Align.Center, 0, value1, color, fontSpacing: 8);
                 DrawText2D(value2X, posY, Align.Center, 0, value2, color, fontSpacing: 8);
@@ -1706,19 +1716,49 @@ namespace MphRead.Entities
             }
         }
 
+        // recomp: a custom character's own portrait (PlayerDraw.HostPortrait), drawn through one instance per seat in its
+        // hunter's portrait's place; else the hunter's
+        private readonly HudObjectInstance?[] _hostPortraitInsts = new HudObjectInstance?[16];
+
+        private HudObjectInstance PortraitOf(PlayerEntity player)
+        {
+            HudObjectInstance hunter = _hunterInsts[(int)player.Hunter];
+            if (player.HostPortrait is not Scene.HostHudSprite sprite || player.SlotIndex < 0 || player.SlotIndex >= _hostPortraitInsts.Length)
+            {
+                return hunter;
+            }
+            HudObjectInstance inst = _hostPortraitInsts[player.SlotIndex] ??= new HudObjectInstance(hunter.Width, hunter.Height) { Enabled = true };
+            inst.HostSprite = sprite;
+            return inst;
+        }
+
+        // wave 1 (2026-11-07): mode 2 stretched these icons 1.33x wide on a 16:9 view; mode 1 keeps their shape at their DS
+        // height, centred where the stretched one sat (so the layout around them stays put)
+        private void DrawHudKeepShape(HudObjectInstance inst)
+        {
+            float x = inst.PositionX;
+            float stretch = _scene.HudStretch;
+            inst.PositionX += inst.Width / 256f * (1 - 1 / stretch) / 2;
+            _scene.DrawHudObject(inst, mode: 1);
+            inst.PositionX = x;
+        }
+
         private void DrawScoreboardPlayer(float posX, float posY, ColorRgba color, HudObjectInstance hunter, int slot)
         {
             hunter.PositionX = (posX - 40) / 256f;
             hunter.PositionY = (posY - 13) / 192f;
-            _scene.DrawHudObject(hunter, mode: 2);
+            DrawHudKeepShape(hunter);
             int stars = GameState.Stars[slot];
-            _starsInst.PositionX = posX / 256f;
+            // the bar is two halves that meet at posX + 32 (the star sits on the seam): keep them touching there, each
+            // at its kept shape, instead of centring each half in its own slot (that opened a gap through the star)
+            float shrink = _starsInst.Width / 256f * (1 - 1 / _scene.HudStretch);
+            _starsInst.PositionX = posX / 256f + shrink;
             _starsInst.PositionY = posY / 192f;
             _starsInst.SetIndex(stars * 2, _scene);
-            _scene.DrawHudObject(_starsInst, mode: 2);
+            _scene.DrawHudObject(_starsInst, mode: 1);
             _starsInst.PositionX = (posX + 32) / 256f;
             _starsInst.SetIndex(stars * 2 + 1, _scene);
-            _scene.DrawHudObject(_starsInst, mode: 2);
+            _scene.DrawHudObject(_starsInst, mode: 1);
             string nickname = GameState.ShownNickname(slot);
             DrawText2D(posX + 32, posY - 9, Align.Center, 0, nickname, color, fontSpacing: 8);
         }
@@ -1774,7 +1814,7 @@ namespace MphRead.Entities
                     _bombInst.SetIndex(_bombAmmo < i ? 1 : 0, _scene);
                     _bombInst.PositionX = (posX - _bombInst.Width / 2) / 256f;
                     _bombInst.PositionY = posY / 192f;
-                    _scene.DrawHudObject(_bombInst, mode: 2);
+                    DrawHudKeepShape(_bombInst);
                     posX -= 14;
                 }
                 string message = Strings.GetHudMessage(1); // bombs
@@ -1792,7 +1832,7 @@ namespace MphRead.Entities
                 }
                 _boostInst.PositionX = (29 - _boostInst.Width / 2) / 256f;
                 _boostInst.PositionY = (posY - 16) / 192f;
-                _scene.DrawHudObject(_boostInst, mode: 2);
+                DrawHudKeepShape(_boostInst);
                 string message = Strings.GetHudMessage(2); // boost
                 DrawText2D(29, posY + 18, Align.Center, palette: 0, message);
             }
@@ -1984,7 +2024,7 @@ namespace MphRead.Entities
             }
             if (reveal == 1)
             {
-                _soundSource.QueueStream(VoiceId.VOICE_CAMPING, delay: 1);
+                if (SoundViewer || (HostNoViewer && IsMainPlayer)) _soundSource.QueueStream(VoiceId.VOICE_CAMPING, delay: 1); // recomp: SoundViewer; announcer kept in free cam
                 QueueHudMessage(128, 150, 60 / 30f, 0, 234); // COWARD DETECTED!
             }
         }
@@ -2764,8 +2804,9 @@ namespace MphRead.Entities
                 posY += _objShiftY;
             }
             string nickname = GameState.ShownNickname(_opponentIndex);
-            DrawText2D(posX, posY, Align.Center, 0, nickname);
-            HudObjectInstance portrait = _hunterInsts[(int)opponent.Hunter];
+            // wave 1 (2026-11-07): the name goes above the portrait; under it (vanilla y 182) the bottom edge clipped it
+            DrawText2D(posX, posY - 33 - 9, Align.Center, 0, nickname);
+            HudObjectInstance portrait = PortraitOf(opponent);
             portrait.PositionX = (posX - 16) / 256f;
             portrait.PositionY = (posY - 33) / 192f;
             _scene.DrawHudObject(portrait);
@@ -2872,6 +2913,7 @@ namespace MphRead.Entities
             Font font = SetUpFont(text[0], set: true);
             _textInst.Alpha = alpha;
             float spacingY = _textSpacingY == 0 ? (fontSpacing == -1 ? 12 : fontSpacing) : _textSpacingY;
+            float squeeze = 1 / _scene.HudStretch; // wave 1 (2026-11-07): DS-unit advances at the glyphs' true width
             if (type == Align.Left)
             {
                 float startX = x;
@@ -2904,9 +2946,11 @@ namespace MphRead.Entities
                             {
                                 _textInst.SetData(index, palette, _scene);
                             }
-                            _scene.DrawHudObject(_textInst, mode: 2);
+                            // wave 1 (2026-11-07): mode 1 at the DS height, advances squeezed to match (all three branches);
+                            // mode 2 stretched left-aligned text 1.33x wide on 16:9 and mode 0 drew the rest 1.33x too big
+                            _scene.DrawHudObject(_textInst, mode: 1);
                         }
-                        x += font.Widths[index];
+                        x += font.Widths[index] * squeeze;
                     }
                 }
             }
@@ -2936,7 +2980,7 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        x -= font.Widths[index];
+                        x -= font.Widths[index] * squeeze;
                         float offset = font.Offsets[index] + y;
                         if (orig != ' ')
                         {
@@ -2950,7 +2994,7 @@ namespace MphRead.Entities
                             {
                                 _textInst.SetData(index, palette, _scene);
                             }
-                            _scene.DrawHudObject(_textInst);
+                            _scene.DrawHudObject(_textInst, mode: 1);
                         }
                     }
                     if (end != length)
@@ -2992,7 +3036,7 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        width += font.Widths[index];
+                        width += font.Widths[index] * squeeze;
                     }
                     x = startX - width / 2;
                     for (int i = start; i < end; i++)
@@ -3019,10 +3063,10 @@ namespace MphRead.Entities
                                 {
                                     _textInst.SetData(index, palette, _scene);
                                 }
-                                _scene.DrawHudObject(_textInst);
+                                _scene.DrawHudObject(_textInst, mode: 1);
                             }
                         }
-                        x += font.Widths[index];
+                        x += font.Widths[index] * squeeze;
                     }
                     if (end != length)
                     {

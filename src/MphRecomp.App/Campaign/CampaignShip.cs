@@ -97,6 +97,9 @@ internal sealed partial class CampaignRenderer
     StorySave? _shipStory;
     Planet _shipPlanet = Planet.CelestialArchives;
     bool _shipCleared, _shipEnding, _shipUnsaved;
+    // the hunters on the planets are rolled once a ship visit, when the planet select first opens (vanilla: the
+    // ShipInSpace scene's init), so its enemy panel shows who is there; a save load or a planet left starts a visit
+    bool _shipHuntersRolled;
     // the planets the planet select has shown (CampaignSaveFile.KnownAreas)
     int _knownAreas;
     int _shipCursor;
@@ -114,6 +117,7 @@ internal sealed partial class CampaignRenderer
     {
         // the map's seen corridors/chambers are static: a run without a save starts with none (AdoptSave sets a save's)
         MphRecomp.Frontend.CorridorMap.Adopt(Array.Empty<string>(), null);
+        MphRead.SceneSetup.HostShipRollsHunters = true;
         _saves = new CampaignSaves(savesDir);
         // slot <n>: the file a NEW game saves to (the front end's files A/B/C = slots 1/2/3)
         if (Int32.TryParse(args.Get("slot"), out int newSlot) && newSlot > 0)
@@ -178,8 +182,10 @@ internal sealed partial class CampaignRenderer
     {
         _hunter = file.Hunter;
         _character = file.Character;
-        _characterSkin = TrooperSkinFromSettings() ?? file.Skin;
+        _characterSkin = TrooperSkinFromSettings() ?? SyluxFileSkin(file.Skin);
         _shipStory = file.Story;
+        _shipHuntersRolled = false;
+        ShipNavigation.Refill(_shipStory); // files saved before 11-06 kept the health left after an ending
         _shipPlanet = file.Planet;
         _shipCleared = file.Cleared;
         _shipNotStarted = !file.Started;
@@ -188,6 +194,7 @@ internal sealed partial class CampaignRenderer
         MphRecomp.Frontend.CorridorMap.Adopt(file.MapPieces, file.Story);
         _playFrames = file.PlaySeconds * 60;
         _shipUnsaved = false;
+        MphRecomp.Mods.LiveMods.AdoptCampaign(file.Mods); // mod.campaign values come back with the save
     }
 
     // CampaignHost.Ended: work out why, keep the story, drop the scene and open the ship screen
@@ -214,6 +221,7 @@ internal sealed partial class CampaignRenderer
         {
             ShipNavigation.PrepareForSave(story);
             _shipStory = story;
+            _shipHuntersRolled = false;
             _shipUnsaved = true;
             _shipEnding = end == CampaignEnd.Ending;
             if (_shipEnding)
@@ -329,6 +337,7 @@ internal sealed partial class CampaignRenderer
         _shipMenu.MouseSens = saved.MouseSens;
         _shipMenu.MouseLookInvert = saved.MouseInvertY;
         _shipMenu.RedrawArt = saved.RedrawArt;
+        _shipMenu.LogbookAllScans = saved.LogbookAllScans;
         _shipMenu.ClassicControls = saved.ClassicControlsPage && !MphRecomp.Config.RecompSettings.PublicBuild;
         _shipMenu.KeyboardControls = MphRecomp.Config.RecompSettings.DesktopHost;
         _loadoutChanged = false;
@@ -842,7 +851,8 @@ internal sealed partial class CampaignRenderer
                 KnownAreas = _knownAreas,
                 MapConnectors = MapConnectorsForSave(),
                 MapPieces = MphRecomp.Frontend.CorridorMap.ForSave(),
-                Story = copy
+                Story = copy,
+                Mods = MphRecomp.Mods.LiveMods.CampaignDataForSave()
             });
             _shipUnsaved = false;
             _shipNote = $"Progress saved to slot {_saveSlot}.";
@@ -879,7 +889,13 @@ internal sealed partial class CampaignRenderer
         _planetSelect.RedrawArt = MphRecomp.Config.RecompSettings.Load(_gunSettingsPath).RedrawArt;
         while (_shipTouches.TryDequeue(out _)) { }
         string[] names = ShipNavigation.Planets.Select(p => p.Name).ToArray();
-        _planetSelect.Open(_shipStory?.Areas ?? 0, _knownAreas, names, (int)_shipPlanet);
+        if (_shipStory != null && !_shipHuntersRolled)
+        {
+            MphRead.SceneSetup.UpdateAreaHunters(_shipStory);
+            _shipHuntersRolled = true;
+        }
+        _planetSelect.Open(_shipStory?.Areas ?? 0, _knownAreas, names, (int)_shipPlanet, _shipStory?.AreaHunters,
+            _shipStory?.LostOctoliths ?? UInt32.MaxValue);
         StartDeepSpace();
         _deepSpace?.ShowOubliette(_planetSelect.OublietteFound);
         // after the deep space view: its new Scene runs Music.Init, which stopped a SEQ_SHIP started before it

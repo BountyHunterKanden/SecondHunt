@@ -117,6 +117,7 @@ namespace MphRead
             if (id >= 0)
             {
                 _musicHandle = Sound.Sfx.Instance.PlaySample(id, source: null, loop: loop, noUpdate: false, recency: -1, sourceOnly: false, cancellable: false);
+                Sound.Sfx.Instance.KeepHandle(_musicHandle);
             }
         }
 

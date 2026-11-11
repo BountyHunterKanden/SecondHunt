@@ -322,6 +322,14 @@ namespace MphRecomp.Frontend
         }
 
         // a game's page: (turning off) the whole game, then a row an area
+        // an ALL SONGS row's hint for its value; a turns all of them off when any is on, else all on
+        private static string GroupHint(string value, string what, bool later) => value switch
+        {
+            "ON" => what + " is in the pickers and shuffles. a: turn them all off.",
+            "SOME" => what + " at once: some are off now. a: turn them all off.",
+            _ => what + " is out of the pickers and shuffles" + (later ? ", songs you import later too" : "") + ". a: turn them all on."
+        };
+
         private List<RowModel> BrowseAreaRows()
         {
             var rows = new List<RowModel>();
@@ -332,8 +340,8 @@ namespace MphRecomp.Frontend
                 rows.Add(new RowModel
                 {
                     Label = "all\nsongs",
-                    Description = $"every song from {name} at once. off: none of them in the pickers or shuffles"
-                        + (game == HuntersMusic.Kind ? "." : ", songs you import later too."),
+                    // the hint for the shown value only (owner 11-06: no all-options hints)
+                    Describe = () => GroupHint(GroupValue(songs), $"every song from {name}", game != HuntersMusic.Kind),
                     Value = () => GroupValue(songs),
                     Step = _ => GroupStep(songs, MusicCatalog.Ids(game)),
                     Check = () => GroupValue(songs) == "ON",
@@ -377,7 +385,7 @@ namespace MphRecomp.Frontend
                 rows.Add(new RowModel
                 {
                     Label = "all\nsongs",
-                    Description = $"every {area} song at once. off: none of them in the pickers or shuffles, songs you import later too.",
+                    Describe = () => GroupHint(GroupValue(songs), $"every {area} song", true),
                     Value = () => GroupValue(songs),
                     Step = _ => GroupStep(songs, MusicCatalog.Ids(game, area)),
                     Check = () => GroupValue(songs) == "ON",

@@ -34,7 +34,14 @@ namespace MphRecomp.Frontend
         private Seats8Bound _seats8 = new();
 
         // a 5th seat is used: two rows
-        private static bool Eight => _setup.Seats.Skip(PlayerEntity.VanillaMaxPlayers).Any(s => s.Used);
+        private static bool Eight
+        {
+            get
+            {
+                for (int s = PlayerEntity.VanillaMaxPlayers; s < _setup.Seats.Length; s++) if (_setup.Seats[s].Used) return true;
+                return false; // (a loop, not Skip/Any: read many times a frame, 2026-11-11)
+            }
+        }
 
         // the copied seat's calls: (seat 4..7, the ROM seat's call)
         private static int Seat8Call(int seat, int call) => call is >= 140 and < 200 ? Seat8CallBase + (seat - 4) * Seat8CallStride + call : call;

@@ -90,6 +90,8 @@ namespace MphRead.Hud
         // host draws that entry instead of interning the pixels by content each frame (a new sprite per repaint)
         public bool Live;
         public int BindingId = -1;
+        // recomp: drawn from these pixels instead (a custom character's portrait, PlayerDraw.HostPortrait); null = its own
+        public Scene.HostHudSprite? HostSprite;
         public int CurrentFrame;
         public int StartFrame;
         public int TargetFrame;
@@ -420,14 +422,14 @@ namespace MphRead.Hud
         public static (int, IReadOnlyList<ushort>) CharMapToTexture(string path, Scene scene,
             IReadOnlyList<ushort>? paletteOverride = null, int paletteId = -1)
         {
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, path)));
+            var bytes = new ReadOnlySpan<byte>(Read.ReadFileBytes(Paths.Combine(Paths.FileSystem, path)));
             return CharMapToTexture(bytes, startX: 0, startY: 0, tilesX: 0, tilesY: 0, scene, paletteOverride, paletteId);
         }
 
         public static (int, IReadOnlyList<ushort>) CharMapToTexture(string path, int startX, int startY,
             int tilesX, int tilesY, Scene scene, IReadOnlyList<ushort>? paletteOverride = null, int paletteId = -1)
         {
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, path)));
+            var bytes = new ReadOnlySpan<byte>(Read.ReadFileBytes(Paths.Combine(Paths.FileSystem, path)));
             return CharMapToTexture(bytes, startX, startY, tilesX, tilesY, scene, paletteOverride, paletteId);
         }
 
@@ -719,7 +721,7 @@ namespace MphRead.Hud
 
         public static HudObject GetHudObject(string file)
         {
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, file)));
+            var bytes = new ReadOnlySpan<byte>(Read.ReadFileBytes(Paths.Combine(Paths.FileSystem, file)));
             UiObjectHeader header = Read.ReadStruct<UiObjectHeader>(bytes);
             int offset = _objHeaderSize;
             Debug.Assert(header.ParamDataSize % _animParamSize == 0);
@@ -1018,7 +1020,7 @@ namespace MphRead.Hud
             foreach (string file in files)
             {
                 string name = file.Split('/').Last().Split('.')[0];
-                var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, file)));
+                var bytes = new ReadOnlySpan<byte>(Read.ReadFileBytes(Paths.Combine(Paths.FileSystem, file)));
                 UiObjectHeader header = Read.ReadStruct<UiObjectHeader>(bytes);
                 int offset = _objHeaderSize;
                 Debug.Assert(header.ParamDataSize % _animParamSize == 0);
@@ -1255,7 +1257,7 @@ namespace MphRead.Hud
             };
             foreach (string file in files)
             {
-                var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, file)));
+                var bytes = new ReadOnlySpan<byte>(Read.ReadFileBytes(Paths.Combine(Paths.FileSystem, file)));
                 UiPartHeader header = Read.ReadStruct<UiPartHeader>(bytes);
                 Debug.Assert(header.Magic == 0);
                 int offset = _layerHeaderSize;
@@ -2429,9 +2431,9 @@ namespace MphRead.Hud
                 TankSpacing = 8,
                 TankOffsetX = 8,
                 TankOffsetY = 1,
-                BarOffsetX = 3,
-                BarOffsetY = -82,
-                Align = Align.Center,
+                BarOffsetX = -2, // recomp: game has 3, -82, Center (the count under the weapon icon's bottom); the count
+                BarOffsetY = -71, // sits left of the bar's top instead, since only 7 px separate the icon and the bar's
+                Align = Align.Right, // slot in bg_top, less than the digits' height
                 TextOffsetX = -2,
                 TextOffsetY = -1,
                 MessageId = 0

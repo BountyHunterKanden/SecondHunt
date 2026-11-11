@@ -15,8 +15,14 @@ namespace MphRead
         // HostView: a render-only camera (replay spectator views). MphRead draws from it -- view matrix, camera position
         // (billboards, sky, portals), field of view and the culling frustum -- while the camera mode stays Player, so the
         // main player's own camera, IsMainPlayer logic and the match are untouched. (SetHostCamera's Roam mode turns
-        // main-player logic off; this doesn't.) Null = the main player's camera (plus HostCameraOffset).
-        public HostView? HostView { get; set; }
+        // main-player logic off; this doesn't.) Null = the main player's camera (plus HostCameraOffset). Unset, the dead
+        // main player's DEATH follow camera if any (PlayerDeathCam.cs, view only)
+        public HostView? HostView
+        {
+            get => _hostView ?? MphRead.Entities.PlayerEntity._players[MphRead.Entities.PlayerEntity.MainPlayerIndex]?.DeathFollowView;
+            set => _hostView = value;
+        }
+        private HostView? _hostView;
 
         // HostBeforeCamera: called in a step once the entities have updated, just before the camera is worked out, so a
         // HostView placed from a seat's eyes is this step's (the seat's gun is drawn from this step's eyes too). Null: nothing.

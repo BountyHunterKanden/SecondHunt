@@ -298,6 +298,10 @@ namespace MphRead.Entities
                 {
                     activate = false;
                 }
+                if (!activate && Current != this)
+                {
+                    Sequence.OweCamSeqAi(); // recomp: a refused camseq still starts the bots it would have (CameraSequence.OweCamSeqAi)
+                }
                 if (activate)
                 {
                     if (Cheats.SkipPlanetIntros && (Name == "unit2_land_intro" || Name == "unit1_land_intro"

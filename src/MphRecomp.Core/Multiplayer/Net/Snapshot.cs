@@ -44,7 +44,24 @@ namespace MphRecomp.Multiplayer.Net
         public const int SeatSize = 62;
         public int Size => HeaderSize + Seats.Length * SeatSize + 1 + (Items == null ? 0 : 1 + Items.Length * NetItem.Size)
             + 1 + (Objective?.Size ?? 0) + 1 + (Abilities?.Size ?? 0) + 1 + (Stats == null ? 0 : 1 + Stats.Length * SeatExtras.StatsSize)
-            + 1 + (World?.Size ?? 0);
+            + 1 + (World?.Size ?? 0) + ThrowsSize;
+
+        // the dead seats' ragdoll launches (PlayerNetState.HasThrow, owner 2026-11-09 "I want exact throw online"): after
+        // World, the last block, so no protocol bump: an older reader stops at World, and an older host's snapshot has
+        // none (its guests work the launch out themselves). Online, SnapshotDelta's mode block runs to the end and carries
+        // it. Flag, count, then per seat: the seat, the speed and push at 1/2048 (int16, +-16)
+        public const int ThrowSize = 1 + 6 * 2;
+        private const float ThrowScale = PlayerEntity.NetThrowScale;
+        private int ThrowCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (PlayerNetState s in Seats) if (s.HasThrow) n++;
+                return n;
+            }
+        }
+        private int ThrowsSize => ThrowCount == 0 ? 1 : 2 + ThrowCount * ThrowSize;
 
         public int Write(Span<byte> dest)
         {
@@ -114,6 +131,24 @@ namespace MphRecomp.Multiplayer.Net
                 dest[o++] = 1;
                 o += World.Write(dest[o..]);
             }
+            int throws = ThrowCount;
+            if (throws == 0)
+            {
+                dest[o++] = 0;
+            }
+            else
+            {
+                dest[o++] = 1;
+                dest[o++] = (byte)throws;
+                for (int i = 0; i < Seats.Length; i++)
+                {
+                    if (!Seats[i].HasThrow) continue;
+                    dest[o++] = (byte)i;
+                    WriteThrowVec(dest[o..], Seats[i].ThrowSpeed);
+                    WriteThrowVec(dest[(o + 6)..], Seats[i].ThrowPush);
+                    o += 12;
+                }
+            }
             return o;
         }
 
@@ -174,7 +209,34 @@ namespace MphRecomp.Multiplayer.Net
                 snap.World = NetWorld.Read(src[o..], out int size);
                 o += size;
             }
+            if (o < src.Length && src[o++] == 1 && o < src.Length)
+            {
+                int throws = src[o++];
+                for (int i = 0; i < throws && src.Length - o >= ThrowSize; i++, o += ThrowSize)
+                {
+                    int seat = src[o];
+                    if (seat >= count) continue;
+                    snap.Seats[seat].HasThrow = true;
+                    snap.Seats[seat].ThrowSpeed = ReadThrowVec(src[(o + 1)..]);
+                    snap.Seats[seat].ThrowPush = ReadThrowVec(src[(o + 7)..]);
+                }
+            }
             return snap;
+        }
+
+        private static void WriteThrowVec(Span<byte> d, Vector3 v)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                float f = Math.Clamp(MathF.Round(v[i] * ThrowScale), short.MinValue, short.MaxValue);
+                BinaryPrimitives.WriteInt16LittleEndian(d[(i * 2)..], (short)f);
+            }
+        }
+
+        private static Vector3 ReadThrowVec(ReadOnlySpan<byte> d)
+        {
+            return new Vector3(BinaryPrimitives.ReadInt16LittleEndian(d) / ThrowScale,
+                BinaryPrimitives.ReadInt16LittleEndian(d[2..]) / ThrowScale, BinaryPrimitives.ReadInt16LittleEndian(d[4..]) / ThrowScale);
         }
 
         // one seat's SeatSize bytes (the online delta compares these byte ranges: SnapshotDelta.SeatGroups)

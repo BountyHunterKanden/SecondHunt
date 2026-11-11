@@ -21,19 +21,37 @@ internal sealed partial class CampaignRenderer
     {
         // (the seat's team / copy colours on it: Prime 4 Sylux's, MatchSkins.SeatTint)
         if (_gun != null) (_gun.SeatTint, _gun.SeatTint2) = _skinGunOn && _host?.Player is PlayerEntity sp ? (SeatTint(sp), SeatTint2(sp)) : (default, default);
-        if (_matchSettings == null || _gunsRoot == null || _host?.Player is not PlayerEntity p || p.Hunter == Hunter.Samus) return;
+        // (and a Sylux campaign file: CAMPAIGN SYLUX TYPE, MatchSkins.CampaignCharacterSeat)
+        if (_matchSettings == null && !CampaignSylux || _gunsRoot == null || _host?.Player is not PlayerEntity p || p.Hunter == Hunter.Samus) return;
         int i = p.SlotIndex;
-        string? id = i >= 0 && i < _seatSkin.Length ? _seatSkin[i] : null;
-        if (id == _skinGunSeen) return;
+        if (!PickSkinGun(i >= 0 && i < _seatSkin.Length ? _seatSkin[i] : null)) return;
+        // the gun loaded so far isn't this one: MPH's own draws until the new one is in (a Sylux file's start had the
+        // MP1 Power Suit cannon loaded, and it drew in place of SyluxGun while the Shock Coil loaded, owner 2026-11-11)
+        _gun?.DeleteGl();
+        _gun = null;
+        StartGearLoad(gun: true);
+    }
+
+    // campaign start, before the first gear load (OnSurfaceChanged): a Sylux file's skin gun is known from its seat
+    // already, so the first frame shows the Shock Coil instead of MPH's SyluxGun (or a Samus cannon) while it loads
+    void PickSkinGunAtStart()
+    {
+        if (CampaignSylux && _gunsRoot != null) PickSkinGun(_seatSkin[0]);
+    }
+
+    // the gun dir for the seat's skin (null: MPH's own gun); true when it changed
+    bool PickSkinGun(string? id)
+    {
+        if (id == _skinGunSeen) return false;
         _skinGunSeen = id;
-        string? dir = id != null ? Path.Combine(_gunsRoot, id) : null;
+        string? dir = id != null ? Path.Combine(_gunsRoot!, id) : null;
         // only a gun the import made (a public build; a dev build also takes a hand-pushed one): ImportedContent
-        if (dir != null && (!File.Exists(Path.Combine(dir, "gun.bin")) || !MphRecomp.Import.ImportedContent.Usable(_gunsRoot, id!))) dir = null;
-        if (dir == _gunDir) return;
+        if (dir != null && (!File.Exists(Path.Combine(dir, "gun.bin")) || !MphRecomp.Import.ImportedContent.Usable(_gunsRoot!, id!))) dir = null;
+        if (dir == _gunDir) return false;
         _gunDir = dir;
         _skinGunOn = dir != null;
-        if (dir != null) Log.Info("MPHCampaign", $"skin gun: {id} in place of {MphGunModel}");
-        StartGearLoad(gun: true);
+        if (dir != null) Log.Info("MPHCampaign", $"skin gun: {id} in place of {(_matchSettings == null ? Metadata.HunterModels[_hunter][3] : MphGunModel)}");
+        return true;
     }
 
     // the MPH first-person gun model the Prime gun replaces: the main player's own (SyluxGun, ...) under a skin's gun,

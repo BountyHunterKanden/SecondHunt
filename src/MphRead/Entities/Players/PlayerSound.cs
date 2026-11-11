@@ -79,6 +79,12 @@ namespace MphRead.Entities
         private void PlayBeamEmptySfx(BeamType beam)
         {
             int sfx = Metadata.BeamSfx[PirateBlaster.BaseIndex(beam), (int)BeamSfx.Empty];
+            if (HostFirstHunt)
+            {
+                // recomp: First Hunt's own (weapon table 0x2079ac4 column 4): Missile 35, Electro Lob 34, Power Beam none
+                sfx = beam == BeamType.Missile ? FirstHuntSounds.Sfx(35)
+                    : beam == FirstHuntRules.ElectroLob ? FirstHuntSounds.Sfx(34) : -1;
+            }
             if (sfx != -1)
             {
                 _soundSource.PlaySfx(sfx, noUpdate: true);
@@ -687,7 +693,15 @@ namespace MphRead.Entities
                     other.UpdateLoopSfx();
                 }
             }
-            if (_flagCarrySfxOn && !_soundSource.IsHandlePlaying(_flagCarrySfxHandle))
+            if (_flagCarrySfxOn && !MainCuesHeard) // recomp: none in a replay's free cam (MainCuesHeard); the loop state stays
+            {
+                if (_flagCarrySfxHandle != -1)
+                {
+                    _soundSource.StopSfxByHandle(_flagCarrySfxHandle);
+                    _flagCarrySfxHandle = -1;
+                }
+            }
+            else if (_flagCarrySfxOn && !_soundSource.IsHandlePlaying(_flagCarrySfxHandle))
             {
                 _flagCarrySfxHandle = _soundSource.PlayFreeSfx(SfxId.FLAG_CARRIED);
             }
@@ -700,7 +714,7 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
-                if (message.Message == Message.PlaySfxScript)
+                if (message.Message == Message.PlaySfxScript && MainCuesHeard) // recomp: the main player's triggers' sounds, none in a replay's free cam
                 {
                     int id = (int)message.Param1;
                     if (id == -1)

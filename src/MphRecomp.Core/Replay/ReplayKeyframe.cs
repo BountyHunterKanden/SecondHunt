@@ -109,6 +109,36 @@ namespace MphRecomp.Replay
 
         // a static list's spare room is whatever earlier matches in this process grew it to (its array is walked, so
         // two copies of a match would differ): each one trimmed to just its items, same list, same items, same order
+        // (thread B keyframes, 11-05) an arena table keyed by room (EchoesGrapple._rooms, EchoesCrates._rooms, ArenaNav...):
+        // its entries sit in the order this process registered and dropped arenas (a Remove frees a slot the next Add
+        // reuses), so the second match of a session walked them in another order than its prepare and every keyframe was
+        // refused. Each one put back in key order at its smallest size: same table, same items, one order for every copy.
+        // (only the arena tables: looked up by room, never iterated, so the order can't change the match)
+        // (the Android release build trims CoreLib: TrimExcess, reached only by reflection here, was stripped and the viewer hit
+        // a NullReferenceException, keyframes off; the dependency keeps it)
+        [System.Diagnostics.CodeAnalysis.DynamicDependency("TrimExcess", typeof(Dictionary<,>))]
+        public static void SortArenaTables()
+        {
+            foreach (FieldInfo f in _staticFields)
+            {
+                if (f.DeclaringType?.Namespace != "MphRecomp.Arenas" || f.GetValue(null) is not IDictionary table) continue;
+                Type t = table.GetType();
+                if (!t.IsGenericType || t.GetGenericTypeDefinition() != typeof(Dictionary<,>)) continue;
+                Type key = t.GetGenericArguments()[0];
+                if (!key.IsPrimitive && key != typeof(string)) continue;
+                lock (table)
+                {
+                    var entries = new List<DictionaryEntry>(table.Count);
+                    foreach (DictionaryEntry e in table) entries.Add(e);
+                    entries.Sort((a, b) => key == typeof(string)
+                        ? string.CompareOrdinal((string)a.Key, (string)b.Key) : ((IComparable)a.Key).CompareTo(b.Key));
+                    table.Clear();
+                    foreach (DictionaryEntry e in entries) table.Add(e.Key, e.Value);
+                    t.GetMethod("TrimExcess", Type.EmptyTypes)?.Invoke(table, null);
+                }
+            }
+        }
+
         public static void TrimStaticLists()
         {
             foreach (FieldInfo f in _staticFields)

@@ -15,6 +15,7 @@ internal sealed partial class CampaignRetroBody
     {
         if (!_lockjaws.TryGetValue(p, out BeyondLockjaw.Animator? a)) _lockjaws[p] = a = new BeyondLockjaw.Animator(Body, Clips);
         string was = a.Playing;
+        if (p.NetFrozen && p.Health > 0) return; // frozen: held, as the body's clocks (Tick)
         a.Step(p.Position, p.HostAltTurn.Row2.Xyz, Dt);
         if (LogClips && a.Playing != was) Log.Info(Tag, $"body {Id}: seat {p.SlotIndex} lockjaw: {a.Playing}");
     }

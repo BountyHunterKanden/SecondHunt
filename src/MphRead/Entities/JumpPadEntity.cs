@@ -33,9 +33,6 @@ namespace MphRead.Entities
         // that throws the player up a wall carries them over the lip; 0 = off
         public static uint HostKeepPushBit { get; set; }
         public bool KeepPush => HostKeepPushBit != 0 && (_data.Unused28 & HostKeepPushBit) != 0;
-        // host hook (placed pads): a player carrying an octolith is too heavy for this
-        // pad and only gets bunted off it, not thrown along its arc (PlayerProcess.ActivateJumpPad); false for every pad
-        // the game places
         public bool HostHeavyCarry { get; set; }
 
         public JumpPadEntity(JumpPadEntityData data, string nodeName, Scene scene)

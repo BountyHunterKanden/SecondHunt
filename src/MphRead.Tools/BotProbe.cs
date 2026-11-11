@@ -33,12 +33,34 @@ namespace MphRead
             public int Snaps;
             public int Hops;
             public int Holds;
+            // Mining Plaza (owner 11-05, Dark Samus jumping against the shut gate): stretches of 0.5 s+ within GateNear of the
+            // shut gate's box, and jumps taken there
+            public int GatePress, GateJumps, GateAir; public bool WasGateAir; public long LastJumpFrame = -1; public Vector3 LastJumpPos, LastJumpNode;
+            public long GateFrom = -1;
+            // (owner 11-05, Trooper's ball and Spire at Mining Plaza's stairs) stretches of 0.5 s+ on the ground under its
+            // node: the node 1+ up and under 3 across, moving under 1.5 units
+            public int Under;
+            public long UnderFrom = -1;
+            public int UnderLong;
+            // (owner 11-06, Samus at Mining Plaza's west stairs) stretches of 1.5 s+ beside its target item (under 3.5
+            // across) getting no nearer: a holds miss, she was on her node
+            public int ItemStalls;
+            public object? StallItem;
+            public long StallFrom = -1;
+            public float StallBest;
+            public Vector3 UnderStart;
+            public string UnderLeaf = "";
+            public long UnderLeafAt = -1;
             public int Shots;
             public int Walls;
             public readonly List<float> RoamPitch = new();
             public readonly List<float> AimSeen = new(), AimHidden = new(); // degrees off the target at each real shot (target seen / not seen)
             public readonly Queue<Vector3> Trail = new(); // last 120 frames' positions
             public Vector3 HoldStart;
+            // stills: 3 s within 1 unit, alive, for any reason (11-06: Samus stood still over the owner facing him, Mining Plaza)
+            public int Stills;
+            public int StillFrom = -1;
+            public Vector3 StillStart;
             public long HoldFrom = -1;
             public bool WasJump;
             public PlayerEntity? LastTarget;
@@ -176,7 +198,7 @@ namespace MphRead
             float time = 120;
             int? goal = null;
             string? character = null, humanChar = null;
-            bool? dropOff = null, steady = null, switchFirst = null, sight = null, roam = null, cling = null, crates = null, vparity = null, stuckfix = null, switchorder = null, nodeflat = null, stucksight = null, breakwalls = null, stuckvertical = null, edgejump = null, padjump = null, liftguard = null, uplifts = null, arrivetick = null, edgehold = null, release = null, extras = null;
+            bool? dropOff = null, steady = null, switchFirst = null, sight = null, roam = null, cling = null, crates = null, vparity = null, stuckfix = null, switchorder = null, nodeflat = null, stucksight = null, breakwalls = null, stuckvertical = null, edgejump = null, padjump = null, liftguard = null, uplifts = null, arrivetick = null, edgehold = null, release = null, extras = null, ledgeland = null, edgeguard = null, crateneed = null, itemwalled = null, outofreach = null, undergiveup = null, grateitems = null, itemnogain = null, nodeoccupied = null;
             bool verbose = false, links = false, linkForce = false, linkSolve = false, padSolve = false;
             Hunter human = Hunter.Samus;
             string? csvPath = null, replay = null, onlyArena = null;
@@ -211,6 +233,15 @@ namespace MphRead
                 case "stucksight": stucksight = value == "on"; break;
                 case "breakwalls": breakwalls = value == "on"; break;
                 case "stuckvertical": stuckvertical = value == "on"; break;
+                case "ledgeland": ledgeland = value == "on"; break;
+                case "edgeguard": edgeguard = value == "on"; break;
+                    case "crateneed": crateneed = value == "on"; break;
+                    case "itemwalled": itemwalled = value == "on"; break;
+                    case "outofreach": outofreach = value == "on"; break;
+                    case "undergiveup": undergiveup = value == "on"; break;
+                    case "grateitems": grateitems = value == "on"; break;
+                    case "itemnogain": itemnogain = value == "on"; break;
+                    case "nodeoccupied": nodeoccupied = value == "on"; break;
                 case "edgejump": edgejump = value == "on"; break;
                 case "release": release = value == "on"; break; // a bot lets go of stale controls (PlayerAi.cs)
                 case "padjump": padjump = value == "on"; break; // the edge jump's pad-launch jump (PlayerAiEdgeJump.cs)
@@ -282,7 +313,7 @@ namespace MphRead
                 string[] only = onlyArena.Split(',');
                 arenas = arenas.Where(a => only.Any(o => a.InGameName.Contains(o, StringComparison.OrdinalIgnoreCase)));
             }
-            var totals = new int[6];
+            var totals = new int[7];
             int arenasRun = 0;
             Console.WriteLine("arena                 | bot             snaps/min hops holds shots walls  roam pitch mean/p90");
             var echoesLines = new List<string>();
@@ -312,6 +343,15 @@ namespace MphRead
                 settings.BotStuckSight = stucksight;
                 settings.BotBreakWalls = breakwalls;
                 settings.BotStuckVertical = stuckvertical;
+                settings.BotLedgeLand = ledgeland;
+                settings.BotEdgeGuard = edgeguard;
+                settings.BotCrateNeed = crateneed;
+                settings.BotItemWalled = itemwalled;
+                settings.BotOutOfReach = outofreach;
+                settings.BotUnderGiveUp = undergiveup;
+                settings.BotGrateItems = grateitems;
+                settings.BotItemNoGain = itemnogain;
+                settings.BotNodeOccupied = nodeoccupied;
                 settings.BotEdgeJump = edgejump;
                 settings.BotEdgePadJump = padjump;
                 settings.BotLiftGuard = liftguard;
@@ -380,10 +420,11 @@ namespace MphRead
                 echoesLines.Add($"{"",-21} | unstick: unmorphs {uc[0]}, climbs {uc[1]}, give-ups {uc[2]}, drifts {uc[3]}, link jumps {uc[4]}, items skipped {uc[5]}");
                 Array.Clear(uc);
                 int[] ec = PlayerEntity.HostEdgeCounts;
-                echoesLines.Add($"{"",-21} | edge jump: jumps {ec[0]}, step-asides {ec[1]}, run-ups {ec[2]}, nodes marked {ec[3]}, pad jumps {ec[4]}, lift guard {PlayerEntity.HostLiftGuardCount}, lift escapes {PlayerEntity.HostLiftEscapeCount}, edge holds {PlayerEntity.HostEdgeHoldCount}");
+                echoesLines.Add($"{"",-21} | edge jump: jumps {ec[0]}, step-asides {ec[1]}, run-ups {ec[2]}, nodes marked {ec[3]}, pad jumps {ec[4]}, lift guard {PlayerEntity.HostLiftGuardCount}, lift escapes {PlayerEntity.HostLiftEscapeCount}, edge holds {PlayerEntity.HostEdgeHoldCount}, edge guards {PlayerEntity.HostEdgeGuardCount}, walled items {PlayerEntity.HostItemWalledCount}, out of reach {PlayerEntity.HostOutOfReachCount}, grate items {PlayerEntity.HostGrateItemCount}, gate jumps dropped {PlayerEntity.HostNoJumpCount}");
                 PlayerEntity.HostLiftGuardCount = 0;
                 PlayerEntity.HostLiftEscapeCount = 0;
                 PlayerEntity.HostEdgeHoldCount = 0;
+                PlayerEntity.HostEdgeGuardCount = 0;
                 Array.Clear(ec);
                 if (MphRecomp.Arenas.EchoesArena.IsEchoesRoom(arena.Name))
                 {
@@ -391,7 +432,7 @@ namespace MphRead
                     {
                         Seat s = seats[i];
                         echoesLines.Add($"{"",-21} |   {settings.Players[i].Character ?? settings.Players[i].Hunter.ToString(),-10} pads {s.Pads,3}  air jumps {s.AirJumps,3}  "
-                            + $"under water {s.WetFrames / 60f,5:0.0} s  boosts {s.Boosts,3}  pickups {s.Pickups,3}  holds {s.Holds,2}");
+                            + $"under water {s.WetFrames / 60f,5:0.0} s  boosts {s.Boosts,3}  pickups {s.Pickups,3}  holds {s.Holds,2}  stills {s.Stills,2}  gate {s.GatePress,2}/{s.GateJumps,2}/{s.GateAir,2}  under {s.Under,2}/{s.UnderLong,2}  item stalls {s.ItemStalls,2}");
                     }
                 }
                 for (int i = 1; i < seats.Length; i++)
@@ -406,6 +447,7 @@ namespace MphRead
                     totals[0] += s.Snaps;
                     totals[1] += s.Hops;
                     totals[2] += s.Holds;
+                    totals[6] += s.ItemStalls;
                     totals[3] += s.Shots;
                     totals[4] += s.Walls;
                     totals[5] += s.Deaths;
@@ -413,11 +455,11 @@ namespace MphRead
                 }
             }
             Console.WriteLine($"TOTAL {arenasRun} arenas: snaps {totals[0]} hops {totals[1]} holds {totals[2]} "
-                + $"shots {totals[3]} through-wall {totals[4]} ({(totals[3] == 0 ? 0 : 100f * totals[4] / totals[3]):0.0}%) deaths {totals[5]}");
+                + $"shots {totals[3]} through-wall {totals[4]} ({(totals[3] == 0 ? 0 : 100f * totals[4] / totals[3]):0.0}%) deaths {totals[5]} item stalls {totals[6]} (no-gain skips {PlayerEntity.HostItemNoGainCount})");
             Console.WriteLine($"aim error at real shots (deg off the target): seen n {AimAll.Count(0)} median {AimAll.Pct(0, 0.5f):0.0} p90 {AimAll.Pct(0, 0.9f):0.0} over30 {AimAll.Over(0, 30):0}% | hidden n {AimAll.Count(1)} median {AimAll.Pct(1, 0.5f):0.0} p90 {AimAll.Pct(1, 0.9f):0.0} over30 {AimAll.Over(1, 30):0}%");
             Console.WriteLine("causes: " + String.Join(" ", WhyCounts.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value}")));
             int[] cc = PlayerEntity.PlayerAiData.HostCrateCounts, wc = PlayerEntity.PlayerAiData.HostWallClingCounts;
-            Console.WriteLine($"bot crates: picked {cc[0]} shots {cc[1]} seen break {cc[2]} drops reached {cc[3]}, given up: time {cc[4]} out of sight {cc[5]} fight {cc[6]}; drops too far {cc[7]} no floor {cc[8]} timed out {cc[9]} | "
+            Console.WriteLine($"bot crates: picked {cc[0]} shots {cc[1]} seen break {cc[2]} drops reached {cc[3]}, given up: time {cc[4]} out of sight {cc[5]} fight {cc[6]}; drops too far {cc[7]} no floor {cc[8]} timed out {cc[9]}, carrier frames {cc[10]} | "
                 + $"bot wall cling: perch jumps {wc[0]} clings {wc[1]} wall jumps {wc[2]}");
             int[] bw = PlayerEntity.PlayerAiData.HostWallCounts;
             Console.WriteLine($"bot breakable walls: picked {bw[0]} shots {bw[1]} seen break {bw[2]}, given up: time {bw[3]} way changed {bw[4]} fight/other {bw[5]}");
@@ -447,16 +489,53 @@ namespace MphRead
                 ReplayTest.PlayFile(new[] { "-replayplay", file });
                 return;
             }
+            if (args.FirstOrDefault(a => a.StartsWith("faces=")) is { } fa) // faces=x,z,y: the floor faces down a grid around (x,z) under y (11-01, Mining Plaza ledges)
+            {
+                float[] c = fa[6..].Split(',').Select(v => Single.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                bool done = false;
+                ReplayTest.StepProbe = (step, host) =>
+                {
+                    if (done || step < 10) return;
+                    done = true;
+                    for (float dz = -1.5f; dz <= 1.51f; dz += 0.25f)
+                    {
+                        var sb = new System.Text.StringBuilder($"z {c[1] + dz,6:0.00}:");
+                        for (float dx = -1.5f; dx <= 1.51f; dx += 0.25f)
+                        {
+                            var res = new CollisionResult();
+                            Vector3 a = new Vector3(c[0] + dx, c[2], c[1] + dz), b = a - new Vector3(0, 12, 0);
+                            if (CollisionDetection.CheckBetweenPoints(a, b, TestFlags.None, host.Scene, ref res))
+                                sb.Append($" {res.Position.Y,6:0.00}/{res.Plane.Y:0.00}{(res.Flags.TestFlag(MphRead.Formats.Collision.CollisionFlags.Bit12) ? "s" : "f")}");
+                            else sb.Append("   ---      ");
+                        }
+                        Console.WriteLine(sb);
+                    }
+                    Console.WriteLine($"cols x {c[0] - 1.5f:0.00} .. {c[0] + 1.5f:0.00} step 0.25; y/normalY, s = Bit12 (not floor material), f = floor material");
+                };
+                ReplayTest.PlayFile(new[] { "-replayplay", file });
+                return;
+            }
             int seat = Int32.Parse(args.First(a => a.StartsWith("seat="))[5..]);
             string[] range = args.First(a => a.StartsWith("steps="))[6..].Split('-');
             int from = Int32.Parse(range[0]), to = Int32.Parse(range[1]);
             // stucksight=on|off: forces that switch over what the file recorded (the match plays on from where it changes)
             string? force = args.FirstOrDefault(a => a.StartsWith("stucksight="));
+            int every = args.FirstOrDefault(a => a.StartsWith("every=")) is { } ev ? Int32.Parse(ev[6..]) : 10;
+            string? forceLand = args.FirstOrDefault(a => a.StartsWith("ledgeland=")); // (11-01) the same for HostBotLedgeLand
             ReplayTest.StepProbe = (step, host) =>
             {
                 if (force != null) PlayerEntity.HostBotStuckSight = force.EndsWith("=on");
-                if (step < from || step > to || step % 10 != 0) return;
+                if (forceLand != null && step >= (forceLand.Contains('@') ? Int32.Parse(forceLand[(forceLand.IndexOf('@') + 1)..]) : 0)) // ledgeland=on@step
+                {
+                    PlayerEntity.HostBotLedgeLand = forceLand.Contains("=on");
+                }
+                if (step < from || step > to || step % every != 0) return;
                 PlayerEntity p = PlayerEntity.Players[seat];
+                if (every < 10) // every=N (11-01): the move and link state, short
+                {
+                    Console.WriteLine($"step {step} pos {Fmt(p.Position)} spd {Fmt(p.Speed)} gnd {(p.Flags1.TestFlag(PlayerFlags1.Grounded) ? 1 : 0)} L {(p.AiData.HostButtonL ? 1 : 0)} n40 {p.AiData.AuditTarget?.Id} {p.AiData.HostLinkState} {p.AiData.AuditMove()}");
+                    return;
+                }
                 Console.WriteLine($"step {step} {p.Hunter} hp {p.Health} alt {p.IsAltForm} pos {Fmt(p.Position)} spd {Fmt(p.Speed)} "
                     + $"stuckfix {PlayerEntity.HostBotStuckFix} sight {PlayerEntity.HostBotStuckSight} parity {PlayerEntity.HostBotVanillaParity} tree {p.AiData.HostDebugState()} "
                     + $"travel:clock {p.AiData.HostUnstickState} seesfoe {p.AiData.HostUnstickSeesFoe} {p.AiData.DemoState()} "
@@ -1034,7 +1113,7 @@ namespace MphRead
                 bot.AiData.AuditHold(null);
                 lines.Add($"{arena.InGameName,-21} | {bot.Hunter,-8} links {total}: ok {ok} ({(total == 0 ? 0 : 100f * ok / total):0.0}%, mean {(ok == 0 ? 0 : okFrames / 60f / ok):0.0} s, "
                     + $"on a wall {okWall / 60f:0.0} s in all, {rubbed.Count} rubbed 0.5 s+), "
-                    + "not ok: " + String.Join(" ", kinds.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value}")) + $" ({nodes.Count} nodes, {cold} cold starts)");
+                    + "not ok: " + String.Join(" ", kinds.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value}")) + $" ({nodes.Count} nodes, {cold} cold starts, edge guards {PlayerEntity.HostEdgeGuardCount})");
                 int first = lines.Count - 1;
                 lines.AddRange(fails);
                 lines.AddRange(rubbed.OrderByDescending(r => r.Item1).Select(r => r.Item2));
@@ -1073,6 +1152,57 @@ namespace MphRead
                 s += down ? n : "-";
             }
             return s;
+        }
+
+        private static object? _selfLeaf;
+        private static void SelfLeafDump(PlayerEntity p, long f) // selftrace: on a leaf change, the leaf's siblings and their exits
+        {
+            if (p.AiData.GetType().GetField("_executionTree", NonPub)?.GetValue(p.AiData) is not Array tree) return;
+            AiPersonalityData1? leaf = null;
+            foreach (object? c in tree)
+            {
+                object? d1 = c?.GetType().GetProperty("Data1")?.GetValue(c);
+                if (d1 is not AiPersonalityData1 n1) break;
+                leaf = n1;
+                if (n1.Data1.Count == 0) break;
+            }
+            if (leaf == null || leaf == _selfLeaf) return;
+            _selfLeaf = leaf;
+            var chain = new List<string>();
+            for (AiPersonalityData1? n = leaf; n != null; n = n.Parent)
+            {
+                chain.Insert(0, $"{n.Func24Id}#{(n.Parent == null ? -1 : Enumerable.ToList(n.Parent.Data1).IndexOf(n))}");
+            }
+            Console.WriteLine($"leaf f{f} path {string.Join("/", chain)}");
+            for (AiPersonalityData1? n = leaf.Parent; n?.Parent != null; n = n.Parent)
+            {
+                var ps = Enumerable.ToList(n.Parent.Data1);
+                foreach (AiPersonalityData2 e in n.Data2)
+                {
+                    string gates = string.Join(" & ", e.Data4.Select(g => $"f3_{g.Func3Id}({g.Parameters.Param1},{g.Parameters.Param2})"));
+                    Console.WriteLine($"leaf   up {ps.IndexOf(n)} -> {(e.Data1SelectIndex >= 20 ? "reset" : $"{e.Data1SelectIndex}")} w {e.Weight} x f3_{e.Func3Id}({e.Parameters.Param1},{e.Parameters.Param2}){(gates.Length > 0 ? " if " + gates : "")}");
+                }
+            }
+            var sib = leaf.Parent?.Data1;
+            Console.WriteLine($"leaf f{f} -> Func24 {leaf.Func24Id} (index {(sib == null ? -1 : Enumerable.ToList(sib).IndexOf(leaf))}) d3a [{string.Join(",", leaf.Data3a)}] d3b [{string.Join(",", leaf.Data3b)}]");
+            if (sib == null) return;
+            for (int k = 0; k < sib.Count; k++)
+            {
+                foreach (AiPersonalityData2 e in sib[k].Data2)
+                {
+                    string gates = string.Join(" & ", e.Data4.Select(g => $"f3_{g.Func3Id}({g.Parameters.Param1},{g.Parameters.Param2})"));
+                    Console.WriteLine($"leaf   child {k} (Func24 {sib[k].Func24Id}) -> {(e.Data1SelectIndex >= 20 ? "reset" : $"child {e.Data1SelectIndex} (Func24 {sib[e.Data1SelectIndex].Func24Id})")}"
+                        + $" w {e.Weight} x f3_{e.Func3Id}({e.Parameters.Param1},{e.Parameters.Param2}){(gates.Length > 0 ? " if " + gates : "")}");
+                }
+            }
+        }
+
+        private static string AiMagUp(PlayerEntity p) // selftrace: Magmaul touch button's FramesUp (PressL needs it over its frames)
+        {
+            object? b = p.AiData.GetType().GetField("_touchButtons", NonPub)?.GetValue(p.AiData);
+            object? m = b?.GetType().GetProperty("Magmaul")?.GetValue(b) ?? b?.GetType().GetField("Magmaul")?.GetValue(b);
+            object? v = m?.GetType().GetProperty("FramesUp")?.GetValue(m) ?? m?.GetType().GetField("FramesUp")?.GetValue(m);
+            return v?.ToString() ?? "?";
         }
 
         private static string AiLeafCtx(PlayerEntity p) // selftrace: the leaf context's Field2C/Field20/Field30 (path-follow mode)
@@ -1142,6 +1272,10 @@ namespace MphRead
                             }
                         }
                     }
+                    if (i == SelfTraceSeat && f >= SelfTraceFrom && f <= SelfTraceTo)
+                    {
+                        SelfLeafDump(p, f);
+                    }
                     if (i == SelfTraceSeat && f >= SelfTraceFrom && f <= SelfTraceTo && (f % 4 == 0 || SelfTraceTo - SelfTraceFrom <= 24))
                     {
                         string grav = "";
@@ -1154,7 +1288,7 @@ namespace MphRead
                         }
                         Console.WriteLine($"st f{f} pos {p.Position.X:0.0} {p.Position.Y:0.0} {p.Position.Z:0.0} spd {p.Speed.X:0.00} {p.Speed.Y:0.00} {p.Speed.Z:0.00}"
                             + $" gnd {p.Flags1.TestFlag(PlayerFlags1.Grounded)} node {SelfNode[i]} climb {climb} climbs {climbs} clock {AiInt(p, "_unstickFrames")} drift {AiInt(p, "_unstickDrift")}{grav}"
-                            + $" btn {AiButtonsDown(p)} f2 {(uint)p.AiData.Flags2:X} st {p.AiData.HostState} c {AiLeafCtx(p)} uc {string.Join(",", PlayerEntity.HostUnstickCounts)} ec {string.Join(",", PlayerEntity.HostEdgeCounts)}");
+                            + $" btn {AiButtonsDown(p)} f2 {(uint)p.AiData.Flags2:X} st {p.AiData.HostState} c {AiLeafCtx(p)} uc {string.Join(",", PlayerEntity.HostUnstickCounts)} ec {string.Join(",", PlayerEntity.HostEdgeCounts)} nj {PlayerEntity.HostNoJumpCount} uj {p.Flags1.TestFlag(PlayerFlags1.UsedJump)} mag {AiMagUp(p)}");
                     }
                 }
                 if (GameState.Suicides[i] > SelfSeen[i])
@@ -1356,6 +1490,22 @@ namespace MphRead
             }
         }
 
+        // a body's distance from the gate's box that counts as pressed against it (a hunter's radius ~0.5 plus a margin)
+        private const float GateNear = 0.8f;
+
+        private static (Vector3 Lo, Vector3 Hi) GateBox(MphRecomp.Arenas.MiningPlazaGateEntity g)
+        {
+            float[] tr = g.Spot.Tris;
+            Vector3 lo = new(Single.MaxValue), hi = new(Single.MinValue);
+            for (int k = 0; k + 2 < tr.Length; k += 3)
+            {
+                var v = new Vector3(tr[k], tr[k + 1], tr[k + 2]);
+                lo = Vector3.ComponentMin(lo, v);
+                hi = Vector3.ComponentMax(hi, v);
+            }
+            return (lo, hi);
+        }
+
         private static void Measure(CampaignHost host, Seat s, PlayerEntity p, int index, bool verbose)
         {
             long frame = host.Frame;
@@ -1372,6 +1522,13 @@ namespace MphRead
                 s.Trail.Clear();
                 s.HoldFrom = -1;
                 s.WasJump = false;
+                if (!p.LoadFlags.TestFlag(LoadFlags.Active) || p.Health == 0)
+                {
+                    // (dead: the under spell ends here; left open it counted the respawn wait as stuck, 11-05)
+                    s.UnderFrom = -1;
+                    s.UnderLeaf = "";
+                    s.UnderLeafAt = -1;
+                }
                 return;
             }
             s.Frames++;
@@ -1436,7 +1593,106 @@ namespace MphRead
                     Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} hop in place at {Fmt(p.Position)}");
                 }
             }
+            // at the shut gate (Mining Plaza): within GateNear of its box
+            bool atGate = false;
+            foreach (EntityBase e in host.Scene.Entities)
+            {
+                if (e is MphRecomp.Arenas.MiningPlazaGateEntity g && !g.Opened && p.Health > 0)
+                {
+                    (Vector3 lo, Vector3 hi) = GateBox(g);
+                    Vector3 q = p.Position;
+                    float dx = Math.Max(0, Math.Max(lo.X - q.X, q.X - hi.X)), dz = Math.Max(0, Math.Max(lo.Z - q.Z, q.Z - hi.Z));
+                    atGate = MathF.Sqrt(dx * dx + dz * dz) < GateNear && q.Y > lo.Y - 1 && q.Y < hi.Y;
+                }
+            }
+            // in the air against the shut gate (a jump from farther off that carries the bot into it)
+            // (counted only within 90 frames of a jump: a step down or a knock at the gate isn't one)
+            bool gateAir = atGate && !p.Flags1.TestFlag(PlayerFlags1.Grounded) && s.LastJumpFrame >= 0 && frame - s.LastJumpFrame < 90;
+            if (gateAir && !s.WasGateAir)
+            {
+                s.GateAir++;
+                Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} in the air at the shut gate {Fmt(p.Position)} node {Fmt(p.AiData.HostNodePos ?? Vector3.Zero)}"
+                    + (s.LastJumpFrame < 0 ? " (no jump yet)" : $" last jump f{s.LastJumpFrame} at {Fmt(s.LastJumpPos)} node {Fmt(s.LastJumpNode)}"));
+            }
+            s.WasGateAir = gateAir;
+            if (!atGate) s.GateFrom = -1;
+            else if (s.GateFrom < 0) s.GateFrom = frame;
+            else if (frame - s.GateFrom == 30)
+            {
+                s.GatePress++;
+                Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} at the shut gate {Fmt(p.Position)} node {Fmt(p.AiData.HostNodePos ?? Vector3.Zero)}");
+            }
+            if (atGate && jump && !s.WasJump)
+            {
+                s.GateJumps++;
+                Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} jump at the shut gate {Fmt(p.Position)} node {Fmt(p.AiData.HostNodePos ?? Vector3.Zero)}");
+            }
+            if (jump && !s.WasJump)
+            {
+                s.LastJumpFrame = frame;
+                s.LastJumpPos = p.Position;
+                s.LastJumpNode = p.AiData.HostNodePos ?? Vector3.Zero;
+            }
             s.WasJump = jump;
+            // under its node: on the ground with the node 1+ up and under 3 across
+            bool under = p.Health > 0 && p.Flags1.TestFlag(PlayerFlags1.Grounded) && p.AiData.HostNodePos is Vector3 un
+                && un.Y - p.Position.Y > 1 && (un - p.Position).Xz.Length < 3;
+            if (!under || s.UnderFrom >= 0 && (p.Position - s.UnderStart).Xz.Length > 1.5f)
+            {
+                if (s.UnderFrom >= 0 && frame - s.UnderFrom >= 45)
+                {
+                    if (frame - s.UnderFrom >= 90) s.UnderLong++; // (stuck under it 1.5 s or more: what the owner sees as stuck)
+                    Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} {(frame - s.UnderFrom >= 90 ? "was" : "(short)")} under its node {(frame - s.UnderFrom) / 60f:0.0} s at {Fmt(s.UnderStart)} leaf {s.UnderLeaf}");
+                }
+                s.UnderFrom = -1;
+            }
+            if (under && s.UnderFrom < 0)
+            {
+                s.UnderFrom = frame;
+                s.UnderStart = p.Position;
+            }
+            if (under && s.UnderFrom >= 0 && frame - s.UnderLeafAt >= 30)
+            {
+                s.UnderLeafAt = frame;
+                s.UnderLeaf += (s.UnderLeaf.Length > 0 ? " " : "") + "[" + p.AiData.HostState + " b" + AiButtonsDown(p) + "]"; // (every 0.5 s: the AI branch)
+            }
+            else if (!under)
+            {
+                s.UnderLeaf = "";
+                s.UnderLeafAt = -1;
+            }
+            else if (under && frame - s.UnderFrom == 30)
+            {
+                s.Under++;
+                Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} under its node at {Fmt(p.Position)} node {Fmt(p.AiData.HostNodePos ?? Vector3.Zero)} alt {(p.IsAltForm ? 1 : 0)}");
+            }
+            if (s.StillFrom < 0 || p.Health == 0 || (p.Position - s.StillStart).Length > 1)
+            {
+                s.StillFrom = (int)frame;
+                s.StillStart = p.Position;
+            }
+            else if (frame - s.StillFrom == 180)
+            {
+                s.Stills++;
+                if (verbose)
+                {
+                    Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} still at {Fmt(p.Position)} [{p.AiData.HostState}]");
+                }
+            }
+            // item stalls: beside its target item 1.5 s, no nearer by a quarter unit (not while frozen, and not once the match is over: the results freeze holds everyone)
+            ItemInstanceEntity? stallItem = p.AiData.HostTargetItem;
+            if (stallItem == null || p.Health == 0 || p.NetFrozen || GameState.MatchState != MatchState.InProgress || stallItem != s.StallItem || (stallItem.Position - p.Position).Xz.Length > 3.5f
+                || (stallItem.Position - p.Position).Length < s.StallBest - 0.25f)
+            {
+                s.StallItem = stallItem;
+                s.StallFrom = frame;
+                s.StallBest = stallItem == null ? 0 : (stallItem.Position - p.Position).Length;
+            }
+            else if (frame - s.StallFrom == 90)
+            {
+                s.ItemStalls++;
+                Console.WriteLine($"  f{frame,6} seat {index} {p.Hunter} item stall at {Fmt(p.Position)} item {stallItem.ItemType} {Fmt(stallItem.Position)}");
+            }
             // holds: 4 s within 2 units
             if (s.HoldFrom < 0 || p.Health == 0 || p.AiData.HostNodePos is not Vector3 holdNode
                 || (holdNode - p.Position).Length < 2 || (p.Position - s.HoldStart).Length > 2)

@@ -512,7 +512,7 @@ namespace MphRead
         }
 
         // the mockup's renders as the device's pictures (the names CharacterPictures.For looks for)
-        private static void FillPictures(string hd, string pictures)
+        internal static void FillPictures(string hd, string pictures)
         {
             string? renders = FindUp(AppContext.BaseDirectory, Path.Combine("testdata", "picker_renders"));
             if (renders == null) return;
@@ -530,7 +530,7 @@ namespace MphRead
             }
         }
 
-        private static string? FindUp(string from, string relative)
+        internal static string? FindUp(string from, string relative)
         {
             for (DirectoryInfo? d = new(from); d != null; d = d.Parent)
             {

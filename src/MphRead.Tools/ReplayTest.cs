@@ -407,8 +407,12 @@ namespace MphRead
         public static void Golden(string[] args)
         {
             bool record = args.Contains("record"), force = args.Contains("force");
+            // mods: play the goldens with a listener on every mod event (GameEvents.cs, docs/MOD_API.md), to show the
+            // hooks fire in the real game and still leave every replay exact
+            bool mods = args.Contains("mods");
             string? only = args.FirstOrDefault(a => a.StartsWith("only="))?[5..];
-            Options o = Parse(args.Skip(1).Where(a => a != "record" && a != "force" && !a.StartsWith("only=")), new Options());
+            Options o = Parse(args.Skip(1).Where(a => a != "record" && a != "force" && a != "mods" && !a.StartsWith("only=")),
+                new Options());
             (_drawFreeRecord, _drawFreeReplay) = (o.DrawFreeRecord, o.DrawFreeReplay);
             if (!Setup())
             {
@@ -518,8 +522,17 @@ namespace MphRead
                     }
                     else
                     {
+                        var heard = new SortedDictionary<string, int>();
+                        if (mods)
+                        {
+                            GameEvents.Listener = (e, _) => heard[e] = heard.GetValueOrDefault(e) + 1;
+                            GameEvents.Any = GameEvents.Tick = true;
+                            GameEvents.Messages = (_, _, _, _, _) => heard["message"] = heard.GetValueOrDefault("message") + 1;
+                        }
                         Run r = Replay(file, o.View, types: false, reference: null);
+                        (GameEvents.Any, GameEvents.Tick, GameEvents.Listener, GameEvents.Messages) = (false, false, null, null);
                         result = $"{(r.Exact ? "PASS" : "FAIL")}   {r.Verdict()}";
+                        if (mods) result += "; mod events " + string.Join(" ", heard.Select(h => $"{h.Key} {h.Value}"));
                     }
                 }
                 if (result.StartsWith("PASS")) pass++; else if (result.StartsWith("SKIP")) skip++; else fail++;

@@ -224,8 +224,7 @@ namespace MphRecomp.FirstHunt
                 foreach (UiVertex v in new[] { t.A, t.B, t.C }) { lo = MathF.Min(lo, v.X); hi = MathF.Max(hi, v.X); ylo = MathF.Min(ylo, v.Y); yhi = MathF.Max(yhi, v.Y); }
                 spans[key] = (lo, hi, ylo, yhi);
             }
-            float barY0 = float.MaxValue, barY1 = float.MinValue;
-            WidgetTri? borderTri = null;
+            var bars = new Dictionary<string, WidgetTri>();
             foreach (WidgetTri t in tris)
             {
                 if (!OnTop(t)) continue;
@@ -247,34 +246,79 @@ namespace MphRecomp.FirstHunt
                 {
                     if (spans.TryGetValue((tag, menus.NodeOf(t.Item).Node), out var span) && span.x0 <= 1 && span.x1 >= 255)
                     {
-                        barY0 = MathF.Min(barY0, span.y0);
-                        barY1 = MathF.Max(barY1, span.y1);
-                        if (menus.NodeOf(t.Item).Node.Contains("border", StringComparison.OrdinalIgnoreCase)) borderTri ??= t;
+                        bars.TryAdd(menus.NodeOf(t.Item).Node, t);
                     }
                     Draw(list, t, _band, true, UiBlend.Alpha);
                 }
             }
             list.Clip = UiRect.None;
-            if (borderTri != null && barY1 > barY0 && !_panel && !_split) BandSides(list, borderTri.Value, _band.Y + (192 - barY1) * _band.S, _band.Y + (192 - barY0) * _band.S);
+            if (!_panel && !_split) BandSides(list, bars);
             Edges(menus, list, tris, u);
         }
 
-        // the description box's sides: the bars' own red glow texture (borderBig*: a 256x16 strip, its line a third of the way
-        // down), turned a quarter turn and laid down each side along the straight part of its line, cut at the bars' ends
-        private void BandSides(UiDrawList list, WidgetTri bar, float y0, float y1)
+        // the description box's sides, built like its top: the top's cross-section (flashTopBig's glow outside, borderBigTop's
+        // lines inside: v 0 outer to 1 inner on both) laid down each side from the bottom's outer edge to the top's, the lines'
+        // plain stretch (column 2 of the 256-wide strip), mitred into the bars at the corners, the bars carried out over the
+        // corners on the same diagonal; so the box reads as one frame (owner 10-30: "the sides should look exactly like the tops")
+        private void BandSides(UiDrawList list, Dictionary<string, WidgetTri> bars)
         {
-            float s = _band.S, half = 0.3f * 16 * s;
-            UiVertex c = bar.A;
-            const float u0 = 0.04f, u1 = 0.14f;
-            foreach (float x in new[] { _band.X, _band.X + 256 * s })
+            if (!bars.TryGetValue("flashTopBig", out WidgetTri flashTop) || !bars.TryGetValue("borderBigTop", out WidgetTri borderTop)
+                || !bars.TryGetValue("borderBigBottom", out WidgetTri borderBottom) || !bars.TryGetValue("flashBottomBig", out WidgetTri flashBottom))
             {
-                var a = new UiVertex(x - half, y0, u0, 0, c.R, c.G, c.B, c.A);
-                var b = new UiVertex(x + half, y0, u0, 0.6f, c.R, c.G, c.B, c.A);
-                var d = new UiVertex(x + half, y1, u1, 0.6f, c.R, c.G, c.B, c.A);
-                var e = new UiVertex(x - half, y1, u1, 0, c.R, c.G, c.B, c.A);
-                list.Triangle(bar.TextureId, UiWrap.Clamp, UiWrap.Clamp, UiBlend.Alpha, a, b, d);
-                list.Triangle(bar.TextureId, UiWrap.Clamp, UiWrap.Clamp, UiBlend.Alpha, a, d, e);
+                return;
             }
+            // (each bar's rows: its outer and inner y, with their v)
+            static (float yOut, float vOut, float yIn, float vIn) Rows(WidgetTri t, bool top)
+            {
+                UiVertex lo = t.A, hi = t.A;
+                foreach (UiVertex v in new[] { t.B, t.C }) { if (v.Y < lo.Y) lo = v; if (v.Y > hi.Y) hi = v; }
+                return top ? (hi.Y, hi.V, lo.Y, lo.V) : (lo.Y, lo.V, hi.Y, hi.V);
+            }
+            var ft = Rows(flashTop, true);
+            var bt = Rows(borderTop, true);
+            var bb = Rows(borderBottom, false);
+            var fb = Rows(flashBottom, false);
+            float topOut = ft.yOut, topIn = bt.yIn, botOut = fb.yOut, botIn = bb.yIn;
+            float flashW = ft.yOut - ft.yIn, width = topOut - topIn;
+            const float u = 2.5f / 256;
+            foreach ((float edge, float dir) in new[] { (0f, -1f), (256f, 1f) })
+            {
+                // (the corners' diagonals: outer corner to inner corner, as x at y)
+                float outX = edge + dir * width;
+                float TopX(float y) => outX + (edge - outX) * (topOut - y) / (topOut - topIn);
+                float BotX(float y) => outX + (edge - outX) * (y - botOut) / (botIn - botOut);
+                float TopY(float x) => topOut - (topOut - topIn) * (x - outX) / (edge - outX);
+                float BotY(float x) => botOut + (botIn - botOut) * (x - outX) / (edge - outX);
+                // the bars over the corners: glow, then lines
+                Corner(list, flashTop, ft.yOut, ft.vOut, ft.yIn, ft.vIn, TopX, edge, u);
+                Corner(list, flashBottom, fb.yOut, fb.vOut, fb.yIn, fb.vIn, BotX, edge, u);
+                Corner(list, borderTop, bt.yOut, bt.vOut, bt.yIn, bt.vIn, TopX, edge, u);
+                Corner(list, borderBottom, bb.yOut, bb.vOut, bb.yIn, bb.vIn, BotX, edge, u);
+                // the side: the top's glow, then its lines
+                Side(list, flashTop, outX, edge + dir * (width - flashW), ft.vOut, ft.vIn, TopY, BotY, u);
+                Side(list, borderTop, edge + dir * (width - flashW), edge, bt.vOut, bt.vIn, TopY, BotY, u);
+            }
+        }
+
+        // a bar's rows yOut..yIn carried from the diagonal (x at y) to the box's edge
+        private void Corner(UiDrawList list, WidgetTri bar, float yOut, float vOut, float yIn, float vIn, Func<float, float> diag, float edge, float u)
+        {
+            Quad(list, bar, (diag(yOut), yOut, u, vOut), (edge, yOut, u, vOut), (edge, yIn, u, vIn), (diag(yIn), yIn, u, vIn));
+        }
+
+        // a side's strip xOut..xIn, between the top and bottom corners' diagonals (y at x)
+        private void Side(UiDrawList list, WidgetTri bar, float xOut, float xIn, float vOut, float vIn, Func<float, float> top, Func<float, float> bottom, float u)
+        {
+            Quad(list, bar, (xOut, top(xOut), u, vOut), (xIn, top(xIn), u, vIn), (xIn, bottom(xIn), u, vIn), (xOut, bottom(xOut), u, vOut));
+        }
+
+        // a quad in the band's units (y up), in the bar's texture and colour
+        private void Quad(UiDrawList list, WidgetTri bar, params (float x, float y, float u, float v)[] p)
+        {
+            UiVertex c = bar.A;
+            UiVertex V((float x, float y, float u, float v) q) => new UiVertex(_band.X + q.x * _band.S, _band.Y + (192 - q.y) * _band.S, q.u, q.v, c.R, c.G, c.B, c.A);
+            list.Triangle(bar.TextureId, UiWrap.Clamp, bar.WrapT, UiBlend.Alpha, V(p[0]), V(p[1]), V(p[2]));
+            list.Triangle(bar.TextureId, UiWrap.Clamp, bar.WrapT, UiBlend.Alpha, V(p[0]), V(p[2]), V(p[3]));
         }
 
         private static int Tag(in WidgetTri t) => t.Item >> 12;
@@ -685,35 +729,27 @@ namespace MphRecomp.FirstHunt
         private void Edges(FhFrontend menus, UiDrawList list, List<WidgetTri> tris, float u)
         {
             TopBar(menus, list, tris, u);
-            Rect b = _bottom;
-            float stripTop = b.Y + 8 * b.S, stripFoot = b.Y + 16 * b.S, stripLeft = _panel ? b.X : 0;
-            bool header = Node(menus, tris, "headerBar1", out _, out _, out _, out _).Count > 0;
             for (int k = 0; k < 2; k++)
             {
                 if (!BoltRect(menus, tris, k, u, out Rect r, out List<WidgetTri> mine)) continue;
                 float s = r.S;
-                // (the canvas's top to its foot, as the cart's run its screen's; behind the header strip where it crosses it,
-                // as the cart's go behind its strip)
-                List<WidgetTri> bar = Node(menus, tris, k == 0 ? "frameBarBL" : "frameBarBR", out float bx0, out _, out float by0, out float by1);
+                // (the canvas's top to its foot, as the cart's run its screen's, unbroken: over the header strip where it
+                // crosses it, as the top screen's cross its frame line; cut behind the strip they left a stub over it that
+                // read as a break, owner 10-30)
+                List<WidgetTri> bar = Node(menus, tris, k == 0 ? "frameBarBL" : "frameBarBR", out _, out _, out float by0, out float by1);
                 if (bar.Count > 0 && by1 > by0)
                 {
-                    UiRect[] parts = !header || r.X + bx0 * s < stripLeft ? new[] { UiRect.None }
-                        : new[] { new UiRect(0, 0, _w, stripTop), new UiRect(0, stripFoot, _w, _h - stripFoot) };
-                    foreach (UiRect part in parts)
+                    list.Clip = UiRect.None;
+                    foreach (WidgetTri t in bar)
                     {
-                        list.Clip = part;
-                        foreach (WidgetTri t in bar)
+                        Draw(list, t, v =>
                         {
-                            Draw(list, t, v =>
-                            {
-                                v.X = r.X + v.X * s;
-                                v.Y = (by1 - v.Y) / (by1 - by0) * _h;
-                                return v;
-                            });
-                        }
+                            v.X = r.X + v.X * s;
+                            v.Y = (by1 - v.Y) / (by1 - by0) * _h;
+                            return v;
+                        });
                     }
                 }
-                list.Clip = UiRect.None;
                 foreach (WidgetTri t in mine) Draw(list, t, r, false, UiBlend.Alpha);
             }
             if (_panel) return;

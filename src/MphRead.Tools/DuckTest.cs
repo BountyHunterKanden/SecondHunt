@@ -80,6 +80,20 @@ namespace MphRead
             float after = e.Step(t + 60_000, true, true);
             Check("a stalled clock doesn't jump", after > 0.5f, $"gain {after:F2}");
 
+            // 6b. self duck (your own push to talk on a loudspeaker, 2026-10-31): down at once (no onset), deep, back after release
+            e = DuckEnvelope.Self();
+            e.Step(t, false, true);
+            float g100 = 1;
+            for (int i = 0; i < 100 / step; i++) { t += step; g100 = e.Step(t, true, true); }
+            for (int i = 0; i < 400 / step; i++) { t += step; e.Step(t, true, true); }
+            Check("self duck: down within 100 ms", g100 <= DuckEnvelope.SelfDuckGain + 1e-4f, $"gain {g100:F3} after 100 ms");
+            Check("self duck is deeper than the remote duck", e.Gain < DuckEnvelope.DuckGain, $"gain {e.Gain:F3}");
+            for (int i = 0; i < (DuckEnvelope.SelfHoldMs + DuckEnvelope.SelfReleaseMs + 200) / step; i++) { t += step; e.Step(t, false, true); }
+            Check("self duck: back to full after release", e.Gain == 1, $"gain {e.Gain:F3}");
+            e = DuckEnvelope.Self();
+            for (int i = 0; i < 1000 / step; i++) { t += step; e.Step(t, true, false); }
+            Check("self duck: toggle off keeps the music up", e.Gain == 1, $"gain {e.Gain:F3}");
+
             // 7. the speaking icon (VoiceGlyph, C4): drawn at the sizes the lobby / pop-up use, vertically symmetric, not empty or solid
             foreach (int n in new[] { 12, 24, 32 })
             {

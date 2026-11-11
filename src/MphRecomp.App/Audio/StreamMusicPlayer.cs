@@ -44,6 +44,10 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, Syst
     volatile bool _hostPaused;
     volatile bool _disposed;
     volatile float _master = 1;
+    // seconds of music the track holds (GameMusicPlayer's bufferSeconds)
+    readonly float _bufferSeconds;
+
+    public StreamMusicPlayer(float bufferSeconds = 0.25f) => _bufferSeconds = bufferSeconds;
 
     public float MasterVolume
     {
@@ -156,8 +160,8 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, Syst
         if (_track != null && rate == _rate) return;
         _track?.Release();
         _rate = rate;
-        // a quarter second of stereo float, as GameMusicPlayer's
-        _track = AppPlatform.Audio.CreateTrack(rate, 2, PcmFormat.Float32, rate / 4, PcmUsage.Music);
+        // bufferSeconds of stereo float, as GameMusicPlayer's
+        _track = AppPlatform.Audio.CreateTrack(rate, 2, PcmFormat.Float32, (int)(rate * _bufferSeconds), PcmUsage.Music);
         _track.SetVolume(_master);
         Log.Info("MPHAudio", $"stream music track: {rate} Hz, {_track.Describe()}");
     }

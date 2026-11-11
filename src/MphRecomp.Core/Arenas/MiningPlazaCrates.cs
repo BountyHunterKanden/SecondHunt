@@ -11,7 +11,7 @@ using OpenTK.Mathematics;
 
 namespace MphRecomp.Arenas
 {
-    // Mining Plaza's seven SAND CRATEs, the shootable plants (owner 2026-10-31: "imported exactly:
+    // Mining Plaza's seven SAND CRATEs, the shootable plants (thread 3d373d stage 3, owner 2026-10-31: "imported exactly:
     // their own animated model, the hit flash and flinch, their own debris burst, effects and sound. The plants regrow 30 s
     // after being destroyed"). Each is Echoes' own actor: its animation set's ready loop and flinch baked as placed passes
     // (MiningPlaza.Crates, at crate 0's transform; each crate drawn through its own Delta), its DCLN as entity collision
@@ -142,9 +142,9 @@ namespace MphRecomp.Arenas
                 Add(ItemType.UASmall, 80, 1, 2);
             }
             else Add(ItemType.UASmall, 25, 1, 1);
-            // one crate, one pickup: the first thing its rolls came up with (health or missiles, else beam ammo). Every roll
-            // above still happens, so the random stream is unchanged
-            if (got.Count > 1) got.RemoveRange(1, got.Count - 1);
+            // (11-01) one crate, one pickup: the first thing its rolls came up with (health or missiles, else beam ammo). Every roll
+            // above still happens, so the random stream is the old one; on with format 78 so older replays keep their bundles
+            if (PlayerEntity.HostBotLedgeLand && got.Count > 1) got.RemoveRange(1, got.Count - 1);
             return got;
         }
     }
@@ -155,8 +155,9 @@ namespace MphRecomp.Arenas
         public CrateLight? Light { get; }
         public Vector3 Origin { get; }
         readonly Vector3 _center; // its middle; Position is zeroed by Transform = Identity in EnemyInitialize
-        // aim, bombs and drops at its middle (Position is zeroed above)
-        Vector3 Mid => _center;
+        // (11-01) aim, bombs and drops at its middle: on with format 78 like PlayerEntity.HostBotLedgeLand, so older replays keep
+        // the zeroed Position they were recorded with
+        Vector3 Mid => PlayerEntity.HostBotLedgeLand ? _center : Position;
         readonly Matrix4 _delta;
         int _hp = MiningPlazaCrates.Health;
         // frames: until it regrows (broken), since it regrew (the grow / fade), since the last hit, the clips' time

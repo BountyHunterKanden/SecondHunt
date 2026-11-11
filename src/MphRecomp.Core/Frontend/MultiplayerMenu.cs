@@ -309,6 +309,7 @@ namespace MphRecomp.Frontend
             public int Mode = 2;
             public bool ModeChosen; // the GAME MODE box shows it (a new CREATE GAME starts empty)
             public bool RulesSeen; // SETTINGS / ADVANCED / ARENA boxes filled (the rules page has been reached)
+            public string? ModMode; // a gameplay mod's mode ("<mod>:<mode>", MultiplayerMenu.ModModes.cs) on top of Mode, null = none
             public int Goal, TimeLimit, TimeGoal; // the values themselves: the goal, minutes, seconds
             public bool TeamPlay, AutoReset, Radar, Affinity, FriendlyFire;
             public int Damage = 1;
@@ -346,10 +347,11 @@ namespace MphRecomp.Frontend
         // the same game's lobby again, or out of it); none: the return page
         public Action<MenuEngine, bool>? OnlineResultsDone { get; set; }
 
-        public void ArmOnlineMatch(MatchSettings settings, int returnPage)
+        // (rejoin: back into the match whose quit penalty is still armed, so nothing is charged)
+        public void ArmOnlineMatch(MatchSettings settings, int returnPage, bool rejoin = false)
         {
             MatchResults.Last = null;
-            ArmMatch(settings, wifi: true);
+            ArmMatch(settings, wifi: true, rejoin);
             s_onlineResultsReturn = returnPage;
             PendingReturn = _resultsBound ? ResultsPage : returnPage;
         }
@@ -469,6 +471,7 @@ namespace MphRecomp.Frontend
             BindExtraRules(file, strings); // (the ADVANCED box's EXTRA PICKUPS / EXTRA CHARACTERS rows)
             BindMatchMusic(file, strings); // (the rules pages' MUSIC row, MultiplayerMenu.MatchMusic.cs)
             BindModeDescriptions(file); // (in a box under the mode panel, MultiplayerMenu.ModeDescription.cs)
+            BindModModes(file, strings); // (the mod modes' row under BATTLE, MultiplayerMenu.ModModes.cs)
             BindDoors(file, strings, type);
             BindReplays(file, strings, type);
             _resultsBound = BindResults(file, strings);
@@ -846,7 +849,8 @@ namespace MphRecomp.Frontend
         {
             MenuStrings s = _strings!;
             ModeInfo m = CurrentMode;
-            s.Fill(_gameModeValue, _setup.ModeChosen ? Word(m.Name) : ""); // lower case as the ROM has it: the small capitals
+            string? modMode = ActiveModMode()?.Name.ToLowerInvariant(); // (a mod's mode: its own name)
+            s.Fill(_gameModeValue, !_setup.ModeChosen ? "" : modMode ?? Word(m.Name)); // lower case as the ROM has it: the small capitals
             bool rules = _setup.RulesSeen;
             string[] labels = RuleLabels(m);
             for (int r = 0; r < 4; r++)
@@ -879,6 +883,7 @@ namespace MphRecomp.Frontend
             s.Fill(_advFriendlyFire, (_setup.FriendlyFire ? Word("on") : Word("off")).ToUpperInvariant());
             FillExtraRules(s, rules);
             FillMatchMusic(s);
+            FillModModes(s);
             // PLAYERS: every used seat, in seat order (the lobby's name texts are the same strings; P8: seats 5-8 too)
             for (int r = 0; r < _setup.Seats.Length; r++)
             {
@@ -970,6 +975,7 @@ namespace MphRecomp.Frontend
             if (page >= CreateJoinPage && page <= JoinLobbyPage)
             {
                 ShowMatchMusic(menu, page); // (before FillStrings: its text is cut with the menu's font)
+                ShowModModes(menu, page); // (the same)
                 FillStrings();
                 Tabs(menu, p, page);
                 Preview(menu, p);
@@ -989,6 +995,7 @@ namespace MphRecomp.Frontend
 
         public void Tick(MenuEngine menu)
         {
+            while (_licensePosted.TryDequeue(out Action? posted)) posted();
             EnterNext(menu);
             ResultsTick(menu);
             LanTick(menu);
@@ -1044,6 +1051,7 @@ namespace MphRecomp.Frontend
         // the ROM's random picture
         private int _previewItem = -1, _previewWidget = -1;
         private string? _previewPicture;
+        private string? _previewPictureKey; // its texture's key (with the file's time), worked out once per Preview
 
         private void Preview(MenuEngine menu, MenuPage p)
         {
@@ -1056,6 +1064,7 @@ namespace MphRecomp.Frontend
             int room = ArenaRooms[_setup.Arena];
             string? stage = StageModel(path, room);
             _previewPicture = stage == null ? ImportedPicture(room) : null;
+            _previewPictureKey = null;
             if (stage == null) stage = StageModel(path, RandomArena); // (an imported arena with no picture yet: random's)
             if (stage == null) return;
             _previewWidget = _file.WidgetIndex(stage, null);
@@ -1071,18 +1080,22 @@ namespace MphRecomp.Frontend
             return file != null && System.IO.File.Exists(file) ? file : null;
         }
 
+        private static UiTexture LoadPicture(MenuEngine menu, string key, string file) => menu.Widgets.Textures.GetOrAdd(key, () =>
+        {
+            byte[] px = MphRecomp.Import.PngOut.Read(file, out int w, out int h);
+            return (w, h, px);
+        });
+
         // the imported picture over the random picture's triangles: its texture instead, the frame's UVs spread over it
         private void UsePicture(MenuEngine menu, List<WidgetTri> picture)
         {
-            string file = _previewPicture!;
             UiTexture tex;
             try
             {
-                tex = menu.Widgets.Textures.GetOrAdd($"arena picture {file} {System.IO.File.GetLastWriteTimeUtc(file).Ticks}", () =>
-                {
-                    byte[] px = MphRecomp.Import.PngOut.Read(file, out int w, out int h);
-                    return (w, h, px);
-                });
+                // (the key and the load outside the per-frame path: a file stat, a key string and a closure every frame
+                // were garbage that froze the menus, 2026-11-11)
+                _previewPictureKey ??= $"arena picture {_previewPicture} {System.IO.File.GetLastWriteTimeUtc(_previewPicture!).Ticks}";
+                tex = menu.Widgets.Textures.TryGet(_previewPictureKey, out UiTexture? have) ? have! : LoadPicture(menu, _previewPictureKey, _previewPicture!);
             }
             catch (Exception ex)
             {
@@ -1090,8 +1103,13 @@ namespace MphRecomp.Frontend
                 _previewPicture = null;
                 return;
             }
-            float u0 = picture.Min(t => MathF.Min(t.A.U, MathF.Min(t.B.U, t.C.U))), u1 = picture.Max(t => MathF.Max(t.A.U, MathF.Max(t.B.U, t.C.U)));
-            float v0 = picture.Min(t => MathF.Min(t.A.V, MathF.Min(t.B.V, t.C.V))), v1 = picture.Max(t => MathF.Max(t.A.V, MathF.Max(t.B.V, t.C.V)));
+            float u0 = float.MaxValue, u1 = float.MinValue, v0 = float.MaxValue, v1 = float.MinValue;
+            for (int t = 0; t < picture.Count; t++)
+            {
+                WidgetTri w = picture[t];
+                u0 = MathF.Min(u0, MathF.Min(w.A.U, MathF.Min(w.B.U, w.C.U))); u1 = MathF.Max(u1, MathF.Max(w.A.U, MathF.Max(w.B.U, w.C.U)));
+                v0 = MathF.Min(v0, MathF.Min(w.A.V, MathF.Min(w.B.V, w.C.V))); v1 = MathF.Max(v1, MathF.Max(w.A.V, MathF.Max(w.B.V, w.C.V)));
+            }
             if (u1 - u0 < 1e-6f || v1 - v0 < 1e-6f) return;
             UiVertex Spread(UiVertex v)
             {
@@ -1144,6 +1162,20 @@ namespace MphRecomp.Frontend
         {
             if (Bound) DrawPicker(menu, tris, start);
             if (Bound && menu.Page?.Index == TypePage) UseLicenseDoorPicture(menu, tris, start);
+            // IMPORT LICENSE's icon (EDIT NAME's clone) draws the file select's SAVE DATA arrows (owner 2026-11-07: "the same
+            // import icon ... from the campaign screen"; SaveDataPicture, laid out as these round icons are)
+            if (_card && menu.Page?.Index == LicensePage && _import.Length > 0)
+            {
+                int texture = menu.Widgets.Textures.GetOrAdd(SaveDataPicture.Key, SaveDataPicture.Draw).Id;
+                for (int t = start; t < tris.Count; t++)
+                {
+                    if (tris[t].Item != _import[0]) continue;
+                    WidgetTri tri = tris[t];
+                    tri.TextureId = texture;
+                    tris[t] = tri;
+                }
+            }
+            if (_card && menu.Page?.Index == LicensePage) AddChoicePicture(menu, tris, start, _license);
             if (menu.Page != null && KeyboardOverCard(menu.Page.Index))
             {
                 // the keyboard floats over the license: its own screen (the mask: a black panel and a grid over both DS
@@ -1155,7 +1187,7 @@ namespace MphRecomp.Frontend
             }
             if (Bound && menu.Page?.Index == ResultsPage && _crossbar >= 0 && _topbar >= 0)
             {
-                var split = new List<WidgetTri>();
+                var split = _splitTris;
                 for (int t = tris.Count - 1; t >= start; t--)
                 {
                     if (tris[t].Item != _crossbar) continue;
@@ -1183,7 +1215,8 @@ namespace MphRecomp.Frontend
                 tris.RemoveAt(t);
             }
             if (at < 0) return;
-            var picture = new List<WidgetTri>();
+            var picture = _pictureTris;
+            picture.Clear();
             try
             {
                 menu.Widgets.Evaluate(_previewWidget, 0, loop: true, alpha: 1, picture);
@@ -1208,11 +1241,15 @@ namespace MphRecomp.Frontend
             tris.InsertRange(at, picture);
         }
 
+        // (kept lists, cleared each use: new ones every frame were garbage that froze the menus, 2026-11-11)
+        private readonly List<WidgetTri> _pictureTris = new(), _splitTris = new();
+
         // A triangle cut along y = 0 (the DS screens' edge in menu space): 1 piece if it doesn't cross it, else 3
         private static void SplitAtScreenEdge(WidgetTri tri, List<WidgetTri> output)
         {
-            UiVertex[] v = { tri.A, tri.B, tri.C };
-            int above = v.Count(x => x.Y > 0), below = v.Count(x => x.Y < 0);
+            UiVertex V(int k) => k == 0 ? tri.A : k == 1 ? tri.B : tri.C;
+            int above = (tri.A.Y > 0 ? 1 : 0) + (tri.B.Y > 0 ? 1 : 0) + (tri.C.Y > 0 ? 1 : 0);
+            int below = (tri.A.Y < 0 ? 1 : 0) + (tri.B.Y < 0 ? 1 : 0) + (tri.C.Y < 0 ? 1 : 0);
             if (above == 0 || below == 0)
             {
                 output.Add(tri);
@@ -1226,8 +1263,9 @@ namespace MphRecomp.Frontend
             }
             // the lone vertex on its side of the edge, then the other two in winding order
             bool loneAbove = above == 1;
-            int lone = Array.FindIndex(v, x => loneAbove ? x.Y > 0 : x.Y < 0);
-            UiVertex p = v[lone], q = v[(lone + 1) % 3], r = v[(lone + 2) % 3];
+            int lone = 0;
+            while (loneAbove ? V(lone).Y <= 0 : V(lone).Y >= 0) lone++;
+            UiVertex p = V(lone), q = V((lone + 1) % 3), r = V((lone + 2) % 3);
             UiVertex pq = Cut(p, q), pr = Cut(p, r);
             WidgetTri Make(UiVertex a, UiVertex b, UiVertex c)
             {
@@ -1264,6 +1302,11 @@ namespace MphRecomp.Frontend
                     EndLan(); // (stops listening; after a LAN game this player is seat 0 again)
                     _setup.ModeChosen = false;
                     _setup.RulesSeen = false;
+                    if (_setup.ModMode != null)
+                    {
+                        _setup.ModMode = null; // (the mod's starting values don't carry into the next plain game)
+                        _defaultsSet = false;
+                    }
                     for (int s = 1; s < _setup.Seats.Length; s++) _setup.Seats[s] = new Seat();
                     _setup.Seats[0].Ready = true;
                     return true;
@@ -1311,7 +1354,7 @@ namespace MphRecomp.Frontend
                 return true;
             }
             if (b == 100 || b == 13) return true; // (bookkeeping calls with nothing to show)
-            if (page == ModePage) return OnModeCall(b);
+            if (page == ModePage) return OnModModeCall(menu, b) || OnModeCall(b);
             if (page >= 28 && page <= 34) return OnRulesCall(menu, b);
             if (page is HunterPage or JoinHunterPage && OnPickerCall(menu, b)) return true;
             if (page == HunterPage) return OnHunterCall(menu, b);
@@ -1358,6 +1401,11 @@ namespace MphRecomp.Frontend
         {
             ModeInfo? m = Modes.FirstOrDefault(x => x.Call == b);
             if (m == null) return false;
+            if (_setup.ModMode != null)
+            {
+                _setup.ModMode = null; // (a mod mode left: the vanilla mode's defaults, even on the mode it played as)
+                _defaultsSet = false;
+            }
             RefreshArenas();
             PickMode(m.Id);
             _setup.ModeChosen = true;
@@ -1769,6 +1817,9 @@ namespace MphRecomp.Frontend
         private int _lightning = -1, _teamDivide = -1, _crossbar = -1, _topbar = -1;
         private int[] _arrowsBack = Array.Empty<int>(), _arrowsMore = Array.Empty<int>();
         private static int _resultsScroll;
+        // the top screen's texts on the combined screen: the mode on its band, the name and place on theirs (BindResults)
+        // (the mode band is cut in line with the name and place bands on that screen, FrontendSession: same centre)
+        private const float ResultsModeX = 193, ResultsPlaceX = 193;
 
         private bool BindResults(MenuFile file, MenuStrings strings)
         {
@@ -1791,16 +1842,30 @@ namespace MphRecomp.Frontend
             for (int c = 0; c < 3; c++) _resultHeader[c] = StringOf(p, TextAt(p, columnX[c], 151));
             // the top screen: GAME MODE's text is the setup pages' box label too, so RESULTS gets a string of its own
             // (BizHawk: drawn in the place text's orange, where the data has it black)
-            int mode = TextAt(p, 163, 233), placeItem = TextAt(p, 163, 204);
+            // The combined screen splits the top screen at SetupSplitX, the bands' left parts going under the medal, so at
+            // vanilla's x 163 a long place ("tied for 1st place") hung off the right part's left end: each line is
+            // centred on the part of its band left beside it (owner 2026-11-08: "the text is misaligned")
+            int TopText(float y, float x)
+            {
+                int i = TextAt(p, 163, y);
+                return i >= 0 ? i : TextAt(p, x, y);
+            }
+            int mode = TopText(233, ResultsModeX), placeItem = TopText(204, ResultsPlaceX), playerItem = TopText(216, ResultsPlaceX);
             if (mode >= 0)
             {
                 _resultsMode = strings.Add("");
                 MenuItem src = p.Items[mode];
                 MenuItem? orange = placeItem >= 0 ? p.Items[placeItem] : null;
                 int id = _resultsMode;
-                p.ReplaceItem(mode, i => Recolour(RecompMenus.Clone(src, i, 0, 0, stringId: id), orange));
+                p.ReplaceItem(mode, i => Recolour(RecompMenus.Clone(src, i, ResultsModeX - src.X, 0, stringId: id), orange));
             }
-            _resultsPlayer = StringOf(p, TextAt(p, 163, 216));
+            foreach (int item in new[] { playerItem, placeItem })
+            {
+                if (item < 0) continue;
+                MenuItem src = p.Items[item];
+                p.ReplaceItem(item, i => RecompMenus.Clone(src, i, ResultsPlaceX - src.X, 0));
+            }
+            _resultsPlayer = StringOf(p, playerItem);
             _resultsPlace = StringOf(p, placeItem);
             _crossbar = FindItem(p, it => HasWidget(file, it, "crossbar"));
             _topbar = FindItem(p, it => HasWidget(file, it, "topbar"));
@@ -1968,11 +2033,12 @@ namespace MphRecomp.Frontend
         // At page entry no item has started (each waits out its delay, then takes its initial state): one that should be
         // hidden but starts shown is started hidden now; one that should show but starts hidden is shown now; the rest
         // come in by themselves.
-        private static void ShowAtEntry(MenuEngine menu, int item, bool visible)
+        // (force: the page is already up, as after IMPORT LICENSE, so set it whatever the page started it as)
+        private static void ShowAtEntry(MenuEngine menu, int item, bool visible, bool force = false)
         {
             if (item < 0) return;
             bool startsShown = (MenuState)menu.Page!.Items[item].Field34 != MenuState.Hidden;
-            if (visible != startsShown) menu.SetState(item, visible ? MenuState.Idle : MenuState.Hidden);
+            if (force || visible != startsShown) menu.SetState(item, visible ? MenuState.Idle : MenuState.Hidden);
         }
 
         // the local player's name: Selected once it has come in (its colour then pulses, as vanilla's)
@@ -2056,7 +2122,11 @@ namespace MphRecomp.Frontend
         private static string RomKey => LanSession.RomKeyFor(Paths.MphKey);
 
         // a lobby a joiner can come into: a seat that is free or a bot's (above)
-        private static bool LanAllowed() => _setup.Seats.Skip(1).Any(s => !s.Used || s.Bot);
+        private static bool LanAllowed()
+        {
+            for (int s = 1; s < _setup.Seats.Length; s++) if (!_setup.Seats[s].Used || _setup.Seats[s].Bot) return true;
+            return false; // (a loop, not Skip/Any: every frame, 2026-11-11)
+        }
 
         private static int JoinerSeat() => Array.FindIndex(_setup.Seats, s => s.Used && s.Remote);
 
@@ -2411,7 +2481,7 @@ namespace MphRecomp.Frontend
                 if (changed) Lobby(menu);
             }
             if (++_lanTick % 30 != 0) return;
-            bool allowed = LanAllowed();
+            bool allowed = LanAllowed() && ActiveModMode() == null; // (mod modes are offline: no LAN game for one)
             if (allowed && lan == null) HostLan();
             else if (lan is { IsHost: true })
             {
@@ -2831,8 +2901,32 @@ namespace MphRecomp.Frontend
             if (_hint < 0 || p.Index != LobbyPage) return;
             int id = StringOf(p, _hint);
             _hintRom ??= _strings![id];
-            string? address = Hosting ? LocalAddresses().FirstOrDefault() : null;
-            _strings!.Fill(id, address == null ? _hintRom : $"{_hintRom}\naddress: {StreamerPrivacy.Address(address)}");
+            string? address = Hosting ? HintAddress() : null;
+            string shown = address == null ? "" : StreamerPrivacy.Address(address);
+            if (_hintShown == null || _hintShownFor != shown)
+            {
+                _hintShownFor = shown;
+                _hintShown = address == null ? _hintRom : $"{_hintRom}\naddress: {shown}";
+            }
+            _strings!.Fill(id, _hintShown);
+        }
+
+        // HostHint runs every frame: the network interfaces are read every 2 s, not per frame, and the hint text is
+        // kept until the address changes (the per-frame interfaces and strings were the menus' garbage, the freezes,
+        // 2026-11-11)
+        private string? _hintShown, _hintShownFor;
+        private static string? _hintAddress;
+        private static long _hintAddressAt = long.MinValue / 2;
+
+        private static string? HintAddress()
+        {
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (now - _hintAddressAt > System.Diagnostics.Stopwatch.Frequency * 2)
+            {
+                _hintAddressAt = now;
+                _hintAddress = LocalAddresses().FirstOrDefault();
+            }
+            return _hintAddress;
         }
 
         // ---- START GAME ----
@@ -2930,6 +3024,7 @@ namespace MphRecomp.Frontend
                     ColourPick = s.ColourPick,
                 });
             }
+            settings.ModMode = ActiveModMode()?.Key; // (offline only; MatchSetupText never writes it with a net role either)
             ApplyExtraRules(settings);
             return settings;
         }
@@ -3106,7 +3201,7 @@ namespace MphRecomp.Frontend
         // The name keyboard for another screen (Replay mode's RENAME, owner 2026-10-08 "go ahead with that hook"): `start` already
         // typed, up to `max` letters, the ROM's prompt without its "for METROID PRIME HUNTERS."; done gets the text (OK; blank
         // refused as for the nickname) or null (CANCEL / B), then the menu goes back to `returnPage` (the usual page change)
-        public void EditText(MenuEngine menu, string start, int max, int returnPage, Action<string?> done)
+        public void EditText(MenuEngine menu, string start, int max, int returnPage, Action<string?> done, string? prompt = null)
         {
             if (!_keyboard)
             {
@@ -3116,12 +3211,14 @@ namespace MphRecomp.Frontend
             _textMax = Math.Max(1, max);
             _textStart = start.Length > _textMax ? start[.._textMax] : start;
             _textDone = done;
+            _textPrompt = prompt;
             _nameReturn = returnPage;
             menu.GoTo(NamePage);
         }
 
         private Action<string?>? _textDone; // EditText's caller while its keyboard is up (null: the nickname)
         private string _textStart = "";
+        private string? _textPrompt; // EditText's own prompt (its two lines), null = the ROM's without "for METROID..."
         private int _textMax;
         private string? _promptRom; // the ROM's prompt, as the nickname shows it
         private int NameMax => _textDone != null ? _textMax : HunterLicense.MaxName;
@@ -3140,7 +3237,9 @@ namespace MphRecomp.Frontend
                 string text = _promptRom;
                 if (_textDone != null && you > 0 && cut > you && metroid > cut + 4)
                 {
-                    text = _promptRom[..you] + _promptRom[(cut + 4)..metroid] + _promptRom[(you + 1)..cut] + ".";
+                    string lineBreak = _promptRom[(cut + 4)..metroid];
+                    text = _textPrompt != null ? _textPrompt.Replace("\n", lineBreak)
+                        : _promptRom[..you] + lineBreak + _promptRom[(you + 1)..cut] + ".";
                 }
                 _strings!.Fill(id, text);
             }
@@ -3358,6 +3457,12 @@ namespace MphRecomp.Frontend
         // ours: a tap on a tab picks it (owner 2026-10-08: "can the different tabs on the license be tappable to switch straight to
         // it"; vanilla has only L / R); the action's item is the tab
         private const int CardTabPickCall = 951;
+        // ours: IMPORT SAVE (owner 2026-11-06), a vanilla DS save's Hunter License into ours (ImportLicense)
+        private const int CardImportCall = 952;
+        // IMPORT SAVE's items: EDIT NAME's cloned this far right (menu px), past the touch screen, where MenuLayout.License's
+        // "import" region takes them next to EDIT NAME
+        internal const float ImportDx = 200;
+        private const string ImportLabel = "import license";
         // a tab's click, L / R and a tap alike (owner 2026-10-24): the option box arrows' sound, as the online and replay
         // license cards' tabs (their items borrow it)
         private const int CardTabSound = 2;
@@ -3370,7 +3475,7 @@ namespace MphRecomp.Frontend
         private int _nameReturn = TypePage;
         private int[] _cardHide = Array.Empty<int>(), _cardTabs = Array.Empty<int>(), _cardShow = Array.Empty<int>();
         private int[] _rankTitle = Array.Empty<int>(), _rankStar = Array.Empty<int>(), _medals = Array.Empty<int>();
-        private int[] _portraits = Array.Empty<int>(), _edit = Array.Empty<int>();
+        private int[] _portraits = Array.Empty<int>(), _edit = Array.Empty<int>(), _import = Array.Empty<int>();
         private int _headerGold = -1, _frame = -1, _frameGold = -1, _swirl = -1, _octolith = -1, _nameBlack = -1, _nameGold = -1;
         private int _sCardName = -1, _sPoints = -1, _sNext = -1;
         // the ranking points' box (two plain quads, x 0..191 and 192..256) narrowed by this much, its words moved with its
@@ -3499,6 +3604,34 @@ namespace MphRecomp.Frontend
                     links: it.Links.ToList(), actions: actions,
                     stretchX: it.Index == rankBox ? -RankBoxNarrower : 0, stretchDown: it.Index == rankBox ? -RankBoxLower : 0));
             }
+            // IMPORT LICENSE: EDIT NAME's icon, label and highlight again ImportDx to the right, the highlight lighting the copies
+            // and calling CardImportCall
+            MenuItem editIcon = rom.Items[_edit[0]], editLabel = rom.Items[_edit[1]], editLight = rom.Items[_edit[2]];
+            int importIcon = copy.Items.Count;
+            copy.AddItem(i => RecompMenus.Clone(editIcon, i, ImportDx, 0, links: Array.Empty<MenuLink>(), actions: Array.Empty<MenuAction>()));
+            int importLabel = copy.Items.Count;
+            int importString = strings.Add(ImportLabel);
+            // (a left-aligned label: the longer words centred under the icon as EDIT NAME's are, ~6 px a letter)
+            float labelDx = editLabel.States.FirstOrDefault(st => st.Text != null)?.Text?.Align == 0
+                ? -(ImportLabel.Length - "edit name".Length) * 3f : 0;
+            copy.AddItem(i => RecompMenus.Clone(editLabel, i, ImportDx + labelDx, 0, stringId: importString,
+                links: Array.Empty<MenuLink>(), actions: Array.Empty<MenuAction>(), wrapGrow: 32));
+            MenuLink[] importLinks = editLight.Links.Select(l => l with
+            {
+                Target = l.Target == _edit[0] ? importIcon : l.Target == _edit[1] ? importLabel : l.Target
+            }).ToArray();
+            MenuAction press = editLight.Actions.First(a => a.Item == keyboardMask && a.Calls.Count == 0);
+            int importLight = copy.Items.Count;
+            copy.AddItem(i => RecompMenus.Clone(editLight, i, ImportDx, 0, links: importLinks, actions: new[]
+            {
+                new MenuAction
+                {
+                    Kind = press.Kind, Field2 = press.Field2, Flags = press.Flags, Field4 = press.Field4, RectX = press.RectX,
+                    RectY = press.RectY, RectW = press.RectW, RectH = press.RectH, Calls = new[] { (0, CardImportCall) },
+                    Item = (ushort)i, TargetPage = 0xFF, Field17 = press.Field17
+                }
+            }));
+            _import = new[] { importIcon, importLabel, importLight };
             _sCardName = cardName;
             _sPoints = ours[points];
             _sNext = ours[next];
@@ -3528,31 +3661,32 @@ namespace MphRecomp.Frontend
                                            // Selected / Focused, the double-tap bug of 2026-10-23; the tab is the item)
         };
 
-        private void EnterCard(MenuEngine menu)
+        private void EnterCard(MenuEngine menu, bool refresh = false)
         {
             HunterLicense l = _license;
-            foreach (int item in _cardHide) ShowAtEntry(menu, item, false);
-            foreach (int item in _cardShow) ShowAtEntry(menu, item, true);
-            foreach (int item in _edit) ShowAtEntry(menu, item, true); // (vanilla shows it after a tap on "you are:")
+            foreach (int item in _cardHide) ShowAtEntry(menu, item, false, refresh);
+            foreach (int item in _cardShow) ShowAtEntry(menu, item, true, refresh);
+            foreach (int item in _edit) ShowAtEntry(menu, item, true, refresh); // (vanilla shows it after a tap on "you are:")
+            foreach (int item in _import) ShowAtEntry(menu, item, true, refresh);
             int level = Math.Clamp(l.RankLevel, 0, 4);
             for (int r = 0; r < 5; r++)
             {
-                ShowAtEntry(menu, _rankTitle[r], r == level);
-                ShowAtEntry(menu, _rankStar[r], r == level);
+                ShowAtEntry(menu, _rankTitle[r], r == level, refresh);
+                ShowAtEntry(menu, _rankStar[r], r == level, refresh);
             }
             // legendary: the gold header and the black name; else the name in its usual colour
-            ShowAtEntry(menu, _headerGold, level == 4);
-            ShowAtEntry(menu, _nameBlack, level == 4);
-            ShowAtEntry(menu, _nameGold, level != 4);
+            ShowAtEntry(menu, _headerGold, level == 4, refresh);
+            ShowAtEntry(menu, _nameBlack, level == 4, refresh);
+            ShowAtEntry(menu, _nameGold, level != 4, refresh);
             // the medal by total wins (25 / 100 / 200), the frame by total matches (500; gold for a legendary hunter)
             int wins = l.Wins, medal = wins >= 200 ? 2 : wins >= 100 ? 1 : wins >= 25 ? 0 : -1;
-            for (int k = 0; k < 3; k++) ShowAtEntry(menu, _medals[k], k == medal);
+            for (int k = 0; k < 3; k++) ShowAtEntry(menu, _medals[k], k == medal, refresh);
             bool frame = l.Matches >= 500;
-            ShowAtEntry(menu, _frameGold, frame && level == 4);
-            ShowAtEntry(menu, _frame, frame && level != 4);
-            ShowAtEntry(menu, _swirl, l.BeatGame && !l.Completed);
-            ShowAtEntry(menu, _octolith, l.BeatGame && l.Completed);
-            for (int h = 0; h < 7; h++) ShowAtEntry(menu, _portraits[h], h == Math.Clamp(l.FavoriteHunter, 0, 6));
+            ShowAtEntry(menu, _frameGold, frame && level == 4, refresh);
+            ShowAtEntry(menu, _frame, frame && level != 4, refresh);
+            ShowAtEntry(menu, _swirl, l.BeatGame && !l.Completed, refresh);
+            ShowAtEntry(menu, _octolith, l.BeatGame && l.Completed, refresh);
+            for (int h = 0; h < 7; h++) ShowAtEntry(menu, _portraits[h], h == l.HunterOfChoice().Hunter, refresh);
             Put(_sCardName, StreamerPrivacy.Name(l.Name, mine: true)); // (this device's license)
             Put(_sPoints, l.RankPoints.ToString(CultureInfo.InvariantCulture));
             Put(_sNext, level < 4 ? HunterLicense.RankThresholds[level].ToString(CultureInfo.InvariantCulture) : "--");
@@ -3639,7 +3773,7 @@ namespace MphRecomp.Frontend
             var shown = new Dictionary<int, bool>();
             foreach (int item in _cardHide) shown[item] = false;
             foreach (int item in _cardShow) shown[item] = true;
-            foreach (int item in _edit) shown[item] = false;
+            foreach (int item in _edit.Concat(_import)) shown[item] = false;
             for (int r = 0; r < 5; r++)
             {
                 shown[_rankTitle[r]] = r == level;
@@ -3655,7 +3789,7 @@ namespace MphRecomp.Frontend
             shown[_frame] = frame && level != 4;
             shown[_swirl] = l.BeatGame && !l.Completed;
             shown[_octolith] = l.BeatGame && l.Completed;
-            for (int h = 0; h < 7; h++) shown[_portraits[h]] = h == Math.Clamp(l.FavoriteHunter, 0, 6);
+            for (int h = 0; h < 7; h++) shown[_portraits[h]] = h == l.HunterOfChoice().Hunter;
             var texts = new Dictionary<int, string>
             {
                 [_sCardName] = name,
@@ -3711,8 +3845,93 @@ namespace MphRecomp.Frontend
                 foreach (WidgetTri tri in items) order.Add((tri.Z, order.Count, tri));
             }
             // far to near, ties in item order (as MenuEngine.Collect)
+            int first = output.Count;
             output.AddRange(order.OrderBy(o => o.Z).ThenBy(o => o.Seq).Select(o => o.Tri));
+            AddChoicePicture(menu, output, first, l);
             return order.Count > 0;
+        }
+
+        // a character as the hunter of choice (owner 2026-11-07: TROOPER or DARK SAMUS, counted as a hunter is): its head
+        // picture inside the base hunter's ROM portrait frame; no picture on this device = the base hunter's portrait
+        private void AddChoicePicture(MenuEngine menu, List<WidgetTri> tris, int start, HunterLicense l)
+        {
+            (int hunter, string? id) = l.HunterOfChoice();
+            // the most used skin first (owner 2026-11-07; also Sylux's Prime 4 look, though Sylux is no character id)
+            string? used = l.ChoiceSkin();
+            if (used != null && CharacterPictures.For(PickerHdRoot, PickerPicturesDir, used) == null) used = null;
+            if (id == null && used == null) return;
+            Character? character = Characters.All.FirstOrDefault(c => c.Id == id);
+            if (character == null && used == null) return;
+            int item = _portraits[hunter];
+            int last = -1;
+            float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
+            for (int t = start; t < tris.Count; t++)
+            {
+                if (tris[t].Item != item) continue;
+                last = t;
+                foreach (UiVertex v in new[] { tris[t].A, tris[t].B, tris[t].C })
+                {
+                    x0 = MathF.Min(x0, v.X); x1 = MathF.Max(x1, v.X);
+                    y0 = MathF.Min(y0, v.Y); y1 = MathF.Max(y1, v.Y);
+                }
+            }
+            if (last < 0) return;
+            // the skin: the one picked now if it's this character's, else its first with a picture
+            string? skin = used ?? (MyLook.Character == id && !Characters.IsOriginal(MyLook.Skin) ? MyLook.Skin : null);
+            if (skin == null && character != null) skin = Characters.Skins(character, PickerHdRoot).FirstOrDefault(k => !Characters.IsOriginal(k)
+                && CharacterPictures.For(PickerHdRoot, PickerPicturesDir, k) != null);
+            if (skin == null || CharacterPictures.For(PickerHdRoot, PickerPicturesDir, skin) is not { } pics) return;
+            int texture;
+            try
+            {
+                texture = menu.Widgets.Textures.GetOrAdd("license choice " + pics.Head, () =>
+                {
+                    byte[] px = MphRecomp.Import.PngOut.Read(pics.Head, out int w, out int h);
+                    return (128, 128, ChoicePicture(px, w, h));
+                }).Id;
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or System.IO.InvalidDataException or UnauthorizedAccessException)
+            {
+                Log?.Invoke($"multiplayer: no license picture for {skin}: {ex.Message}");
+                return;
+            }
+            // inside the frame (ChoiceInset of the portrait each side), just over the portrait
+            float ix = (x1 - x0) * ChoiceInset, iy = (y1 - y0) * ChoiceInset;
+            (x0, x1, y0, y1) = (x0 + ix, x1 - ix, y0 + iy, y1 - iy);
+            WidgetTri basis = tris[last];
+            UiVertex V(float x, float y, float u, float v) => new(x, y, u, v, 1, 1, 1, 1);
+            // menu space is y up: the picture's top row at y1
+            var a = new WidgetTri { A = V(x0, y1, 0, 0), B = V(x1, y1, 1, 0), C = V(x1, y0, 1, 1), Z = basis.Z, Item = item,
+                TextureId = texture, WrapS = UiWrap.Clamp, WrapT = UiWrap.Clamp };
+            var b = a;
+            b.B = V(x1, y0, 1, 1); b.C = V(x0, y0, 0, 1);
+            tris.InsertRange(last + 1, new[] { a, b });
+        }
+
+        private const float ChoiceInset = 0f;
+
+        // 128 x 128: the head picture's square (as the round icons'), its middle HudPortraits.Zoom (the face, as MPH's
+        // portraits), over black
+        private static byte[] ChoicePicture(byte[] head, int w, int h)
+        {
+            const int size = 128;
+            var px = new byte[size * size * 4];
+            // the head picture's whole square (head and shoulders): the HUD's tighter face crop cuts an off-centre head
+            // (Dark Samus) to a shoulder
+            float side = Math.Min(w, h);
+            float left = (w - side) / 2, top = h * CharacterPictures.HeadCropTop;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float sx = left + (x + 0.5f) / size * side, sy = top + (y + 0.5f) / size * side;
+                    (float r, float g, float b, float a) = Sample(head, w, h, sx / w, sy / h, side / size);
+                    int i = (y * size + x) * 4;
+                    px[i] = (byte)Math.Clamp(r * a, 0, 255); px[i + 1] = (byte)Math.Clamp(g * a, 0, 255);
+                    px[i + 2] = (byte)Math.Clamp(b * a, 0, 255); px[i + 3] = 255;
+                }
+            }
+            return px;
         }
 
         private string ArenaNameOfRoom(int room)
@@ -3752,7 +3971,7 @@ namespace MphRecomp.Frontend
                 return true;
             }
             case CardNameCall: // "you are:" chosen: EDIT NAME shows (vanilla; hidden here, EDIT NAME always shows)
-                foreach (int item in _edit) Show(menu, item, true);
+                foreach (int item in _edit.Concat(_import)) Show(menu, item, true);
                 return true;
             case CardEditCall: // EDIT NAME (its highlight opens the keyboard's mask, which calls this): the name keyboard
                 // straight in, no page exit: the card stays (dimmed) behind the keyboard (owner 2026-10-08: "the license still
@@ -3767,6 +3986,9 @@ namespace MphRecomp.Frontend
                 _textDone = null; // (the nickname, not a RENAME left some other way)
                 _cardSnapshot = true;
                 _enterNext = NamePage;
+                return true;
+            case CardImportCall: // IMPORT SAVE: a DS save's license (ImportLicense)
+                PickLicenseSave(menu);
                 return true;
             }
             return true; // (the roster's calls: hidden)
@@ -3878,7 +4100,7 @@ namespace MphRecomp.Frontend
                 try
                 {
                     MphRecomp.Campaign.CampaignSaveFile? file = saves.Load(slot);
-                    if (file?.Story != null) opened |= _license.FromStory(file.Story);
+                    if (file?.Story != null) opened |= _license.FromStory(file.Story, file.ImportedArenas ?? 0, file.ImportedHunters ?? 0);
                 }
                 catch (Exception ex)
                 {
@@ -3902,6 +4124,156 @@ namespace MphRecomp.Frontend
                 + (opened ? "; oubliette opened" : ""));
         }
 
+        // the license as DS save unlocks, for EXPORT DS SAVE
+        public MphRecomp.Campaign.CartUnlocks DsSaveUnlocks() => new()
+        {
+            Arenas = _license.Arenas, Hunters = _license.Hunters,
+            Ending = _license.BeatGame, Ending100 = _license.Completed,
+            LicenseBeaten = _license.BeatGame, LicenseCompleted = _license.Completed
+        };
+
+        // ---- IMPORT SAVE (owner 2026-11-06): a vanilla DS save's Hunter License into ours. The campaign's DS save import
+        // (FileSelect) brings only a file in; the license comes from here: the system picker, then "import the name?",
+        // then add the save's stats on top of this license or take the save's license as it is (HunterLicense.ImportCart:
+        // the rank, the beaten / 100% marks and the cart's unlocks come either way). The license before is kept as
+        // hunter_license.before_import.json. The picker answers on any thread: Tick runs its answer.
+
+        private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _licensePosted = new();
+        public const string BeforeImportFile = "hunter_license.before_import.json";
+
+        private void PickLicenseSave(MenuEngine menu)
+        {
+            if (ImportHost.Pick == null)
+            {
+                Popup?.Inform("this version can't open files.");
+                return;
+            }
+            Log?.Invoke("multiplayer: license import: picking a ds save");
+            ImportHost.Pick(new ImportPickRequest(ImportPickKind.DsSave, "mph", "DS SAVE", new[] { ".sav", ".dsv", ".bin" }),
+                picked => _licensePosted.Enqueue(() => LicenseSavePicked(menu, picked)));
+        }
+
+        private void LicenseSavePicked(MenuEngine menu, ImportPicked? picked)
+        {
+            if (picked == null || Popup == null)
+            {
+                Log?.Invoke("multiplayer: license import: no ds save picked");
+                return;
+            }
+            MphRecomp.Campaign.CartSave? cart = null;
+            string? error = null;
+            try
+            {
+                using System.IO.Stream? stream = ImportHost.Open(picked.Token);
+                if (stream == null)
+                {
+                    error = "that file can't be opened.";
+                }
+                else
+                {
+                    var bytes = new System.IO.MemoryStream();
+                    stream.CopyTo(bytes);
+                    if (bytes.Length > 4 * MphRecomp.Campaign.CartSave.Size) error = "this isn't a metroid prime hunters\nds save.";
+                    else cart = MphRecomp.Campaign.CartSave.TryParse(bytes.ToArray(), out error);
+                }
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                error = "that file can't be read.";
+            }
+            if (cart != null && error == null && cart.Unlocks.License == null) error = "this save has no hunter license\nin it.";
+            if (cart != null && error == null && cart.Unlocks.LicenseProblem != null)
+            {
+                // the block history doesn't add up as the DS writes it (CartSave.CheckLicense): an edited or made-up license
+                Log?.Invoke($"multiplayer: license import: ds save {picked.Name}: refused, {cart.Unlocks.LicenseProblem}");
+                error = "this save's hunter license wasn't\nwritten by the game, so it can't\nbe imported.";
+            }
+            Log?.Invoke($"multiplayer: license import: ds save {picked.Name}: {(error == null && cart != null ? "license found" : (error ?? "unreadable").Replace('\n', ' '))}");
+            if (error != null || cart == null)
+            {
+                Popup.Inform(error ?? "that file can't be read.");
+                return;
+            }
+            MenuPopup popup = Popup;
+            MphRecomp.Campaign.CartUnlocks unlocks = cart.Unlocks;
+            string name = HunterLicense.Clean(unlocks.License!.Name);
+            void AskHow(bool withName)
+            {
+                // the DS FILE box's look (FileSelect): the choice with arrows, what it does smaller and dimmer under it
+                bool merge = true;
+                void Flip(int d) => merge = !merge;
+                popup.Ask("how should it\nbe imported?", new MenuPopup.Body
+                {
+                    Width = FileSelect.HunterBoxWidth,
+                    Height = FileSelect.HunterBoxHeight,
+                    Draw = (tris, font, bx, by, _) =>
+                    {
+                        FileSelect.DrawChoiceAt(tris, font, popup.TextColour, bx, by + 24, merge ? "ADD TO MINE" : "AS IN SAVE", arrows: true);
+                        FileSelect.DrawChoiceAt(tris, font, popup.TextColour, bx, by + 35, merge ? "stats added" : "replaces mine",
+                            arrows: false, alpha: 0.5f);
+                    },
+                    Touch = (x, _) =>
+                    {
+                        if (x >= FileSelect.HunterBoxWidth / 3f && x < FileSelect.HunterBoxWidth * 2 / 3f) return;
+                        Flip(1);
+                        popup.Sound?.Invoke((int)SfxId.TOUCH_NEUTRAL, "license import choice tap");
+                    },
+                    Step = Flip,
+                }, yes =>
+                {
+                    if (yes) ImportLicense(menu, unlocks, withName, merge, picked.Name);
+                    else Log?.Invoke("multiplayer: license import: left as it was (NO)");
+                });
+            }
+            void AskName()
+            {
+                // no name on the save's license (or the default one): nothing to ask
+                if (name == DefaultNickname)
+                {
+                    AskHow(false);
+                    return;
+                }
+                popup.Ask(StreamerPrivacy.HideName ? "import the name\nfrom the save too?" : $"import the name\n{name.ToLowerInvariant()}\nfrom the save too?",
+                    AskHow);
+            }
+            // one imported license at a time (owner 2026-11-07): the next import takes the last one's data out first
+            // (HunterLicense.UndoImport), and the player is told so before either
+            popup.Ask(_license.Imported != null
+                    ? "a license was imported already.\nonly one can be: this import\nreplaces that one's data."
+                    : "only one license can be imported.\nimporting another one later\nreplaces this one's data.",
+                yes =>
+                {
+                    if (yes) AskName();
+                    else Log?.Invoke("multiplayer: license import: left as it was (one-license notice NO)");
+                });
+        }
+
+        private void ImportLicense(MenuEngine menu, MphRecomp.Campaign.CartUnlocks unlocks, bool name, bool merge, string save)
+        {
+            if (_profileDir != null)
+            {
+                try
+                {
+                    string path = System.IO.Path.Combine(_profileDir, HunterLicense.FileName);
+                    if (System.IO.File.Exists(path)) System.IO.File.Copy(path, System.IO.Path.Combine(_profileDir, BeforeImportFile), true);
+                }
+                catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+                {
+                    Log?.Invoke("multiplayer: license import: the old license not copied: " + ex.Message);
+                }
+            }
+            string done = _license.ImportCart(unlocks, name, merge, save);
+            _license.Save(_profileDir);
+            if (name) _setup.Nickname = _license.Name;
+            Log?.Invoke("multiplayer: license import: " + done);
+            Popup?.Busy("saving the hunter license.", 44, () =>
+            {
+                if (menu.Page?.Index != LicensePage || !_card) return;
+                _cardKeepTab = true;
+                EnterCard(menu, refresh: true); // (the page stays up: the old license's medal, portrait... set over)
+            });
+        }
+
         // ---- counting a match for the license: vanilla's after-match code (arm9 0x020562A4) and its live kill counts ----
         //
         // Vanilla's two buckets (one flag: Nintendo WFC or not): owner 2026-10-07, Wi-Fi = internet battles, wireless =
@@ -3910,10 +4282,12 @@ namespace MphRecomp.Frontend
         private static HunterLicense.MatchKills? _kills; // the running match's (null: nothing to count)
         private static bool _lastWifi;
         private static int _lastArenaRoom = -1;
+        private static string? _lastSkin; // the local seat's skin (the licence counts the most used)
         private static readonly int[] _seatRanks = Enumerable.Repeat(-1, MphRead.Entities.PlayerEntity.SlotCapacity).ToArray(); // each human's rank level (-1 = not known; P8: 8 seats)
 
-        private void ArmMatch(MatchSettings settings, bool wifi)
+        private void ArmMatch(MatchSettings settings, bool wifi, bool rejoin = false)
         {
+            if (!rejoin) ChargeQuitPenalty("a new match"); // (a match left before: charged first, so a bot match can't undo it)
             s_onlineResultsReturn = -1; // (ArmOnlineMatch sets it again after)
             _kills = new HunterLicense.MatchKills();
             MphRead.Entities.PlayerEntity.HostLicenseKill = (flags, beam) =>
@@ -3925,11 +4299,33 @@ namespace MphRecomp.Frontend
             };
             _lastWifi = wifi;
             _lastArenaRoom = MatchArenas.Find(settings.Arena)?.Id ?? -1;
+            _lastSkin = settings.LocalSeat >= 0 && settings.LocalSeat < settings.Players.Count
+                ? Characters.Normalize(settings.Players[settings.LocalSeat].Hunter, settings.Players[settings.LocalSeat].Skin) : null;
             for (int s = 0; s < _seatRanks.Length; s++)
             {
                 MatchPlayer? p = s < settings.Players.Count ? settings.Players[s] : null;
                 _seatRanks[s] = p == null || p.Bot ? -1 : s == settings.LocalSeat ? _license.RankLevel : p.RankLevel;
             }
+            // the quit penalty (HunterLicense.ArmQuitPenalty): every other human, saved now so closing the app keeps it;
+            // only this match's RESULTS (CountMatch) clear it, and a lost connection ends the match on RESULTS too.
+            // Internet matches only (owner 2026-11-08: "Let's not do it for local"): a LAN or bot match marks no one
+            _license.ArmQuitPenalty(Enumerable.Range(0, _seatRanks.Length).Where(s => wifi && s != settings.LocalSeat && _seatRanks[s] >= 0)
+                .Select(s => _seatRanks[s]));
+            _license.Save(_profileDir);
+        }
+
+        // a match left without RESULTS (QUIT, the app closed): vanilla's rank points lost against each human in it, saved;
+        // at the next match start and at the online login (none held, or its rejoin declined or failed: OnlineMenus.cs)
+        public int ChargeQuitPenalty(string why)
+        {
+            if (_license.PendingLosses.Length == 0) return 0;
+            int points = _license.RankPoints;
+            string levels = String.Join(",", _license.PendingLosses);
+            int lost = _license.ChargeQuitPenalty();
+            _setup.Rank = _license.RankLevel;
+            _license.Save(_profileDir);
+            Log?.Invoke($"multiplayer: quit penalty at {why}: rank points {points} -> {_license.RankPoints} (others' levels {levels})");
+            return lost;
         }
 
         // TRY CONTROLS (RecompMenus.ZoomAim.cs): nothing counted for the license -- a match armed and left without RESULTS
@@ -3957,16 +4353,21 @@ namespace MphRecomp.Frontend
             MatchResults? r = MatchResults.Last;
             if (r == null || ReferenceEquals(r, _counted)) return;
             _counted = r;
+            _license.ClearQuitPenalty(); // (its RESULTS: not quit; saved below)
             HunterLicense.MatchKills? kills = _kills;
             _kills = null;
             MatchResults.Player? local = r.Local;
-            if (local == null) return;
+            if (local == null)
+            {
+                _license.Save(_profileDir);
+                return;
+            }
             double seconds = kills?.Seconds ?? 0;
             var others = r.Rows.Where(p => p.Seat != r.LocalSeat).OrderBy(p => p.Seat)
                 .Select(p => new HunterLicense.Opponent(p.Hunter, p.Place, p.Bot, p.Team, p.Bot || p.Seat >= _seatRanks.Length ? -1 : _seatRanks[p.Seat]))
                 .ToList();
             var match = new HunterLicense.MatchRecord(_lastWifi, r.Mode, _lastArenaRoom, seconds, local.Hunter, local.Place, r.Teams,
-                local.Team, others);
+                local.Team, others, local.Character, _lastSkin);
             int points = _license.RankPoints;
             string opened = _license.AfterMatch(match, kills);
             _setup.Rank = _license.RankLevel;

@@ -27,6 +27,51 @@ internal sealed partial class CampaignRenderer
     void ConfigureBench(LaunchArgs args)
     {
         _bench = args.Get("replaybench") is string s && s.Length > 0 && s != "0";
+        // dev perf looks (Redmi 15 thread, 10-31): replayseek <step> jumps there once the replay has started (negative =
+        // steps from the end), gpusplit 1 times each pass, gpulogms <ms> logs GPU frames over that (CampaignRenderer)
+        if (args.Get("replayseek") is string seek && int.TryParse(seek, out int step)) _benchSeek = step;
+        _benchHold = args.Get("replayhold") is string h && h.Length > 0 && h != "0"; // (and stays paused there: same-picture A/Bs)
+        // replaycam <i>,<dx>,<dy>,<dz>: the free cam at that offset from the i-th health pickup, looking at it (pickup-in-water looks)
+        if (args.Get("replaycam") is string rc && rc.Split(',') is { Length: 4 } parts)
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            _benchCamItem = int.Parse(parts[0], ci);
+            _benchCamOffset = new OpenTK.Mathematics.Vector3(float.Parse(parts[1], ci), float.Parse(parts[2], ci), float.Parse(parts[3], ci));
+        }
+        _gpuSplitTiming = args.Get("gpusplit") is string g && g.Length > 0 && g != "0";
+        _cpuSplit = args.Get("cpusplit") is string cs && cs.Length > 0 && cs != "0"; // GL-thread time per section (CampaignRenderer.CpuSplit.cs)
+        if (args.Get("gpulogms") is string lm && double.TryParse(lm, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out double logMs)) _gpuLogMs = logMs;
+    }
+
+    int? _benchSeek;
+    bool _benchHold;
+    int _benchCamItem = -1;
+    OpenTK.Mathematics.Vector3 _benchCamOffset;
+    bool _benchCamLogged;
+
+    void BenchCam()
+    {
+        if (_benchCamItem < 0 || _host == null) return;
+        var health = new List<MphRead.Entities.ItemInstanceEntity>();
+        foreach (MphRead.Entities.EntityBase e in _host.Scene.Entities)
+        {
+            if (e is MphRead.Entities.ItemInstanceEntity it && it.ItemType is MphRead.ItemType.HealthSmall or MphRead.ItemType.HealthMedium
+                or MphRead.ItemType.HealthBig) health.Add(it);
+        }
+        if (!_benchCamLogged && health.Count > 0)
+        {
+            _benchCamLogged = true;
+            for (int i = 0; i < health.Count; i++) Log.Info("MPHReplayBench", $"benchcam health {i}: {health[i].ItemType} at {health[i].Position}");
+            if (MphRead.Entities.PlayerEntity.HostWater is { } w) foreach (var (min, max) in w) Log.Info("MPHReplayBench", $"benchcam water {min} .. {max}");
+        }
+        if (_benchCamItem >= health.Count) return;
+        OpenTK.Mathematics.Vector3 at = health[_benchCamItem].Position, d = (-_benchCamOffset).Normalized();
+        _replayCam = ReplayCamKind.Free;
+        _freeCamInit = true;
+        _freeCamPos = at + _benchCamOffset;
+        _freeCamPitch = MathF.Asin(d.Y);
+        _freeCamYaw = MathF.Atan2(d.X, d.Z);
     }
 
     // TakeCheckpoint: one was taken
@@ -41,6 +86,14 @@ internal sealed partial class CampaignRenderer
     // ReplayRate, once a frame (before it notices a seek arriving): the script's next seek once the last one has settled
     void BenchTick()
     {
+        BenchCam();
+        if (_benchSeek is int seekTo && _replayPlayer != null && _replayPlayer.Position >= 120)
+        {
+            _benchSeek = null;
+            _replayHeld = false;
+            ReplaySeek(seekTo < 0 ? Math.Max(0, _replayPlayer.File.Steps.Count + seekTo) : seekTo);
+            if (_benchHold) _replayHeld = true;
+        }
         if (!_bench || _replayPlayer == null || _host == null) return;
         double now = _replayClock.Elapsed.TotalMilliseconds;
         if (_benchLabel != null)

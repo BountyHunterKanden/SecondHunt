@@ -35,6 +35,7 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
     readonly FhScreenLayout _layout = new();
     MoviePresenter? _presenter;
     FhMoviePlayer? _movie;
+    double _launchAt = -1; // (when the spawn movie handed off to the game screen; -1 back in the menus)
     volatile bool _skipMovie;
     Action? _afterMovie;
     bool _paused;
@@ -105,7 +106,11 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
                     StopMusic();
                     _lastGame = g;
                     int slot = g.Mode == FhMode.Multiplayer && FhLobby.Lan?.Settings is MphRecomp.Multiplayer.MatchSettings st ? st.LocalSeat : 0;
-                    StartMovie(FhMovie.SpawnYellow + Math.Clamp(slot, 0, 3), () => GameSink?.Invoke(g));
+                    StartMovie(FhMovie.SpawnYellow + Math.Clamp(slot, 0, 3), () =>
+                    {
+                        _launchAt = _clock.Elapsed.TotalSeconds;
+                        GameSink?.Invoke(g);
+                    });
                 };
                 menus.Exit = () => ExitSink?.Invoke();
                 menus.PlayMovie = m => StartMovie(m, () => _menus?.Start());
@@ -205,11 +210,17 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
     // after a quit from the pause menu; reloads the save the game wrote
     public void ReturnFromGame()
     {
+        // (here, not in the Post: the frames don't take posts while launching)
+        _launchAt = -1;
+        // OnPause paused us when the game screen opened; left set, the next spawn movie sat on frame 0 with no sound
+        _paused = false;
         Post(m =>
         {
             // the game screen had its own player as Sfx.Instance (and the music handle was its)
             if (_sfx != null) MphRead.Sound.Sfx.SetHost(_sfx);
             StopMusic();
+            // (stopped above: this only lifts Pause's hold so the next menu song can sound)
+            _shMusic?.Play(_shMusic.Volume);
             m.Save.Reload();
             (FhTrainingResult? result, FhMatchResult? match) = TakeResult();
             if (result != null || match != null) ShowResult(m, result, match);
@@ -292,6 +303,7 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
     }
 
     int _width = 1, _height = 1;
+    bool _touchHeld;
 
     public void OnSurfaceChanged(int width, int height)
     {
@@ -304,9 +316,12 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
     // screen is dropped)
     public void Touch(bool down, float x, float y)
     {
+        // (moves come in as down too: only a new press skips, not the finger still on the button that started it)
+        bool pressed = down && !_touchHeld;
+        _touchHeld = down;
         if (_movie != null)
         {
-            if (down) _skipMovie = true;
+            if (pressed) _skipMovie = true;
             return;
         }
         if (!_layout.ToTouch(x, y, down, out float sx, out float sy)) return;
@@ -351,6 +366,10 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
                 return;
             }
         }
+        // the spawn movie has ended and the game screen is starting: black until it covers this one (the menus flashed up
+        // between the two), 10 s at most in case it never comes
+        // (a surface remade in the meantime restarts the clock: not then)
+        if (_launchAt >= 0 && now >= _launchAt && now - _launchAt < 10) return;
         while (_input.TryDequeue(out Action<FhFrontend>? action)) action(menus);
         _accum += dt;
         int steps = 0;

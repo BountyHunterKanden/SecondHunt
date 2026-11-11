@@ -203,12 +203,14 @@ namespace MphRecomp.Replay
             }
             if (file.Mods.Count > 0)
             {
-                // format 75: a gameplay mod was on in this match, and this build has no mods to play it back with
-                return $"missing mod {file.Mods[0].Id} {file.Mods[0].Version}";
+                // format 75: the gameplay mods the match ran with must be here, unchanged (Mods/LiveMods.CheckRecorded)
+                return ModsCheck != null ? ModsCheck(file.Mods) : $"missing mod {file.Mods[0].Id} {file.Mods[0].Version}";
             }
             return null;
         }
 
+        // the app's mod check for a replay recorded with gameplay mods (set while LiveMods is attached; null = no mods here)
+        public static Func<IReadOnlyList<ReplayMod>, string?>? ModsCheck;
 
         // Starts the recorded match exactly as it started: the same settings, both RNG streams where they were, and no
         // save-slot reset in between (see ReplayRecorder.RngAtStart).

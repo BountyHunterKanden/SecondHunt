@@ -35,6 +35,9 @@ namespace MphRecomp.Multiplayer
     public sealed class MatchSettings
     {
         public GameMode Mode { get; set; } = GameMode.Battle;
+        // a gameplay mod's mode played on Mode (docs/MOD_API.md 4.2): "<mod id>:<mode id>", null = Mode as it is. Offline
+        // only; LiveMods.StartMatch runs that mod and records the choice in the replay's mods row
+        public string? ModMode { get; set; }
         public string Arena { get; set; } = "MP3 PROVING GROUND"; // a RoomMetadata name (MatchArenas)
         public List<MatchPlayer> Players { get; } = new();
         // the seat this device plays (the host is seat 0; a match client plays its own seat)
@@ -143,6 +146,9 @@ namespace MphRecomp.Multiplayer
         // the Pirate Blaster's bolts a little lighter again, 9 / 13 instead of LighterBlaster's 10 / 14 (2026-10-20);
         // only counts with LighterBlaster on; null = on; replays before format 56 read as off (10 / 14)
         public bool? LighterBlaster2 { get; set; }
+        // the Pirate Blaster a little stronger again (owner 2026-11-07): its bolts back to 10 / 14 (over LighterBlaster2's
+        // 9 / 13) and 4 UA a bolt instead of 5 (PirateBlaster.HostBlasterBuff); null = on; replays before format 87 read as off
+        public bool? BlasterBuff { get; set; }
         // bots walk off a ledge toward a drop-down node under it instead of shaking over it (PlayerEntity.HostBotDropOff,
         // 2026-10-20, back on 2026-10-23); null = on; replays before format 57 read as off
         public bool? BotDropOff { get; set; }
@@ -276,9 +282,51 @@ namespace MphRecomp.Multiplayer
         // PlayerEntity.HostShockCoilGrace): null = on (not on the wire: the host decides damage); replays recorded before it
         // (format < 40) read as off, so they play exactly
         public bool? ShockCoilGrace { get; set; }
-        // homing shots (missiles) turn at the game's rate, not twice it (PlayerEntity.HostVanillaHoming): null = on (not on the
-        // wire: the host runs the shots); replays recorded before it (format < 76) read as off, so they play exactly
+        // homing shots (missiles) turn at the game's rate, not twice it (2026-10-31, player reports; PlayerEntity.HostVanillaHoming):
+        // null = on (not on the wire: the host runs the shots); replays recorded before it (format < 76) read as off, so they
+        // play exactly
         public bool? VanillaHoming { get; set; }
+        // a bot's climb toward a node above it steers it in the air onto floor past the node, and its link jump waits until
+        // the ledge is in reach (2026-11-01, Mining Plaza's west stairs; PlayerEntity.HostBotLedgeLand): null = on (not on the
+        // wire: the host runs the bots); replays recorded before it (format < 78) read as off, so they play exactly
+        public bool? BotLedgeLand { get; set; }
+        // a grounded bot walking over a drop while its node lies another way steps for the node instead (2026-11-01, Mining
+        // Plaza's south deck; PlayerEntity.HostBotEdgeGuard): null = on (not on the wire); replays before format 79 read as off
+        public bool? BotEdgeGuard { get; set; }
+        // bots carrying the octolith leave crates alone, and one with ammo to spare shoots only near crates and doesn't walk to
+        // them (2026-11-01, owner report; PlayerEntity.HostBotCrateNeed): null = on (not on the wire); replays before format 79 read as off
+        public bool? BotCrateNeed { get; set; }
+        // a bot skips an item a shut gate stands between it and its node (2026-11-04, Mining Plaza's gate;
+        // PlayerEntity.HostBotItemWalled), and its item skips go by the item, not the entity id placed pickups share: null =
+        // on (not on the wire); replays before format 80 read as off
+        public bool? BotItemWalled { get; set; }
+        // a grounded bot gives up at once a node further above it than a double jump and steeper than any floor (2026-11-05,
+        // Mining Plaza's gate ledge; PlayerEntity.HostBotOutOfReach): null = on (not on the wire); replays before format 81
+        // read as off
+        public bool? BotOutOfReach { get; set; }
+        // a grounded bot under its node (1+ up, under 3 across) half a second in one spot gives it up (2026-11-05, Mining
+        // Plaza's stairs; PlayerEntity.HostBotUnderGiveUp): null = on (not on the wire); replays before format 82 read as off
+        public bool? BotUnderGiveUp { get; set; }
+        // a bot skips items inside a grate's footprint, grate up or broken (2026-11-06, Shooting Gallery's pool items;
+        // PlayerEntity.HostBotGrateItems): null = on (not on the wire); replays before format 83 read as off
+        public bool? BotGrateItems { get; set; }
+        // a bot beside an item it has got no nearer for a second skips it (Mining Plaza's stairs missile;
+        // PlayerEntity.HostBotItemNoGain): null = on (not on the wire); replays before format 84 read as off
+        public bool? BotItemNoGain { get; set; }
+        // Nodes bots' "our node is occupied" checks read the node's seats (owner's Nodes replay, Mining Plaza, 11-06: bots
+        // stood beside enemy nodes; PlayerEntity.HostBotNodeOccupied): null = on (not on the wire); replays before format 85
+        // read as off
+        public bool? BotNodeOccupied { get; set; }
+        // the Echoes turret keeps its shell off for the player who jumped out while they're under the ball's footprint
+        // (owner's "sd" replay 11-06: the lowering ball pushed them through the floor; EchoesTurret.LeaverFootprint):
+        // null = on (not on the wire); replays before format 86 read as off
+        public bool? TurretLeaverFootprint { get; set; }
+        // the Echoes turret's occupant takes no damage while seated: they die only when the turret is destroyed with them
+        // in it (owner 2026-11-10; PlayerEntity.HostSeatSafe): null = on (not on the wire); replays before format 90 read as off
+        public bool? TurretSeatSafe { get; set; }
+        // bots on an Echoes turret errand steer a strafing alt form the way it moves and re-plan a lost route (2026-11-11,
+        // issue turret-bot-stall; PlayerEntity.HostTurretBotNav): null = on (not on the wire); replays before format 91 read as off
+        public bool? TurretBotNav { get; set; }
         // the zoom (Imperialist) as the game does it (2026-10-16, owner: the zoom felt bad; PlayerEntity.HostVanillaZoom):
         // the zoomed aim speed, the zoom's step in and ease out, the facing's catch-up. null = on (not on the wire: each
         // device plays its own seat's aim); replays recorded before it (format < 39) read as off, so they play exactly

@@ -202,32 +202,32 @@ namespace MphRead
             {
                 errors.Add($"only {full} full bursts");
             }
-            // only a death cuts a burst short (each bolt pays 5 UA; the last 15 UA fire a full burst)
+            // only a death cuts a burst short (each bolt pays 4 UA with MatchSettings.BlasterBuff; the last 12 UA fire a full burst)
             if (short_ > GameState.Deaths[0])
             {
                 errors.Add($"{short_} bursts cut short with {GameState.Deaths[0]} deaths");
             }
-            // 60 UA from the pickup = 12 bolts at 5 UA each (MatchSettings.BlasterBoltCost) = 4 bursts, then the Power Beam
-            if (gives == 1 && GameState.Deaths[0] == 0 && bursts.Count != 4)
+            // 60 UA from the pickup = 15 bolts at 4 UA each (MatchSettings.BlasterBoltCost + BlasterBuff) = 5 bursts, then the Power Beam
+            if (gives == 1 && GameState.Deaths[0] == 0 && bursts.Count != 5)
             {
-                errors.Add($"{bursts.Count} bursts from one pickup's 60 UA (4 expected)");
+                errors.Add($"{bursts.Count} bursts from one pickup's 60 UA (5 expected)");
             }
             // held fire: 40 frames burst to burst (longer only across a death and respawn)
             if (!starts.ContainsKey(40) || starts.Keys.Any(s => s < 40))
             {
                 errors.Add("bursts aren't 40 frames apart");
             }
-            if (uaSpent.Keys.Any(u => u != 15))
+            if (uaSpent.Keys.Any(u => u != 12))
             {
-                errors.Add("a burst didn't cost 15 UA (a pickup between bursts can top it up: check the list)");
+                errors.Add("a burst didn't cost 12 UA (a pickup between bursts can top it up: check the list)");
             }
             if (damages.Keys.Any(k => !k.StartsWith("PirateBlaster ")))
             {
                 errors.Add("seat 0 fired something that isn't the blaster");
             }
-            if (!damages.Keys.Any(k => k == "PirateBlaster 9/13"))
+            if (!damages.Keys.Any(k => k == "PirateBlaster 10/14"))
             {
-                errors.Add("no 9/13 blaster shot seen (MatchSettings.LighterBlaster2)");
+                errors.Add("no 10/14 blaster shot seen (MatchSettings.BlasterBuff)");
             }
             if (samusGiven != 1)
             {
@@ -403,10 +403,24 @@ namespace MphRead
             }
             int bolts = me.HostPirateBlasterBolts - bolts0;
             byte mask = target.NetSquadMark;
-            // stop firing: the mark lasts SquadMarkFrames from the burst that set it
+            // teams: the Trooper dies with the mark up: its marks go with it (owner 2026-10-31); free for all: stop firing, the
+            // mark lasts SquadMarkFrames from the burst that set it
             int clearedAfter = -1;
-            bool died = false;
-            for (int i = 0; i < PlayerEntity.SquadMarkFrames + 120 && markedAt >= 0; i++)
+            bool died = false, meDied = false;
+            if (teams && markedAt >= 0)
+            {
+                me.Health = 0;
+                host.Step(default);
+                byte afterDeath = target.NetSquadMark;
+                Console.WriteLine($"{what}: the Trooper died with the mark up -> mask {afterDeath}");
+                if (afterDeath != 0)
+                {
+                    errors.Add($"{what}: the Trooper's mark stayed on the target after the Trooper died (mask {afterDeath})");
+                }
+                clearedAfter = 1;
+                meDied = true;
+            }
+            for (int i = 0; i < PlayerEntity.SquadMarkFrames + 120 && markedAt >= 0 && clearedAfter < 0; i++)
             {
                 Hold();
                 host.Step(default);
@@ -418,7 +432,7 @@ namespace MphRead
                 }
             }
             Console.WriteLine($"{what}: marked after {markedAt} frames ({bolts} bolts), mask {mask}, seen by the Trooper {meSees}, by seat 2 {thirdSees}, "
-                + $"by itself {selfSees}; cleared {clearedAfter} frames after{(died ? " (target died)" : "")} (SquadMarkFrames {PlayerEntity.SquadMarkFrames})");
+                + $"by itself {selfSees}; cleared {clearedAfter} frames after{(died ? " (target died)" : meDied ? " (the Trooper died)" : "")} (SquadMarkFrames {PlayerEntity.SquadMarkFrames})");
             if (markedAt < 0)
             {
                 errors.Add($"{what}: the Trooper's bursts never marked the target ({bolts} bolts, target health {target.Health})");
@@ -437,7 +451,7 @@ namespace MphRead
                 errors.Add($"{what}: who sees it is wrong (Trooper {meSees}, itself {selfSees}, seat 2 {thirdSees})");
             }
             // (the last burst may have set it up to two bursts' bolts before the fire stopped)
-            if (clearedAfter < 0 || !died && (clearedAfter > PlayerEntity.SquadMarkFrames + 2 || clearedAfter < PlayerEntity.SquadMarkFrames - 50))
+            if (clearedAfter < 0 || !died && !meDied && (clearedAfter > PlayerEntity.SquadMarkFrames + 2 || clearedAfter < PlayerEntity.SquadMarkFrames - 50))
             {
                 errors.Add($"{what}: cleared {clearedAfter} frames after the fire stopped (SquadMarkFrames {PlayerEntity.SquadMarkFrames})");
             }

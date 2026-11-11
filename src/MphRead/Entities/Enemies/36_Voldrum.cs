@@ -156,7 +156,7 @@ namespace MphRead.Entities.Enemies
             {
                 facing = facing.WithY(-0.5f).Normalized();
             }
-            SetTransform(facing, UpVector, Position);
+            SetTransform(facing, Vector3.UnitY, Position); // vanilla keeps up at (0,1,0); reusing the tilted up made the body roll
         }
 
         private void State2()
@@ -207,7 +207,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior00()
         {
             bool collided = HandleCollision();
-            if (!SeekTargetFacing(_targetVec, UpVector, ref _aimSteps, _aimAngleStep) || !collided)
+            if (!SeekTargetFacing(_targetVec, Vector3.UnitY, ref _aimSteps, _aimAngleStep) || !collided)
             {
                 return false;
             }

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using MphRead;
 using MphRead.Entities;
 using MphRead.Formats;
@@ -94,6 +95,11 @@ namespace MphRecomp.Arenas
             // the player spawns (the editor's spawn mode, Mining Plaza 2026-10-31): when there are any, a match uses these
             // and none of the arena's own (PlacedPickups.Extra)
             public List<SpawnSpotData> Spawns { get; set; } = new();
+            // no respawn this near an octolith sitting on its pedestal (the enemy's in Capture): PlayerEntity
+            // HostOctolithSpawnClear (Mining Plaza owner 2026-11-06: "a player cant spawn too close to octolith right
+            // away in the match or if the octolith is sitting on its pedestal"). 0 = no such rule
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+            public float OctolithSpawnClear { get; set; }
             public List<JumpPadSpotData> JumpPads { get; set; } = new();
             // the modes' octoliths, bases and nodes (the editor's mode choices, owner 2026-11-01): when the file has any for
             // a match's mode, they replace the room's own (PlacedPickups.Extra; MatchArenas.Census counts them)
@@ -117,6 +123,22 @@ namespace MphRecomp.Arenas
         {
             public float[] Pos { get; set; } = new float[3];    // on the floor
             public float[] Facing { get; set; } = new float[3]; // level, unit length
+            // vanilla's per-mode spawn sets (each mode's entity layer holds its own; owner 2026-11-06), tagged by hand in
+            // the file: Capture's team spawn (0/1; a file with any uses only those in Capture, as vanilla's do), and the
+            // modes this spawn isn't used in ("Nodes", "Bounty", ...: a Teams mode counts as its plain one)
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public int? Team { get; set; }
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public List<string>? Skip { get; set; }
+
+            // used in a match of this mode
+            public bool In(GameMode mode, bool teamSpawns)
+            {
+                if (mode == GameMode.Capture && teamSpawns && Team == null) return false;
+                string name = mode.ToString();
+                if (name.EndsWith("Teams", StringComparison.Ordinal)) name = name[..^5];
+                return Skip == null || !Skip.Contains(name);
+            }
         }
 
         public sealed class PickupSpot
@@ -199,6 +221,7 @@ namespace MphRecomp.Arenas
             }
             if (saved != null)
             {
+                _data.OctolithSpawnClear = saved.OctolithSpawnClear;
                 foreach (PickupSpot s in saved.Pickups)
                 {
                     if (Enum.TryParse(s.Item, out ItemType t)) AddItem(t, V(s.Pos), s.RespawnSeconds);
@@ -213,7 +236,7 @@ namespace MphRecomp.Arenas
                 {
                     foreach (PlayerSpawnEntity sp in ArenaSpawns()) Destroy(sp);
                 }
-                foreach (SpawnSpotData sp in saved.Spawns) AddSpawn(V(sp.Pos), V(sp.Facing));
+                foreach (SpawnSpotData sp in saved.Spawns) AddSpawn(V(sp.Pos), V(sp.Facing), sp);
                 foreach (JumpPadSpotData jp in saved.JumpPads) AddJumpPad(V(jp.Pos), V(jp.Target), out _);
                 foreach (ModeSpotData m in saved.Modes) AddMode(m.Kind, m.Team, V(m.Pos));
                 foreach (RemovedItem r in saved.RemovedItems)
@@ -385,14 +408,15 @@ namespace MphRecomp.Arenas
 
         // a player spawn on the floor, facing `facing` (made level). Its marker is a live spawn too, so the solo run
         // respawns there: the red placeholder MphRead's viewer draws for spawns, shown
-        public PlayerSpawnEntity AddSpawn(Vector3 floor, Vector3 facing)
+        public PlayerSpawnEntity AddSpawn(Vector3 floor, Vector3 facing, SpawnSpotData? tags = null)
         {
             facing = Level(facing);
             var e = new PlayerSpawnEntity(SpawnData(NextId(), floor, facing), "", _scene);
             foreach (ModelInstance inst in e.GetModels()) inst.IsPlaceholder = false;
             _scene.AddEntity(e);
             e.NodeRef = NodeAt(floor);
-            var spot = new SpawnSpotData { Pos = A(floor), Facing = A(facing) };
+            // a re-save keeps the file's hand-made mode tags
+            var spot = new SpawnSpotData { Pos = A(floor), Facing = A(facing), Team = tags?.Team, Skip = tags?.Skip };
             _spawns.Add((e, spot));
             _data.Spawns.Add(spot);
             return e;
@@ -405,7 +429,8 @@ namespace MphRecomp.Arenas
         }
 
         // a player spawn's data as a room file holds it (Entity.cs PlayerSpawnEntityData): any time, active, no team
-        internal static PlayerSpawnEntityData SpawnData(int id, Vector3 pos, Vector3 facing)
+        // unless given one (Capture's team spawns)
+        internal static PlayerSpawnEntityData SpawnData(int id, Vector3 pos, Vector3 facing, int team = -1)
         {
             var bytes = new byte[Marshal.SizeOf<PlayerSpawnEntityData>()];
             using (var w = new BinaryWriter(new MemoryStream(bytes)))
@@ -420,7 +445,7 @@ namespace MphRecomp.Arenas
                 }
                 w.Write((byte)0);  // Availability: any time
                 w.Write((byte)1);  // Active
-                w.Write((sbyte)-1); // TeamIndex: none
+                w.Write((sbyte)team); // TeamIndex: -1 none
             }
             return MemoryMarshal.Read<PlayerSpawnEntityData>(bytes);
         }

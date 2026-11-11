@@ -76,6 +76,7 @@ namespace MphRecomp.Frontend
             Strings = strings;
             Widgets = widgets;
             Font = font;
+            _sortByZ = ByZ;
         }
 
         private sealed class ItemRuntime
@@ -103,6 +104,17 @@ namespace MphRecomp.Frontend
 
         public MenuState ItemState(int item) => _items[item].State;
         public int ItemCode(int item) => _items[item].Code;
+        public int ItemCount => _items.Length;
+
+        // Put an item back in a steady state at once: no transition, no links, no actions (file select's dialog close: an
+        // item a link bounced out and back ends where it was, without the slide it would play)
+        public void Settle(int item, MenuState state)
+        {
+            ItemRuntime rt = _items[item];
+            rt.State = state;
+            rt.Code = (int)state;
+            rt.Frame = 0;
+        }
 
         // ---- page flow ----
 
@@ -825,12 +837,27 @@ namespace MphRecomp.Frontend
                     output[t] = tri;
                 }
             }
-            // far to near; ties keep item order (DS draws in list order)
-            var slice = output.GetRange(start, output.Count - start);
-            var order = new int[slice.Count];
-            for (int i = 0; i < order.Length; i++) order[i] = i;
-            Array.Sort(order, (p, q) => slice[p].Z != slice[q].Z ? slice[p].Z.CompareTo(slice[q].Z) : p.CompareTo(q));
-            for (int i = 0; i < order.Length; i++) output[start + i] = slice[order[i]];
+            // far to near; ties keep item order (DS draws in list order). The copy and the order are kept buffers: a new
+            // copy every frame (~120 bytes a triangle) was most of the front end's garbage, 67 KB a frame in the lobby,
+            // whose collections froze the menus for 0.2-0.46 s (2026-11-11)
+            int count = output.Count - start;
+            _sortTris.Clear();
+            for (int i = start; i < output.Count; i++) _sortTris.Add(output[i]);
+            if (_sortOrder.Length < count) _sortOrder = new int[Math.Max(count, _sortOrder.Length * 2)];
+            for (int i = 0; i < count; i++) _sortOrder[i] = i;
+            _sortOrder.AsSpan(0, count).Sort(_sortByZ);
+            for (int i = 0; i < count; i++) output[start + i] = _sortTris[_sortOrder[i]];
+        }
+
+        private readonly List<WidgetTri> _sortTris = new();
+        private int[] _sortOrder = new int[256];
+        private readonly Comparison<int> _sortByZ;
+
+        // _sortTris' indices far to near, ties in list order (one delegate, made once)
+        private int ByZ(int p, int q)
+        {
+            float zp = _sortTris[p].Z, zq = _sortTris[q].Z;
+            return zp != zq ? zp.CompareTo(zq) : p.CompareTo(q);
         }
 
         // Reports R11 (owner 2026-10-07: "orange lines around the boxes that are the width of the ds screen on the vertical
@@ -853,8 +880,9 @@ namespace MphRecomp.Frontend
             {
                 WidgetTri tri = tris[t];
                 if (tri.TextureId != texture || texture < 0) return;
-                foreach (UiVertex v in new[] { tri.A, tri.B, tri.C })
+                for (int k = 0; k < 3; k++) // (no array of the three: that was garbage per triangle, per frame)
                 {
+                    UiVertex v = k == 0 ? tri.A : k == 1 ? tri.B : tri.C;
                     if (v.U < U0 - Eps || v.U > U1 + Eps) return; // not a middle-column box
                     minX = MathF.Min(minX, v.X);
                     maxX = MathF.Max(maxX, v.X);
@@ -957,7 +985,13 @@ namespace MphRecomp.Frontend
             float a = Lerp(sa, ea);
             if (a <= 0) return;
             string text = Strings[style.StringId];
-            Font.Emit(text, item.X, item.Y, style.Align, style.WrapWidth, lineHeight: style.Size == 0 ? 8 : style.Size,
+            // (?) fmt xx03 (only the rules pages' "POINT GOAL\n\nTIME LIMIT\n\nTEAM PLAY" labels and their values) spaces
+            // its lines 2.5 further apart: two lines a row then match the value boxes' 21 (owner 2026-11-06, the labels
+            // drifted above their boxes); fmt xx01's mode descriptions left at 8, unchecked against the game. The first
+            // line stays where the ROM puts it (Emit anchors on the first line's bottom, which moves with the line height):
+            // the one-line values sat 3 px high in their boxes otherwise (owner 2026-11-07)
+            float size = style.Size == 0 ? 8 : style.Size, extra = style.Format2 == 3 ? 2.5f : 0;
+            Font.Emit(text, item.X, item.Y - extra, style.Align, style.WrapWidth, lineHeight: size + extra,
                 Lerp(sr, er), Lerp(sg, eg), Lerp(sb, eb), a, TextDepthZ(item.Depth), output);
         }
     }

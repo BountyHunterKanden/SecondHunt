@@ -1,0 +1,22 @@
+{
+  "Id": "example_party_modes",
+  "Name": "Example: Party Modes",
+  "Version": "1.0.0",
+  "Description": "Three new match modes built on Battle: INSTAGIB, HEADHUNTER and MOON BOUNCE. A copy-me starting point for mods that add game modes.",
+  "Author": "Second Hunt",
+  "Kind": "gameplay",
+  "Api": 1,
+  "Entry": "main.lua",
+  "Settings": [
+    { "Id": "respawn", "Name": "Instagib respawn (seconds)", "Type": "int", "Min": 1, "Max": 3, "Default": "1" },
+    { "Id": "headshot_points", "Name": "Headshot kill points", "Type": "int", "Min": 2, "Max": 5, "Default": "3" }
+  ],
+  "Modes": [
+    { "Id": "instagib", "Name": "INSTAGIB", "Base": "Battle", "PointGoal": 10, "TimeLimit": 5,
+      "Description": "Every hit is a kill and you're back in a second. First to the point goal wins." },
+    { "Id": "headhunter", "Name": "HEADHUNTER", "Base": "Battle", "PointGoal": 15, "TimeLimit": 7,
+      "Description": "A kill is worth 1 point, a headshot kill is worth 3. Aim high." },
+    { "Id": "moon", "Name": "MOON BOUNCE", "Base": "Battle", "PointGoal": 7, "TimeLimit": 5,
+      "Description": "Low gravity and big jumps. Fight in the air." }
+  ]
+}

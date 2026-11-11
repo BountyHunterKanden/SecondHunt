@@ -162,7 +162,8 @@ namespace MphRecomp.Frontend
 
         private static readonly Dictionary<string, string[]> Joined = new() {
             ["hd/MP4Sylux"] = new[] { "bodies/MP4Sylux", "bodies/MP4SyluxLockjaw", "guns/MP4Sylux" },
-            ["hd/MP1FusionSuit"] = new[] { "hd/MP1FusionSuitVaria", "hd/MP1FusionSuitGravity", "hd/MP1FusionSuitPhazon" } };
+            ["hd/MP1FusionSuit"] = new[] { "hd/MP1FusionSuitVaria", "hd/MP1FusionSuitGravity", "hd/MP1FusionSuitPhazon" },
+            ["hd/MP1FusionSuitBall"] = new[] { "hd/MP1FusionSuitVariaBall", "hd/MP1FusionSuitGravityBall", "hd/MP1FusionSuitPhazonBall" } };
 
         // the joins as offered (Fold fills it from the page's items: only parts this build offers, hd/X + bodies/X found)
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string[]> OfferedJoins = new();

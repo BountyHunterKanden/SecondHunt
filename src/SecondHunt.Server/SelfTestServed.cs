@@ -99,9 +99,15 @@ namespace SecondHunt.Server
             Check(!(await o.RequestAsync<OkMsg>(new StartGameReq { Started = true })).Done, "served: the owner's StartGame is not a start");
             hub.MatchHostSays(id, "!started");
             Check(!(await o.RequestAsync<OkMsg>(Result(id, (o, 1), (a, 0)))).Done, "served: a player's own result of a served match is ignored");
-            hub.MatchHostSays(id, $"!result {{\"teams\":false,\"rows\":[{{\"slot\":{g.Relay.Slot},\"place\":0}},{{\"slot\":{ja.Relay.Slot},\"place\":1}}]}}");
+            // (+ the Gaming Hub's numbers, 0.10.0: SelfTestStats.cs)
+            hub.MatchHostSays(id, $"!result {{\"teams\":false,\"rows\":[{{\"slot\":{g.Relay.Slot},\"place\":0,\"stats\":{{\"hunter\":\"dark_samus\",\"kills\":4}}}},"
+                + $"{{\"slot\":{ja.Relay.Slot},\"place\":1}}],\"mode\":\"capture\",\"arena\":\"echoes_spires\",\"seconds\":120}}");
             HeadToHeadInfo? oa = (await o.RequestAsync<PlayerMsg>(new GetPlayerReq { Code = a.Me.Code })).Player.Record;
             Check(oa is { Rounds: 1, Victories: 1, Last: HeadToHeadInfo.Victory }, "served: the match host's result is the record (owner won)");
+            StatsMsg os = await a.RequestAsync<StatsMsg>(new StatsReq { Code = o.Me.Code });
+            Check(os.Totals.GetValueOrDefault(Store.Kills) == 4 && os.Hunters.ContainsKey("dark_samus") && os.Modes.ContainsKey("capture")
+                && os.Arenas.ContainsKey("echoes_spires") && os.Totals.GetValueOrDefault(Store.Seconds) == 120,
+                "served: the match host's result counts on the Gaming Hub");
             hub.MatchHostSays(id, "!lobby");
 
             // 0.9.7: a recording that didn't reach a player over the match: the match host drops it and says !replay; it

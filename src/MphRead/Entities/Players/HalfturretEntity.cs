@@ -94,6 +94,7 @@ namespace MphRead.Entities
             {
                 _health = health / 2;
                 Owner.Health -= _health;
+                Owner.NetClearLastHit(); // recomp: the cost isn't a hit (a client mustn't credit the last attacker for it)
             }
             else
             {

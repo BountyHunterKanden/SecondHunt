@@ -507,6 +507,7 @@ public class MainActivity : Activity
         ("Trace", "Trace", null), ("Noxus", "Noxus", null), ("Sylux", "Sylux", null), ("Weavel", "Weavel", null),
     };
 
+
     void AddSoloArena()
     {
         AddHeader("Solo arena (third person; R3 = orbit camera / aim)");
@@ -682,6 +683,53 @@ public class MainActivity : Activity
                 .PutExtra("gun", "none")
                 .PutExtra("skins", "0:MP3DarkSamus"));
         });
+        // dev (owner 2026-11-04): the solo character picked above in each of its recolours, side by side as idle targets
+        // (SoloArena --es lineup, MatchSkins --es lookvariant per seat); 7 bots at most, so two pages in the sheets' order
+        foreach (var (page, variants) in new[] { ("1/2", new[] { 0, 1, 2, 3, 6, 7, 8 }), ("2/2", new[] { 9, 4, 5 }) })
+        {
+            AddButton($"Recolour lineup {page}: the solo character above, " + (page == "1/2" ? "1st-7th colours" : "8th + orange and green teams"), () =>
+            {
+                var a = Arenas();
+                var (_, hunter, skin) = SoloCharacters[_soloChar];
+                string who = skin ?? hunter;
+                var intent = new Intent(this, typeof(CampaignActivity))
+                    .PutExtra("match", "Battle")
+                    .PutExtra("solo", "1")
+                    .PutExtra("bots", variants.Length.ToString())
+                    .PutExtra("targets", "1")
+                    .PutExtra("lineup", string.Join(",", Enumerable.Repeat(who, variants.Length)))
+                    .PutExtra("lookvariant", string.Join(",", variants.Select((v, i) => $"{i + 1}:{v}")))
+                    .PutExtra("arena", a[_soloArena % a.Count].Name)
+                    .PutExtra("hunter", hunter)
+                    .PutExtra("gun", "none");
+                if (skin != null) intent.PutExtra("skins", "0:" + skin);
+                StartActivity(intent);
+            });
+        }
+        // dev (owner 2026-11-10): every death look -- a row of idle bots kept at 1 health, so any hit kills, back in the row
+        // when they respawn; the player has every weapon but the Omega Cannon (SoloArena --es lowhp). The solo character and
+        // arena picked above; two pages, so the custom bodies and every DS hunter each stand in a row
+        foreach (var (page, who) in new[] { ("1/2", "trooper,DarkSamusStandin,MP4Sylux,Samus,Kanden,Spire,Trace"), ("2/2", "Noxus,Sylux,Weavel,MP2DarkSamus,MP1WaveTrooper") })
+        {
+            AddButton($"Death test {page}: idle bots at 1 health, every weapon: solo character + arena above", () =>
+            {
+                var a = Arenas();
+                var (_, hunter, skin) = SoloCharacters[_soloChar];
+                var intent = new Intent(this, typeof(CampaignActivity))
+                    .PutExtra("match", "Battle")
+                    .PutExtra("solo", "1")
+                    .PutExtra("bots", who.Split(',').Length.ToString())
+                    .PutExtra("targets", "1")
+                    .PutExtra("lowhp", "1")
+                    .PutExtra("lineup", who)
+                    .PutExtra("arena", a[_soloArena % a.Count].Name)
+                    .PutExtra("hunter", hunter)
+                    .PutExtra("gun", skin == null && hunter == "Samus" ? "settings" : "none");
+                if (skin != null) intent.PutExtra("skins", "0:" + skin);
+                if (_soloInfUa) intent.PutExtra("infua", "1");
+                StartActivity(intent);
+            });
+        }
         // one tap (owner 2026-10-24, dev only: docs/DARK_SAMUS_HYPER.md H2 + H4): Corruption Dark Samus with the Hyper Beam in
         // hand (her affinity row: a full charge held is rapid fire), endless UA; the solo arena and practice targets above
         AddButton("Hyper Beam practice: Dark Samus (Corruption), solo arena + practice targets above, endless UA", () =>

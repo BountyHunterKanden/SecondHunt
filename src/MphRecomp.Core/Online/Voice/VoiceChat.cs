@@ -225,6 +225,8 @@ namespace MphRecomp.Online.Voice
         // this device's voice is going out (sent something in the last 200 ms)
         public bool Transmitting => Environment.TickCount64 - Interlocked.Read(ref _lastSentMs) < 200;
         public bool PushToTalkHeld => _pttHeld;
+        // you are holding push to talk now (the self duck in App/Audio/MusicDuck.cs follows this)
+        public bool SelfTalking => _pttHeld && VoiceSettings.Current.Mode == VoiceMode.PushToTalk;
         public bool MicOpen => _capture?.Running == true;
 
         // that player is being heard now

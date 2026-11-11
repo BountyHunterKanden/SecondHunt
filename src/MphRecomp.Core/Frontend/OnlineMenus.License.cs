@@ -110,7 +110,7 @@ namespace MphRecomp.Frontend
         }
 
         // where the card may sit (mockup px: x0, top, x1, bottom): it keeps its own shape inside, centred, at the top
-        private static readonly (float X0, float Top, float X1, float Bottom) LicenseCardBox = (100, 225, 1120, 790);
+        private (float X0, float Top, float X1, float Bottom) LicenseCardBox => (100, HubOn ? 290 : 225, 1120, 790); // (the hub's view tabs over it: OnlineMenus.Hub.cs)
 
         private static float LicenseButtonY(int row) => 470 + 82 * row;
 
@@ -165,10 +165,12 @@ namespace MphRecomp.Frontend
             if (_licCard?.Code != card.Code)
             {
                 _licTab = 0;
+                _licView = 0;
                 _licLicense = ParseLicense(card.License);
             }
             _licCard = card;
             _licError = null;
+            OpenedLicense(from);
             menu.GoTo(s_onLicense);
             FetchLicense();
         }
@@ -177,7 +179,7 @@ namespace MphRecomp.Frontend
         private void FetchLicense()
         {
             PlayerCard? card = _licCard;
-            if (card == null || _previewMe != null) return;
+            if (card == null || _previewMe != null || (SampleHub && HubSample.IsSample(card.Code))) return; // (sample_hub.txt's hunters: made up)
             OnlineClient? client = Conn;
             if (client == null || !client.Connected)
             {
@@ -194,7 +196,7 @@ namespace MphRecomp.Frontend
                     RosterMsg roster = await client.RequestAsync<RosterMsg>(new RosterReq());
                     Post(() =>
                     {
-                        _roster = roster;
+                        _roster = WithFakeFriends(roster);
                         if (_licCard?.Code != code) return;
                         _licLoading = false;
                         _licError = null;
@@ -238,6 +240,7 @@ namespace MphRecomp.Frontend
                 if (!on && item >= 0 && menu.ItemState(item) == MenuState.Focused) lost = true;
                 Show(menu, item, on);
             }
+            Set(_liSide, actions); // (your own card: no head to head, no actions)
             Set(_liFriend, actions && !blocked);
             Set(_liRival, actions && !blocked && ShowRivals);
             Set(_liBlock, actions);
@@ -245,6 +248,7 @@ namespace MphRecomp.Frontend
             Set(_liMute, actions); // (OnlineMenus.Chat.cs)
             Set(_liVoice, actions && !blocked); // (OnlineMenus.Voice.cs)
             Set(_liJoin, actions && !blocked && LicenseJoinable(c!));
+            ShowLicenseViews(menu); // (OnlineMenus.Hub.cs)
             if (focus || lost) menu.SetState(_liCard, MenuState.Focused);
         }
 
@@ -285,13 +289,12 @@ namespace MphRecomp.Frontend
             switch (call)
             {
             case LicCardCall:
-            case LicNextCall:
-                _licTab = (_licTab + 1) % CardTabs;
-                if (call == LicNextCall) KeyClick(menu, _liTab[0]); // (L / R click like a tab's tap; the card's own tap has its item's)
+                if (_licView == 0) _licTab = (_licTab + 1) % CardTabs; // (STATS / FAVOURITES up: nothing to step)
                 break;
+            case LicNextCall:
             case LicPrevCall:
-                _licTab = (_licTab + CardTabs - 1) % CardTabs;
-                KeyClick(menu, _liTab[0]);
+                LicenseStep(call == LicNextCall ? 1 : -1); // (the card's tabs, then the hub's STATS / FAVOURITES: OnlineMenus.Hub.cs)
+                KeyClick(menu, _liTab[0]); // (L / R click like a tab's tap; the card's own tap has its item's)
                 break;
             case LicFriendCall:
                 LinkAction(c, LinkKind.Friend);
@@ -398,7 +401,9 @@ namespace MphRecomp.Frontend
             float bx0 = Mx(px0), btop = My(py0), bx1 = Mx(px1), bbottom = My(py1);
             var card = new List<WidgetTri>();
             float cardBottom = bbottom;
-            if (Multiplayer?.EmitCard(_drawMenu!, _licLicense ?? new HunterLicense(), StreamerPrivacy.Name(c.Name, c.Code == MeCard?.Code), _licTab, card) == true)
+            bool view = DrawLicenseViews(c, glows); // (the hub's STATS / FAVOURITES instead of the card: OnlineMenus.Hub.cs)
+            if (view) for (int t = 0; t < CardTabs; t++) _liTabRect[t][0] = TouchRect(0, 0, 0, 0, LicTabCall + t);
+            else if (Multiplayer?.EmitCard(_drawMenu!, _licLicense ?? new HunterLicense(), StreamerPrivacy.Name(c.Name, c.Code == MeCard?.Code), _licTab, card) == true)
             {
                 float x0 = card.Min(MinX), x1 = card.Max(MaxX), y0 = card.Min(MinY), y1 = card.Max(MaxY);
                 float s = MathF.Min((bx1 - bx0) / MathF.Max(x1 - x0, 1), (btop - bbottom) / MathF.Max(y1 - y0, 1));
@@ -442,12 +447,13 @@ namespace MphRecomp.Frontend
                     _ => ("offline", OnGrey),
                 };
             }
-            string note = _licError != null ? _licError : _licLoading && _licLicense == null ? "loading..."
+            string note = view ? "" : _licError != null ? _licError : _licLoading && _licLicense == null ? "loading..."
                 : _licLicense == null ? "no license stats yet." : "";
             if (where.Length > 0) TextS(where, mid, cardBottom - Mw(84), 2, colour, tag, SizeM);
             if (note.Length > 0) TextS(Fit(note, 40), mid, cardBottom - Mw(where.Length > 0 ? 130 : 84), 2, _licError != null ? Red : OnGrey, tag, SizeX);
 
-            // HEAD TO HEAD
+            // HEAD TO HEAD (not on your own card: its side panel hides, ShowLicense)
+            if (c.Code == MeCard?.Code) return;
             Fill(Mx(1194), My(200), Mx(1846), My(238), HeaderBar.R, HeaderBar.G, HeaderBar.B, 1, side);
             TextS("head to head", Mx(1520), My(208), 2, Dark, side, SizeM);
             HeadToHead? h = HeadToHeads.Get(c.Code);
@@ -475,7 +481,6 @@ namespace MphRecomp.Frontend
             if (h == null) TextS("no online matches yet.", Mx(1520), My(y + 58), 2, OnGrey, side, SizeX);
 
             // the actions (their items hide what doesn't apply: ShowLicense)
-            if (c.Code == MeCard?.Code) return;
             (string friend, (float, float, float) friendColour) = LinkLabel(c, LinkKind.Friend);
             LicenseButton(_liFriend, LicenseButtonY(0), friend, friendColour, glows);
             if (ShowRivals)
@@ -526,6 +531,7 @@ namespace MphRecomp.Frontend
                 l.HeadshotKills, l.Disconnects, WirelessSeconds = Minutes(l.WirelessSeconds), WifiSeconds = Minutes(l.WifiSeconds),
                 TotalSeconds = Minutes(l.TotalSeconds), l.WifiBestWinStreak, l.WifiBestKillStreak, l.WirelessBestWinStreak,
                 l.WirelessBestKillStreak, l.FavoriteHunter, l.FavoriteWeapon, l.FavoriteMode, l.LuckyArena, l.BeatGame, l.Completed,
+                l.ChoiceHunter, l.ChoiceCharacter, l.SkinChoice,
             });
         }
 
@@ -539,10 +545,22 @@ namespace MphRecomp.Frontend
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
             if (s_picks.TryGetValue(json, out MatchPlayer? known)) return known;
-            MatchPlayer? pick = ParseLicense(json) is { } l ? new MatchPlayer { Hunter = (Hunter)l.FavoriteHunter } : null;
+            MatchPlayer? pick = ParseLicense(json) is { } l ? ChoicePick(l) : null;
             if (s_picks.Count > 256) s_picks.Clear();
             s_picks[json] = pick;
             return pick;
+        }
+
+        // the card's hunter of choice as a seat: a character (TROOPER, DARK SAMUS) in its most used skin, else its first known
+        // one, and Samus / Sylux in their most used skin (SeatIcon draws that skin's icon where this device has its picture,
+        // else the look-alike one; Samus / Sylux without it: their vanilla icon)
+        private static MatchPlayer ChoicePick(HunterLicense l)
+        {
+            (int hunter, string? id) = l.HunterOfChoice();
+            Character? c = id == null ? null : Characters.All.FirstOrDefault(k => k.Id == id);
+            string? skin = l.ChoiceSkin();
+            if (c == null && skin != null) c = Characters.All.FirstOrDefault(k => k.HasOriginal && (int)k.Base == hunter);
+            return new MatchPlayer { Hunter = (Hunter)hunter, Character = c?.Id, Skin = skin ?? c?.Known.FirstOrDefault() };
         }
 
         // another device's license (anything it sent: clamped to what the card can show), null = none or unreadable
@@ -571,6 +589,7 @@ namespace MphRecomp.Frontend
             l.FavoriteHunter = Math.Clamp(l.FavoriteHunter, 0, 6);
             l.FavoriteWeapon = Math.Clamp(l.FavoriteWeapon, 0, 8);
             l.FavoriteMode = Math.Clamp(l.FavoriteMode, 0, 6);
+            l.ClampChoice(counted: false); // (its character counts aren't sent)
             return l;
         }
 

@@ -7,7 +7,7 @@ using MphRecomp.Multiplayer;
 namespace MphRecomp.App;
 
 // The Trooper's Scout Drone on its own Prime 1 body (Core DroneBody; docs/CHARACTERS_AND_SKINS.md D10/D22): each seat
-// that can fly the drone gets its skin's drone (bodies/MP1GammaDrone with the Wave Trooper, MP1AlphaDrone otherwise),
+// that can fly the drone gets its skin's drone (bodies/MP1AlphaDrone for every skin),
 // loaded with the native bodies (MatchSkins' _bodyLoads / _bodies) and drawn where MphRead flies the drone, in place of its
 // Psycho Bit stand-in (PlayerEntity.HostOwnAlt). A drone body that isn't imported leaves the stand-in. Drawing only.
 internal sealed partial class CampaignRenderer

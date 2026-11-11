@@ -25,7 +25,7 @@ namespace MphRecomp.Frontend
     {
         private readonly MenuFile _file;
         private readonly UiTextureCache _textures;
-        private readonly Dictionary<string, ModelInstance> _instances = new();
+        private readonly Dictionary<(string, string?), ModelInstance> _instances = new(); // by (model, anim) path: no key string per frame
         private readonly Dictionary<ModelInstance, List<float[]>> _meshes = new();
 
         public MenuWidgets(MenuFile file, UiTextureCache textures)
@@ -48,12 +48,11 @@ namespace MphRecomp.Frontend
         // a model by path: a widget's, or one the game's code draws itself (frontend2d/slots and lines, the grooves)
         public ModelInstance Instance(string modelPath, string? animPath)
         {
-            string key = modelPath + "|" + animPath;
-            if (!_instances.TryGetValue(key, out ModelInstance? inst))
+            if (!_instances.TryGetValue((modelPath, animPath), out ModelInstance? inst))
             {
-                Model model = Read.ReadModelFile(key, FixPath(modelPath), animPath == null ? null : FixPath(animPath));
+                Model model = Read.ReadModelFile(modelPath + "|" + animPath, FixPath(modelPath), animPath == null ? null : FixPath(animPath));
                 inst = new ModelInstance(model);
-                _instances[key] = inst;
+                _instances[(modelPath, animPath)] = inst;
             }
             return inst;
         }
@@ -203,7 +202,19 @@ namespace MphRecomp.Frontend
                 s[o + 8], s[o + 9], s[o + 10], s[o + 11], s[o + 12], s[o + 13], s[o + 14], s[o + 15]);
         }
 
+        // (model name, texture, palette) -> the cache's id: every mesh asks every frame, and the string key and the
+        // closure GetOrAdd takes were garbage each time (the menu freezes, 2026-11-11); the cache never drops a texture
+        private readonly Dictionary<(string, int, int), int> _textureIds = new();
+
         private int TextureFor(Model model, int textureId, int paletteId)
+        {
+            if (_textureIds.TryGetValue((model.Name, textureId, paletteId), out int id)) return id;
+            id = AddTexture(model, textureId, paletteId);
+            _textureIds[(model.Name, textureId, paletteId)] = id;
+            return id;
+        }
+
+        private int AddTexture(Model model, int textureId, int paletteId)
         {
             string key = $"{model.Name}|{textureId}|{paletteId}";
             return _textures.GetOrAdd(key, () =>

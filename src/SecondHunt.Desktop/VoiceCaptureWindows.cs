@@ -12,8 +12,13 @@ namespace SecondHunt.Desktop;
 // Voice chat's microphone on Windows (milestone O8): the default capture device through SoundFlow/miniaudio (the library
 // DesktopAudio plays through), converted by miniaudio to 16 kHz mono and cut into 20 ms frames on its capture thread.
 // Its own engine, so opening and closing the microphone never touches the game's output device.
+// WASAPI first, then DirectSound, each tried on its own: a mic whose WASAPI mix format miniaudio can't read fails with
+// FormatNotSupported (a 0.4.1 player's, 10-31), and an engine given both only ever uses the first. (SoundFlow's
+// miniaudio has no WinMM: NoBackend.)
 internal sealed class VoiceCaptureWindows : IVoiceCapture
 {
+    static readonly MiniAudioBackend[] Backends = { MiniAudioBackend.Wasapi, MiniAudioBackend.DirectSound };
+
     MiniAudioEngine? _engine;
     AudioCaptureDevice? _device;
     Action<short[]>? _frame;
@@ -26,23 +31,44 @@ internal sealed class VoiceCaptureWindows : IVoiceCapture
 
     public bool Start(Action<short[]> frame)
     {
+        var failed = new List<string>();
+        foreach (MiniAudioBackend backend in Backends)
+        {
+            if (Start(frame, backend, out string? error))
+            {
+                if (failed.Count > 0)
+                {
+                    Log.Info("MPHVoice", "microphone: " + string.Join("; ", failed));
+                }
+                Error = null;
+                return true;
+            }
+            failed.Add($"{backend}: {error}");
+        }
+        Error = "microphone: " + string.Join("; ", failed);
+        return false;
+    }
+
+    bool Start(Action<short[]> frame, MiniAudioBackend backend, out string? error)
+    {
         try
         {
-            _engine = new MiniAudioEngine(new[] { MiniAudioBackend.Wasapi, MiniAudioBackend.DirectSound, MiniAudioBackend.WinMm });
+            _engine = new MiniAudioEngine(new[] { backend });
             var format = new AudioFormat { SampleRate = VoiceFormat.Rate, Channels = 1, Format = SampleFormat.F32 };
             var config = new MiniAudioDeviceConfig { PeriodSizeInFrames = (uint)VoiceFormat.FrameSamples };
             _device = _engine.InitializeCaptureDevice(null, format, config);
             _frame = frame;
+            _at = 0;
             _device.OnAudioProcessed += OnAudio;
             _run = true;
             _device.Start();
             Log.Info("MPHVoice", $"microphone: {_device.Info?.Name ?? "default"}, {VoiceFormat.Rate} Hz mono ({_engine.ActiveBackend})");
-            Error = null;
+            error = null;
             return true;
         }
         catch (Exception ex)
         {
-            Error = "microphone: " + ex.Message;
+            error = ex.Message;
             Stop();
             return false;
         }

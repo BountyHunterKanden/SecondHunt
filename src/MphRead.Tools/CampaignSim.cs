@@ -444,6 +444,14 @@ namespace MphRead
                 host.Step(L2(true));
                 for (int i = 0; i < 10; i++) host.Step(L2(false));
                 Check($"tap again: zoom off ({p.EquipInfo.Zoomed})", !p.EquipInfo.Zoomed);
+                // (owner 2026-11-02) zoom on a button of its own: the Imperialist's ring opens on the press, a tap never zooms
+                opened = false;
+                bool sepOpen = pad.Hold(true, p, out bool sepZoom, tapZooms: false);
+                pad.Step(sepOpen, System.Numerics.Vector2.Zero, p);
+                pad.Hold(false, p, out bool sepTapZoom, tapZooms: false);
+                pad.Step(false, System.Numerics.Vector2.Zero, p);
+                Check($"separate zoom button: Imperialist ring opens on the press ({sepOpen}), no tap zoom ({sepZoom || sepTapZoom})",
+                    p.CurrentWeapon == BeamType.Imperialist && sepOpen && !sepZoom && !sepTapZoom);
                 for (int i = 0; i < 30; i++) host.Step(new CampaignInput { Buttons = CampaignButtons.WeaponMenu, WeaponWheel = CampaignHost.WheelDirection(1) });
                 for (int i = 0; i < 30; i++) host.Step(default);
                 opened = false;
@@ -490,7 +498,7 @@ namespace MphRead
                 Console.WriteLine($"    wrote {file}");
             }
             Shot("normal");
-            for (int i = 0; i < 40; i++) host.Step(new CampaignInput { Buttons = i < 2 ? CampaignButtons.ScanVisor : CampaignButtons.None });
+                for (int i = 0; i < 40; i++) host.Step(new CampaignInput { Buttons = i < 2 ? CampaignButtons.ScanVisor : CampaignButtons.None });
             Shot("scanvisor");
             // the weapon menu open, MphRead's corner arc and then the L2 weapon ring (PlayerWeaponRing.cs), Magmaul picked
             for (int i = 0; i < 40; i++) host.Step(new CampaignInput { Buttons = i < 2 ? CampaignButtons.ScanVisor : CampaignButtons.None });

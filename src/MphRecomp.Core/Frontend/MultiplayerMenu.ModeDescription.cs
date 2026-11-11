@@ -42,7 +42,7 @@ namespace MphRecomp.Frontend
             _modeDescriptions = Enumerable.Range(0, page.Items.Count)
                 .Where(i => page.Items[i].IsText && MathF.Abs(page.Items[i].X - DescX) < 1 && MathF.Abs(page.Items[i].Y - descY) < 1)
                 .ToArray();
-            if (_modeDescriptions.Length != Modes.Length)
+            if (_modeDescriptions.Length < Modes.Length) // (a bound file's has the mod modes' copy too, ModModes.cs)
             {
                 Log?.Invoke($"multiplayer: {_modeDescriptions.Length} mode descriptions moved (expected {Modes.Length})");
             }

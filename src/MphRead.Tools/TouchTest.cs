@@ -70,6 +70,17 @@ namespace MphRead
             record.AsSpan(MphRecomp.Multiplayer.Net.NetInput.Size, 4).CopyTo(old.AsSpan(11));
             var up = MphRecomp.Multiplayer.Net.NetInput.ReadRecord(MphRecomp.Multiplayer.Net.NetInput.UpgradeOldRecord(old));
             Check("old record: stylus up, the rest kept", !up.Touching && up.TouchDx == 0 && up.ViewTick == 1234 && up.AimEpoch == 3);
+            // the move stick's push (STICK CURVE) rides in the move byte's top nibble, beside the direction
+            var moved = new MphRecomp.Multiplayer.Net.NetInput { MoveX = 1, MoveY = -1, MovePush = 9, SelectWeapon = BeamType.None };
+            byte[] wire = new byte[MphRecomp.Multiplayer.Net.NetInput.Size];
+            moved.Write(wire);
+            var back = MphRecomp.Multiplayer.Net.NetInput.Read(wire);
+            Check("net input: move push round-trips with the direction", back.MovePush == 9 && back.MoveX == 1 && back.MoveY == -1);
+            // and the stick's own direction (360-degree steering) in the touch byte's top bits, beside the stylus
+            var steered = new MphRecomp.Multiplayer.Net.NetInput { MoveDir = 120, Touching = true, SelectWeapon = BeamType.None };
+            steered.Write(wire);
+            back = MphRecomp.Multiplayer.Net.NetInput.Read(wire);
+            Check("net input: move direction round-trips with the stylus", back.MoveDir == 120 && back.Touching);
         }
 
         private static void Check(string what, bool ok)

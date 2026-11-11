@@ -90,7 +90,7 @@ namespace MphRecomp.Frontend
             public int SfxValueString, MusicValueString;
             public int SfxPlay, SfxStop, MusicPlay, MusicStop;
             public int[] Mic = Array.Empty<int>();
-            public int QualityValueString;
+            public int QualityValueString, QualityHintString;
         }
 
         // null when this ROM's page 22 isn't the layout we know (the page then runs as plain data, as before)
@@ -169,8 +169,8 @@ namespace MphRecomp.Frontend
                 int labelString = strings.Add("quality");
                 it.QualityValueString = strings.Add("");
                 // 3 lines at the band's wrap (230; measured with -fecanvas FE_MEASURE)
-                int hintString = strings.Add("orig: the ds. orig+fix: no clicks or clipping. hq+fix: smoother. "
-                    + "hq+tone: hq + fixes + the ds's treble. changes live.");
+                // the hint for the picked quality only (owner 11-06: no all-options hints); RefreshTexts sets it
+                int hintString = it.QualityHintString = strings.Add("");
                 MenuItem hint = Item(it.Hint);
                 it.QualityHint = page.AddItem(i => RecompMenus.Clone(hint, i, 0, 0, stringId: hintString, init: MenuState.Hidden)).Index;
                 page.AddItem(i => RecompMenus.Clone(Item(micArrows), i, 0, 0, stretchX: grow));
@@ -284,6 +284,7 @@ namespace MphRecomp.Frontend
             menu.Strings.Fill(_it.SfxIndexString, (_sfxIndex + 1).ToString("000"));
             menu.Strings.Fill(_it.MusicIndexString, (_musicIndex + 1).ToString("00"));
             menu.Strings.Set(_it.QualityValueString, QualityLabel(_quality));
+            menu.Strings.Set(_it.QualityHintString, SettingHints.All["musicquality." + QualityLabel(_quality).ToLowerInvariant()]);
         }
 
         public static string QualityLabel(string music) => music switch

@@ -30,6 +30,8 @@ namespace MphRecomp.Import
     //   arenas     9  2026-10-17: Sidehopper Station's grates break the same way (a turret.json of no pieces: grate Fx + sound
     //                 only); the turret's animation events' real durations (ball glow on while raised + ballglowdown, muzzle 2,
     //                 smoke 10 frames)
+    //   arenas    10  2026-10-30: the grapple points (arena.json Grapples) and the grapple beam's Echoes effects + sounds
+    //                 (hd/grapple.json, hd/grapple_fx/; Sidehopper Station + Shooting Gallery read SamGunFx.pak)
     //   arenas    11  2026-10-31: ArenaNav jumps up overhanging ledges (TakeOff) + long pocket walks: Mining Plaza's upper floors
     //                 and east bridge in the bots' graph (141 -> 195 nodes), Spider Complex +94 walk links, rest unchanged
     //   arenas    12  2026-10-31: ArenaNav DoubleRise 3.9 -> 3.6 (double-jump ledge links a bot can't make dropped; a Noxus
@@ -45,7 +47,10 @@ namespace MphRecomp.Import
     //   arenas    18  2026-11-01: Mining Plaza's bot graph rides the shipped placement file's jump pads (and its spawns anchor it)
     //   arenas    19  2026-11-01: Mining Plaza's graph adds node data sets for octolith carriers, never routed over the placed jump pads
     //   arenas    20  2026-11-01: Mining Plaza's sand crates baked at 30 fps (was 12): smoother sway and flinch
-    //   arenas    21  2026-11-01: the sand crates' effects import (vector KEYF keys were unreadable, so the crate and pillar effects were left half written)
+    //   arenas    21  2026-11-06: spider ball tracks kept in the collision (CollisionFlags.SpiderTrack, Echoes bit 61:
+    //                 Sidehopper Station 14 faces, Spider Complex 638; docs/SPIDER_BALL.md)
+    //   arenas    22  2026-11-06: the spider ball's Echoes look (recipe "spiderFxPak": TestAnim.pak -> hd/spider_fx/, EchoesSpider.ImportFx)
+    //                 and Spider Complex's loop sound (its recipe now lists AudioGrp.pak)
     //   bodies     2  2026-10-19: the Scout Drone bodies' Prime deploy alert (fx/sfx_632.wav; MusyX Loop renders its four beeps)
     public static class ImporterVersions
     {
@@ -54,7 +59,7 @@ namespace MphRecomp.Import
             ["guns"] = 1,
             ["hd"] = 1,
             ["bodies"] = 2,
-            ["arenas"] = 21,
+            ["arenas"] = 22,
             ["music"] = 1,
         };
 

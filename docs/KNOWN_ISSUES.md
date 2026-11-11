@@ -30,8 +30,9 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 - A replay of an online match that ended early may not seek instantly.
 - The original's typed rules intro, with its sweeping camera, doesn't play at the start of a match yet.
 - Bots still get stuck for a moment on some _Echoes_ arenas.
-- The Trooper's wall cling doesn't hold on curved walls.
+- The Pirate Trooper's wall cling doesn't hold on curved walls.
 - The Pirate Blaster doesn't leave a mark on walls yet.
+- Trace has been seen invisible to other players in his alt form online (Stasis Bunker). It's being looked into.
 
 ## Controls
 
@@ -51,7 +52,6 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 
 These were reported and are being compared with the DS game.
 
-- Looping or odd sounds in Piston Cave (Alinos). Fixed in the next update.
 - Flickering lava texture in Processor Core
 - The Fault Line shock barrier is invisible and can be walked through
 - The Docking Bay floating platforms slide you backward
@@ -64,6 +64,10 @@ These were reported and are being compared with the DS game.
   charged shot should distort your visor
 
 ## Devices
+
+On Android, Play Protect may call the app harmful when you install it. Tap "More details", then "Install anyway".
+Google has been asked to review it.
+
 
 So far Second Hunt has mostly been tested on Snapdragon 8 Gen 2 hardware (AYN Odin 2 Portal, Galaxy S23) and one
 Windows PC. Reports from other phones, handhelds and PCs are very welcome.

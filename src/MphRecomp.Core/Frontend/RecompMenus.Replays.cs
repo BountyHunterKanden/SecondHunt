@@ -52,7 +52,9 @@ namespace MphRecomp.Frontend
 
         // the game's name keyboard for RENAME (MultiplayerMenu.EditText: start text, most letters, the page it comes back
         // to, done = the new text or null = cancelled); null = not yet
-        public Action<MenuEngine, string, int, int, Action<string?>>? EditText { get; set; }
+        public EditTextFn? EditText { get; set; }
+        // (prompt: the keyboard's two lines, "\n" between them; null = the ROM's "enter the new name you wish to use.")
+        public delegate void EditTextFn(MenuEngine menu, string start, int max, int returnPage, Action<string?> done, string? prompt = null);
         private const int TitleMax = 20;
 
         // our callbacks (RecompMenus takes every call >= 1000; ReplayCall answers these before its rows pages' dispatch)
@@ -82,6 +84,7 @@ namespace MphRecomp.Frontend
         // the details page
         private const float PicX = -42.9f, PicTop = -34.6f, PicW = 139.4f, PicH = 88.1f, PicFrame = 1.6f;
         private const float FactsX = 111.8f, FactsRight = 297.7f, FactsTop = -36.6f, FactsPitch = 12.5f;
+        private const float ModdedFactsPitch = 9.6f; private const int ModsTextMax = 30;
         private const float BigPillTop = -77, BigPillW = 113.1f, BigPillH = 22.6f;
         private const float ButtonTop = -108.1f, ButtonW = 58.6f, ButtonH = 13.3f, ButtonPitch = 61.6f;
         // EXPORT: a button's size beside PLAY, at the facts' right edge, level with the pill's middle
@@ -890,13 +893,24 @@ namespace MphRecomp.Frontend
             int tag = _dPlay;
             Picture(r, PicX, PicTop, PicW, PicH, PicFrame, tag);
             string when = r.Recorded is DateTime t ? t.ToString("MMM d HH:mm", CultureInfo.InvariantCulture).ToLowerInvariant() : "";
+            // a match played with gameplay mods (format 75) gets a fourth row naming them, the rows closer to fit above PLAY
+            IReadOnlyList<MphRecomp.Replay.ReplayMod> mods = (IReadOnlyList<MphRecomp.Replay.ReplayMod>?)r.Header?.Mods
+                ?? Array.Empty<MphRecomp.Replay.ReplayMod>();
+            float pitch = mods.Count > 0 ? ModdedFactsPitch : FactsPitch;
             Text("date", FactsX, FactsTop, 0, Pale, tag);
             Text(when, FactsRight, FactsTop, 1, White, tag);
-            Text("length", FactsX, FactsTop - FactsPitch, 0, Pale, tag);
-            Text(Length(r.Seconds) + (r.Complete ? "" : " (ended early)"), FactsRight, FactsTop - FactsPitch, 1, White, tag);
-            Text("result", FactsX, FactsTop - 2 * FactsPitch, 0, Pale, tag);
-            if (!r.PlaysHere) Text("can't play here", FactsRight, FactsTop - 2 * FactsPitch, 1, White, tag);
-            else if (r.LocalPlace is int) Result(r, FactsRight - ResultWidth(r) - 10.9f - 2.4f, FactsTop - 2 * FactsPitch + 1.6f, 10.9f, tag);
+            Text("length", FactsX, FactsTop - pitch, 0, Pale, tag);
+            Text(Length(r.Seconds) + (r.Complete ? "" : " (ended early)"), FactsRight, FactsTop - pitch, 1, White, tag);
+            Text("result", FactsX, FactsTop - 2 * pitch, 0, Pale, tag);
+            if (!r.PlaysHere) Text("can't play here", FactsRight, FactsTop - 2 * pitch, 1, White, tag);
+            else if (r.LocalPlace is int) Result(r, FactsRight - ResultWidth(r) - 10.9f - 2.4f, FactsTop - 2 * pitch + 1.6f, 10.9f, tag);
+            if (mods.Count > 0)
+            {
+                string names = string.Join(", ", mods.Select(m => m.Id)).ToLowerInvariant();
+                if (names.Length > ModsTextMax) names = names[..(ModsTextMax - 3)] + "...";
+                Text("mods", FactsX, FactsTop - 3 * pitch, 0, Pale, tag);
+                Text(names, FactsRight, FactsTop - 3 * pitch, 1, White, tag);
+            }
             Pill(FactsX, BigPillTop, BigPillW, BigPillH, r.PlaysHere, _dPlay, glows);
             Fill(ShareX0, ShareTop, ShareX0 + ButtonW, ShareTop - ButtonH, 0, 0, 0, 0.35f, _dShare);
             Box(ShareX0, ShareTop, ShareX0 + ButtonW, ShareTop - ButtonH, _dShare);

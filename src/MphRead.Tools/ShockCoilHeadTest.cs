@@ -185,6 +185,44 @@ namespace MphRead
                 }
             }
 
+            // a match client's instant hit feedback (PlayerHitClaims.HitClaimBeamHit -> NetPredictHit): a head-zone Shock Coil
+            // hit isn't a headshot the host flags, so no HEADSHOT! (owner 2026-10-31: the Fault Line matches showed it); a
+            // head hit of a beam with its own head damage (the Power Beam's) still says it
+            bool PredictedHead(float damage, float headDamage)
+            {
+                var beam = new BeamProjectileEntity(host.Scene) { Owner = shooter, Damage = damage, HeadshotDamage = headDamage };
+                var list = (System.Collections.IList)typeof(PlayerEntity).GetField("_netPredicted",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(me)!;
+                int mainBefore = PlayerEntity.MainPlayerIndex;
+                me.Health = 900;
+                list.Clear();
+                try
+                {
+                    PlayerEntity.MainPlayerIndex = 1;
+                    PlayerEntity.NetClient = true;
+                    PlayerEntity.HitClaimBeamHit(beam, me, me.Position, head: true, halfturret: false, damage: 10);
+                }
+                finally
+                {
+                    PlayerEntity.NetClient = false;
+                    PlayerEntity.MainPlayerIndex = mainBefore;
+                }
+                bool shown = list.Count > 0 && (bool)((System.Runtime.CompilerServices.ITuple)list[0]!)[2]!;
+                list.Clear();
+                return shown;
+            }
+            bool coilHead = PredictedHead(coil.UnchargedDamage, coil.HeadshotDamage);
+            bool powerHead = PredictedHead(8, 16);
+            Console.WriteLine($"client prediction, head zone: Shock Coil HEADSHOT! {coilHead}, a beam with its own head damage {powerHead}");
+            if (contHeads && coilHead)
+            {
+                Fail("a match client showed HEADSHOT! for a head-zone Shock Coil hit (the host never flags it)");
+            }
+            if (!powerHead)
+            {
+                Fail("a match client showed no HEADSHOT! for a real headshot");
+            }
+
             foreach (string e in errors)
             {
                 Console.WriteLine("  " + e);

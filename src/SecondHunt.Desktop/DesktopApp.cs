@@ -141,9 +141,43 @@ internal sealed class DesktopApp : IDisposable
 
     // ---- the loop ----
 
+    // stall finder: the loop's current step, and a watchdog thread that logs it when one frame takes over 2 s (a frozen,
+    // "not responding" window says in the log where it is stuck, even if it's closed before it comes back)
+    public static volatile string Step = "start";
+    static long _loopStamp = Stopwatch.GetTimestamp();
+
+    static void StartWatchdog()
+    {
+        var thread = new Thread(() =>
+        {
+            long stalled = 0;   // the frame start a stall was logged for
+            double next = 2, seen = 0;
+            while (true)
+            {
+                Thread.Sleep(500);
+                long stamp = Interlocked.Read(ref _loopStamp);
+                if (stalled != 0 && stamp != stalled)
+                {
+                    Log.Warn("MPHDesktop", $"main loop running again after about {seen:0.0} s");
+                    stalled = 0;
+                    next = 2;
+                }
+                seen = Stopwatch.GetElapsedTime(stamp).TotalSeconds;
+                if (seen >= next)
+                {
+                    Log.Warn("MPHDesktop", $"main loop stalled {seen:0.0} s in step '{Step}'");
+                    stalled = stamp;
+                    next *= 2;
+                }
+            }
+        }) { IsBackground = true, Name = "loop watchdog", Priority = ThreadPriority.BelowNormal };
+        thread.Start();
+    }
+
     public void Run()
     {
         NativeWindow w = _gl.Window;
+        StartWatchdog();
         if (_options.Background) _gl.ShowBehind();
         else
         {
@@ -154,11 +188,17 @@ internal sealed class DesktopApp : IDisposable
         while (!w.IsExiting)
         {
             CheckFrameRate();
+            Interlocked.Exchange(ref _loopStamp, Stopwatch.GetTimestamp());
+            Step = "limiter";
             if (_fpsLimit > 0) _limiter.Wait(_fpsLimit); // before the input, so a frame draws what was pressed just now
+            Step = "window events";
             w.NewInputFrame();
             NativeWindow.ProcessWindowEvents(false);
             if (w.IsExiting) break;
+            _gl.KeepResponsive();
+            Step = "input";
             _input.Poll();
+            Step = "deferred";
             while (_deferred.TryDequeue(out Action? action)) action();
             if (_stack.Count == 0)
             {
@@ -182,8 +222,11 @@ internal sealed class DesktopApp : IDisposable
                 _audioPausedForMinimize = false;
                 ResumeTopAudio();
             }
+            Step = "draw";
             DrawFrame();
+            Step = "swap";
             _gl.Swap();
+            Step = "after swap";
             // vsync asked for but the driver doesn't wait (forced off in its control panel): don't run the GPU flat out
             // (about 250 frames a second at most). A cap or UNLIMITED: no floor
             double ms = Stopwatch.GetElapsedTime(lastSwap).TotalMilliseconds;
@@ -508,6 +551,7 @@ internal sealed class DesktopApp : IDisposable
         OpenFrontend(FrontendSession.ReturnPage()); // the main menu, or the multiplayer lobby after a match
     }
 
+
     // ---- window ----
 
     public void ToggleFullscreen()
@@ -548,7 +592,8 @@ internal sealed class DesktopApp : IDisposable
 // --match Battle --arena "Combat Hall"), --shot <png> [--shot-frame <n>[,<n>...]] saves pictures of those frames,
 // --quit-after <n> closes after n frames, --rom <file> unpacks that ROM on a first launch without the picker,
 // --script "<frame>:<key>,<frame>:click@<x>;<y>" plays key presses and clicks (DesktopInput.SetScript). Runs with --shot,
-// --quit-after or --script open behind the other windows without taking focus or the mouse (--background 0: in front).
+// --quit-after or --script open behind the other windows without taking focus or the mouse and without sound
+// (--background 0 / --sound 1 to override, e.g. a PC host set up for the owner to play)
 internal sealed class AppOptions
 {
     public string? Data;
@@ -562,12 +607,13 @@ internal sealed class AppOptions
     public int? FpsCap; // --fpscap display|unlimited|N: the frame rate setting for this run (measurements)
     public int DrawRepeat = 1; // --drawrepeat N: each frame drawn N times (measurements)
     public bool Background;
+    public bool Sound = true; // --sound 0|1; a background test run is silent unless --sound 1 (owner 2026-11-06)
 
     public static AppOptions Parse(string[] args)
     {
         var o = new AppOptions();
         var launch = new Dictionary<string, string>();
-        bool? background = null;
+        bool? background = null, sound = null;
         for (int i = 0; i + 1 < args.Length; i += 2)
         {
             string key = args[i].TrimStart('-', '/'), value = args[i + 1];
@@ -581,13 +627,16 @@ internal sealed class AppOptions
             case "shot-frame": o.ShotFrames = value.Split(',').Select(v => int.TryParse(v, out int n) ? n : 0).ToList(); break;
             case "quit-after": int.TryParse(value, out o.QuitAfterFrames); break;
             case "background": background = value != "0"; break;
+            case "sound": sound = value != "0"; break;
             case "drawrepeat": int.TryParse(value, out o.DrawRepeat); break;
             case "fpscap": o.FpsCap = value switch { "display" => 0, "unlimited" => -1, _ => int.TryParse(value, out int f) ? f : null }; break;
             default: launch[key] = value; break;
             }
         }
         if (launch.Count > 0) o.Launch = launch;
-        o.Background = background ?? (o.ShotPath != null || o.QuitAfterFrames > 0 || o.Script != null);
+        bool session = false;
+        o.Background = background ?? (session || o.ShotPath != null || o.QuitAfterFrames > 0 || o.Script != null);
+        o.Sound = sound ?? !o.Background;
         return o;
     }
 }

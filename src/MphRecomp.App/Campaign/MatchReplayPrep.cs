@@ -27,6 +27,7 @@ public static class ReplayPrepHost
             Paths.ChooseMphPath();
             MphRecomp.Arenas.EchoesArena.ImportRoot = dataDir;
             MphRecomp.Replay.ReplayData.ReplaysRoot = dataDir; // (kept arena files: ReplayData.Use)
+            MphRecomp.Anim.DeathCollapse.SetFrom(dataDir); // (the viewer's DEATH look, or its walk differs)
             ReplayFile file = ReplayFile.Load(replayPath);
             ReplayFeed.Follower? feed = ReplayFeed.IsLive(replayPath) ? ReplayFeed.Follow(file, replayPath, cancel) : null; // (a match still being played)
             string? why = ReplayPrep.Run(file, sidecar, cancel, feed == null ? null : feed.More, log: l => Log.Info("MPHReplayPrep", l));
@@ -44,7 +45,7 @@ public static class ReplayPrepHost
         }
         catch (Exception ex)
         {
-            Log.Warn("MPHReplayPrep", $"failed: {ex.GetType().Name}: {ex.Message}");
+            Log.Warn("MPHReplayPrep", $"failed: {ex}"); // (the stack: a bare message hid vc 521's throw site, 11-05)
             return ex.Message;
         }
     }

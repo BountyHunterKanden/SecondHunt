@@ -3,19 +3,11 @@ using MphRead;
 using MphRead.Entities;
 using MphRead.Formats;
 using MphRecomp.Arenas;
+using MphRecomp.Arenas.Editor;
 using OpenTK.Mathematics;
 
 namespace MphRecomp.App;
 
-// Dev launcher "Solo arena" + "Place pickups" (owner 2026-10-10): place pickups where you want them while you play the
-// arena alone; in an Echoes arena also the affinity weapon's crates. The arena's own pickups and crates (and the
-// affinity crates the owner picked on the map pictures, docs/PICKUPS.md) are there to keep or delete. The logic and the
-// saved file are PickupPlacement's (Core); here the controls and the status line. While placing, the D-pad is the
-// editor's (the L2 weapon ring still picks weapons):
-//   D-pad left / right  what to place      D-pad up  place it at your feet     Select  place it where you aim
-//   D-pad down          delete the pickup or crate nearest you (the status line names it)
-// Every change is saved at once to <data>/placements/<room>.json.
-//   --es place 1  (with --es solo 1)
 internal sealed partial class CampaignRenderer
 {
     // <data>/placements (CampaignLaunch.Create)
@@ -25,6 +17,7 @@ internal sealed partial class CampaignRenderer
     PickupPlacement? _placer;
     int _placerRoom = -1, _placeIndex;
     string _placeNote = "";
+    Vector3? _padStart; // a jump pad waiting for its landing spot
 
     // ConfigureSolo: a solo run with the editor on
     void ConfigurePlacer(LaunchArgs args)
@@ -32,12 +25,33 @@ internal sealed partial class CampaignRenderer
         _placing = args.Get("place") == "1";
     }
 
-    // the choices: every placeable pickup, then (Echoes arenas) the affinity crate
-    int PlaceChoices => PickupPlacement.Placeable.Length + (_placer?.CanPlaceCrate == true ? 1 : 0);
+    // the choices: every placeable pickup, then (Echoes arenas) the affinity crate, then a jump pad, then a player spawn
+    int PlaceChoices => ModeStart + Modes.Length + 2;
+    int ModeStart => PickupPlacement.Placeable.Length + (_placer?.CanPlaceCrate == true ? 1 : 0);
+    static readonly (string Kind, int Team)[] Modes =
+    {
+        (ModeKinds.Capture, 0), (ModeKinds.Capture, 1), (ModeKinds.Octolith, 0), (ModeKinds.Drop, 0),
+        (ModeKinds.Node, 0), (ModeKinds.Defend, 0),
+    };
+    (string Kind, int Team)? PlacingMode => _placeIndex >= ModeStart && _placeIndex < ModeStart + Modes.Length
+        ? Modes[_placeIndex - ModeStart] : null;
     bool PlacingCrate => _placer?.CanPlaceCrate == true && _placeIndex == PickupPlacement.Placeable.Length;
+    bool PlacingPad => _placeIndex == PlaceChoices - 2;
+    bool PlacingSpawn => _placeIndex == PlaceChoices - 1;
 
     string PlaceChoiceLabel()
     {
+        if (PlacingPad) return _padStart is Vector3 ps
+            ? $"Jump pad: now mark WHERE IT LANDS (pad at {ps.X:0.0}, {ps.Y:0.0}, {ps.Z:0.0})"
+            : $"Jump pad ({_placer?.PadCount ?? 0} placed): mark the pad first";
+        if (PlacingSpawn) return $"Player spawn ({_placer?.SpawnCount ?? 0}/{PickupPlacement.SpawnsWanted} placed)";
+        if (PlacingMode is var (kind, team))
+        {
+            int count = _placer?.ModeCount(kind, team) ?? 0;
+            return ModeKinds.Single(kind)
+                ? $"{ModeKinds.Label(kind, team)} ({(count > 0 ? "placed: places again = move" : "not placed")})"
+                : $"{ModeKinds.Label(kind, team)} ({count} placed)";
+        }
         if (PlacingCrate) return "Affinity crate";
         ItemType t = PickupPlacement.Placeable[_placeIndex % PickupPlacement.Placeable.Length];
         return $"{PickupPlacement.Label(t)} (respawn {PickupPlacement.RespawnSeconds(t)} s)";
@@ -66,6 +80,9 @@ internal sealed partial class CampaignRenderer
         bool changed = false;
         if (pressLeft) _placeIndex = (_placeIndex + n - 1) % n;
         if (pressRight) _placeIndex = (_placeIndex + 1) % n;
+        if (!PlacingPad) _padStart = null;
+        // placing one mode's elements hides the other modes' (owner 2026-11-01); any other choice shows them all
+        placer.ShowMode(PlacingMode is var (shown, _) ? ModeKinds.Mode(shown) : null);
         if (pressUp || pressSelect)
         {
             Vector3? at = pressUp ? placer.SpotAtFeet(p) : placer.SpotAtAim(p.CameraInfo.Position, p.NetAimVector, out _);
@@ -73,18 +90,46 @@ internal sealed partial class CampaignRenderer
             {
                 _placeNote = "your aim reaches no floor: nothing placed";
             }
+            else if (PlacingPad && _padStart is not Vector3)
+            {
+                _padStart = spot;
+                _placeNote = $"pad marked at ({spot.X:0.0}, {spot.Y:0.0}, {spot.Z:0.0}): now mark where it lands";
+            }
+            else if (PlacingPad && _padStart is Vector3 start)
+            {
+                if (placer.AddJumpPad(start, spot, out MapPads.Launch launch) != null)
+                {
+                    _padStart = null;
+                    changed = true;
+                    _placeNote = $"placed jump pad {placer.PadCount}: ({start.X:0.0}, {start.Y:0.0}, {start.Z:0.0}) -> "
+                        + $"({spot.X:0.0}, {spot.Y:0.0}, {spot.Z:0.0}), speed {launch.Vector.Length:0.00}"
+                        + (launch.Blocked ? " (something overhead blocks every arc)" : "");
+                }
+                else
+                {
+                    _placeNote = $"too far for a pad (needs speed {launch.Vector.Length:0.00}, max {MapPads.MaxSpeed:0.0}): "
+                        + "mark a nearer landing, or D-DOWN to drop the pad";
+                }
+            }
             else
             {
-                string what = PlaceChoiceLabel();
-                if (PlacingCrate) placer.AddAffinityCrate(spot);
+                string what = PlacingSpawn ? $"spawn {placer.SpawnCount + 1}" : PlaceChoiceLabel();
+                if (PlacingMode is var (kind, team)) placer.AddMode(kind, team, spot);
+                else if (PlacingSpawn) placer.AddSpawn(spot, p.NetAimVector);
+                else if (PlacingCrate) placer.AddAffinityCrate(spot);
                 else placer.AddItem(PickupPlacement.Placeable[_placeIndex], spot);
                 changed = true;
                 _placeNote = $"placed {what} at ({spot.X:0.0}, {spot.Y:0.0}, {spot.Z:0.0})";
             }
         }
-        if (pressDown)
+        if (pressDown && PlacingPad && _padStart != null)
         {
-            if (placer.Nearest(p.Position) is PickupPlacement.Target t)
+            _padStart = null;
+            _placeNote = "pad mark dropped";
+        }
+        else if (pressDown)
+        {
+            if (NearestFor(placer, p.Position) is PickupPlacement.Target t)
             {
                 placer.Delete(t.Entity);
                 changed = true;
@@ -104,14 +149,22 @@ internal sealed partial class CampaignRenderer
         return dpadHeld;
     }
 
+    PickupPlacement.Target? NearestFor(PickupPlacement placer, Vector3 at) =>
+        PlacingMode is var (kind, team) ? placer.NearestMode(at, kind, team)
+        : PlacingSpawn ? placer.NearestSpawn(at) : PlacingPad ? placer.NearestPad(at) : placer.Nearest(at);
+
     // SoloStatusLine: what's picked, the controls, what D-pad down would delete, and the last change
     string PlacerStatusLine()
     {
         if (!_placing) return "";
         if (_placer == null || _host == null) return "\nPLACE PICKUPS: loading...";
-        string near = _placer.Nearest(_host.Player.Position) is PickupPlacement.Target t ? $"{t.Label} {t.Distance:0.0}" : "nothing near";
+        Vector3 at = _host.Player.Position;
+        string near = NearestFor(_placer, at) is PickupPlacement.Target t ? $"{t.Label} {t.Distance:0.0}" : "nothing near";
+        string facing = PlacingSpawn ? " (facing where you look)" : "";
         return $"\nPLACE: {PlaceChoiceLabel()}   D-pad L/R: change"
-            + $"\nD-UP: at your feet   SELECT: where you aim   D-DOWN: delete nearest ({near})"
-            + $"\n{_placer.PlacedCount} placed, {_placer.DeletedCount} deleted   last: {_placeNote}";
+            + $"\nD-UP: at your feet{facing}   SELECT: where you aim   D-DOWN: delete nearest ({near})"
+            + $"\n{_placer.PlacedCount} placed, {_placer.DeletedCount} deleted, {_placer.SpawnCount} spawns, {_placer.PadCount} pads   modes: "
+            + $"CTF {_placer.ModeCount(ModeKinds.Capture)}/2, bounty {_placer.ModeCount(ModeKinds.Octolith) + _placer.ModeCount(ModeKinds.Drop)}/2, "
+            + $"nodes {_placer.ModeCount(ModeKinds.Node)}, defender {_placer.ModeCount(ModeKinds.Defend)}/1   last: {_placeNote}";
     }
 }

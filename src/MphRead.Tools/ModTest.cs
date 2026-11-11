@@ -28,6 +28,60 @@ mod.on('damage', function(amount) mod.save('total', mod.load('total', 0) + amoun
 mod.on('tick', function(dt) mod.save('lastDt', dt) end)
 ";
 
+        const string LiveMod = @"
+mod.on('damage', function(target, attacker, amount, beam, fatal)
+  mod.save('dmg', mod.load('dmg', 0) + amount) mod.save('beam', beam) mod.save('fatal', fatal) end)
+mod.on('tick', function(dt, frame) mod.save('dt', dt) mod.save('frame', frame) end)
+mod.on('start', function() mod.save('started', mod.load('started', 0) + 1) end)
+mod.log('mode ' .. mod.setting('mode'))
+";
+
+        static void LiveTest()
+        {
+            string data = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "mphmodlive_" + Guid.NewGuid().ToString("N"));
+            string dir = System.IO.Path.Combine(data, "mods", "live");
+            System.IO.Directory.CreateDirectory(dir);
+            try
+            {
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "mod.json"),
+                    "{\"Id\":\"live\",\"Name\":\"Live\",\"Settings\":[{\"Id\":\"mode\",\"Values\":[\"a\",\"b\"]}]}");
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "main.lua"), LiveMod);
+                string settingsPath = System.IO.Path.Combine(data, "recomp_settings.json");
+                var settings = new MphRecomp.Config.RecompSettings();
+                settings.SetModSetting("live", "mode", "b");
+                settings.Save(settingsPath);
+
+                Check("live: skipped for a replay / network game", LiveMods.Attach(data, "replay") == 0 && !GameEvents.Any);
+                Check("live: folder mod attached", LiveMods.Attach(data, null) == 1 && GameEvents.Any && GameEvents.Tick);
+                string log; // (open the way a player's file viewer would, while the game still writes it)
+                using (var r = new System.IO.StreamReader(new System.IO.FileStream(System.IO.Path.Combine(data, "mods", LiveMods.LogFileName),
+                    System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite))) log = r.ReadToEnd();
+                Check("live: mod.setting reads the player's pick + log file", log.Contains("[live] mode b"));
+                if (GameEvents.Any) GameEvents.Raise("damage", 0, 1, 30, "PowerBeam", false);
+                if (GameEvents.Any) GameEvents.Raise("damage", 0, 1, 12, "Missile", true);
+                if (GameEvents.Tick) GameEvents.Raise("tick", 1 / 60.0, 600);
+                ModInstance? live = LiveMods.Host?.Get("live");
+                Check("live: engine event args reach Lua", live != null && live.Data["dmg"].GetDouble() == 42
+                    && live.Data["beam"].GetString() == "Missile" && live.Data["fatal"].GetBoolean()
+                    && live.Data["frame"].GetDouble() == 600 && Math.Abs(live.Data["dt"].GetDouble() - 1 / 60.0) < 1e-6);
+                LiveMods.Detach();
+                Check("live: detach clears the bus", !GameEvents.Any && !GameEvents.Tick && GameEvents.Listener == null);
+                LiveMods.Attach(data, null);
+                if (GameEvents.Any) GameEvents.Raise("damage", 0, -1, 8, "", false);
+                Check("live: start fires once per game", LiveMods.Host?.Get("live")?.Data["started"].GetDouble() == 2);
+                Check("live: mod.save kept across games (42 + 8)", LiveMods.Host?.Get("live")?.Data["dmg"].GetDouble() == 50);
+                LiveMods.Detach();
+                settings.DisabledMods.Add("live");
+                settings.Save(settingsPath);
+                Check("live: a mod turned off in MODS doesn't run", LiveMods.Attach(data, null) == 0 && !GameEvents.Any);
+            }
+            finally
+            {
+                LiveMods.Detach();
+                try { System.IO.Directory.Delete(data, recursive: true); } catch (Exception) { }
+            }
+        }
+
         public static void Run(string[] args)
         {
             var logs = new List<string>();
@@ -75,6 +129,17 @@ mod.on('tick', function(dt) mod.save('lastDt', dt) end)
             host.Fire("boom");
             Check("hook runtime error isolated + logged", logs.Any(l => l.Contains("kaboom")));
 
+            // 6b) runaway guard: an endless loop at load or in a hook turns that mod off instead of hanging the game
+            var spinLoad = host.LoadFromSource(new ModManifest { Id = "spinload" }, "while true do end");
+            Check("endless loop while loading -> mod off", !spinLoad.Enabled && spinLoad.Error != null && spinLoad.Error.Contains("too long"));
+            var spinHook = host.LoadFromSource(new ModManifest { Id = "spinhook" },
+                "mod.on('damage', function() while true do end end)");
+            Check("spinning mod loads fine", spinHook.Enabled && host.Wants("damage"));
+            host.Fire("damage", 1.0);
+            Check("endless loop in a hook -> mod off", !spinHook.Enabled && spinHook.Error != null);
+            Check("other mods still got the event", a.Data["total"].GetDouble() == 24);
+            Check("Wants: false for an event nobody hooks", !host.Wants("nobody_listens"));
+
             // 7) persistence round-trips through the save system across a fresh host/session
             var save = new SaveData();
             host.SaveDataTo(save);
@@ -83,7 +148,10 @@ mod.on('tick', function(dt) mod.save('lastDt', dt) end)
             var a2 = host2.LoadFromSource(new ModManifest { Id = "modA", Version = "1.2.0" }, ModA, save);
             // hydrated counter was 1 from session 1; init's mod.load('counter',0)+1 makes it 2
             Check("persisted counter carried into new session (1 -> 2)", a2.Data["counter"].GetDouble() == 2);
-            Check("persisted total survived", a2.Data["total"].GetDouble() == 23);
+            Check("persisted total survived", a2.Data["total"].GetDouble() == 24);
+
+            // 8) the live game path: engine events (MphRead GameEvents) -> LiveMods -> a folder mod's Lua, saved on detach
+            LiveTest();
 
             Console.WriteLine($"\nMOD TESTS: {_pass} passed, {_fail} failed  =>  {(_fail == 0 ? "ALL GREEN" : "FAILURES")}");
             Environment.ExitCode = _fail == 0 ? 0 : 1;

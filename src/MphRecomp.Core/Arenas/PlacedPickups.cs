@@ -122,6 +122,7 @@ namespace MphRecomp.Arenas
         public static IReadOnlyList<EntityBase> Extra(Scene scene, int roomId, IReadOnlyList<EntityBase> entities)
         {
             _placed.Clear();
+            PlayerEntity.HostOctolithSpawnClear = 0;
             if (!GameState.Multiplayer || !Files.TryGetValue(roomId, out PickupPlacement.FileData? file)) return entities;
             bool spawns = SpawnsEnabled && file.Spawns.Count > 0;
             bool pads = SpawnsEnabled && file.JumpPads.Count > 0;
@@ -135,9 +136,14 @@ namespace MphRecomp.Arenas
             if (spawns)
             {
                 list.RemoveAll(e => e is PlayerSpawnEntity);
+                PlayerEntity.HostOctolithSpawnClear = file.OctolithSpawnClear;
+                // each mode's own set (the file's tags; untagged: all of them, every mode)
+                bool teamSpawns = file.Spawns.Any(sp => sp.Team != null);
                 foreach (PickupPlacement.SpawnSpotData sp in file.Spawns)
                 {
-                    PlayerSpawnEntityData data = PickupPlacement.SpawnData(id++, V(sp.Pos), PickupPlacement.Level(V(sp.Facing)));
+                    if (!sp.In(GameState.Mode, teamSpawns)) continue;
+                    int team = GameState.Mode == GameMode.Capture ? sp.Team ?? -1 : -1;
+                    PlayerSpawnEntityData data = PickupPlacement.SpawnData(id++, V(sp.Pos), PickupPlacement.Level(V(sp.Facing)), team);
                     list.Add(new PlayerSpawnEntity(data, echoes ? ArenaModelWriter.RoomNode : "", scene));
                 }
             }

@@ -17,6 +17,10 @@ using MphRecomp.Config;
 // MUTE is this device's (PlayerMutes: chat and voice together, by friend code; the license's MUTE switches it back). REPORT
 // asks, then sends a "chat" report: the server attaches what they typed (it keeps typed chat nowhere else). REPORT A HUNTER
 // (from the license) picks what to report: their name, what they typed, their voice, cheating.
+// The CHAT page's log scrolls back through the whole game's chat (owner 2026-10-31: "so chat isnt lost in a lobby session";
+// ChatLog keeps its last Keep lines): the arrows right of the rows, L / R, the mouse wheel, the right stick, a finger drag on
+// the rows (FrontendSession's section-page drag, RecompMenus.SectionScroll.cs). Scrolled back, the view stays on its lines as
+// new ones come in ("N newer lines below"); opening the page or sending a line goes back to the newest.
 namespace MphRecomp.Frontend
 {
     public sealed partial class RecompMenus
@@ -26,6 +30,7 @@ namespace MphRecomp.Frontend
         // our callbacks (2740-2799)
         private const int ChOpenCall = 2740, ChTypeCall = 2741, LicMuteCall = 2742;
         private const int ChStartCall = 2743; // Start on CHAT / REPORT: in a match's pause, resume (as the pause page does)
+        private const int ChOlderCall = 2744, ChNewerCall = 2745; // the log's arrows, L / R: a page of lines back / on
         private const int ChPresetCall = 2750; // + the quick message (18 of them, to 2767)
         private const int ChMuteCall = 2770, ChReportCall = 2776; // + the log row
         private const int RpReasonCall = 2785; // + the reason
@@ -43,7 +48,7 @@ namespace MphRecomp.Frontend
         };
 
         // items (-1 = none)
-        private int _chPanel = -1, _chSide = -1, _chTitle = -1, _chType = -1, _lbChat = -1, _liMute = -1;
+        private int _chPanel = -1, _chSide = -1, _chTitle = -1, _chType = -1, _lbChat = -1, _liMute = -1, _chOlder = -1, _chNewer = -1;
         private readonly int[] _chPreset = Unset(ChatPresets.All.Length), _chMute = Unset(ChatRows), _chReport = Unset(ChatRows);
         private int _rpPanel = -1, _rpTitle = -1;
         private readonly int[] _rpRow = Unset(ReportReasons.Length);
@@ -54,6 +59,8 @@ namespace MphRecomp.Frontend
         private string? _chatNote; // a short word under TYPE A MESSAGE (too fast, not sent), until _chatNoteUntil
         private long _chatNoteUntil;
         private List<ChatLog.Line> _chatShown = new(); // the CHAT page's rows as drawn (MUTE / REPORT act on these)
+        private long _chatAnchor; // scrolled back: the Seq of the view's newest line (0 = the newest, following new lines)
+        private int _chatOlder, _chatNewer; // the game's lines above / below the view
         private PlayerCard? _reportCard; // REPORT A HUNTER's player
         private int _reportReturn = -1;
 
@@ -79,7 +86,7 @@ namespace MphRecomp.Frontend
             MenuItem Px(MenuPage page, float x, float y, float w, float h, int call) => page.AddItem(i => input(i, Mx(x), My(y), Mx(x + w), My(y + h), call));
 
             // ---- CHAT: back to the lobby ----
-            MenuPage chat = addFramePage(s_onLobby, new[] { Call(MenuKeys.Start, ChStartCall) });
+            MenuPage chat = addFramePage(s_onLobby, new[] { Call(MenuKeys.Start, ChStartCall), Call(MenuKeys.L, ChOlderCall), Call(MenuKeys.R, ChNewerCall) });
             s_onChat = chat.Index;
             _chPanel = chat.AddItem(i => panelAt(i, Mx(70), Mx(1150))).Index;
             _chSide = chat.AddItem(i => panelAt(i, Mx(1190), Mx(1850))).Index;
@@ -88,9 +95,11 @@ namespace MphRecomp.Frontend
             for (int r = 0; r < ChatRows; r++)
             {
                 float y = ChatRowY(r);
-                _chMute[r] = Px(chat, 850, y + 18, 126, 60, ChMuteCall + r).Index;
-                _chReport[r] = Px(chat, 986, y + 18, 136, 60, ChReportCall + r).Index;
+                _chMute[r] = Px(chat, ChMuteX, y + 18, 126, 60, ChMuteCall + r).Index;
+                _chReport[r] = Px(chat, ChMuteX + 136, y + 18, 126, 60, ChReportCall + r).Index;
             }
+            _chOlder = Px(chat, ChScrollX0, ChatRowY(0), ChScrollX1 - ChScrollX0, ChArrowH, ChOlderCall).Index;
+            _chNewer = Px(chat, ChScrollX0, ChatLogBottom - ChArrowH, ChScrollX1 - ChScrollX0, ChArrowH, ChNewerCall).Index;
             _chType = Px(chat, 100, 764, 1020, 76, ChTypeCall).Index; // (its centre above y 815: below, the layout's back corner takes it)
             for (int k = 0; k < ChatPresets.All.Length; k++)
             {
@@ -118,13 +127,19 @@ namespace MphRecomp.Frontend
         }
 
         // the CHAT page's log rows (tops, mockup px), its quick messages (two columns)
-        private static float ChatRowY(int row) => 228 + 106 * row;
+        private static float ChatRowY(int row) => 228 + ChRowPitch * row;
+
+        // the log's rows end left of its scroll column (arrows at the ends, the bar between); MUTE / REPORT at the rows' right
+        private const float ChRowX1 = 1060, ChMuteX = 790, ChScrollX0 = 1072, ChScrollX1 = 1120, ChArrowH = 72, ChRowPitch = 106;
+        private static float ChatLogBottom => ChatRowY(ChatRows - 1) + 96;
 
         private static (float X, float Y) PresetAt(int k) => (1215 + k / PresetRows * 315, 262 + k % PresetRows * 70);
 
         private void ApplyChatSounds(Action<int, int, int, int> like)
         {
             like(s_onLobby, _lbChat, MultiplayerMenu.CreateJoinPage, _soundListRow);
+            like(s_onChat, _chOlder, OptionBoxPage, _soundToggle);
+            like(s_onChat, _chNewer, OptionBoxPage, _soundToggle);
             like(s_onLicense, _liMute, OptionBoxPage, _soundToggle);
             like(s_onChat, _chType, MultiplayerMenu.CreateJoinPage, _soundListRow);
             foreach (int p in _chPreset) like(s_onChat, p, MultiplayerMenu.CreateJoinPage, _soundListRow);
@@ -148,6 +163,7 @@ namespace MphRecomp.Frontend
                     menu.GoTo(s_onHub); // (the game is gone)
                     return;
                 }
+                if (!typed) _chatAnchor = 0; // (opened: the newest lines; back from typing: where it was)
                 ShowChat(menu, focus: !typed);
                 if (typed) menu.SetState(_chType, MenuState.Focused);
             }
@@ -163,11 +179,31 @@ namespace MphRecomp.Frontend
             return m.Client.Chat.Recent(ChatLog.Keep, PlayerMutes.Current, m.Client.Me?.Code, others: VoiceSettings.Current.Chat).Where(l => l.GameId == game).TakeLast(max).ToList();
         }
 
+        // the view's end in the game's lines (the newest when following, else up to the anchor; never fewer than a page)
+        private int ChatEnd(List<ChatLog.Line> all)
+        {
+            if (_chatAnchor == 0) return all.Count;
+            int end = Math.Max(all.FindLastIndex(l => l.Seq <= _chatAnchor) + 1, Math.Min(ChatRows, all.Count));
+            if (end < all.Count) return end;
+            _chatAnchor = 0; // (back at the newest: follow again)
+            return all.Count;
+        }
+
         private void ShowChat(MenuEngine menu, bool focus)
         {
-            _chatShown = ChatLines(ChatRows);
+            List<ChatLog.Line> all = ChatLines(ChatLog.Keep);
+            int end = ChatEnd(all);
+            int start = Math.Max(0, end - ChatRows);
+            _chatShown = all.GetRange(start, end - start);
+            (_chatOlder, _chatNewer) = (start, all.Count - end);
             string? me = ChatMatch?.Client.Me?.Code;
             bool lost = false;
+            bool scrolls = all.Count > ChatRows;
+            foreach (int item in new[] { _chOlder, _chNewer })
+            {
+                if (!scrolls && menu.ItemState(item) == MenuState.Focused) lost = true;
+                Show(menu, item, scrolls);
+            }
             for (int r = 0; r < ChatRows; r++)
             {
                 bool other = r < _chatShown.Count && _chatShown[r].Code != me;
@@ -185,6 +221,43 @@ namespace MphRecomp.Frontend
         {
             if (focus) menu.SetState(_rpRow[0], MenuState.Focused);
         }
+
+        // the CHAT page on screen (the wheel, the right stick and a drag scroll its log: FrontendSession, SectionScroll.cs)
+        public bool ChatScrolls(MenuEngine menu) => s_onChat >= 0 && menu.Page?.Index == s_onChat && ChatMatch != null;
+
+        // `rows` lines on (+, newer) or back (-); false = not the CHAT page
+        public bool ChatScrollBy(MenuEngine menu, int rows)
+        {
+            if (!ChatScrolls(menu)) return false;
+            if (rows != 0) ChatScrollTo(menu, _chatNewer - rows);
+            return true;
+        }
+
+        // the view `back` lines above the newest (kept on its lines by the anchor as new ones come in)
+        private void ChatScrollTo(MenuEngine menu, int back)
+        {
+            List<ChatLog.Line> all = ChatLines(ChatLog.Keep);
+            int end = Math.Clamp(all.Count - back, Math.Min(ChatRows, all.Count), all.Count);
+            long anchor = end >= all.Count ? 0 : all[end - 1].Seq;
+            if (anchor == _chatAnchor) return;
+            _chatAnchor = anchor;
+            ShowChat(menu, focus: false);
+            Redraw();
+        }
+
+        // SectionGrab on the CHAT page: a touch on the log's rows (when it scrolls) is held for a drag (1), else 0
+        private int ChatGrab(float x, float y)
+        {
+            if (_chatOlder + _chatNewer == 0 || x < Mx(100) || x > Mx(ChRowX1) || y > My(ChatRowY(0)) || y < My(ChatLogBottom)) return 0;
+            _dragKind = 3;
+            _dragY0 = y;
+            _dragScroll0 = _chatNewer;
+            return 1;
+        }
+
+        // the held touch now at y (menu units, y up): the rows follow it a line per row's pitch (up: newer lines come in)
+        private void ChatDrag(MenuEngine menu, float y)
+            => ChatScrollTo(menu, _dragScroll0 - (int)MathF.Round((y - _dragY0) / Mw(ChRowPitch)));
 
         // TickOnline: new chat lines redraw the lobby / CHAT (the license's MUTE too)
         private long _chatSeen;
@@ -209,6 +282,10 @@ namespace MphRecomp.Frontend
                 break;
             case ChTypeCall:
                 TypeChat(menu);
+                break;
+            case ChOlderCall:
+            case ChNewerCall:
+                ChatScrollBy(menu, (call == ChNewerCall ? 1 : -1) * (ChatRows - 1));
                 break;
             case ChStartCall:
                 if (PauseChat != null) Requested?.Invoke(FrontendRequestKind.Resume); // (the lobby: Start does nothing here)
@@ -274,7 +351,7 @@ namespace MphRecomp.Frontend
             EditText(menu, "", ChatTypeMax, s_onChat, text =>
             {
                 if (!string.IsNullOrWhiteSpace(text)) SendChat(-1, text);
-            });
+            }, prompt: "enter the message\nyou wish to send."); // (not the nickname's "new name" prompt, owner 2026-11-09)
         }
 
         // the server muted this player's typed chat (an owner's mute): what to say, or null
@@ -308,6 +385,7 @@ namespace MphRecomp.Frontend
                 return;
             }
             _chatSending = true;
+            _chatAnchor = 0; // (the line goes in at the bottom: show it)
             Task.Run(async () =>
             {
                 try
@@ -409,7 +487,8 @@ namespace MphRecomp.Frontend
             if (_lbChat < 0) return;
             int tag = _lbChat; // (one item from the lines to the bar: its centre is right of the layout's back corner)
             List<ChatLog.Line> lines = ChatLines(LobbyChatLines);
-            if (lines.Count == 0) TextS("say hello: quick messages are in chat.", Mx(420), My(942), 0, OnGrey, tag, SizeX);
+            // (right-aligned to end short of the CHAT bar: from x 420 it ran into it, Discord 10-31 "align it to the right")
+            if (lines.Count == 0) TextS("say hello: quick messages are in chat.", Mx(1030), My(942), 1, OnGrey, tag, SizeX);
             for (int i = 0; i < lines.Count; i++)
             {
                 ChatLine(lines[i], Mx(420), My(922 + 38 * i + (lines.Count == 1 ? 20 : 0)), Mw(600), tag);
@@ -475,23 +554,25 @@ namespace MphRecomp.Frontend
             {
                 ChatLog.Line l = _chatShown[r];
                 float y = ChatRowY(r);
-                Fill(Mx(100), My(y), Mx(1120), My(y + 96), 0, 0, 0, 0.35f, tag);
-                Box(Mx(100), My(y), Mx(1120), My(y + 96), tag);
+                Fill(Mx(100), My(y), Mx(ChRowX1), My(y + 96), 0, 0, 0, 0.35f, tag);
+                Box(Mx(100), My(y), Mx(ChRowX1), My(y + 96), tag);
                 bool mine = l.Code == me;
                 TextS(StreamerPrivacy.Name(l.Name, mine).ToLowerInvariant() + (mine ? "  (you)" : ""), Mx(124), My(y + 10), 0, mine ? Cyan : Orange, tag, SizeX);
-                List<string> words = Wrap(l.Shown, Mw(mine ? 970 : 700), SizeX, 2);
+                List<string> words = Wrap(l.Shown, Mw(mine ? ChRowX1 - 150 : ChMuteX - 150), SizeX, 2);
                 for (int i = 0; i < words.Count; i++) TextS(words[i], Mx(124), My(y + 42 + 28 * i), 0, l.IsPreset ? Pale : White, tag, SizeX);
                 if (mine) continue;
-                Bar(Mx(850), My(y + 18), Mx(976), My(y + 78), _chMute[r], glows);
-                TextS("mute", Mx(913), My(y + 36), 2, Orange, _chMute[r], SizeX);
-                Bar(Mx(986), My(y + 18), Mx(1112), My(y + 78), _chReport[r], glows);
-                TextS("report", Mx(1049), My(y + 36), 2, Red, _chReport[r], SizeX);
+                Bar(Mx(ChMuteX), My(y + 18), Mx(ChMuteX + 126), My(y + 78), _chMute[r], glows);
+                TextS("mute", Mx(ChMuteX + 63), My(y + 36), 2, Orange, _chMute[r], SizeX);
+                Bar(Mx(ChMuteX + 136), My(y + 18), Mx(ChMuteX + 262), My(y + 78), _chReport[r], glows);
+                TextS("report", Mx(ChMuteX + 199), My(y + 36), 2, Red, _chReport[r], SizeX);
             }
+            DrawChatScroll(glows, tag);
             // TYPE A MESSAGE, and what holds typed chat back
             Bar(Mx(100), My(764), Mx(1120), My(840), _chType, glows);
             TextS("type a message", Mx(610), My(782), 2, Orange, _chType, SizeM);
             string? note = _chatNote != null && Environment.TickCount64 < _chatNoteUntil ? _chatNote : null;
             int left = m.Client.ChatLeft;
+            if (note == null && _chatNewer > 0) note = $"{_chatNewer} newer line{(_chatNewer == 1 ? "" : "s")} below.";
             if (note == null && ChatMutedText() != null) note = "your typed chat is muted: quick messages still work.";
             if (note == null && left > 0)
             {
@@ -509,6 +590,35 @@ namespace MphRecomp.Frontend
                 TextS(FitWidth(ChatPresets.All[k].ToLowerInvariant(), Mw(285), SizeX), Mx(x + 152), My(y + 19), 2, White, _chPreset[k], SizeX);
             }
             DrawChatVoice(glows); // (OnlineMenus.Voice.cs)
+        }
+
+        // the log's scroll column (only when there is more than a page): the older / newer arrows and the bar between
+        private void DrawChatScroll(Dictionary<int, List<WidgetTri>> glows, int tag)
+        {
+            int total = _chatOlder + _chatShown.Count + _chatNewer;
+            if (total <= ChatRows) return;
+            float top = ChatRowY(0), bottom = ChatLogBottom, cx = (ChScrollX0 + ChScrollX1) / 2;
+            Bar(Mx(ChScrollX0), My(top), Mx(ChScrollX1), My(top + ChArrowH), _chOlder, glows);
+            ChatArrow(true, Mx(cx), My(top + ChArrowH / 2), _chatOlder > 0, _chOlder);
+            Bar(Mx(ChScrollX0), My(bottom - ChArrowH), Mx(ChScrollX1), My(bottom), _chNewer, glows);
+            ChatArrow(false, Mx(cx), My(bottom - ChArrowH / 2), _chatNewer > 0, _chNewer);
+            float t0 = top + ChArrowH + 10, t1 = bottom - ChArrowH - 10, length = t1 - t0;
+            Fill(Mx(cx - 4), My(t0), Mx(cx + 4), My(t1), 0, 0, 0, 0.35f, tag);
+            float thumb = MathF.Max(24, length * ChatRows / total);
+            float at = t0 + (length - thumb) * _chatOlder / Math.Max(1, total - _chatShown.Count);
+            Fill(Mx(cx - 4), My(at), Mx(cx + 4), My(at + thumb), Orange.R, Orange.G, Orange.B, 1, tag);
+        }
+
+        // a solid triangle pointing up or down round (cx, cy) (menu units), dim when there is nothing that way
+        private void ChatArrow(bool up, float cx, float cy, bool live, int tag)
+        {
+            float w = Mw(15), h = Mw(12) * (up ? 1 : -1), a = live ? 1 : 0.3f;
+            (float r, float g, float b) = Orange;
+            var tip = new UiVertex(cx, cy + h, 0, 0, r, g, b, a);
+            var right = new UiVertex(cx + w, cy - h, 0, 0, r, g, b, a);
+            var left = new UiVertex(cx - w, cy - h, 0, 0, r, g, b, a);
+            _out.Add(up ? new WidgetTri { A = tip, B = right, C = left, TextureId = -1, Item = tag }
+                : new WidgetTri { A = left, B = right, C = tip, TextureId = -1, Item = tag });
         }
 
         private void DrawReport(Dictionary<int, List<WidgetTri>> glows)

@@ -23,6 +23,14 @@ namespace MphRecomp.Frontend
             }
             string model = @"characterselect\" + (p.Hunter == Hunter.Guardian ? "samus" : p.Hunter.ToString().ToLowerInvariant());
             LookAlikes.Look look = extra ? LookAlikes.For(p) : LookAlikes.Look.None;
+            // a DARK SAMUS skin this device doesn't have: it draws her as Limoki's low-poly stand-in, so that one's picture
+            // (owner 2026-11-07; the trooper skins get their own stand-in pictures above); the recolour only until it's drawn
+            if (look == LookAlikes.Look.DarkSamus
+                && Multiplayer?.SkinIcon(_drawMenu!, Characters.DarkSamusStandinSkin) is int standin and >= 0)
+            {
+                Quad(standin, x, top, x + d, top - d, 0, 0, 1, 1, 1, 1, 1, 1, tag);
+                return true;
+            }
             if (look != LookAlikes.Look.None && LookAlikeIcon(model, look) is int tex and >= 0)
             {
                 Quad(tex, x, top, x + d, top - d, 0, 0, 1, 1, 1, 1, 1, 1, tag);

@@ -63,6 +63,8 @@ namespace MphRead
 
         public static IRoomMusicHost? RoomHost { get; set; }
 
+        public static Dictionary<int, int> MusicAs { get; } = new();
+
         public static void Init()
         {
             RoomHost?.Stop(0);
@@ -151,11 +153,21 @@ namespace MphRead
                 Stop();
                 return;
             }
+            // a replay's free cam is no seat's ear: the room's own track, never a seat's node/flag/team track (MphRecomp, owner
+            // 2026-11-08; GameAudio.FreeCamEar)
+            if (Entities.PlayerEntity.HostNoViewer)
+            {
+                track = 0;
+            }
             if (RoomHost?.PlayRoom(roomId, track) == true)
             {
                 return;
             }
             track = Math.Clamp(track, 0, 2);
+            if (MusicAs.TryGetValue(roomId, out int musicAs))
+            {
+                roomId = musicAs;
+            }
             for (int i = 0; i < _roomMusic.Count; i++)
             {
                 RoomMusic room = _roomMusic[i];

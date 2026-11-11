@@ -11,8 +11,18 @@ namespace MphRecomp.Input
 {
     public sealed class PacedSum
     {
-        const long LagCapNs = 30_000_000; // never hold motion back more than 30 ms
+        // never hold motion back more than 30 ms. A PC's Bluetooth pad gets more (owner 2026-11-09, 8BitDo on a 60 Hz
+        // monitor: "jumps around or feels jittery when moving left to right"): its packets come 0-70 ms late, in
+        // spells of a second or so, and past the cap each late burst landed in one step
+        public const long DefaultLagCapNs = 30_000_000;
         const long IdleNs = 50_000_000; // nothing added for this long: the source is idle (a finger held still), not late
+        private readonly long _lagCapNs, _idleNs; // (idle: past the cap, so a late burst isn't taken for a rest)
+
+        public PacedSum(long lagCapNs = DefaultLagCapNs)
+        {
+            _lagCapNs = lagCapNs;
+            _idleNs = Math.Max(IdleNs, lagCapNs + 20_000_000);
+        }
         const long ClockSlackNs = 500_000_000; // times this far from the clock: not the same clock
 
         private readonly long[] _ns = new long[128];
@@ -83,7 +93,7 @@ namespace MphRecomp.Input
             // forgets slowly (half in ~6 s at 60 takes a second): a lag that wandered with each burst would move the
             // steps' times about and bring the unevenness back
             _lagNs *= 0.998f;
-            if (lag > IdleNs) return TakeAll(); // idle (a finger held still), not late
+            if (lag > _idleNs) return TakeAll(); // idle (a finger held still), not late
             long target = nowNs - Math.Max(behindNs, 0) - (long)_lagNs;
             if (target < _takenNs) target = _takenNs;
             if (target >= newest) return TakeAll();
@@ -115,7 +125,7 @@ namespace MphRecomp.Input
             return at;
         }
 
-        void Learn(long lagNs) => _lagNs = Math.Max(_lagNs, Math.Clamp(lagNs, 0, LagCapNs));
+        void Learn(long lagNs) => _lagNs = Math.Max(_lagNs, Math.Clamp(lagNs, 0, _lagCapNs));
 
         public void Clear()
         {

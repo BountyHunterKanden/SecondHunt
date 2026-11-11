@@ -52,6 +52,7 @@ internal sealed partial class CampaignRenderer
         string[] lines = text.Split('\n');
         if (!_paused || line < 0 || line >= lines.Length) return false;
         string l = lines[line];
+        if (SandCrateTap(l)) return true; // SandCrateToggle.cs
         // (the vertical line first: it starts with the stuck fix's)
         int which = l.StartsWith(BotVerticalLine) ? 8 : l.StartsWith(BotStuckLine) ? 1 : l.StartsWith(BotOrderLine) ? 2 : l.StartsWith(BotFlatLine) ? 3
             : l.StartsWith(BotDemoFlatLine) ? 4 : l.StartsWith(BotDemoStuckLine) ? 5 : l.StartsWith(BotSightLine) ? 6

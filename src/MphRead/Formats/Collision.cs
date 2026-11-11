@@ -397,7 +397,7 @@ namespace MphRead.Formats.Collision
         // bits 3-4: slipperiness
         // bits 5-8: terrain type
         ReflectBeams = 0x200,
-        Bit10 = 0x400,
+        SpiderTrack = 0x400, // recomp: an Echoes arena's spider ball track (Mrea bit 61; docs/SPIDER_BALL.md)
         Bit11 = 0x800,
         Bit12 = 0x1000,
         IgnorePlayers = 0x2000,

@@ -48,7 +48,8 @@ namespace MphRecomp.Frontend
                 if (p.Bot || !codes.TryGetValue(p.Seat, out string? code) || rows.Any(x => x.Code == code)) continue;
                 // a team mode is the team's result: its best place (the server compares across teams only)
                 int place = r.Teams ? r.Rows.Where(x => x.Team == p.Team).Min(x => x.Place) : p.Place;
-                rows.Add(new ResultRow { Code = code, Place = Math.Clamp(place, 0, MatchResultReq.MaxRows - 1), Team = r.Teams ? p.Team : -1 });
+                rows.Add(new ResultRow { Code = code, Place = Math.Clamp(place, 0, MatchResultReq.MaxRows - 1), Team = r.Teams ? p.Team : -1,
+                    Stats = MatchResults.HubStats(p) });
             }
             if (rows.Count < 2) return; // (only bots or players who never went online against this one)
             OnlineMatch? online = MultiplayerMenu.OnlineResults ? Kept : null;
@@ -59,6 +60,9 @@ namespace MphRecomp.Frontend
                 MatchKey = Guid.NewGuid().ToString("N"),
                 Teams = r.Teams,
                 Rows = rows.Take(MatchResultReq.MaxRows).ToList(),
+                Mode = r.ModeKey,
+                Arena = r.ArenaKey,
+                Seconds = r.Seconds,
             };
             Console.WriteLine($"online: head to head report for {rows.Count} hunters ({(report.Lan ? "LAN" : "online " + report.GameId)})");
             lock (s_pendingLock)

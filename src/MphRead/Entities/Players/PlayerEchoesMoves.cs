@@ -40,6 +40,7 @@ namespace MphRead.Entities
         public static bool HostEchoesPadNoFall { get; set; }
         // that room's water boxes (MPH units; the surface = Max.Y), null = none
         public static (Vector3 Min, Vector3 Max)[]? HostWater { get; set; }
+        public static bool HostSwimWater { get; set; }
 
         public const float GravityBoostNet = 10f / 35f, GravityBoostKeep = 0.3f;
         public const int GravityBoostTime = 90; // steps (60 Hz): 1.5 s
@@ -53,7 +54,7 @@ namespace MphRead.Entities
             get
             {
                 (Vector3 Min, Vector3 Max)[]? water = HostWater;
-                if (!HostEchoesMoves || water == null) return false;
+                if (!(HostEchoesMoves || HostSwimWater) || water == null) return false;
                 Vector3 p = Position;
                 for (int i = 0; i < water.Length; i++)
                 {
@@ -127,6 +128,34 @@ namespace MphRead.Entities
                 }
             }
             return g;
+        }
+
+        public const float SwimGravity = 1f / 3f, SwimSink = 1f / 3f, SwimStroke = 0.6f, SwimSurface = 1.2f;
+
+        private float SwimMovesGravity(float g)
+        {
+            if (!EchoesSubmerged) return g;
+            float jump = Fixed.ToFloat(Values.JumpSpeed);
+            if (Speed.Y < -jump * SwimSink) Speed = Speed.WithY(-jump * SwimSink);
+            return g * SwimGravity;
+        }
+
+        // PlayerInput's jump press: true = it was a stroke (under water, off the floor), so no jump. Every press is one,
+        // UsedJump or not; near the surface the stroke is a full jump, to climb out
+        private bool SwimPress()
+        {
+            if (!EchoesSubmerged || Flags1.TestFlag(PlayerFlags1.Standing)) return false;
+            float jump = Fixed.ToFloat(Values.JumpSpeed);
+            float top = float.MaxValue;
+            Vector3 p = Position;
+            foreach ((Vector3 min, Vector3 max) in HostWater!)
+            {
+                if (p.X >= min.X && p.X <= max.X && p.Z >= min.Z && p.Z <= max.Z && p.Y >= min.Y && p.Y < max.Y) top = MathF.Min(top, max.Y - p.Y);
+            }
+            float up = top < SwimSurface ? jump : jump * SwimStroke;
+            if (Speed.Y < up) Speed = Speed.WithY(up);
+            Flags1 |= PlayerFlags1.UsedJump;
+            return true;
         }
     }
 }

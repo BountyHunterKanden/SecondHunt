@@ -42,10 +42,15 @@ namespace MphRead.Entities
 
         // a stand-in's claimed hit on `player` at `point` (head: the host's check of the claim found it a headshot): ProcessCollision's
         // player hit (a Halfturret is never claimed), without its impact effect and sound (the guest drew those already)
-        internal void HostClaimHit(PlayerEntity player, Vector3 point, bool head)
+        // already: a head upgrade (PlayerEntity.HostApplyClaimedHit): the shot's own body hit dealt this (and pushed and counted),
+        // so only the rest of the head damage goes on
+        internal void HostClaimHit(PlayerEntity player, Vector3 point, bool head, uint already = 0)
         {
             Position = point;
-            PlayerEntity.NetCountBeamHit(Owner, player);
+            if (already == 0)
+            {
+                PlayerEntity.NetCountBeamHit(Owner, player);
+            }
             if (player.BeamEffectiveness[PirateBlaster.BaseIndex(Beam)] == Effectiveness.Zero)
             {
                 return;
@@ -67,10 +72,14 @@ namespace MphRead.Entities
                 damage = MaxDistance > 0 ? GetInterpolatedValue(DamageInterpolation, Damage, 0, pct) : Damage;
             }
             uint wholeDamage = (uint)Math.Clamp(damage, 0, Int32.MaxValue);
+            wholeDamage = wholeDamage > already ? wholeDamage - already : 0;
             if (wholeDamage != 0)
             {
                 player.TakeDamage(wholeDamage, damageFlags, damageDir, this);
-                HostHitPush?.Invoke(this, player, -1);
+                if (already == 0)
+                {
+                    HostHitPush?.Invoke(this, player, -1);
+                }
             }
             if (Flags.TestFlag(BeamFlags.LifeDrain) && Owner is PlayerEntity ownerPlayer
                 && !ownerPlayer.IsPrimeHunter && ownerPlayer.TeamIndex != player.TeamIndex)

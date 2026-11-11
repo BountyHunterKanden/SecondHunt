@@ -48,6 +48,13 @@ namespace MphRead.Entities
         // after one ~9.5 s alt period, vanilla often chains two or more). With HostBotVanillaParity, an odd frame stops at
         // the first exit it defers. Live: the gun-adjust pause (MatchSettings.BotSwitchOrder; replays before format 63 off)
         public static bool HostBotSwitchOrder { get; set; }
+        // recomp (HostBotNodeOccupied, MatchSettings.BotNodeOccupied; replays before format 85 play without it): Nodes'
+        // "our node is occupied" checks (Func3_213B3F0, 213B3A0, 213B1F0) tested OccupiedBy != null, always true since
+        // OccupiedBy became a bool array, and IsOccupied looked at seats 0-3 only. A bot going for an enemy node took
+        // B -> B (B37C and B3F0 both true) every frame, so the walk state's "reached it" switch never ran: Kanden and Samus
+        // stood beside the node, not shooting, 12-15 s at a time (owner's Nodes replay, Mining Plaza, 11-06; -botprobe 8
+        // seeds: 218 spells of 3 s+ beside a node, 12 with it, all live fights or guarding)
+        public static bool HostBotNodeOccupied { get; set; }
         // recomp: with HostBotSwitchOrder, a sure exit after a deferred one isn't checked on the odd frame, so a one-frame
         // event (MphRead's note: some sure checks can't wait a frame) was lost, where vanilla's tick would have seen it. The
         // latch remembers a sure exit that would fire on the odd frame and takes it on the tick unless an earlier exit wins
@@ -59,6 +66,9 @@ namespace MphRead.Entities
         // (PlayerAiUnstick.cs SightPinned, 10-26: Oubliette Spire walked into a wall 9.5 s in sight of the human); and a bot
         // off the ground but still for half a second isn't in a pad's flight (BotMphPadFlight: wedged on a wall's lip)
         public static bool HostBotStuckSight { get; set; }
+        // host hook (Second Hunt's gameplay mods, bot.objective): when set and it gives a position for a bot's slot, the bot
+        // heads for the node closest to it where it would have wandered to a random node
+        public static Func<int, Vector3?>? HostBotObjective { get; set; }
 
         public partial class PlayerAiData
         {
@@ -237,6 +247,13 @@ namespace MphRead.Entities
                 ClearInput();
                 InitializeSub();
                 UpdateExecutionPath(Personality, depth: 0);
+                if (GameState.Mode == GameMode.SinglePlayer && _player.Health == 0)
+                {
+                    // recomp: a campaign encounter hunter that hasn't spawned yet (vanilla only sets its AI up at the
+                    // spawn). The picks above ran on the RNG the room load just reset (always the first vantage
+                    // node: Spire in High Ground went to node 52 every time); drop them so the spawn draws again.
+                    _entityRefs.Clear();
+                }
             }
 
             public void InitializeAtSpawn()
@@ -696,6 +713,12 @@ namespace MphRead.Entities
                     }
                     _mappedControls[i] = control; // recomp: HostBotReleaseControls
                     bool prevDown = control.IsDown;
+                    if (button == _buttons.L && button.IsDown && !_player.IsAltForm && HostBotOutOfReach
+                        && HostBotNoJumpAt?.Invoke(_player) == true)
+                    {
+                        button.IsDown = false; // recomp: HostBotNoJumpAt (no jump at Mining Plaza's shut gate)
+                        HostNoJumpCount++;
+                    }
                     if (button.IsDown && !HostIdleBots) // recomp: HostIdleBots
                     {
                         Flags3 &= ~AiFlags3.NoInput;
@@ -867,13 +890,21 @@ namespace MphRead.Entities
                 Func2134594();
                 Func2148ABC();
                 EdgeHold(); // recomp (HostBotEdgeHold): an edge jump's flight keeps its node (PlayerAiEdgeJump.cs)
+                if (_player.CamSeqAiOwed && CameraSequence.Current == null) // recomp: CameraSequence.OweCamSeqAi
+                {
+                    _player.CamSeqAiOwed = false;
+                    Flags2 |= AiFlags2.AiStart;
+                }
                 Execute(_executionTree[0]);
                 ParalyzerCloseIn(); // recomp (before the unstick, which can still take over)
                 TurretErrand(); // recomp: Shooting Gallery's turret (PlayerEchoesSeat.cs; likewise)
                 DroneTestStep(); // recomp, dev: the launcher's Drone kill test (PlayerScoutDrone.cs)
                 CrateStep(); // recomp: Echoes arenas' crates (PlayerAiCrates.cs; before the unstick, which can still take over)
                 WallStep(); // recomp: Echoes arenas' breakable walls across a bot's way (PlayerAiWalls.cs)
-                if (BotUnstickOn && _wall == null) // recomp: Echoes arenas' generated graphs, MPH's with the stuck fix (PlayerAiUnstick.cs; waits while it shoots a wall)
+                // recomp: Echoes arenas' generated graphs, MPH's with the stuck fix (PlayerAiUnstick.cs; waits while it shoots a wall;
+                // HostTurretBotNav: and while the turret errand steers, which re-plans for itself: the unstick's walk to its own
+                // node took her off the errand's ledge jump out of Shooting Gallery's Dark Water trench)
+                if (BotUnstickOn && _wall == null && !(HostTurretBotNav && _errandOn))
                 {
                     BotUnstickTick();
                 }
@@ -5541,7 +5572,7 @@ namespace MphRead.Entities
             {
                 foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
                 {
-                    if (defense.CapturedPlayer?.TeamIndex == _player.TeamIndex && defense.OccupiedBy != null)
+                    if (defense.CapturedPlayer?.TeamIndex == _player.TeamIndex && (HostBotNodeOccupied ? defense.IsOccupied : defense.OccupiedBy != null))
                     {
                         return 1;
                     }
@@ -5556,7 +5587,8 @@ namespace MphRead.Entities
                     return 0;
                 }
                 Debug.Assert(_targetDefense != null);
-                return _targetDefense.CapturedPlayer?.TeamIndex == _player.TeamIndex && _targetDefense.OccupiedBy != null ? 1 : 0;
+                return _targetDefense.CapturedPlayer?.TeamIndex == _player.TeamIndex
+                    && (HostBotNodeOccupied ? _targetDefense.IsOccupied : _targetDefense.OccupiedBy != null) ? 1 : 0;
             }
 
             private int Func3_213B37C(AiContext context, AiPersonalityData5 param)
@@ -5599,7 +5631,8 @@ namespace MphRead.Entities
             {
                 foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
                 {
-                    if (defense.CapturedPlayer == null || defense.CapturedPlayer.TeamIndex != _player.TeamIndex || defense.OccupiedBy != null)
+                    if (defense.CapturedPlayer == null || defense.CapturedPlayer.TeamIndex != _player.TeamIndex
+                        || (HostBotNodeOccupied ? defense.IsOccupied : defense.OccupiedBy != null))
                     {
                         return 0;
                     }
@@ -6491,7 +6524,8 @@ namespace MphRead.Entities
                     }
                     else if (context.Field9 == 24)
                     {
-                        _node3C = GetRandomNavigationNode();
+                        Vector3? objective = HostBotObjective?.Invoke(_player.SlotIndex);
+                        _node3C = objective.HasValue ? FindClosestNodeToPosition(objective.Value) : GetRandomNavigationNode();
                         _queuedFindEntityAction = AiQueuedEnt.None;
                     }
                     else if (context.Field9 == 40)
@@ -11217,16 +11251,25 @@ namespace MphRead.Entities
                     }
                 }
                 int newIndex = 0;
+                // recomp: an imported arena's set bit flagged 0x8000 isn't the room's but "carrying an octolith" (Mining
+                // Plaza: those routes avoid the placed jump pads, ArenaNav.Graph.Carrier, owner 2026-11-01), set per bot
+                int carrierBit = 0;
                 for (int i = 0; i < _nodeData.SetIndices.Count; i++)
                 {
+                    if ((_nodeData.SetIndices[i] & 0x8000) != 0)
+                    {
+                        carrierBit = 1 << i;
+                        continue;
+                    }
                     newIndex += (_nodeData.SetSelector[i] ? 1 : 0) << i;
                 }
                 // todo?: it's kind of jank how this is called for each bot, but updates all bots
                 foreach (PlayerEntity player in _scene.GetPlayerEntities())
                 {
-                    if (player.IsBot && player.AiData._nodeDataSetIndex != newIndex)
+                    int index = newIndex + (player.OctolithFlag != null ? carrierBit : 0);
+                    if (player.IsBot && player.AiData._nodeDataSetIndex != index)
                     {
-                        player.AiData._nodeDataSetIndex = newIndex;
+                        player.AiData._nodeDataSetIndex = index;
                         player.AiData.SetClosestNodeList(player.Position);
                     }
                 }

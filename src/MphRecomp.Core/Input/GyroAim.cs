@@ -6,7 +6,7 @@ using System.Numerics;
 // camera exactly as before and the gyro is ADDED on top of it -- the stick for big turns, the gyro for precision --
 // the model GyroWiki (Jibb Smart, JoyShockMapper) recommends and Splatoon / Prime Remastered's hybrid scheme ship.
 //
-// Pipeline per sample: bias -> turn axis (yaw / player space / roll) + pitch -> tightening (fades out tiny rates, so a
+// Pipeline per sample: bias -> turn axis (yaw / player space / roll / yaw+roll) + pitch -> tightening (fades out tiny rates, so a
 // steady hand holds the reticle still) -> optional soft tiered smoothing (off here; the setting defaults to 20%, 6 deg/s
 // as of 10-24) -> optional acceleration (off by default) -> real-world sensitivity, yaw and pitch each their own (1.0 = the
 // view turns exactly as far as the device did) -> integrated to degrees. Every filter only touches SLOW motion: at or
@@ -24,7 +24,9 @@ namespace MphRecomp.Input
                 // screen moves with your hands)
         Player, // turning about the real world's vertical, whatever angle it's held at ("player space"; GyroWiki's pick
                 // for a controller held apart from the screen)
-        Roll    // steering-wheel tilt: rotating the screen left/right turns
+        Roll,   // steering-wheel tilt: rotating the screen left/right turns
+        YawRoll // yaw and roll together: turn the device, and tilt it to keep turning once you can't turn any further.
+                // Their sum, capped at the length of the two, so turning and tilting at once never doubles the speed
     }
 
     public sealed class GyroAimOptions
@@ -59,11 +61,13 @@ namespace MphRecomp.Input
         private Vector3 _up; // unit "away from gravity" in the screen's axes; zero until the first accelerometer sample
         private readonly Vector2[] _smooth = new Vector2[64];
         private int _smoothIndex, _smoothCount;
-        private readonly PacedSum _paced = new(); // degrees not yet taken (X = turn left +, Y = look up +), by sample time
+        private readonly PacedSum _paced; // degrees not yet taken (X = turn left +, Y = look up +), by sample time
 
-        public GyroAim(GyroAimOptions? options = null)
+        // lagCapNs: the most a paced take holds motion back for a late source (PacedSum)
+        public GyroAim(GyroAimOptions? options = null, long lagCapNs = PacedSum.DefaultLagCapNs)
         {
             Options = options ?? new GyroAimOptions();
+            _paced = new PacedSum(lagCapNs);
         }
 
         public Vector3 Up { get { lock (_lock) return _up; } }
@@ -110,6 +114,7 @@ namespace MphRecomp.Input
                 {
                     GyroTurnAxis.Yaw => d.Y,
                     GyroTurnAxis.Roll => d.Z,
+                    GyroTurnAxis.YawRoll => YawPlusRoll(d.Y, d.Z, _up),
                     _ => PlayerSpaceYaw(d, _up)
                 };
                 var rate = new Vector2(o.InvertYaw ? -turn : turn, o.InvertPitch ? -d.X : d.X);
@@ -171,6 +176,20 @@ namespace MphRecomp.Input
             const float yawRelaxFactor = 1.41f;
             float cap = MathF.Sqrt(dps.Y * dps.Y + dps.Z * dps.Z);
             return MathF.Sign(worldYaw) * MathF.Min(MathF.Abs(worldYaw) * yawRelaxFactor, cap);
+        }
+
+        // yaw + roll: either one turns, both the same way add up, but never past the length of the two (GyroWiki's local
+        // space with roll, length-capped), so turning and tilting together turns about as fast as one big turn would.
+        // Upright that's yaw + roll. Pitched against gravity (tilted to aim down or up), the line where the two cancel
+        // tips by half the pitch: a steering-wheel tilt about the true horizontal then reads partly as the opposite yaw,
+        // and a plain sum dropped it to nothing near 45 degrees (owner 11-08, aiming down). Pitch is capped at 60.
+        public static float YawPlusRoll(float yawDps, float rollDps, Vector3 up = default)
+        {
+            float pitch = up == Vector3.Zero ? 0f : Math.Clamp(MathF.Atan2(up.Z, up.Y), -MathF.PI / 3f, MathF.PI / 3f);
+            float dir = MathF.PI / 4f + pitch / 2f; // the turn's direction in the yaw/roll plane
+            float along = (yawDps * MathF.Cos(dir) + rollDps * MathF.Sin(dir)) / MathF.Cos(MathF.PI / 4f + MathF.Abs(pitch) / 2f);
+            float cap = MathF.Sqrt(yawDps * yawDps + rollDps * rollDps);
+            return MathF.Sign(along) * MathF.Min(MathF.Abs(along), cap);
         }
 
         // GyroWiki acceleration as a slow-motion scale: slowScale at or below slowDps, 1 at fastDps and above

@@ -24,7 +24,9 @@ namespace MphRecomp.Config
         // tightening threshold, degrees a second (GyroAim.TightenDps; 2 = what it always was)
         public static readonly float[] GyroDeadbands = { 0f, 0.5f, 1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f, 6f, 8f, 10f, 12f, 15f, 20f, 30f };
         public static readonly int[] GyroPercents = Enumerable.Range(0, 21).Select(i => i * 5).ToArray(); // 0-100
-        public static readonly string[] GyroAxes = { "yaw", "player", "roll" };
+        public static readonly string[] GyroAxes = { "yaw", "player", "roll", "yaw+roll" };
+        // GYRO BUTTON (finRatman via owner 11-07): what the gyro function's button does (GyroButton)
+        public static readonly string[] GyroButtons = { "always", "hold", "pause", "toggle" };
         public static readonly string[] TouchModes = { "auto", "on", "aim only", "off" };
         public static readonly string[] TouchAimModes = { "stick", "stylus" };
 
@@ -53,6 +55,19 @@ namespace MphRecomp.Config
         // option dropped the same day) plays as instant.
         public static readonly string[] AimViews = { "instant", "classic" };
         public string AimView { get; set; } = "instant";
+        // CONTROLS > AIM > MOVE "stick curve" (owner 2026-11-08, Core Input/StickCurve.cs): modern = a light tilt of the move
+        // stick walks and rolls gently and a full tilt is the whole d-pad press (vanilla's top speed and turning); classic =
+        // any tilt past the dead zone is the whole press, as the DS d-pad. Movement only: the aim stick is its own.
+        public static readonly string[] StickCurves = { "modern", "classic" };
+        public string StickCurve { get; set; } = "modern";
+        // KEYBOARD & MOUSE > AIM > MOVE (owner 2026-11-09, "a way to move more subtly in alt form on pc"; App Campaign/
+        // KeyboardMouseInput.cs): "mouse roll" on = in the rolling alt forms (no AltFormStrafe: Samus, Kanden, Spire, Noxus)
+        // the mouse rolls the ball through the DS stylus's own touch roll (MphRead PlayerTouch.cs) instead of turning the
+        // view; "slow move speed" = how fast the slow move key (ControlBinds.SlowMove) walks and rolls, percent of a whole
+        // press (CampaignInput.MovePush, PlayerStickPush.cs)
+        public bool MouseRoll { get; set; }
+        public static readonly int[] SlowMovePercents = { 25, 40, 60 };
+        public int SlowMovePercent { get; set; } = 40;
         public int RenderScale { get; set; } = 100;
         public string Music { get; set; } = "original";
         public string MenuLayout { get; set; } = "combined";
@@ -99,6 +114,10 @@ namespace MphRecomp.Config
         // picker like SAMUS SUIT): one of Characters.Trooper.Known; one that isn't imported leaves the first imported one
         // (CampaignRenderer.PlayAs). Changing it in the pause menu swaps him on resume.
         public string TrooperSkin { get; set; } = "MP1PowerTrooper";
+        // Sylux's look on a Sylux campaign file (SECOND HUNT SETTINGS > GAME > CAMPAIGN SYLUX TYPE, owner 2026-11-08: the
+        // same as TROOPER TYPE): "original" (MPH's own) or an imported Sylux skin (MP4Sylux, Beyond's). One that isn't
+        // imported leaves him original (CampaignRenderer.SyluxSkinFromSettings). Changing it in the pause menu swaps him on resume.
+        public string SyluxSkin { get; set; } = "original";
         // The campaign's camera: first person (the game's own) or third person (the suit's body seen from behind; render
         // only, CampaignActivity.UpdateThirdPerson). Was a Select toggle until 2026-10-03; Select opens the map now.
         public bool ThirdPerson { get; set; }
@@ -110,6 +129,13 @@ namespace MphRecomp.Config
         // (only rooms and connectors Samus has been in, free moving, the room in the middle selected); off = vanilla's.
         public bool MapDetailed { get; set; }
         public bool MapPrime { get; set; } = true;
+        // LOGBOOK SCANS (owner 2026-10-31): true = the ship's logbook also lists the scans vanilla leaves out (doors,
+        // shields, switches...) on its OBJECT page; the percentages stay vanilla (ShipLogbook)
+        public bool LogbookAllScans { get; set; }
+        // ALT FORM HOP (owner 2026-11-09): true = in the campaign, jump hops any alt form up to bomb jump height
+        // (MphRead PlayerAltHop.cs); false = no hop, and the other hunters get MphRead's helper jump pads back
+        // (SceneSetup.CampaignAltHop). Every build.
+        public bool CampaignAltHop { get; set; } = true;
         // The in-play HUD: PRIME adds, in the campaign, a mini map of the current room (top right) to each hunter's own HUD
         // (MphRead PlayerPrimeHud.cs; owner 2026-10-14; the radar was here too until 2026-10-26); off = the DS's.
         public bool PrimeHud { get; set; } = true;
@@ -143,10 +169,15 @@ namespace MphRecomp.Config
         // Gyro aim in the campaign (MphRead.Android/CampaignGyro.cs, math in Input/GyroAim.cs), added on top of the right
         // stick: "off", "on" (always) or "zoom" (only while zoomed or in the scan visor). GyroSensitivity: the view turns
         // this percent of the device's own rotation. GyroAxis: which rotation turns -- "yaw" (the screen's own vertical),
-        // "player" (the world's vertical, however it's held) or "roll" (steering-wheel tilt).
+        // "player" (the world's vertical, however it's held) "roll" (steering-wheel tilt) or "yaw+roll"
+        // (both: tilt to keep turning once you can't turn further; finRatman 11-04).
         public string Gyro { get; set; } = "off";
         public int GyroSensitivity { get; set; } = 150;
         public string GyroAxis { get; set; } = "yaw";
+        // the GYRO button (ControlBinds.Gyro; CampaignGyroAim.cs): "always" (no button, gyro aims all the time), "hold" (aims
+        // only while it's held), "pause" (aims except while it's held: hold, turn the device back, let go = re-centre) or
+        // "toggle" (each press turns gyro aim off or back on). With no button bound it's "always".
+        public string GyroButton { get; set; } = "always";
         // a PC controller's turn axis (SecondHunt.Desktop/DesktopGyro.cs; the PC's gyro axis row): "player" by default,
         // GyroWiki's pick for a pad held apart from the screen. A pad's own yaw is about its face, which tilts with the
         // grip (owner 10-30: "yaw is different on pc for that controller than it is my odin"). Android keeps GyroAxis.
@@ -300,11 +331,30 @@ namespace MphRecomp.Config
         // SkipIntro also on, the NINTENDO PRESENTS logos and the intro movie too, straight to TOUCH TO START
         // (FrontendSession.Start). SkipIntro only counts with SkipBootLogos on (its row only shows then)
         public bool SkipBootLogos { get; set; }
+        // owner 2026-11-06: the SECOND HUNT logo (the SteamGridDB one) under the game's logo on the main menu, page 18
+        // (FrontendSession.DrawSecondHuntLogo); off by default
+        public bool SecondHuntLogo { get; set; }
+        // DEATH (owner 2026-11-07, docs/IDEAS_SURVEY.md D1): "vanilla" = MPH's death, "firsthunt" = First Hunt's collapse
+        // on every hunter's body (dev only, needs First Hunt imported: MphRecomp.Anim.DeathCollapse), "ragdoll" = the body
+        // falls as a ragdoll pushed by the killing shot (PlayerRagdoll.cs; every build, no import). Independent of each
+        // other (owner 2026-11-09); a match takes the one it started with, and RAGDOLL switches off live. The alt forms
+        // die as MPH's
+        public string DeathAnimation { get; set; } = "vanilla";
+        // owner 2026-11-09: with DEATH on FIRST HUNT or RAGDOLL, VANILLA ORBS also draws MPH's blue death particles, in the
+        // hunter's shape at death, rising over the falling body (PlayerDeathAnim.cs HostDeathOrbs); off by default
+        public bool DeathVanillaOrbs { get; set; }
+        // ICE (owner 2026-11-09, fitted ice): a frozen hunter's ice. "vanilla" = the game's ice shell, "fitted" = the game's
+        // ice on the hunter's own body (MphRecomp.Render.FittedIce, PlayerFittedIce.cs), "faceted" = fitted with the
+        // shell's faceted glints. Stand-in, HD and native bodies always wear fitted ice. Live, draw only
+        public string HunterIce { get; set; } = "vanilla";
         public bool SkipIntro { get; set; }
         // owner 2026-10-26: making a new file in the campaign's file select first offers to fill it from a vanilla DS save
         // (an emulator's or a dumped cart's .sav: Campaign/CartSave.cs); off = new files start as before
         public bool ImportSavesOnNewFile { get; set; }
         public List<string> DisabledMods { get; set; } = new();
+        // the player's mod load order (ids, first loads first; mods not listed follow in folder order). Mods/ModManager.Resolve
+        // still puts a mod after the mods it requires.
+        public List<string> ModOrder { get; set; } = new();
         // mod id -> setting id -> the value the player picked (settings a mod declares in its mod.json)
         public Dictionary<string, Dictionary<string, string>> ModSettings { get; set; } = new();
 

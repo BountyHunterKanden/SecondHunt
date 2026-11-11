@@ -334,7 +334,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior00()
         {
             bool collided = HandleCollision();
-            if (!SeekTargetFacing(_targetVec, UpVector, ref _aimSteps, _aimAngleStep) || !collided)
+            if (!SeekTargetFacing(_targetVec, Vector3.UnitY, ref _aimSteps, _aimAngleStep) || !collided)
             {
                 return false;
             }

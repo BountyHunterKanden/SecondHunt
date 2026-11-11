@@ -9,7 +9,9 @@ using MphRecomp.Config;
 
 // ONLINE PLAY's FRIENDS AND RIVALS and FIND A HUNTER pages (owner 2026-10-09; mockups F_A / F_B /
 // F_C and A_A / A_B in extract_out/online_menus/mockups, "OK as shown"). The hub's ALL FRIENDS opens FRIENDS AND RIVALS:
-// four tabs (FRIENDS, RIVALS, REQUESTS with the incoming count, RECENT), five rows a page (L / R or the title's arrows):
+// four tabs (FRIENDS, RIVALS, REQUESTS with the incoming count, RECENT; L / R step through them), five rows on screen, the
+// list scrolling as the settings pages do (owner 2026-10-31: "no pages just scrolling for each tab": a drag, the wheel, the
+// right stick, the scroll column's arrows and bar, the D-pad past the first / last row; FIND A HUNTER's rows the same):
 // the person disc, name#tag, where they are, their presence (online green, in lobby cyan, in match orange, offline dimmed),
 // JOIN on someone in an open game; REQUESTS' incoming rows take OK / X, the sent ones CANCEL; RECENT's rows ADD FRIEND / ADD
 // RIVAL (or the word when already linked, "sent" while waiting). Tapping a row opens their HUNTER LICENSE (OnlineMenus.License.cs:
@@ -27,21 +29,23 @@ namespace MphRecomp.Frontend
 
         // our callbacks (2600-2674)
         private const int FrTabCall = 2600; // + the tab
-        private const int FrAddCall = 2604, FrPrevCall = 2605, FrNextCall = 2606;
+        private const int FrAddCall = 2604, FrTabPrevCall = 2605, FrTabNextCall = 2606, FrUpCall = 2607, FrDownCall = 2608; // L / R, the scroll arrows
         private const int FrRowCall = 2610, FrWideCall = 2615, FrLeftCall = 2620, FrRightCall = 2625, FrOkCall = 2630, FrNoCall = 2635; // + the row
         private const int AdTabCall = 2640; // + the tab
-        private const int AdFieldCall = 2643, AdSearchCall = 2644, AdOkCall = 2645, AdBackspaceCall = 2646, AdPrevCall = 2647, AdNextCall = 2648;
+        private const int AdFieldCall = 2643, AdSearchCall = 2644, AdOkCall = 2645, AdBackspaceCall = 2646, AdTabPrevCall = 2647, AdTabNextCall = 2648;
         private const int AdKeyCall = 2650; // + the digit
-        private const int AdRowCall = 2660, AdLeftCall = 2665, AdRightCall = 2670; // + the row
+        private const int AdRowCall = 2660, AdUpCall = 2663, AdDownCall = 2664, AdLeftCall = 2665, AdRightCall = 2670; // + the row
         private const int FriendsFirstCall = FrTabCall, FriendsLastCall = AdRightCall + 4;
         private const int FrRows = 5, FrTabs = 4, AdRows = 3, AdTabs = 3;
+        // (mockup px) the rows' right edge and the scroll column right of them; the list's row pitch
+        private const float FrRowX1 = 1760, FrScrollX0 = 1776, FrScrollX1 = 1824, FrArrowH = 72, FrPitch = 126;
         private const int CodeDigits = 12, SearchMax = 15; // a name (10) and " 1234"
 
         // items (-1 = none)
-        private int _frPanel = -1, _frTitle = -1, _frAdd = -1, _frPrev = -1, _frNext = -1, _frTitleString = -1;
+        private int _frPanel = -1, _frTitle = -1, _frAdd = -1, _frUp = -1, _frDown = -1, _frTitleString = -1;
         private readonly int[] _frTab = Unset(FrTabs), _frRow = Unset(FrRows), _frWide = Unset(FrRows), _frLeft = Unset(FrRows),
             _frRight = Unset(FrRows), _frOk = Unset(FrRows), _frNo = Unset(FrRows);
-        private int _adPanel = -1, _adTitle = -1, _adField = -1, _adSearch = -1, _adOk = -1, _adBackspace = -1, _adPrev = -1, _adNext = -1,
+        private int _adPanel = -1, _adTitle = -1, _adField = -1, _adSearch = -1, _adOk = -1, _adBackspace = -1, _adUp = -1, _adDown = -1,
             _adTitleString = -1;
         private readonly int[] _adTab = Unset(AdTabs), _adKey = Unset(10), _adRow = Unset(AdRows), _adLeft = Unset(AdRows), _adRight = Unset(AdRows);
         private string? _numKey, _numBack; // the ROM keypad's key models (ENTER NEW CODE, page 61)
@@ -61,6 +65,7 @@ namespace MphRecomp.Frontend
 
         // tools (MphRead.Tools -onlinemenu / -onlinefriendstest)
         internal static (int Friends, int Add) OnlineFriendsPages => (s_onFriends, s_onAdd);
+        internal (int FriendsTab, int FriendsOffset, int AddTab, int AddOffset) OnlineFriendsView => (s_frTab, _frOffset, s_adTab, _adOffset); // (-onlinemenu)
         internal RosterMsg? OnlineRoster => _roster;
         internal IReadOnlyList<PlayerCard>? OnlineFound => _found;
         internal string? OnlineCodeName => _codeName;
@@ -74,6 +79,34 @@ namespace MphRecomp.Frontend
             _searchText = search;
             _codeTyped = typed;
             Redraw();
+        }
+
+        // dev builds only: a fake_friends.txt beside the settings file (its text = how many, default 30) pads the roster the
+        // server sent with made-up friends, rivals and requests, for checking the scrolling lists on a device. Client-side
+        // only: the server knows nothing about them, so their buttons answer with an error.
+        private RosterMsg WithFakeFriends(RosterMsg roster)
+        {
+            if (RecompSettings.PublicBuild || ProfileDir is not string dir) return roster;
+            string file = System.IO.Path.Combine(dir, "fake_friends.txt");
+            if (!System.IO.File.Exists(file)) return roster;
+            if (!int.TryParse(System.IO.File.ReadAllText(file).Trim(), out int n)) n = 30;
+            n = Math.Clamp(n, 1, 500);
+            string[] names = { "ZEPHYR", "AURORA", "VESPER", "ONYX", "LUMINA", "RAVEN", "ECHO", "NOVA", "CINDER", "TALON",
+                "QUASAR", "HALCYON", "MIRAGE", "JUNO", "SABLE", "ORION", "KESTREL", "NIMBUS", "PYRE", "TEMPEST" };
+            string[] presence = { Presence.Lobby, Presence.Match, Presence.Online, Presence.Offline, Presence.Offline };
+            PlayerCard Fake(int i, bool friend, bool rival) => new()
+            {
+                Code = (900000000000L + i).ToString(), Name = names[i % names.Length] + (i >= names.Length ? (i / names.Length + 1).ToString() : ""),
+                Tag = 1000 + i * 37 % 9000, Presence = presence[i % presence.Length], Friend = friend, Rival = rival,
+            };
+            roster.Friends.RemoveAll(f => f.Code.StartsWith("9000000"));
+            roster.Rivals.RemoveAll(f => f.Code.StartsWith("9000000"));
+            roster.Requests.RemoveAll(q => q.Player.Code.StartsWith("9000000"));
+            for (int i = 0; i < n; i++) roster.Friends.Add(Fake(i, true, false));
+            for (int i = 0; i < Math.Max(1, n / 3); i++) roster.Rivals.Add(Fake(n + i, false, true));
+            for (int i = 0; i < Math.Max(1, n / 3); i++)
+                roster.Requests.Add(new RequestInfo { Player = Fake(2 * n + i, false, false), Kind = i % 3 == 2 ? LinkKind.Rival : LinkKind.Friend, Incoming = i % 2 == 0 });
+            return roster;
         }
 
         // the search the name keyboard would run (tools: no keyboard)
@@ -94,7 +127,7 @@ namespace MphRecomp.Frontend
             MenuItem Px(MenuPage page, float x, float y, float w, float h, int call) => page.AddItem(i => input(i, Mx(x), My(y), Mx(x + w), My(y + h), call));
 
             // ---- FRIENDS AND RIVALS (F_A / F_B / F_C): the title higher, the panel lower (the tabs between) ----
-            MenuPage friends = addFramePage(s_onHub, new[] { Call(MenuKeys.R, FrNextCall), Call(MenuKeys.L, FrPrevCall) });
+            MenuPage friends = addFramePage(s_onHub, new[] { Call(MenuKeys.R, FrTabNextCall), Call(MenuKeys.L, FrTabPrevCall) });
             s_onFriends = friends.Index;
             _frPanel = friends.AddItem(i => Clone(panel, i, (Mx(70) + Mx(1850)) / 2 - PanelMid, -Mw(54), stretchX: Mx(1850) - Mx(70) - PanelWidth,
                 stretchDown: PanelStretchDown - Mw(54))).Index;
@@ -106,38 +139,39 @@ namespace MphRecomp.Frontend
                 (float tx, float tw) = FrTabSpot(t);
                 _frTab[t] = Px(friends, tx, 140, tw, 70, FrTabCall + t).Index;
             }
-            for (int r = 0; r < FrRows; r++) _frRow[r] = Px(friends, 100, FriendRowY(r), 1720, 110, FrRowCall + r).Index;
+            for (int r = 0; r < FrRows; r++) _frRow[r] = Px(friends, 100, FriendRowY(r), FrRowX1 - 100, 110, FrRowCall + r).Index;
             // the row buttons after the rows (taps hit them first); a row shows at most two of them
             for (int r = 0; r < FrRows; r++)
             {
                 float by = FriendRowY(r);
-                _frWide[r] = Px(friends, 1520, by + 24, 270, 62, FrWideCall + r).Index;
-                _frLeft[r] = Px(friends, 1300, by + 24, 240, 62, FrLeftCall + r).Index;
-                _frRight[r] = Px(friends, 1560, by + 24, 240, 62, FrRightCall + r).Index;
-                _frOk[r] = Px(friends, 1560, by + 8, 94, 94, FrOkCall + r).Index;
-                _frNo[r] = Px(friends, 1680, by + 8, 94, 94, FrNoCall + r).Index;
+                _frWide[r] = Px(friends, FrRowX1 - 300, by + 24, 270, 62, FrWideCall + r).Index;
+                _frLeft[r] = Px(friends, FrRowX1 - 520, by + 24, 240, 62, FrLeftCall + r).Index;
+                _frRight[r] = Px(friends, FrRowX1 - 260, by + 24, 240, 62, FrRightCall + r).Index;
+                _frOk[r] = Px(friends, FrRowX1 - 260, by + 8, 94, 94, FrOkCall + r).Index;
+                _frNo[r] = Px(friends, FrRowX1 - 140, by + 8, 94, 94, FrNoCall + r).Index;
             }
+            _frUp = Px(friends, FrScrollX0, FriendRowY(0), FrScrollX1 - FrScrollX0, FrArrowH, FrUpCall).Index;
+            _frDown = Px(friends, FrScrollX0, FriendRowY(FrRows) - 16 - FrArrowH, FrScrollX1 - FrScrollX0, FrArrowH, FrDownCall).Index;
             _frAdd = Px(friends, 1736, 918, 108, 140, FrAddCall).Index;
-            float ay = ArrowTop + Mw(42);
-            _frPrev = friends.AddItem(i => touch(i, 128 - ArrowGap - ArrowW - 60, ay + 4, 128 - ArrowGap - 14, ay - ArrowH - 4, FrPrevCall)).Index;
-            _frNext = friends.AddItem(i => touch(i, 128 + ArrowGap + 14, ay + 4, 128 + ArrowGap + ArrowW + 60, ay - ArrowH - 4, FrNextCall)).Index;
 
             // ---- FIND A HUNTER (A_A / A_B, and FROM RECENT) ----
-            MenuPage add = addFramePage(friends.Index, new[] { Call(MenuKeys.R, AdNextCall), Call(MenuKeys.L, AdPrevCall) });
+            MenuPage add = addFramePage(friends.Index, new[] { Call(MenuKeys.R, AdTabNextCall), Call(MenuKeys.L, AdTabPrevCall) });
             s_onAdd = add.Index;
             _adPanel = add.AddItem(i => panelAt(i, Mx(70), Mx(1850))).Index;
             back(add, friends.Index);
             _adTitleString = _strings.Add("FIND A HUNTER");
             _adTitle = add.AddItem(i => Clone(title, i, 0, 0, stringId: _adTitleString)).Index;
-            for (int t = 0; t < AdTabs; t++) _adTab[t] = Px(add, 300 + t * 424, 222, 400, 66, AdTabCall + t).Index;
+            for (int t = 0; t < AdTabs; t++) _adTab[t] = Px(add, AdTabX(t), 222, 400, 66, AdTabCall + t).Index;
             _adField = Px(add, 330, 324, 900, 90, AdFieldCall).Index;
             _adSearch = Px(add, 1280, 330, 380, 80, AdSearchCall).Index;
-            for (int r = 0; r < AdRows; r++) _adRow[r] = Px(add, 100, AddRowY(r), 1720, 110, AdRowCall + r).Index;
+            for (int r = 0; r < AdRows; r++) _adRow[r] = Px(add, 100, AddRowY(r), FrRowX1 - 100, 110, AdRowCall + r).Index;
             for (int r = 0; r < AdRows; r++)
             {
-                _adLeft[r] = Px(add, 1300, AddRowY(r) + 24, 240, 62, AdLeftCall + r).Index;
-                _adRight[r] = Px(add, 1560, AddRowY(r) + 24, 240, 62, AdRightCall + r).Index;
+                _adLeft[r] = Px(add, FrRowX1 - 520, AddRowY(r) + 24, 240, 62, AdLeftCall + r).Index;
+                _adRight[r] = Px(add, FrRowX1 - 260, AddRowY(r) + 24, 240, 62, AdRightCall + r).Index;
             }
+            _adUp = Px(add, FrScrollX0, AddRowY(0), FrScrollX1 - FrScrollX0, FrArrowH, AdUpCall).Index;
+            _adDown = Px(add, FrScrollX0, AddRowY(AdRows) - 16 - FrArrowH, FrScrollX1 - FrScrollX0, FrArrowH, AdDownCall).Index;
             for (int d = 0; d < 10; d++)
             {
                 (float kx, float ky) = KeyAt(d);
@@ -146,12 +180,14 @@ namespace MphRecomp.Frontend
             (float bx, float bky) = KeyAt(10);
             _adBackspace = Px(add, bx, bky, 116, 116, AdBackspaceCall).Index;
             _adOk = Px(add, 1640, 616, 130, 130, AdOkCall).Index;
-            _adPrev = add.AddItem(i => touch(i, 128 - ArrowGap - ArrowW - 60, ArrowTop + 4, 128 - ArrowGap - 14, ArrowTop - ArrowH - 4, AdPrevCall)).Index;
-            _adNext = add.AddItem(i => touch(i, 128 + ArrowGap + 14, ArrowTop + 4, 128 + ArrowGap + ArrowW + 60, ArrowTop - ArrowH - 4, AdNextCall)).Index;
         }
 
-        private static float FriendRowY(int row) => 272 + 126 * row;
-        private static float AddRowY(int row) => 456 + 126 * row;
+        // (FriendRowY(FrRows) / AddRowY(AdRows): a row past the last, its top 16 under the list's bottom)
+        private static float FriendRowY(int row) => 272 + FrPitch * row;
+        private static float AddRowY(int row) => 456 + FrPitch * row;
+
+        // FIND A HUNTER's tabs, centred (mockup px)
+        private static float AdTabX(int tab) => 960 - (AdTabs * 424 - 24) / 2f + tab * 424;
 
         // the keypad (mockup px): 7 8 9 / 4 5 6 / 1 2 3 / 0 . back; 10 = back
         private static (float X, float Y) KeyAt(int key)
@@ -169,6 +205,8 @@ namespace MphRecomp.Frontend
         {
             foreach (int t in _frTab) like(s_onFriends, t, OptionBoxPage, _soundToggle);
             foreach (int t in _adTab) like(s_onAdd, t, OptionBoxPage, _soundToggle);
+            foreach (int a in new[] { _frUp, _frDown }) like(s_onFriends, a, OptionBoxPage, _soundToggle);
+            foreach (int a in new[] { _adUp, _adDown }) like(s_onAdd, a, OptionBoxPage, _soundToggle);
             for (int r = 0; r < FrRows; r++)
             {
                 like(s_onFriends, _frRow[r], MultiplayerMenu.CreateJoinPage, _soundListRow);
@@ -199,7 +237,8 @@ namespace MphRecomp.Frontend
         private static (float X, float W) FrTabSpot(int tab)
         {
             int slot = Math.Max(0, Array.IndexOf(FrTabsShown, tab));
-            return FrTabsShown.Length == 4 ? (130 + slot * 354, 330) : (130 + slot * 472, 448);
+            float w = FrTabsShown.Length == 4 ? 330 : 448, x0 = 960 - (FrTabsShown.Length * (w + 24) - 24) / 2; // (centred)
+            return (x0 + slot * (w + 24), w);
         }
 
         private sealed record PlayerRow(PlayerCard Card, string Line, (float R, float G, float B) LineColour, string? State,
@@ -265,31 +304,39 @@ namespace MphRecomp.Frontend
 
         private bool Sent(PlayerCard c, string kind) => _roster?.Requests.Any(q => !q.Incoming && q.Kind == kind && q.Player.Code == c.Code) ?? false;
 
-        private static int Pages(int count, int per) => Math.Max(1, (count + per - 1) / per);
-
         // ---- FRIENDS AND RIVALS ----
 
-        // focus: the row to focus (-1 = keep what's focused)
+        // focus: the row to focus (-1 = keep what's focused; when that went hidden, its row, else the tab); _frOffset is the
+        // first row on screen, kept in the list
         private void ShowFriends(MenuEngine menu, int focus)
         {
             List<PlayerRow> rows = FriendRows();
-            if (_frOffset >= rows.Count) _frOffset = 0;
+            _frOffset = Math.Clamp(_frOffset, 0, Math.Max(0, rows.Count - FrRows));
             int count = Math.Clamp(rows.Count - _frOffset, 0, FrRows);
+            int lost = -2; // the row whose button lost the focus (-1: the scroll arrows')
+            void Keep(int item, bool on, int r)
+            {
+                if (!on && item >= 0 && menu.ItemState(item) == MenuState.Focused) lost = r;
+                Show(menu, item, on);
+            }
             for (int r = 0; r < FrRows; r++)
             {
                 PlayerRow? row = r < count ? rows[_frOffset + r] : null;
-                Show(menu, _frRow[r], row != null);
+                Keep(_frRow[r], row != null, -1);
                 if (row != null && focus >= 0) menu.SetState(_frRow[r], r == Math.Min(focus, count - 1) ? MenuState.Focused : MenuState.Idle);
-                Show(menu, _frWide[r], row?.Buttons is RowButtons.Join or RowButtons.Cancel);
-                Show(menu, _frLeft[r], row?.Buttons == RowButtons.AddBoth && Addable(row.Card, LinkKind.Friend));
-                Show(menu, _frRight[r], row?.Buttons == RowButtons.AddBoth && Addable(row.Card, LinkKind.Rival));
-                Show(menu, _frOk[r], row?.Buttons == RowButtons.Answer);
-                Show(menu, _frNo[r], row?.Buttons == RowButtons.Answer);
+                Keep(_frWide[r], row?.Buttons is RowButtons.Join or RowButtons.Cancel, r);
+                Keep(_frLeft[r], row?.Buttons == RowButtons.AddBoth && Addable(row.Card, LinkKind.Friend), r);
+                Keep(_frRight[r], row?.Buttons == RowButtons.AddBoth && Addable(row.Card, LinkKind.Rival), r);
+                Keep(_frOk[r], row?.Buttons == RowButtons.Answer, r);
+                Keep(_frNo[r], row?.Buttons == RowButtons.Answer, r);
             }
+            bool scrolls = rows.Count > FrRows;
+            Keep(_frUp, scrolls, -1);
+            Keep(_frDown, scrolls, -1);
             for (int t = 0; t < FrTabs; t++) Show(menu, _frTab[t], FrTabsShown.Contains(t));
-            if (count == 0 && focus >= 0) menu.SetState(_frTab[s_frTab], MenuState.Focused);
-            int pages = Pages(rows.Count, FrRows);
-            _strings.Set(_frTitleString, pages > 1 ? $"{FriendsTitle} {_frOffset / FrRows + 1}/{pages}" : FriendsTitle);
+            if (count == 0 && (focus >= 0 || lost != -2)) menu.SetState(_frTab[s_frTab], MenuState.Focused);
+            else if (lost != -2 && focus < 0) menu.SetState(_frRow[Math.Clamp(lost, 0, count - 1)], MenuState.Focused);
+            _strings.Set(_frTitleString, FriendsTitle);
         }
 
         // (friend OR rival, vanilla: no ADD RIVAL for a friend; ADD FRIEND on a rival upgrades them)
@@ -326,17 +373,20 @@ namespace MphRecomp.Frontend
             case FrAddCall:
                 menu.GoTo(s_onAdd);
                 break;
-            case FrPrevCall:
-            case FrNextCall:
+            case FrTabPrevCall:
+            case FrTabNextCall:
             {
-                int pages = Pages(rows.Count, FrRows);
-                if (pages > 1)
-                {
-                    _frOffset = (_frOffset / FrRows + (call == FrNextCall ? 1 : pages - 1)) % pages * FrRows;
-                    ShowFriends(menu, 0);
-                }
+                int at = Math.Max(0, Array.IndexOf(FrTabsShown, s_frTab)), n = FrTabsShown.Length;
+                s_frTab = FrTabsShown[(at + (call == FrTabNextCall ? 1 : n - 1)) % n];
+                _frOffset = 0;
+                ShowFriends(menu, -1);
+                KeyClick(menu, _frTab[s_frTab]);
                 break;
             }
+            case FrUpCall:
+            case FrDownCall:
+                FriendsScrollBy(menu, call == FrDownCall ? FrRows - 1 : 1 - FrRows);
+                break;
             case >= FrRowCall and < FrRowCall + FrRows:
                 if (RowOf(FrRowCall) is PlayerRow tapped) OpenLicense(menu, tapped.Card);
                 break;
@@ -438,23 +488,126 @@ namespace MphRecomp.Frontend
             Show(menu, _adSearch, search);
             foreach (int k in _adKey.Append(_adBackspace).Append(_adOk)) Show(menu, k, code);
             List<PlayerRow> rows = AddRows();
-            if (_adOffset >= rows.Count) _adOffset = 0;
+            _adOffset = Math.Clamp(_adOffset, 0, Math.Max(0, rows.Count - AdRows));
             int count = Math.Clamp(rows.Count - _adOffset, 0, AdRows);
+            int lost = -2; // as ShowFriends'
+            void Keep(int item, bool on, int r)
+            {
+                if (!on && item >= 0 && menu.ItemState(item) == MenuState.Focused) lost = r;
+                Show(menu, item, on);
+            }
             for (int r = 0; r < AdRows; r++)
             {
                 PlayerRow? row = r < count ? rows[_adOffset + r] : null;
-                Show(menu, _adRow[r], row != null);
+                Keep(_adRow[r], row != null, -1);
                 if (row != null && focus >= 0) menu.SetState(_adRow[r], r == Math.Min(focus, count - 1) ? MenuState.Focused : MenuState.Idle);
-                Show(menu, _adLeft[r], row != null && Addable(row.Card, LinkKind.Friend));
-                Show(menu, _adRight[r], row != null && Addable(row.Card, LinkKind.Rival));
+                Keep(_adLeft[r], row != null && Addable(row.Card, LinkKind.Friend), r);
+                Keep(_adRight[r], row != null && Addable(row.Card, LinkKind.Rival), r);
             }
-            if (focus >= 0 && count == 0)
+            bool scrolls = rows.Count > AdRows;
+            Keep(_adUp, scrolls, -1);
+            Keep(_adDown, scrolls, -1);
+            if (count == 0 && (focus >= 0 || lost != -2))
             {
                 int first = search ? _adField : code ? _adKey[1] : _adTab[s_adTab];
                 menu.SetState(first, MenuState.Focused);
             }
-            int pages = Pages(rows.Count, AdRows);
-            _strings.Set(_adTitleString, pages > 1 ? $"FIND A HUNTER {_adOffset / AdRows + 1}/{pages}" : "FIND A HUNTER");
+            else if (lost != -2 && focus < 0) menu.SetState(_adRow[Math.Clamp(lost, 0, count - 1)], MenuState.Focused);
+            _strings.Set(_adTitleString, "FIND A HUNTER");
+        }
+
+        // ---- the lists' scrolling (the wheel, the right stick, a drag: FrontendSession, SectionScroll.cs; the D-pad: FriendsEdgeStep) ----
+
+        // FRIENDS or FIND A HUNTER on screen
+        public bool FriendsScrolls(MenuEngine menu) => menu.Page?.Index is int p && p >= 0 && (p == s_onFriends || p == s_onAdd);
+
+        // the list on screen: its rows, how many show at once, the first shown, its rows' top and its bottom (mockup px)
+        private (int Count, int Shown, int Offset, float Top, float Bottom) FriendsList(MenuEngine menu)
+            => menu.Page?.Index == s_onAdd ? (AddRows().Count, AdRows, _adOffset, AddRowY(0), AddRowY(AdRows) - 16)
+                : (FriendRows().Count, FrRows, _frOffset, FriendRowY(0), FriendRowY(FrRows) - 16);
+
+        // `rows` rows on (+, down the list) or back; false = not these pages
+        public bool FriendsScrollBy(MenuEngine menu, int rows)
+        {
+            if (!FriendsScrolls(menu)) return false;
+            if (rows != 0) FriendsScrollTo(menu, FriendsList(menu).Offset + rows);
+            return true;
+        }
+
+        private void FriendsScrollTo(MenuEngine menu, int to)
+        {
+            bool add = menu.Page?.Index == s_onAdd;
+            int was = add ? _adOffset : _frOffset;
+            if (add) _adOffset = to;
+            else _frOffset = to;
+            if (add) ShowAdd(menu, -1);
+            else ShowFriends(menu, -1);
+            if ((add ? _adOffset : _frOffset) != was) Redraw();
+        }
+
+        // SectionGrab on these pages: a touch on the rows (when the list scrolls) is held for a drag (1), on the scroll column's
+        // bar between its arrows (2, the thumb follows it), else 0
+        private int FriendsGrab(MenuEngine menu, float x, float y)
+        {
+            (int count, int shown, int offset, float top, float bottom) = FriendsList(menu);
+            if (count <= shown || (menu.Page?.Index == s_onAdd && s_adTab == 1) || y > My(top) || y < My(bottom)) return 0;
+            if (x >= Mx(100) && x <= Mx(FrRowX1)) _dragKind = 4;
+            else if (x >= Mx(FrScrollX0 - 8) && x <= Mx(FrScrollX1 + 8) && y < My(top + FrArrowH) && y > My(bottom - FrArrowH)) _dragKind = 5;
+            else return 0;
+            _dragY0 = y;
+            _dragScroll0 = offset;
+            return _dragKind == 4 ? 1 : 2;
+        }
+
+        // the held touch now at y (menu units, y up): the rows follow it a row per row's pitch, or the thumb does
+        private void FriendsDrag(MenuEngine menu, float y)
+        {
+            if (!FriendsScrolls(menu)) return;
+            if (_dragKind == 4)
+            {
+                FriendsScrollTo(menu, _dragScroll0 + (int)MathF.Round((y - _dragY0) / Mw(FrPitch)));
+                return;
+            }
+            (int count, int shown, _, float top, float bottom) = FriendsList(menu);
+            (float t0, float t1, float thumb, _) = FriendsBar(count, shown, 0, top, bottom);
+            float travel = t1 - t0 - thumb, at = (My(t0) - y) / Mw(1) - thumb / 2; // (mockup px down the track, the thumb's top)
+            FriendsScrollTo(menu, travel <= 0 ? 0 : (int)MathF.Round(at / travel * (count - shown)));
+        }
+
+        // the scroll column's track between its arrows and its thumb (mockup px): t0 / t1 the track's ends, the thumb's length
+        // and top
+        private static (float T0, float T1, float Thumb, float At) FriendsBar(int count, int shown, int offset, float top, float bottom)
+        {
+            float t0 = top + FrArrowH + 10, t1 = bottom - FrArrowH - 10, length = t1 - t0;
+            float thumb = MathF.Max(24, length * shown / Math.Max(1, count));
+            return (t0, t1, thumb, t0 + (length - thumb) * offset / Math.Max(1, count - shown));
+        }
+
+        // The D-pad up from the first row on screen or down from the last scrolls the list a row (focus kept on that slot's
+        // button, else its row), when there are rows that way; false = move the focus as always
+        public bool FriendsEdgeStep(MenuEngine menu, int dy)
+        {
+            if (dy == 0 || !FriendsScrolls(menu)) return false;
+            bool add = menu.Page?.Index == s_onAdd;
+            int focused = menu.FocusedItem();
+            int[][] slots = add ? new[] { _adRow, _adLeft, _adRight } : new[] { _frRow, _frWide, _frLeft, _frRight, _frOk, _frNo };
+            int kind = -1, slot = -1;
+            for (int k = 0; k < slots.Length && slot < 0; k++)
+            {
+                slot = Array.IndexOf(slots[k], focused);
+                if (slot >= 0) kind = k;
+            }
+            if (slot < 0) return false;
+            (int count, int shown, int offset, _, _) = FriendsList(menu);
+            bool step = dy > 0 ? slot == 0 && offset > 0 : slot == Math.Min(shown, count - offset) - 1 && offset + shown < count;
+            if (!step) return false;
+            FriendsScrollTo(menu, offset - dy);
+            int same = slots[kind][slot];
+            if (menu.ItemState(same) == MenuState.Hidden) same = slots[0][slot];
+            // (focus kept on the same item makes no sound in Focus: the step's own, as a row move's, owner 11-05)
+            if (same == focused) menu.Host?.OnSound(menu, MenuSounds.Neutral, "friends list step");
+            menu.Focus(same);
+            return true;
         }
 
         private void AddCall(MenuEngine menu, int call)
@@ -490,17 +643,17 @@ namespace MphRecomp.Frontend
                 if (_searchText.Length == 0) goto case AdFieldCall;
                 RunSearch();
                 break;
-            case AdPrevCall:
-            case AdNextCall:
-            {
-                int pages = Pages(rows.Count, AdRows);
-                if (pages > 1)
-                {
-                    _adOffset = (_adOffset / AdRows + (call == AdNextCall ? 1 : pages - 1)) % pages * AdRows;
-                    ShowAdd(menu, 0);
-                }
+            case AdTabPrevCall:
+            case AdTabNextCall:
+                s_adTab = (s_adTab + (call == AdTabNextCall ? 1 : AdTabs - 1)) % AdTabs;
+                _adOffset = 0;
+                ShowAdd(menu, -1);
+                KeyClick(menu, _adTab[s_adTab]);
                 break;
-            }
+            case AdUpCall:
+            case AdDownCall:
+                FriendsScrollBy(menu, call == AdDownCall ? AdRows - 1 : 1 - AdRows);
+                break;
             case >= AdKeyCall and < AdKeyCall + 10:
                 if (_codeTyped.Length >= CodeDigits) break;
                 _codeTyped += (char)('0' + call - AdKeyCall);
@@ -640,13 +793,7 @@ namespace MphRecomp.Frontend
                 TextS(first, Mx(960), My(480), 2, White, tag, SizeS);
                 TextS(Fit(second, 50), Mx(960), My(540), 2, Pale, tag, SizeM);
             }
-            int pages = Pages(rows.Count, FrRows);
-            if (pages > 1)
-            {
-                float w = _drawMenu!.Font.Measure($"{FriendsTitle} {pages}/{pages}") / 2;
-                Arrow(false, 128 - w - 22, ArrowTop + Mw(42), _frPrev);
-                Arrow(true, 128 + w + 12, ArrowTop + Mw(42), _frNext);
-            }
+            DrawFriendsScroll(rows.Count, FrRows, _frOffset, FriendRowY(0), FriendRowY(FrRows) - 16, _frUp, _frDown, tag, glows);
             if (MeCard is PlayerCard me && me.Code.Length > 0)
                 TextS("your code " + StreamerPrivacy.Code(FriendCodes.Format(me.Code)), Mx(960), My(1000), 2, Pale, tag, SizeM);
             // ADD: the person disc, its label under it
@@ -659,7 +806,7 @@ namespace MphRecomp.Frontend
         {
             int tag = _adTitle;
             string[] labels = { "search name", "friend code", "from recent" };
-            for (int t = 0; t < AdTabs; t++) Tab(300 + t * 424, 222, 400, 66, labels[t], t == s_adTab, _adTab[t], glows);
+            for (int t = 0; t < AdTabs; t++) Tab(AdTabX(t), 222, 400, 66, labels[t], t == s_adTab, _adTab[t], glows);
             if (s_adTab == 1)
             {
                 DrawCode(glows);
@@ -696,13 +843,23 @@ namespace MphRecomp.Frontend
                     : _searching ? "searching..." : _found == null ? "" : "no hunter found with that name.";
                 TextS(line, Mx(960), My(560), 2, White, tag, SizeM);
             }
-            int pages = Pages(rows.Count, AdRows);
-            if (pages > 1)
-            {
-                float w = _drawMenu!.Font.Measure($"FIND A HUNTER {pages}/{pages}") / 2;
-                Arrow(false, 128 - w - 22, ArrowTop, _adPrev);
-                Arrow(true, 128 + w + 12, ArrowTop, _adNext);
-            }
+            DrawFriendsScroll(rows.Count, AdRows, _adOffset, AddRowY(0), AddRowY(AdRows) - 16, _adUp, _adDown, tag, glows);
+        }
+
+        // the list's scroll column right of its rows (as CHAT's): the up and down arrow boxes (dim when nothing is that way),
+        // between them the bar with its orange thumb; nothing when every row fits
+        private void DrawFriendsScroll(int count, int shown, int offset, float top, float bottom, int up, int down, int tag,
+            Dictionary<int, List<WidgetTri>> glows)
+        {
+            if (count <= shown) return;
+            float cx = (FrScrollX0 + FrScrollX1) / 2;
+            Bar(Mx(FrScrollX0), My(top), Mx(FrScrollX1), My(top + FrArrowH), up, glows);
+            ChatArrow(true, Mx(cx), My(top + FrArrowH / 2), offset > 0, up);
+            Bar(Mx(FrScrollX0), My(bottom - FrArrowH), Mx(FrScrollX1), My(bottom), down, glows);
+            ChatArrow(false, Mx(cx), My(bottom - FrArrowH / 2), offset + shown < count, down);
+            (float t0, float t1, float thumb, float at) = FriendsBar(count, shown, offset, top, bottom);
+            Fill(Mx(cx - 4), My(t0), Mx(cx + 4), My(t1), 0, 0, 0, 0.35f, tag);
+            Fill(Mx(cx - 4), My(at), Mx(cx + 4), My(at + thumb), Orange.R, Orange.G, Orange.B, 1, tag);
         }
 
         // FRIEND CODE: YOUR CODE and NEW CODE cards (as ENTER NEW CODE's), the keypad, OK
@@ -744,7 +901,7 @@ namespace MphRecomp.Frontend
             }
             Model(@"gameoptions\ok", Mx(1640), My(616), Mw(130), Mw(130), _adOk, alpha: _codeTyped.Length == CodeDigits ? 1 : 0.5f);
             Glow(glows, _adOk, Mx(1640), My(616), Mx(1770), My(746), _adOk);
-            TextS("enter their code. when they enter yours too, you're friends.", Mx(960), My(940), 2, Pale, tag, SizeX);
+            TextS("OK sends them a friend request. if they've already entered yours, you become friends.", Mx(960), My(940), 2, Pale, tag, SizeX);
         }
 
         // a tab: a black box, the active one glowing with the blue dot under it
@@ -766,9 +923,9 @@ namespace MphRecomp.Frontend
         {
             int tag = rowItem;
             PlayerCard c = row.Card;
-            Fill(Mx(100), My(by), Mx(1820), My(by + 110), 0, 0, 0, 0.35f, tag);
-            Box(Mx(100), My(by), Mx(1820), My(by + 110), tag);
-            Glow(glows, tag, Mx(100), My(by), Mx(1820), My(by + 110), tag);
+            Fill(Mx(100), My(by), Mx(FrRowX1), My(by + 110), 0, 0, 0, 0.35f, tag);
+            Box(Mx(100), My(by), Mx(FrRowX1), My(by + 110), tag);
+            Glow(glows, tag, Mx(100), My(by), Mx(FrRowX1), My(by + 110), tag);
             if (LicensePick(c.License) is not { } pick || !SeatIcon(pick, Mx(116), My(by + 8), Mw(94), tag)) // (their hunter of choice)
             {
                 PersonDisc(Mx(116), My(by + 8), Mw(94), tag, row.Dim ? 0.4f : 1); // (offline: darker)
@@ -785,20 +942,20 @@ namespace MphRecomp.Frontend
             switch (row.Buttons)
             {
             case RowButtons.Join:
-                Capsule(Mx(1520), My(by + 24), Mw(270), Mw(62), "join", JoinBlock(c.GameId) == null, wide, glows, SizeM);
+                Capsule(Mx(FrRowX1 - 300), My(by + 24), Mw(270), Mw(62), "join", JoinBlock(c.GameId) == null, wide, glows, SizeM);
                 break;
             case RowButtons.Cancel:
-                PxButton(1520, by + 24, 270, 62, "cancel", SizeM, wide, glows);
+                PxButton(FrRowX1 - 300, by + 24, 270, 62, "cancel", SizeM, wide, glows);
                 break;
             case RowButtons.Answer:
-                Model(@"gameoptions\ok", Mx(1560), My(by + 8), Mw(94), Mw(94), ok);
-                Glow(glows, ok, Mx(1560), My(by + 8), Mx(1654), My(by + 102), ok);
-                Model(@"gameoptions\cancel", Mx(1680), My(by + 8), Mw(94), Mw(94), no);
-                Glow(glows, no, Mx(1680), My(by + 8), Mx(1774), My(by + 102), no);
+                Model(@"gameoptions\ok", Mx(FrRowX1 - 260), My(by + 8), Mw(94), Mw(94), ok);
+                Glow(glows, ok, Mx(FrRowX1 - 260), My(by + 8), Mx(FrRowX1 - 166), My(by + 102), ok);
+                Model(@"gameoptions\cancel", Mx(FrRowX1 - 140), My(by + 8), Mw(94), Mw(94), no);
+                Glow(glows, no, Mx(FrRowX1 - 140), My(by + 8), Mx(FrRowX1 - 46), My(by + 102), no);
                 break;
             case RowButtons.AddBoth:
-                LinkSlot(c, LinkKind.Friend, 1300, by + 24, left, glows);
-                LinkSlot(c, LinkKind.Rival, 1560, by + 24, right, glows);
+                LinkSlot(c, LinkKind.Friend, FrRowX1 - 520, by + 24, left, glows);
+                LinkSlot(c, LinkKind.Rival, FrRowX1 - 260, by + 24, right, glows);
                 break;
             }
         }

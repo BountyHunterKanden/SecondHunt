@@ -34,12 +34,13 @@ public class NCSFFile
     const int ProgramSizeOffset = 8;
     const int ProgramHeaderSize = 12;
 
-    readonly List<byte> rawData = [];
     readonly List<byte> reservedSection = [];
-    readonly List<byte> programSection = [];
+    byte[] programSection = []; // ncsf-change: the inflated array itself (no List copy, no rawData copy: ~4 x the
+                                // library's size in garbage per song, a GC hitch on Android at every music change)
 
     public string FilePath { get; }
-    public ReadOnlySpan<byte> ProgramSection => this.programSection.AsSpan();
+    public ReadOnlySpan<byte> ProgramSection => this.programSection;
+    internal byte[] ProgramArray => this.programSection;
     public ReadOnlySpan<byte> ReservedSection => this.reservedSection.AsSpan();
     public TagList Tags { get; private set; } = [];
 
@@ -117,8 +118,6 @@ public class NCSFFile
 
         uint reservedSize = BinaryPrimitives.ReadUInt32LittleEndian(fileBytes[0x04..]);
         uint programCompressedSize = BinaryPrimitives.ReadUInt32LittleEndian(fileBytes[0x08..]);
-        CollectionsMarshal.SetCount(this.rawData, fileBytes.Length);
-        fileBytes.CopyTo(this.rawData.AsSpan());
 
         if (!readTagsOnly)
         {
@@ -130,10 +129,8 @@ public class NCSFFile
 
             if (programCompressedSize != 0)
             {
-                Span<byte> programSection = NCSFCommon.NCSF.GetProgramSectionFromPSF(fileBytes, NCSFFile.VersionByte,
+                this.programSection = NCSFCommon.NCSF.GetProgramSectionFromPSF(fileBytes, NCSFFile.VersionByte,
                     NCSFFile.ProgramHeaderSize, NCSFFile.ProgramSizeOffset);
-                CollectionsMarshal.SetCount(this.programSection, programSection.Length);
-                programSection.CopyTo(this.programSection.AsSpan());
             }
         }
 
@@ -146,4 +143,25 @@ public class NCSFFile
     }*/
 
     public NCSFFile(string path) => this.ReadNCSF(this.FilePath = path);
+
+    // ncsf-change: a library (_lib) file read once and kept: every song of a game points at the same multi-MB
+    // library, and reading + inflating it again for each song was the garbage behind the music-change hitch. The
+    // file is never changed after it is read, so streams share it; a changed file on disk (size/time) reads again.
+    static readonly Dictionary<string, (long Length, DateTime Time, NCSFFile File)> shared = [];
+
+    public static NCSFFile Shared(string path)
+    {
+        var info = new FileInfo(path);
+        long length = info.Length;
+        DateTime time = info.LastWriteTimeUtc;
+        lock (NCSFFile.shared)
+        {
+            if (NCSFFile.shared.TryGetValue(path, out var hit) && hit.Length == length && hit.Time == time)
+                return hit.File;
+        }
+        NCSFFile file = new(path);
+        lock (NCSFFile.shared)
+            NCSFFile.shared[path] = (length, time, file);
+        return file;
+    }
 }

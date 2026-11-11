@@ -267,6 +267,34 @@ namespace MphRecomp.Frontend
                 }
             }
             if (queued > 0) Log?.Invoke($"multiplayer: {queued} character picture(s) queued ahead of SELECT HUNTER");
+            BakeAllColours();
+        }
+
+        // dev: a file named bake_colours in the pictures folder queues every hunter and skin in all 8 lobby colours (the
+        // badge eyedropper page's pictures, pulled from cache/characters), once per run
+        private bool _coloursBaked;
+
+        private void BakeAllColours()
+        {
+            if (_coloursBaked || MphRecomp.Config.RecompSettings.PublicBuild || !File.Exists(Path.Combine(PickerPicturesDir!, "bake_colours"))) return;
+            _coloursBaked = true;
+            var seats = new List<MatchPlayer>();
+            foreach (Hunter h in new[] { Hunter.Samus, Hunter.Kanden, Hunter.Trace, Hunter.Sylux, Hunter.Noxus, Hunter.Spire, Hunter.Weavel })
+            {
+                seats.Add(new MatchPlayer { Hunter = h });
+            }
+            foreach (Character c in new[] { Characters.Samus, Characters.Trooper, Characters.DarkSamus, Characters.Sylux })
+            {
+                foreach (string skin in SkinsOf(c).Where(s => !Characters.IsOriginal(s)))
+                {
+                    seats.Add(new MatchPlayer { Hunter = c.Base, Character = Characters.IdFor(c.Base, skin), Skin = skin });
+                }
+            }
+            foreach (MatchPlayer p in seats)
+            {
+                for (int copy = 0; copy < LookAlikes.Colours; copy++) CharacterPictures.ForColour(PickerHdRoot, PickerPicturesDir, p, copy);
+            }
+            Log?.Invoke($"multiplayer: bake_colours: {seats.Count} looks x {LookAlikes.Colours} colours queued");
         }
 
         // ---- calls (SELECT HUNTER) ----
@@ -346,6 +374,38 @@ namespace MphRecomp.Frontend
                 });
             }
             return (players, index);
+        }
+
+        // the lobby's seat colours for drawing, worked out again only when a seat changes (or each second, for a look
+        // imported meanwhile): the new players and look keys every frame were the lobby's garbage (the freezes, 2026-11-11)
+        private static (List<MatchPlayer> Players, int[] Index, int[] Held)? _lobbyColours;
+        private static long _lobbyColoursAt;
+
+        private static (List<MatchPlayer> Players, int[] Index, int[] Held) LobbyColours()
+        {
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (_lobbyColours is { } kept && SameSeats(kept.Players, kept.Index) && now - _lobbyColoursAt < System.Diagnostics.Stopwatch.Frequency)
+            {
+                return kept;
+            }
+            (List<MatchPlayer> players, int[] index) = LobbyPlayers();
+            _lobbyColoursAt = now;
+            return (_lobbyColours = (players, index, LookAlikes.CopyIndices(players))).Value;
+        }
+
+        private static bool SameSeats(List<MatchPlayer> players, int[] index)
+        {
+            if (index.Length != _setup.Seats.Length) return false;
+            for (int s = 0; s < index.Length; s++)
+            {
+                Seat seat = _setup.Seats[s];
+                if (seat.Used != index[s] >= 0) return false;
+                if (!seat.Used) continue;
+                MatchPlayer p = players[index[s]];
+                if (p.Hunter != seat.Hunter || p.Bot != seat.Bot || p.Remote != seat.Remote || p.Skin != seat.Skin
+                    || p.Character != seat.Character || p.ColourPick != seat.ColourPick) return false;
+            }
+            return true;
         }
 
         // the colour pop-up: the game's question box (MenuPopup) holding the seat's look standing in a colour between two
@@ -509,6 +569,7 @@ namespace MphRecomp.Frontend
 
         private ((byte R, byte G, byte B) A, (byte R, byte G, byte B) B) BadgePair(MenuEngine menu, MatchPlayer p, int colour)
         {
+            if (HandBadge(p, colour) is { } hand) return hand; // the owner's picks (MultiplayerMenu.BadgeColours.cs)
             ((byte, byte, byte) A, (byte, byte, byte) B) pair = ((110, 110, 110), (60, 60, 60)); // (until its picture is drawn)
             string what = p.Skin ?? p.Hunter.ToString();
             if (CharacterPictures.ForColour(PickerHdRoot, PickerPicturesDir, p, colour) is { } pics && BodyTextureAt(menu, pics.Full, what) != null)
@@ -1085,12 +1146,7 @@ namespace MphRecomp.Frontend
             EnsureRims(menu);
             bool joiner = menu.Page!.Index == JoinLobbyPage;
             // the colours the seats wear now (none in a team game: the team colours)
-            (List<MatchPlayer> Players, int[] Index, int[] Held)? colours = null;
-            if (!TeamLobby)
-            {
-                (List<MatchPlayer> players, int[] index) = LobbyPlayers();
-                colours = (players, index, LookAlikes.CopyIndices(players));
-            }
+            (List<MatchPlayer> Players, int[] Index, int[] Held)? colours = TeamLobby ? null : LobbyColours();
             for (int s = 0; s < _setup.Seats.Length; s++)
             {
                 Seat seat = _setup.Seats[s];
@@ -1247,9 +1303,18 @@ namespace MphRecomp.Frontend
         {
             var icon = hunter == Hunter.Samus ? _rim : hunter == Hunter.Sylux ? _syluxIcon : null;
             if (icon is not { } rim) return -1;
-            string key = "character icon rom " + hunter.ToString().ToLowerInvariant();
-            return menu.Widgets.Textures.GetOrAdd(key, () => (128, 128, ComposeIcon(rim, null, grey: false, keepFace: true))).Id;
+            // (the key kept per hunter, and the texture looked up before a closure is made: no garbage per frame)
+            if (!_romIconKeys.TryGetValue(hunter, out string? key))
+            {
+                _romIconKeys[hunter] = key = "character icon rom " + hunter.ToString().ToLowerInvariant();
+            }
+            return menu.Widgets.Textures.TryGet(key, out UiTexture? known) ? known!.Id : AddRomIcon(menu, key, rim);
         }
+
+        private readonly Dictionary<Hunter, string> _romIconKeys = new();
+
+        private int AddRomIcon(MenuEngine menu, string key, (byte[] Rgba, int W, int H, float U0, float V0, float U1, float V1) rim)
+            => menu.Widgets.Textures.GetOrAdd(key, () => (128, 128, ComposeIcon(rim, null, grey: false, keepFace: true))).Id;
 
         // any hunter's SELECT HUNTER icon (the menu-art chooser's DS bodies); -1 before the hunter page is loaded
         private int HunterIconTexture(MenuEngine menu, Hunter hunter)
@@ -1389,6 +1454,27 @@ namespace MphRecomp.Frontend
             return (t0.Rgba, t0.Width, t0.Height, u0, v0, u1, v1);
         }
 
+        private readonly Dictionary<string, string> _iconKeys = new(StringComparer.Ordinal);
+
+        private string IconKey(string head)
+        {
+            if (!_iconKeys.TryGetValue(head, out string? key)) _iconKeys[head] = key = "character icon " + head;
+            return key;
+        }
+
+        private int AddIcon(MenuEngine menu, string key, (byte[] Rgba, int W, int H, float U0, float V0, float U1, float V1) rim,
+            (string Full, string Head)? pics, bool grey)
+            => menu.Widgets.Textures.GetOrAdd(key, () =>
+            {
+                (byte[] Px, int W, int H)? head = null;
+                if (pics is { } q)
+                {
+                    byte[] px = MphRecomp.Import.PngOut.Read(q.Head, out int w, out int h);
+                    head = (px, w, h);
+                }
+                return (128, 128, ComposeIcon(rim, head, grey, keepFace: false));
+            }).Id;
+
         // a skin's round icon (A2: the ROM rim around its head picture, 128 px) or B1's greyed one (the dark rim, dark
         // inside; the "?" is drawn over it in the font); without its picture yet, the rim around a dark inside
         private int IconTexture(MenuEngine menu, string? skin, bool grey)
@@ -1396,19 +1482,11 @@ namespace MphRecomp.Frontend
             var rim = grey ? _greyRim : _rim;
             if (rim == null) return -1;
             (string Full, string Head)? pics = grey ? null : CharacterPictures.For(PickerHdRoot, PickerPicturesDir, skin);
-            string key = grey ? "character icon grey" : pics is { } p ? "character icon " + p.Head : "character icon empty";
+            string key = grey ? "character icon grey" : pics is { } p ? IconKey(p.Head) : "character icon empty";
+            if (menu.Widgets.Textures.TryGet(key, out UiTexture? known)) return known!.Id; // (no closure or key per frame)
             try
             {
-                return menu.Widgets.Textures.GetOrAdd(key, () =>
-                {
-                    (byte[] Px, int W, int H)? head = null;
-                    if (pics is { } q)
-                    {
-                        byte[] px = MphRecomp.Import.PngOut.Read(q.Head, out int w, out int h);
-                        head = (px, w, h);
-                    }
-                    return (128, 128, ComposeIcon(rim.Value, head, grey, keepFace: false));
-                }).Id;
+                return AddIcon(menu, key, rim.Value, pics, grey);
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
             {
@@ -1504,12 +1582,20 @@ namespace MphRecomp.Frontend
                 z = tris[t].Z;
                 break;
             }
-            var quad = new List<WidgetTri>();
+            List<WidgetTri> quad = _bodyQuad; // (kept, and no lambda: Body runs per seat per frame)
+            quad.Clear();
             if (at < 0 || !BodyQuad(menu, item, skin!, fit, alpha, z, quad)) return;
-            tris.RemoveAll(t => t.Item == item);
+            int kept = 0;
+            for (int t = 0; t < tris.Count; t++)
+            {
+                if (tris[t].Item != item) tris[kept++] = tris[t];
+            }
+            tris.RemoveRange(kept, tris.Count - kept);
             at = Math.Min(at, tris.Count);
             tris.InsertRange(at, quad);
         }
+
+        private readonly List<WidgetTri> _bodyQuad = new();
 
         // the skin's whole-body picture as a quad, its body fitted into `fit` (as Body's), at that alpha and depth
         private bool BodyQuad(MenuEngine menu, int item, string skin, (float X, float Bottom, float W, float H) fit, float alpha, float z,

@@ -16,6 +16,10 @@ namespace MphRead.Entities
         // gunship cockpit view, where vanilla spawns her only when she steps out of the ship. Default off.
         public static bool HostHoldMainSpawn { get; set; }
 
+        // host hook: no respawn within this distance of an octolith sitting on its pedestal (the enemy team's in
+        // Capture). Set per arena by its placement file (PlacedPickups.Extra, Mining Plaza owner 2026-11-06). 0 = off.
+        public static float HostOctolithSpawnClear { get; set; }
+
         // host hook: no "press FIRE to begin / respawn" prompt (a replay's viewer can't press anything; MatchReplay.cs).
         // The HUD only: the match plays the same. Default off.
         public static bool HostNoRespawnPrompt { get; set; }
@@ -54,6 +58,7 @@ namespace MphRead.Entities
             HyperBallProcess(); // recomp: Dark Samus's Hyper Ball (PlayerHyperBall.cs)
             FirstHuntFrame(); // recomp: a First Hunt level's match rules (FirstHunt/PlayerFirstHunt.cs)
             PrimeMapPieceFrame(); // recomp: the map's corridors/chambers she enters (PlayerPrimeHud.cs)
+            RagdollStep(); // recomp: the DEATH look option's RAGDOLL (PlayerRagdoll.cs), off unless dying with it
             if (Flags2.TestFlag(PlayerFlags2.UnequipOmegaCannon))
             {
                 UnequipOmegaCannon();
@@ -133,6 +138,8 @@ namespace MphRead.Entities
             Flags1 &= ~PlayerFlags1.ShotMissile;
             Flags1 &= ~PlayerFlags1.ShotUncharged;
             _crushBits = 0;
+            _crushedBefore = _crushedNow;
+            _crushedNow = false;
             if (_respawnTimer > 0)
             {
                 _respawnTimer--;
@@ -167,8 +174,8 @@ namespace MphRead.Entities
                         if (targetTeleporter != null)
                         {
                             targetTeleporter.SetTriggered();
-                            Spawn(targetTeleporter.Position, targetTeleporter.FacingVector,
-                                targetTeleporter.UpVector, targetTeleporter.NodeRef, respawn: true);
+                            Spawn(targetTeleporter.Position, targetTeleporter.ArrivalFlipped ? -targetTeleporter.FacingVector
+                                : targetTeleporter.FacingVector, targetTeleporter.UpVector, targetTeleporter.NodeRef, respawn: true);
                             if (GameState.TransitionAltForm)
                             {
                                 TrySwitchForms(force: true);
@@ -783,6 +790,7 @@ namespace MphRead.Entities
             {
                 UpdateAnimFrames(_bipedModel1);
                 UpdateAnimFrames(_bipedModel2);
+                DeathOrbFrames(); // recomp: DEATH's VANILLA ORBS clips under the collapse (PlayerDeathAnim.cs)
             }
             if ((IsAltForm || IsMorphing) && _frozenTimer == 0)
             {
@@ -1229,7 +1237,7 @@ namespace MphRead.Entities
             {
                 _soundSource.PlaySfx(SfxId.JUMP_PAD);
             }
-            // recomp: an octolith carrier on a placed pad is too heavy: a small hop off it toward the pad's
+            // recomp: an octolith carrier on a placed pad is too heavy (owner 2026-11-01): a small hop off it toward the pad's
             // aim, a fifth of its push across and a quarter up (at most a jump), and the stick back after MPH's minimum
             bool heavy = jumpPad.HostHeavyCarry && OctolithFlag != null;
             if (heavy)
@@ -1333,6 +1341,10 @@ namespace MphRead.Entities
                     }
                 }
 
+                if (GameFilters.Pickup && !GameFilters.AllowPickup(SlotIndex, item.ItemType.ToString()))
+                {
+                    continue; // mph-recomp: a gameplay mod's pickup filter refused it (GameFilters.cs)
+                }
                 bool pickedUp = false;
                 switch (item.ItemType)
                 {
@@ -1493,6 +1505,7 @@ namespace MphRead.Entities
                 if (pickedUp)
                 {
                     item.OnPickedUp();
+                    if (GameEvents.Any) GameEvents.Raise("pickup", SlotIndex, item.ItemType.ToString()); // recomp: mod event (GameEvents.cs)
                 }
             }
         }
@@ -1644,7 +1657,7 @@ namespace MphRead.Entities
                     || HostSeated || HostSlotHeld // recomp: no switching in the turret or its bomb slot (a bot's touch buttons come here; PlayerEchoesSeat.cs)
                     || DroneSwitchWaiting)) // recomp: the Trooper's wait between splits and merges (PlayerScoutDrone.cs)
             {
-                if (IsMainPlayer && (CameraSequence.Current == null || !CameraSequence.Current.BlockInput))
+                if (IsMainPlayer && SoundViewer && (CameraSequence.Current == null || !CameraSequence.Current.BlockInput)) // recomp: SoundViewer
                 {
                     _soundSource.PlayFreeSfx(SfxId.BEAM_SWITCH_FAIL);
                 }
@@ -1699,7 +1712,8 @@ namespace MphRead.Entities
             _gunDrawPos.Y += Fixed.ToFloat(20) * cos;
             _aimVec = _aimPosition - _gunDrawPos;
             float dot = Vector3.Dot(_aimVec, facing);
-            Vector3 vec = facing * dot;
+            // recomp: on an Echoes grapple's rope the gun points right at the aim, off the view's middle (PlayerGrapple.cs)
+            Vector3 vec = GrappleViewActive ? _aimVec : facing * dot;
             _aimVec = (_aimVec + (vec - _aimVec) / 2).Normalized();
             _muzzlePos = _gunDrawPos + _aimVec * Fixed.ToFloat(Values.MuzzleOffset);
         }
@@ -1757,6 +1771,11 @@ namespace MphRead.Entities
                     var rotAxis = DetMatrix.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(angle));
                     transform *= rotAxis;
                 }
+                if (SpiderAttached)
+                {
+                    // recomp: on a spider track the top spins about the track's up (PlayerSpiderBall.cs)
+                    transform *= GetTransformMatrix(SpiderFacing(new Vector3(_field80, 0, _field84)), SpiderNormal);
+                }
                 _modelTransform = transform;
             }
             else if (Hunter == Hunter.Kanden)
@@ -1767,7 +1786,14 @@ namespace MphRead.Entities
             {
                 Vector3 axis = Vector3.Zero;
                 float altRadius = Fixed.ToFloat(Values.AltColRadius);
-                if (Hunter == Hunter.Spire || Flags1.TestFlag(PlayerFlags1.CollidingEntity))
+                if (SpiderAttached)
+                {
+                    // recomp: on a spider track it rolls over the track, about the track's up x its motion (PlayerSpiderBall.cs)
+                    Vector3 delta = Hunter == Hunter.Spire || Flags1.TestFlag(PlayerFlags1.CollidingEntity)
+                        ? Speed / 2 : Position - PrevPosition; // todo: FPS stuff
+                    axis = Vector3.Cross(SpiderNormal, delta) * altRadius;
+                }
+                else if (Hunter == Hunter.Spire || Flags1.TestFlag(PlayerFlags1.CollidingEntity))
                 {
                     // todo: FPS stuff
                     axis.X = altRadius * (Speed.Z / 2);
@@ -1821,12 +1847,20 @@ namespace MphRead.Entities
             }
             else
             {
-                _modelTransform = GetTransformMatrix(new Vector3(_field80, 0, _field84), Vector3.UnitY);
+                // recomp: on a spider track the walker stands on it, up = the track's up (PlayerSpiderBall.cs)
+                _modelTransform = SpiderAttached
+                    ? GetTransformMatrix(SpiderFacing(new Vector3(_field80, 0, _field84)), SpiderNormal)
+                    : GetTransformMatrix(new Vector3(_field80, 0, _field84), Vector3.UnitY);
             }
         }
 
         private void UpdateStinglarvaSegments()
         {
+            if (SpiderAttached) // recomp: on a spider track the body lies on it (PlayerSpiderBall.cs)
+            {
+                SpiderStinglarvaSegments();
+                return;
+            }
             const int cycle = 13 * 2; // todo: FPS stuff
             float angle = 359f * (_scene.FrameCount % cycle) / (cycle - 1);
             float factor = 0.3f * MathF.Sin(MathHelper.DegreesToRadians(angle)) * _hSpeedMag;
@@ -1998,6 +2032,7 @@ namespace MphRead.Entities
 
         private void UpdateForm(bool altForm)
         {
+            if (GameEvents.Any) GameEvents.Raise("alt_form", SlotIndex, altForm); // recomp: mod event (GameEvents.cs)
             if (altForm)
             {
                 Flags1 |= PlayerFlags1.AltForm;
@@ -2189,6 +2224,11 @@ namespace MphRead.Entities
                     limit++;
                     continue;
                 }
+                if (HostOctolithSpawnClear > 0 && NearOctolithAtBase(candidate))
+                {
+                    limit++;
+                    continue;
+                }
                 float minDistSqr = 100;
                 foreach (PlayerEntity player in _scene.GetPlayerEntities())
                 {
@@ -2222,11 +2262,39 @@ namespace MphRead.Entities
             {
                 chosenSpawn = bestAvailable;
             }
+            if (GameFilters.SpawnPoint) // mph-recomp: gameplay mods' spawn_point filter (GameFilters.cs)
+            {
+                var all = new List<PlayerSpawnEntity>();
+                foreach (PlayerSpawnEntity spawn in _scene.GetPlayerSpawnEntities())
+                {
+                    all.Add(spawn);
+                }
+                int picked = GameFilters.SpawnIndex(SlotIndex, chosenSpawn == null ? -1 : all.IndexOf(chosenSpawn), all.Count);
+                if (picked >= 0 && picked < all.Count)
+                {
+                    chosenSpawn = all[picked];
+                }
+            }
             if (chosenSpawn != null)
             {
                 chosenSpawn.Cooldown = 2 * 2; // todo: FPS stuff
             }
             return chosenSpawn;
+        }
+
+        private bool NearOctolithAtBase(PlayerSpawnEntity candidate)
+        {
+            float clearSqr = HostOctolithSpawnClear * HostOctolithSpawnClear;
+            foreach (EntityBase entity in _scene.Entities)
+            {
+                if (entity is OctolithFlagEntity octolith && octolith.AtBase
+                    && (GameState.Mode != GameMode.Capture || octolith.Data.TeamId != TeamIndex)
+                    && Vector3.DistanceSquared(candidate.Position, octolith.BasePosition) < clearSqr)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private int GetTimeUntilRespawn()

@@ -51,7 +51,8 @@ namespace MphRecomp.Config
             DroneFire = "dronefire", DroneLaser = "dronelaser", DroneRise = "dronerise",
             PowerBeam = "powerbeam", VoltDriver = "voltdriver", Battlehammer = "battlehammer", Imperialist = "imperialist",
             Judicator = "judicator", Magmaul = "magmaul", ShockCoil = "shockcoil", OmegaCannon = "omegacannon",
-            PirateBlaster = "pirateblaster", ZoomIn = "zoomin", ZoomOut = "zoomout";
+            PirateBlaster = "pirateblaster", ZoomIn = "zoomin", ZoomOut = "zoomout", Spider = "spider",
+            Gyro = "gyro", SlowMove = "slowmove";
 
         // the weapon functions (the keyboard's WEAPONS section) and the weapon each picks (MphRead BeamType's number)
         public static readonly (string Id, int Beam)[] WeaponPicks =
@@ -74,6 +75,8 @@ namespace MphRecomp.Config
             new(Scan, "scan", "with the scan visor on hold to scan.", new[] { "Y", "L2" }),
             new(Zoom, "imp\nzoom", "zooms in with the imperialist. if this button is also assigned to weapon ring, the weapon ring will "
                 + "require a short hold to appear when imp is equipped.", new[] { "L2" }, Touch: new[] { "Y" }),
+            // (owner 2026-11-06, docs/SPIDER_BALL.md: hold L2 in alt form; read only there, where the weapon ring stays shut)
+            new(Spider, "spider\nball", "in alt form on a spider track (sidehopper station, spider complex), hold to cling to the track and move over it like ground. boost to jump off it.", new[] { "L2" }),
             // (owner 2026-10-17: the D-pad by default; only while zoomed, and then they do nothing else)
             new(ZoomIn, "zoom\nin", "with zoom step on, this button will perform the same auto zoom vanilla does when a target is in "
                 + "sight, but only when you press it while the reticle is lit.", new[] { "DpadUp" }, ZoomStep),
@@ -92,6 +95,9 @@ namespace MphRecomp.Config
             new(Talk, "push to\ntalk", "online voice chat: hold to talk.", new[] { "ThumbR" }, Common),
             new(Map, "map", "in the campaign, opens the map.", new[] { "Select" }, Common),
             new(Scoreboard, "scoreboard", "in a match, hold for the live scoreboard.", new[] { "Select" }, Common),
+            // (finRatman via owner 11-07: hold or toggle gyro aim; no default button; on CONTROLS > GYRO under GYRO BUTTON,
+            // RecompSettings.GyroButton says what it does)
+            new(Gyro, "gyro", "the gyro button: holds, pauses or toggles gyro aim, as gyro button says.", Array.Empty<string>(), Common),
             // the Trooper's Scout Drone (2026-10-11: its own buttons, read while the drone is out; deploy / recall is MORPH,
             // 2026-10-19)
             new(DroneFire, "drone\nblasters", "hold to unfold the drone's blasters and fire.", new[] { "R2", "B" }, Drone),
@@ -105,9 +111,14 @@ namespace MphRecomp.Config
             new(Back, "move\nback", "walks back. in the morph ball, rolls.", new[] { "S" }, Common),
             new(Left, "move\nleft", "steps left. in the morph ball, rolls.", new[] { "A" }, Common),
             new(Right, "move\nright", "steps right. in the morph ball, rolls.", new[] { "D" }, Common),
+            // (owner 2026-11-09: subtle moves on a keyboard, walking and every alt form; KeyboardMouseInput.SlowMove)
+            new(SlowMove, "slow\nmove", "hold with the movement keys to walk and roll slower, for careful moves on ledges and small "
+                + "platforms. how slow: aim > slow move speed.", new[] { "LeftShift" }, Common),
             new(Fire, "fire", "fires your weapon. in the morph ball, lays bombs.", new[] { "Mouse.Left" }),
             // (owner 2026-10-17, C10: zoom / scan and bombs / scan split; right click still zooms and scans, Q bombs and scans)
             new(Zoom, "imp\nzoom", "zooms in with the imperialist.", new[] { "Mouse.Right" }),
+            // (owner 2026-11-06, docs/SPIDER_BALL.md: hold right click in alt form)
+            new(Spider, "spider\nball", "in alt form on a spider track (sidehopper station, spider complex), hold to cling to the track and move over it like ground. boost to jump off it.", new[] { "Mouse.Right" }),
             new(Scan, "scan", "with the scan visor on hold to scan.", new[] { "Mouse.Right", "Q" }),
             new(ZoomIn, "zoom\nin", "with zoom step on, this key will perform the same auto zoom vanilla does when a target is in "
                 + "sight, but only when you press it while the reticle is lit.", new[] { "R" }, ZoomStep),
@@ -159,6 +170,7 @@ namespace MphRecomp.Config
         private static readonly (string, string)[] Together =
         {
             (WeaponMenu, Scan), (WeaponMenu, Zoom), (Scan, Zoom), (Scan, Bombs), (Map, Scoreboard),
+            (Spider, WeaponMenu), (Spider, Zoom), (Spider, Scan), // (the spider ball: only in alt form, where these aren't)
         };
 
         private static bool WorkTogether(string a, string b) => Array.Exists(Together, p => p == (a, b) || p == (b, a));
@@ -256,9 +268,13 @@ namespace MphRecomp.Config
             else BindsOf(s, keys)[id] = buttons;
         }
 
-        public static void Reset(RecompSettings s, bool keys) => BindsOf(s, keys).Clear();
+        // (keep: a function left as it is, one on another sub-tab: the GYRO button)
+        public static void Reset(RecompSettings s, bool keys, string? keep = null)
+        {
+            foreach (string id in BindsOf(s, keys).Keys.Where(id => id != keep).ToList()) BindsOf(s, keys).Remove(id);
+        }
 
-        public static bool IsDefault(RecompSettings s, bool keys) => BindsOf(s, keys).Count == 0;
+        public static bool IsDefault(RecompSettings s, bool keys, string? keep = null) => BindsOf(s, keys).Keys.All(id => id == keep);
 
         // one function's RESET (owner 2026-10-26): back to its own default buttons
         public static void ResetOne(RecompSettings s, bool keys, string id) => BindsOf(s, keys).Remove(id);

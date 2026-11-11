@@ -639,9 +639,19 @@ namespace MphRead
             return results;
         }
 
+        // mod content (Core Mods/ModContent.cs): a mod's copy of the game file at this full path, or null = the game's own.
+        // Null (the default) = no mod files mounted, reads unchanged.
+        public static Func<string, byte[]?>? HostReadFile;
+
         public static ReadOnlySpan<byte> ReadBytes(string path, bool firstHunt)
         {
-            return new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(firstHunt ? Paths.FhFileSystem : Paths.FileSystem, path)));
+            return new ReadOnlySpan<byte>(ReadFileBytes(Paths.Combine(firstHunt ? Paths.FhFileSystem : Paths.FileSystem, path)));
+        }
+
+        // File.ReadAllBytes with the mod content hook (for loaders that build the full path themselves)
+        public static byte[] ReadFileBytes(string fullPath)
+        {
+            return HostReadFile?.Invoke(fullPath) ?? File.ReadAllBytes(fullPath);
         }
 
         private static IReadOnlyList<TextureData> GetTextureData(Texture texture, ReadOnlySpan<byte> textureBytes)

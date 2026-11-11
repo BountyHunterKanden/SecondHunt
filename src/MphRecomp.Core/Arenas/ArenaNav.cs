@@ -179,7 +179,8 @@ namespace MphRecomp.Arenas
 
         public static Graph Build(ArenaRaycaster ray, IReadOnlyList<Vector3> anchors, float killHeight,
             IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null,
-            Vector2? gridOrigin = null, bool echoesMoves = true, float padReach = 0, int heavyFrom = int.MaxValue, bool carrier = false)
+            Vector2? gridOrigin = null, bool echoesMoves = true, float padReach = 0, int heavyFrom = int.MaxValue, bool carrier = false,
+            IReadOnlyList<(Vector3 Min, Vector3 Max)>? noBots = null)
         {
             var g = new Graph();
             bool Wet(Vector3 p) => water?.Any(w => p.X >= w.Min.X && p.X <= w.Max.X && p.Z >= w.Min.Z && p.Z <= w.Max.Z
@@ -204,7 +205,8 @@ namespace MphRecomp.Arenas
                         if (hit is not { } h) break;
                         float y = top - (top - (ray.Min.Y - 1)) * h.T;
                         var floor = new Vector3(x, y, z);
-                        if (h.Normal.Y >= 0.7f && y > killHeight + 0.5f && ray.Cast(floor + Vector3.UnitY * 0.05f, floor + Vector3.UnitY * (Height + 0.3f)) == null)
+                        if (h.Normal.Y >= 0.7f && y > killHeight + 0.5f && ray.Cast(floor + Vector3.UnitY * 0.05f, floor + Vector3.UnitY * (Height + 0.3f)) == null
+                            && noBots?.Any(b => x >= b.Min.X && x <= b.Max.X && z >= b.Min.Z && z <= b.Max.Z && y >= b.Min.Y - 0.5f && y <= b.Max.Y) != true)
                         {
                             g.Nodes.Add(floor);
                         }

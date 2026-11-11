@@ -146,11 +146,14 @@ namespace MphRecomp.Frontend
         // bottom, and the touch screen's footer row (back / save / paging) pinned to the canvas corners.
         // actionsAboveRight: the file select's COPY / DELETE (the middle of its footer row, under the description band
         // otherwise) go in a row above MOVIES, DELETE over it, in the game's left-to-right order; the corner starts at x 166
-        // there, so SAVE DATA (centred ~x 172, FileSelect.BindTransfer) goes with MOVIES with a gap between the two labels,
-        // DELETE (x 160.5) still in the middle.
+        // there, so DELETE (x 160.5) stays in the middle. SAVE DATA (FileSelect.BindTransfer) sits under the footer in
+        // menu space (x ~172, 64 lower: nothing else is there, so its touch area can't cover DELETE's, owner 2026-11-07:
+        // "when you press delete on a save it brings up the import screen"), and "footer-saves" draws it in the corner
+        // row under COPY, 11 menu pixels further left than footer-right would (x 161 lines up with COPY's x 94 in
+        // footer-mid); x 0..512 holds it through its slide in from off screen.
         // pagingLeft: MOVIES' second page, whose PREVIOUS arrow (x ~148-179) sits left of its label (x 187): the corner
         // takes both, so the arrow stays beside its label (it fell in the footer's middle before)
-        public static MenuLayout MainFamily(bool actionsAboveRight = false, bool pagingLeft = false) => new(LayoutKind.MainFamily, new[]
+        public static MenuLayout MainFamily(bool actionsAboveRight = false, bool pagingLeft = false) => new(LayoutKind.MainFamily, Present(new[]
         {
             new LayoutRegion { Name = "footer-left", X0 = 0, Y0 = -192, X1 = 64, Y1 = -160, AnchorX = 0, AnchorY = 1, PivotX = 0, PivotY = 1, OffsetX = 6, OffsetY = -4, Scale = 0.9f },
             new LayoutRegion { Name = "footer-right", X0 = pagingLeft ? 140 : actionsAboveRight ? 166 : 176, Y0 = -192, X1 = 256, Y1 = -160, AnchorX = 1, AnchorY = 1, PivotX = 1, PivotY = 1, OffsetX = -6, OffsetY = -4, Scale = 0.9f },
@@ -158,11 +161,17 @@ namespace MphRecomp.Frontend
                 // x 161 (DELETE) lands where footer-right puts x 228 (MOVIES): 13 menu pixels further in than its right edge
                 ? new LayoutRegion { Name = "footer-mid", X0 = 64, Y0 = -192, X1 = 176, Y1 = -160, AnchorX = 1, AnchorY = 1, PivotX = 1, PivotY = 1, OffsetX = -6 - 13 * 0.9f, OffsetY = -4 - 40 * 0.9f, Scale = 0.9f }
                 : new LayoutRegion { Name = "footer-mid", X0 = 64, Y0 = -192, X1 = 176, Y1 = -160, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -4, Scale = 0.9f },
+            actionsAboveRight
+                ? new LayoutRegion { Name = "footer-saves", X0 = 0, Y0 = -192 - FileSelect.TransferDrop, X1 = 512, Y1 = -160 - FileSelect.TransferDrop, AnchorX = 1, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetX = -6 - FileSelect.TransferShift * 0.9f, OffsetY = -4, Scale = 0.9f }
+                : null,
             new LayoutRegion { Name = "extra", X0 = 256, Y0 = -160, X1 = 332, Y1 = 0, AnchorX = 1, AnchorY = 0, PivotX = 1, PivotY = 0, OffsetX = -8, OffsetY = 64, Scale = 0.76f },
             new LayoutRegion { Name = "controls", X0 = 0, Y0 = -160, X1 = 256, Y1 = 0, AnchorX = 0.5f, AnchorY = 0, PivotX = 0.5f, PivotY = 0, OffsetY = 64, Scale = 0.76f },
             new LayoutRegion { Name = "logo", X0 = 0, Y0 = 60, X1 = 256, Y1 = 192, AnchorX = 0.5f, AnchorY = 0, PivotX = 0.5f, PivotY = 0, Scale = 0.5f },
             new LayoutRegion { Name = "info", X0 = 0, Y0 = 0, X1 = 256, Y1 = 60, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -2, Scale = 0.86f },
-        });
+        }));
+
+        // a layout's regions without the ones it leaves out (null)
+        private static LayoutRegion[] Present(LayoutRegion?[] regions) => Array.FindAll(regions, r => r != null)!;
 
         // The multiplayer setup pages (frame group 7, CREATE OR JOIN to the lobby) as ONE combined screen (owner
         // 2026-10-07): the touch screen's controls in the middle, the top screen's left boxes (SETTINGS / DESCRIPTION,
@@ -204,7 +213,8 @@ namespace MphRecomp.Frontend
         // info area ... put the edit name button in the corner in the right opposite the back button", "completely
         // eliminating the you are part"): the whole top screen (title, card, tabs, ranking points) in the middle at the
         // setup pages' touch scale (MultiplayerMenu.BindCard narrows the ranking box and hides "you are:"), the back arrow
-        // and EDIT NAME in the bottom corners as the main menus' footer. The touch screen's empty roster panel (no roster
+        // and EDIT NAME in the bottom corners as the main menus' footer, IMPORT LICENSE (owner 2026-11-06: BindCard clones EDIT NAME
+        // MultiplayerMenu.ImportDx to the right, off the touch screen; 11-07: "it should be next to edit name") just left of EDIT NAME. The touch screen's empty roster panel (no roster
         // yet) has no region, so it isn't drawn; a one-point region at the popup's centre puts the game's box in the middle
         // of the canvas. Kind Setup: the same backdrop over the whole canvas. Below its width it all shrinks to fit.
         public static MenuLayout License()
@@ -215,6 +225,9 @@ namespace MphRecomp.Frontend
                 new LayoutRegion { Name = "back", X0 = 0, Y0 = -192, X1 = 64, Y1 = -150, AnchorX = 0, AnchorY = 1, PivotX = 0, PivotY = 1, OffsetX = 6, OffsetY = -4, Scale = 0.9f },
                 // EDIT NAME (label x 81..135, y -193..-185, its icon above): 10 menu px in from the corner, as back's icon
                 new LayoutRegion { Name = "edit", X0 = 70, Y0 = -203, X1 = 145, Y1 = -145, AnchorX = 1, AnchorY = 1, PivotX = 1, PivotY = 1, OffsetX = -6, OffsetY = -4, Scale = 0.9f },
+                // IMPORT LICENSE (its icon x 270..345, the label wrapped to two lines under it): 50 canvas px in from the edge, between EDIT NAME
+                // and the ranking box (Odin 11-07: at -75.5 it sat on the box's right end)
+                new LayoutRegion { Name = "import", X0 = 260, Y0 = -203, X1 = 355, Y1 = -145, AnchorX = 1, AnchorY = 1, PivotX = 1, PivotY = 1, OffsetX = -50, OffsetY = -4, Scale = 0.9f },
                 new LayoutRegion { Name = "popup", X0 = 127.5f, Y0 = -88.5f, X1 = 128.5f, Y1 = -87.5f, Scale = scale },
                 new LayoutRegion { Name = "card", X0 = 0, Y0 = TopY0, X1 = 256, Y1 = TopY1, Scale = scale },
             }, needWidth: 256 * scale + 2 * margin);
@@ -357,7 +370,20 @@ namespace MphRecomp.Frontend
         }
 
         // Resolve the regions for a canvas of `width` x `height` pixels.
+        // (kept while the canvas size stays: Resolve runs every frame, and its new array was menu garbage, 2026-11-11;
+        // the regions are init-only, so the same size gives the same placements)
+        private Placement[]? _resolved;
+        private float _resolvedWidth, _resolvedHeight;
+
         public Placement[] Resolve(float width, float height)
+        {
+            if (_resolved != null && _resolvedWidth == width && _resolvedHeight == height) return _resolved;
+            _resolvedWidth = width;
+            _resolvedHeight = height;
+            return _resolved = ResolveNew(width, height);
+        }
+
+        private Placement[] ResolveNew(float width, float height)
         {
             float unit = height / VirtualHeight;
             float fit = _needWidth > 0 ? MathF.Min(1, width / unit / _needWidth) : 1;

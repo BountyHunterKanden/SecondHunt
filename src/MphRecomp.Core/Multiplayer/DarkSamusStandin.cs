@@ -35,11 +35,15 @@ namespace MphRecomp.Multiplayer
         internal static void Init()
         {
             Func<string, Model?>? previous = Read.HostBuildModel;
-            Read.HostBuildModel = name => Array.IndexOf(ModelNames, name) >= 0 ? Build(null, name) : previous?.Invoke(name);
+            Read.HostBuildModel = name => Array.IndexOf(ModelNames, name) >= 0 ? Build(null, name, m => LastMessage ??= m) : previous?.Invoke(name);
         }
 #pragma warning restore CA2255
 
         static readonly bool?[] _available = new bool?[3];
+        static readonly object _lock = new();
+
+        // why the stand-in didn't build (the first reason seen), for the skins log; null = built or not tried
+        public static string? LastMessage { get; private set; }
 
         // whether the stand-in (body / ball) builds from this ROM (checked once; the build itself is cached by MphRead's
         // model cache)
@@ -49,18 +53,24 @@ namespace MphRecomp.Multiplayer
 
         static bool Builds(int i)
         {
-            if (_available[i] == null)
+            // locked: the skins setup and the picture workers ask at once, and MphRead's model cache isn't thread safe
+            lock (_lock)
             {
-                try
+                if (_available[i] == null)
                 {
-                    _available[i] = Read.GetModelInstance(ModelNames[i]).Model.Name == ModelNames[i];
+                    try
+                    {
+                        _available[i] = Read.GetModelInstance(ModelNames[i]).Model.Name == ModelNames[i];
+                    }
+                    catch (Exception ex)
+                    {
+                        // not cached: a failed attempt (e.g. the ROM not loaded yet) is tried again next time
+                        LastMessage ??= $"Dark Samus stand-in: {ModelNames[i]} not loaded ({ex.GetType().Name}: {ex.Message})";
+                        return false;
+                    }
                 }
-                catch (Exception)
-                {
-                    _available[i] = false;
-                }
+                return _available[i]!.Value;
             }
-            return _available[i]!.Value;
         }
 
         // the source mesh's identity: per mesh its material name, texture size and display list (integer data only)

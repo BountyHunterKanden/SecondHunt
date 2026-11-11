@@ -30,10 +30,12 @@ namespace MphRead
             bool shotsOnly = false; // shots=1: the shot check's every entry, no playback
             int fromArg = -1; // from=<step>: print from there (default: 4 windows before the first drop)
             bool raw = false; // raw=1: each remote input record that lands on a printed step
+            int fine = -1; // fine=<seat>: that seat's exact place and speed every step from `from`, and whether its own position was taken
             foreach (string a in args.Skip(2))
             {
                 if (a.StartsWith("every=")) every = Int32.Parse(a[6..]);
                 if (a == "raw=1") raw = true;
+                if (a.StartsWith("fine=")) fine = Int32.Parse(a[5..]);
                 if (a.StartsWith("from=")) fromArg = Int32.Parse(a[5..]);
                 if (a == "shots=1") shotsOnly = true;
             }
@@ -127,7 +129,16 @@ namespace MphRead
                     Console.WriteLine($"  step {step}: state differs from the recording (stopping)");
                     break;
                 }
-                if (step >= from && step % every == 0)
+                if (fine >= 0 && step >= from && step < from + every)
+                {
+                    PlayerEntity fp = PlayerEntity.Players[fine];
+                    bool taken = events.Any(e => e.Step == step && e.Seat == fine && e.Kind == ReplayNetKind.Position);
+                    int got = events.Count(e => e.Step == step && e.Seat == fine && e.Kind == ReplayNetKind.Input);
+                    Console.WriteLine($"  fine {step} pos {fp.Position.X:0.000},{fp.Position.Y:0.000},{fp.Position.Z:0.000} "
+                        + $"speed {fp.Speed.X:0.000},{fp.Speed.Y:0.000},{fp.Speed.Z:0.000} inputs {got}{(taken ? " TAKEN" : "")} alt {fp.IsAltForm}");
+                    continue;
+                }
+                if (fine < 0 && step >= from && step % every == 0)
                 {
                     Console.WriteLine($"  step {step} {GameState.MatchState} inputs[{string.Join(",", inputs)}] shoot[{string.Join(",", shoots)}] "
                         + $"move[{string.Join(",", moves)}] " + string.Join(" ", Enumerable.Range(0, seats).Select(Seat)));

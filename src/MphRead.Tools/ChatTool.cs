@@ -19,7 +19,8 @@ namespace MphRead
     //                         message (CHAT's second button) reaches the joiner; 3 the joiner's typed line is refused
     //                         goes through (no match minimum; both are new hunters and strangers); 4 as friends it goes through, the
     //                         bad word masked; 5 MUTE (yes) hides the joiner's lines on CHAT and in the lobby, the license's
-    //                         UNMUTE brings them back; 6 the line's REPORT (yes) is taken by the server.
+    //                         UNMUTE brings them back; 6 the line's REPORT (yes) is taken by the server; 7 with more lines than
+    //                         the page, L scrolls the log back, a new line leaves that view put, the wheel scrolls back down.
     //                         Renders -> extract_out/online_menus/build/chat_live_<page>.png
     internal static class ChatTool
     {
@@ -32,6 +33,7 @@ namespace MphRead
             Dictionary<string, string> a = args.Skip(1).Select(x => x.Split('=', 2)).Where(p => p.Length == 2).ToDictionary(p => p[0], p => p[1]);
             var uri = new Uri(a.GetValueOrDefault("server", RecompMenus.OnlineServer));
             Console.WriteLine($"chattest: {uri}");
+            if (a.ContainsKey("server")) RecompMenus.OnlineServerOverride = uri.ToString(); // (the menus too, not just the PC joiner)
             string? fail = null;
             string dir = Path.Combine(Path.GetTempPath(), "chat-test-" + Guid.NewGuid().ToString("N")[..6]);
             FrontendSession s = Session(dir);
@@ -80,12 +82,12 @@ namespace MphRead
                 for (int i = 0; i < 4; i++) s.Recomp.OnCall(s.Menu, 2565, inPause: false); // PLAYERS down to 2
                 Run(s, 30);
                 s.Recomp.OnCall(s.Menu, 2570, inPause: false); // CREATE
-                if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Recomp.OnlineHosting != null && s.Menu.PendingPage == -1, 15))
+                if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Recomp.OnlineRunner != null && s.Menu.PendingPage == -1, 15))
                 {
-                    fail = "CREATE didn't open the lobby";
+                    fail = $"CREATE didn't open the lobby (page {s.Menu.Page?.Index}, lobby {lobby}, runner {s.Recomp.OnlineRunner != null}, popup {s.Popup?.IsOpen})";
                     return;
                 }
-                OnlineMatch host = s.Recomp.OnlineHosting!;
+                OnlineMatch host = s.Recomp.OnlineRunner!;
                 OnlineClient hc = host.Client;
                 if (!hc.ServerAtLeast(ChatReq.SinceServer))
                 {
@@ -121,7 +123,7 @@ namespace MphRead
                     return;
                 }
                 Run(s, 30);
-                if (s.Recomp.OnlineHosting != host || host.Disposed)
+                if (s.Recomp.OnlineRunner != host || host.Disposed)
                 {
                     fail = "1: going to CHAT dropped the hosted game";
                     return;
@@ -184,7 +186,7 @@ namespace MphRead
                 s.Recomp.OnCall(s.Menu, 2741, inPause: false); // TYPE A MESSAGE: the keyboard
                 Run(s, 60);
                 Shot(s, "chat_live_keyboard");
-                if (s.Recomp.OnlineHosting != host)
+                if (s.Recomp.OnlineRunner != host)
                 {
                     fail = "4: the chat keyboard dropped the hosted game";
                     return;
@@ -192,7 +194,7 @@ namespace MphRead
                 s.Press(MenuKeys.B); // (cancel: back to CHAT)
                 RunUntil(s, () => s.Menu.Page?.Index == chatPage && s.Menu.PendingPage == -1, 5);
                 Run(s, 30);
-                if (s.Menu.Page?.Index != chatPage || s.Recomp.OnlineHosting != host)
+                if (s.Menu.Page?.Index != chatPage || s.Recomp.OnlineRunner != host)
                 {
                     fail = $"4: the keyboard's cancel didn't come back to CHAT with the game (page {s.Menu.Page?.Index})";
                     return;
@@ -239,7 +241,7 @@ namespace MphRead
                 RunUntil(s, () => s.Menu.Page?.Index == RecompMenus.OnlineLicensePage && s.Menu.PendingPage == -1, 5);
                 s.Press(MenuKeys.B);
                 RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1, 5);
-                if (s.Recomp.OnlineHosting != host)
+                if (s.Recomp.OnlineRunner != host)
                 {
                     fail = $"6: the license / report pages dropped the hosted game (page {s.Menu.Page?.Index})";
                     return;
@@ -266,6 +268,49 @@ namespace MphRead
                     return;
                 }
                 Console.WriteLine("  6 ok: UNMUTE on the license, REPORT A HUNTER page, a line's REPORT sent (admin: reports)");
+
+                // 7 the log scrolls: more lines than the page, L a page back (stays put as a new line comes), the wheel back down
+                Run(s, 660); // (the quick-message rate limit's 10 s)
+                for (int k = 0; k < 6; k++)
+                {
+                    Wait(jc.RequestAsync<OkMsg>(new ChatReq { Preset = 4 + k }));
+                    Run(s, 45);
+                }
+                RunUntil(s, () => HostLines(host).Count(l => l.Preset == 9) >= 1, 5);
+                Run(s, 30);
+                long newest = HostLines(host).Last().Seq;
+                if (s.Recomp.OnlineChatShown.LastOrDefault()?.Seq != newest)
+                {
+                    fail = "7: CHAT doesn't show the newest line";
+                    return;
+                }
+                s.Press(MenuKeys.L);
+                Run(s, 20);
+                Shot(s, "chat_live_scrolled");
+                List<long> back = s.Recomp.OnlineChatShown.Select(l => l.Seq).ToList();
+                if (back.Count == 0 || back.Last() >= newest)
+                {
+                    fail = "7: L didn't scroll the log back";
+                    return;
+                }
+                Run(s, 660); // (the rate limit again: one more line while the view is scrolled back)
+                Wait(jc.RequestAsync<OkMsg>(new ChatReq { Preset = 1 }));
+                RunUntil(s, () => HostLines(host).Last().Seq > newest, 5);
+                Run(s, 20);
+                if (!s.Recomp.OnlineChatShown.Select(l => l.Seq).SequenceEqual(back))
+                {
+                    fail = "7: a new line moved the scrolled-back view";
+                    return;
+                }
+                s.ScrollWheel(-20); // (notches down: newer)
+                Run(s, 20);
+                if (s.Recomp.OnlineChatShown.LastOrDefault()?.Seq != HostLines(host).Last().Seq)
+                {
+                    fail = "7: the wheel didn't scroll back to the newest";
+                    return;
+                }
+                Shot(s, "chat_live_newest");
+                Console.WriteLine($"  7 ok: {HostLines(host).Count} lines: L scrolls back, a new line keeps the view, the wheel comes back down");
             }
             catch (Exception ex) when (ex is OnlineException or InvalidOperationException or IOException
                 or System.Net.WebSockets.WebSocketException or OperationCanceledException)
@@ -275,10 +320,10 @@ namespace MphRead
             finally
             {
                 joiner?.Dispose();
-                s.Recomp.OnlineHosting?.Dispose();
+                s.Recomp.OnlineRunner?.Dispose();
                 Thread.Sleep(500);
                 DeleteTestProfiles(uri, dir, (joinerId, "PCCHAT"));
-                Console.WriteLine(fail == null ? "PASS chattest: lobby + CHAT quick messages both ways, new-hunter lock, friends' typed chat masked, MUTE / UNMUTE, REPORT"
+                Console.WriteLine(fail == null ? "PASS chattest: lobby + CHAT quick messages both ways, new-hunter lock, friends' typed chat masked, MUTE / UNMUTE, REPORT, the log scrolls"
                     : "FAIL chattest: " + fail);
             }
         }

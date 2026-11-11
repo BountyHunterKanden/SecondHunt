@@ -64,6 +64,7 @@ internal sealed class TextOverlay
         }
         float w = _image.Width, h = _image.Height;
         float px = center ? x + (width - x - w) / 2 : x, py = center ? (height - h) / 2 : y;
+        if (!center) py = Math.Min(py, height - h - 8 * s); // a taller (several-line) note grows upwards, never off the window
         drawer.Draw(up.Texture, px, py, w, h, width, height);
         _drawn = (px, py, w, h, s);
     }

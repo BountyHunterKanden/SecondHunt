@@ -264,6 +264,13 @@ namespace MphRecomp.Online
     [JsonDerivedType(typeof(ReplayDropReq), "replay_drop")]
     [JsonDerivedType(typeof(ReplayBlockReq), "set_replay_block")]
     [JsonDerivedType(typeof(ReplayOfferEvent), "ev_replay")]
+    // the Gaming Hub (server 0.10.0: OnlineProtocol.Hub.cs, docs/GAMING_HUB.md)
+    [JsonDerivedType(typeof(HubReq), "get_hub")]
+    [JsonDerivedType(typeof(HubMsg), "hub")]
+    [JsonDerivedType(typeof(LeadersReq), "get_leaders")]
+    [JsonDerivedType(typeof(LeadersMsg), "leaders")]
+    [JsonDerivedType(typeof(StatsReq), "get_stats")]
+    [JsonDerivedType(typeof(StatsMsg), "stats")]
     public abstract class OnlineMsg
     {
         public int? Id { get; set; }

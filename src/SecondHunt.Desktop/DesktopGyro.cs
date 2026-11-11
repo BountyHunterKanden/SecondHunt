@@ -13,12 +13,15 @@ namespace SecondHunt.Desktop;
 // Steam Controller. Steam Input or DS4Windows in between hide it (they present an Xbox pad, which has none).
 // Some pads drift a little at rest and don't calibrate themselves: a second held dead still (on a desk) re-learns the
 // offset (Aim.Bias).
-// Dev: --gyrolog logs (MPHGyro) once a second: sample rate, mean/peak raw rate, the degrees the game got.
+// Dev: --gyrolog logs (MPHGyro) once a second: sample rate, mean/peak raw rate, the degrees the game got. --gyrodump
+// writes every sample and every step's take to logs/gyrodump.txt (S/A: sensor, pad count ns, read at ns, local ns, dt,
+// x y z; T: step at ns, degrees turn/pitch), to replay a real hand's motion offline.
 internal sealed class DesktopGyro : IGyroAimSource
 {
     public const string Tag = "MPHGyro";
 
-    public readonly GyroAim Aim = new();
+    // Bluetooth pads on a PC deliver up to ~70 ms late, in spells (PacedSum's cap); a pad that's on time learns no lag
+    public readonly GyroAim Aim = new(lagCapNs: 80_000_000);
     volatile bool _enabled, _inGame;
     long _lastSampleMs = long.MinValue / 2;
     readonly bool _log = Environment.GetCommandLineArgs().Contains("--gyrolog");
@@ -32,6 +35,11 @@ internal sealed class DesktopGyro : IGyroAimSource
     public bool OnlyWhenZoomed { get; private set; } // "zoom" mode
     public bool ZoomScaling => true;
     GyroAim IGyroAimSource.Aim => Aim;
+    // the clock the samples' times are on (Sdl3Pads moves the pad's own onto it), so each sim step takes its own share
+    // of the motion (GyroAim.TakePaced), as on Android
+    public static long NowNs => (long)(System.Diagnostics.Stopwatch.GetTimestamp() * NsPerTick);
+    static readonly double NsPerTick = 1e9 / System.Diagnostics.Stopwatch.Frequency;
+    long IGyroAimSource.SensorNowNs => NowNs;
 
     // a game started (true) or ended (false); a start re-reads the settings, which the menus may have changed
     public void SetInGame(bool inGame)
@@ -100,6 +108,7 @@ internal sealed class DesktopGyro : IGyroAimSource
         {
             "player" => GyroTurnAxis.Player,
             "roll" => GyroTurnAxis.Roll,
+            "yaw+roll" => GyroTurnAxis.YawRoll,
             _ => GyroTurnAxis.Yaw
         };
         o.PitchSensitivity = pitch > 0 ? Math.Clamp(pitch, 10, 1000) / 100f : null;
@@ -116,12 +125,13 @@ internal sealed class DesktopGyro : IGyroAimSource
             + $"deadband {o.TightenDps:0.0} deg/s, smoothing {o.SmoothDps:0} deg/s, accel slow x{o.AccelSlowScale:0.00}");
     }
 
-    // one gyro sample from the pad (rad/s, GyroAim's axes), held dt seconds (0: the first after a gap)
-    public void AddGyro(Vector3 rad, float dt)
+    // one gyro sample from the pad (rad/s, GyroAim's axes), held dt seconds (0: the first after a gap), made at timeNs
+    // on NowNs's clock (0 = unknown)
+    public void AddGyro(Vector3 rad, float dt, long timeNs = 0)
     {
         _lastSampleMs = Environment.TickCount64;
         Calibrate(rad, dt);
-        Aim.AddSample(rad, dt);
+        Aim.AddSample(rad, dt, timeNs);
         if (_log) LogSample(rad, dt);
     }
 
@@ -198,5 +208,21 @@ internal sealed class DesktopGyro : IGyroAimSource
     public void NoteTaken(Vector2 degrees)
     {
         if (_log) _logTaken += degrees;
+        Dump($"T {NowNs} {degrees.X:R} {degrees.Y:R}");
+    }
+
+    public static readonly bool Dumping = Environment.GetCommandLineArgs().Contains("--gyrodump");
+    static StreamWriter? _dump;
+    static readonly object _dumpGate = new();
+
+    public static void Dump(string line)
+    {
+        if (!Dumping) return;
+        lock (_dumpGate)
+        {
+            _dump ??= new StreamWriter(Path.Combine(DesktopPaths.Root, "logs", "gyrodump.txt"), false);
+            _dump.WriteLine(line);
+            if (line[0] == 'T') _dump.Flush();
+        }
     }
 }

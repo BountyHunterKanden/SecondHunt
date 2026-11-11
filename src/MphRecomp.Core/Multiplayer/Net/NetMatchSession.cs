@@ -27,7 +27,7 @@ namespace MphRecomp.Multiplayer.Net
     // takes out one that didn't come back when the host starts without it.
     public sealed partial class NetMatchSession : IMatchNet, IDisposable
     {
-        private const byte Protocol = 20; // 2: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
+        private const byte Protocol = 21; // 2: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
                                          // 3: snapshots carry the mode's state (NetObjective: octoliths, nodes, timers);
                                          // 4: the lobby (LOBBY, LOOK, KICK) and back to it after a match;
                                          // 5 (O5): delta snapshots per joiner at 30 Hz (20 on a weak link) with its input
@@ -53,6 +53,9 @@ namespace MphRecomp.Multiplayer.Net
                                          // 19: Shooting Gallery's turret on; snapshots carry it (NetWorld.Turret, 14 bytes)
                                          // 20: JOIN, LOOK and the players carry the seat's colour pick after the look
                                          //     (MatchPlayer.ColourPick, sbyte, -1 = auto; LookAlikes.CopyIndices)
+                                         // 21: inputs carry the move stick's push (NetInput.MovePush, the move byte's
+                                         //     top 4 bits; PlayerStickPush.cs) and its direction (NetInput.MoveDir, the
+                                         //     touch byte's top 7 bits)
         private const byte MsgJoin = 2, MsgWelcome = 3, MsgRefuse = 4, MsgInput = 5, MsgSnapshot = 6, MsgBye = 7, MsgStart = 8,
             MsgLobby = 9, MsgLook = 10, MsgKick = 11, MsgRehost = 12;
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("MPHO");

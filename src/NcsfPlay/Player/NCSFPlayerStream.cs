@@ -36,6 +36,7 @@ public class NCSFPlayerStream : Stream
     readonly bool ignoreVolume;
     SDAT sdat = null!;
     readonly List<byte> sdatData = [];
+    byte[]? sdatShared; // ncsf-change: a lone program section is read in place (no copy); a second one copies
     uint sseq;
     readonly Player player = new();
     public Player Player => player;
@@ -206,7 +207,8 @@ public class NCSFPlayerStream : Stream
         this.LoadNCSF();
 
         this.sdat = new();
-        this.sdat.Read(this.ncsf.FilePath, this.sdatData.AsSpan(), this.sseq);
+        this.sdat.Read(this.ncsf.FilePath, this.sdatShared ?? this.sdatData.AsSpan(), this.sseq);
+        this.sdatShared = null;
         this.player.ChannelMask = this.sdat.Player?.ChannelMask ?? 0xFFFF;
         this.player.SampleRate = this.sampleRate;
         this.player.Interpolation = this.interpolation;
@@ -307,12 +309,24 @@ public class NCSFPlayerStream : Stream
             this.sseq = BinaryPrimitives.ReadUInt32LittleEndian(reservedSection);
 
         if (programSection.Length != 0)
-            this.MapNCSFSection(programSection);
+            this.MapNCSFSection(ncsfToLoad.ProgramArray);
     }
 
-    void MapNCSFSection(ReadOnlySpan<byte> section)
+    void MapNCSFSection(byte[] section)
     {
-        int size = BinaryPrimitives.ReadInt32LittleEndian(section[0x08..]);
+        int size = BinaryPrimitives.ReadInt32LittleEndian(section.AsSpan(0x08));
+        // ncsf-change: the first section, filling the image exactly, is used as it is (the usual song + _lib)
+        if (this.sdatData.Count == 0 && this.sdatShared == null && section.Length == size)
+        {
+            this.sdatShared = section;
+            return;
+        }
+        if (this.sdatShared != null)
+        {
+            byte[] first = this.sdatShared;
+            this.sdatShared = null;
+            this.MapNCSFSection(first);
+        }
         if (this.sdatData.Count < size)
         {
             bool empty = this.sdatData.Count == 0;
@@ -530,7 +544,7 @@ public class NCSFPlayerStream : Stream
     void RecursiveLoadNCSF(NCSFFile ncsfToLoad, int level)
     {
         if (level <= 10 && ncsfToLoad.Tags.Contains("_lib"))
-            this.RecursiveLoadNCSF(new(Path.Combine(Path.GetDirectoryName(ncsfToLoad.FilePath)!, ncsfToLoad.Tags["_lib"].Value)),
+            this.RecursiveLoadNCSF(NCSFFile.Shared(Path.Combine(Path.GetDirectoryName(ncsfToLoad.FilePath)!, ncsfToLoad.Tags["_lib"].Value)), // ncsf-change: shared
                 level + 1);
         this.MapNCSF(ncsfToLoad);
 
@@ -543,7 +557,7 @@ public class NCSFPlayerStream : Stream
             if (ncsfToLoad.Tags.Contains(libTag))
             {
                 found = true;
-                this.RecursiveLoadNCSF(new(Path.Combine(Path.GetDirectoryName(ncsfToLoad.FilePath)!, ncsfToLoad.Tags[libTag].Value)),
+                this.RecursiveLoadNCSF(NCSFFile.Shared(Path.Combine(Path.GetDirectoryName(ncsfToLoad.FilePath)!, ncsfToLoad.Tags[libTag].Value)),
                     level + 1);
             }
         } while (found);

@@ -63,6 +63,13 @@ namespace MphRead.Entities
         public static int HostLiftGuardCount;
         // lift escapes since the start: steps a lift carried a bot toward a death volume and she pushed out for a ledge
         public static int HostLiftEscapeCount;
+        // recomp (HostBotEdgeGuard, MatchSettings.BotEdgeGuard; replays before format 79 play without it): a grounded bot
+        // whose motion carries it over a drop while its node lies another way, with floor that way, stops the lane walk and
+        // steps straight for the node. Mining Plaza's south deck: she reached node 130 walking west, her next node (141) lay
+        // back north-east, and the lane walk kept her going west over the deck lip into the pit (11-01, Phase B group C)
+        public static bool HostBotEdgeGuard { get; set; }
+        // steps the edge guard turned a bot away from a drop since the start (Tools -botprobe prints it)
+        public static int HostEdgeGuardCount;
 
         public partial class PlayerAiData
         {
@@ -78,6 +85,8 @@ namespace MphRead.Entities
             private bool _edgeAirborne = false; // she has left the ground since the edge jump (EdgeHold)
             private int _edgeRung = 0; // the backstop's next step in this spot
             private int _edgeAside = 0; // stepping aside: steps so far (0 = not)
+            private int _edgeGuard = 0; // (HostBotEdgeGuard) steps left walking for her node away from a drop
+            private NodeData3? _edgeGuardNode = null; // the node it walks for
             private float _edgeSide = 1; // which side the next step aside goes
             private int _edgeBack = 0; // the run-up's backing off: steps so far (0 = not)
             private bool _edgeRunUp = false; // backed off: a jump at the ledge, the wall or the spot she backed off from
@@ -324,7 +333,56 @@ namespace MphRead.Entities
                 return true;
             }
 
-            // a floor under the point this far ahead, between half a unit over her position and down to y
+                // (HostBotEdgeGuard) her motion runs over a drop and her node lies another way with floor under it: walk for the
+            // node, held a quarter second so the lane walk doesn't take her straight back to the edge
+            private void BotEdgeGuard()
+            {
+                if (!HostBotEdgeGuard || _node40 == null || !UnstickGrounded || _player.IsAltForm || _player.IsMorphing
+                    || _unstickClimb > 0 || _unstickDrift > 0 || EdgeBusy)
+                {
+                    _edgeGuard = 0;
+                    return;
+                }
+                Vector2 toNode = (_node40.Position - _player.Position).Xz;
+                if (toNode.LengthSquared < 0.5f * 0.5f || _edgeGuardNode != _node40)
+                {
+                    _edgeGuard = 0;
+                }
+                if (toNode.LengthSquared < 0.5f * 0.5f)
+                {
+                    return;
+                }
+                Vector2 nodeDir = toNode.Normalized();
+                if (_edgeGuard == 0)
+                {
+                    Vector2 vel = _player.Speed.Xz;
+                    if (vel.LengthSquared < 0.05f * 0.05f)
+                    {
+                        return;
+                    }
+                    Vector2 velDir = vel.Normalized();
+                    // her node not below her (a route down a step or a drop is meant to go over the edge), her motion turned
+                    // well away from it, a real drop along it (no floor within 3 units down) and floor toward the node
+                    float ahead = 0.8f + vel.Length * 6; // her reach plus the few frames a turn takes at this speed
+                    if (_node40.Position.Y < _player.Position.Y - 1.5f || Vector2.Dot(velDir, nodeDir) >= 0
+                        || EdgeFloor(velDir, ahead, _player.Position.Y - 3.5f) || !EdgeFloor(nodeDir, 0.8f, _player.Position.Y - 1.2f))
+                    {
+                        return;
+                    }
+                    _edgeGuard = 15;
+                    _edgeGuardNode = _node40;
+                    HostEdgeGuardCount++;
+                }
+                _edgeGuard--;
+                _buttons.X.IsDown = false;
+                _buttons.B.IsDown = false;
+                _buttons.Y.IsDown = false;
+                _buttons.A.IsDown = false;
+                Helper01(new Vector3(_player._field70, 0, _player._field74), new Vector3(nodeDir.X, 0, nodeDir.Y),
+                    _buttons.X, _buttons.B, _buttons.Y, _buttons.A);
+            }
+
+        // a floor under the point this far ahead, between half a unit over her position and down to y
             private bool EdgeFloor(Vector2 dir, float ahead, float y)
             {
                 var result = new CollisionResult();

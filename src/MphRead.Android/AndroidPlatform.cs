@@ -20,6 +20,7 @@ internal static class AndroidPlatform
     {
         AppLog.Sink = (level, tag, message) =>
         {
+            AndroidFileLog.Write(level, tag, message); // (first: the file log's logcat copy skips this line's echo)
             switch (level)
             {
             case AppLog.Level.Debug: AndroidLog.Debug(tag, message); break;
@@ -28,12 +29,28 @@ internal static class AndroidPlatform
             default: AndroidLog.Error(tag, message); break;
             }
         };
+        AndroidFileLog.Install(context, ProcessSuffix());
+        Console.SetOut(new AndroidFileLog.ConsoleWriter()); // (SetOut wraps it thread-safe)
+        AppLog.Info("MPHLog", $"{context.PackageName} on Android {Android.OS.Build.VERSION.Release} ({Android.OS.Build.Model}), "
+            + $"process {Android.OS.Process.MyPid()}, log file {AndroidFileLog.Path ?? "(none)"}");
         AppPlatform.Audio = new AndroidAudioOutput(context);
         AppPlatform.DecodeImage = DecodeImage;
         AppPlatform.EncodePng = EncodePng;
         AppPlatform.CacheDir = context.FilesDir!.AbsolutePath;
         AppPlatform.RuntimeStat = name => Int64.TryParse(Android.OS.Debug.GetRuntimeStat(name), out long v) ? v : 0;
         ReplayPrepService.Install(context); // replay keyframes made in the :replayprep process (fast seeking)
+    }
+
+    // "" in the app's main process, "replayprep" in the keyframe service's (the part after the ':')
+    static string ProcessSuffix()
+    {
+        try
+        {
+            string name = File.ReadAllText("/proc/self/cmdline").Split('\0')[0];
+            int colon = name.IndexOf(':');
+            return colon < 0 ? "" : name[(colon + 1)..];
+        }
+        catch { return ""; }
     }
 
     static IntPtr _gles;

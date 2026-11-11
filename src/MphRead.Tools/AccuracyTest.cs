@@ -170,6 +170,25 @@ namespace MphRead
                 // "steep <ROOM>" lists a room's biggest faces, "steep all" sums the area per room
                 Steep(args.Length >= 3 ? args[2] : "UNIT2_LAND", args);
             }
+            else if (test == "node" && args.Length >= 4)
+            {
+                // "node <ROOM> x,y,z ...": the room part around each spot (to pick a vanilla NodeRef for a BizHawk poke)
+                using CampaignHost host = CampaignHost.Start(args[2]);
+                foreach (string a in args.Skip(3))
+                {
+                    float[] f = a.Split(',').Select(float.Parse).ToArray();
+                    var at = new Vector3(f[0], f[1], f[2]);
+                    Console.WriteLine($"  {at}: containing {host.Scene.GetNodeRefContaining(at).PartIndex}"
+                        + $" planes {host.Scene.GetNodeRefByPosition(at).PartIndex}");
+                }
+            }
+            else if (test == "walkat" && args.Length >= 6)
+            {
+                // "walkat <ROOM> x,y,z fx,fz frames [trace.csv]": stand at a spot facing (fx, 0, fz), hold forward; per
+                // vanilla tick, the distance walked along the facing and the height. A BizHawk trace (frame,px,py,pz in
+                // fx32, from rest then forward) is lined up on the first tick either one moves.
+                WalkAt(args[2], args[3], args[4], Int32.Parse(args[5]), args.Length >= 7 ? args[6] : null);
+            }
             else if (test == "idle")
             {
                 // probe_idle.lua: standing on the landed gunship for 10 s (vanilla bobs ~7.05-7.22 and drifts -X)
@@ -476,7 +495,7 @@ namespace MphRead
                         float[] b = args[4..8].Select(a => Single.Parse(a, _inv)).ToArray();
                         if (centre.X >= b[0] && centre.X <= b[1] && centre.Z >= b[2] && centre.Z <= b[3])
                         {
-                            Console.WriteLine($"    {area,6:F2} u2 {deg,5:F1} deg n {Fmt(plane.Xyz)}: " + String.Join(" ", Enumerable.Range(0, data.PointIndexCount)
+                            Console.WriteLine($"    {area,6:F2} u2 {deg,5:F1} deg slip {data.Slipperiness} n {Fmt(plane.Xyz)}: " + String.Join(" ", Enumerable.Range(0, data.PointIndexCount)
                                 .Select(j => Fmt(info.Points[info.PointIndices[data.PointStartIndex + j]]))));
                         }
                         continue;
@@ -509,6 +528,75 @@ namespace MphRead
                     {
                         Console.WriteLine($"      {String.Join(" ", f.Verts.Select(Fmt))}");
                     }
+                }
+            }
+        }
+
+        private static void WalkAt(string room, string at, string face, int frames, string? tracePath)
+        {
+            float[] p = at.Split(',').Select(s => Single.Parse(s, _inv)).ToArray();
+            float[] d = face.Split(',').Select(s => Single.Parse(s, _inv)).ToArray();
+            var facing = new Vector3(d[0], 0, d[1]).Normalized();
+            using CampaignHost host = CampaignHost.Start(room, collectDrawItems: false);
+            for (int i = 0; i < 300 && !host.Ended; i++) // let the arrival spawn the player first
+            {
+                host.Step(new CampaignInput { DialogButton = host.DialogPaused && i % 10 == 0 ? HostDialogButton.Advance : HostDialogButton.None });
+            }
+            host.PlacePlayer(new Vector3(p[0], p[1], p[2]), facing);
+            for (int f = 0; f < 60; f++)
+            {
+                host.Step(default);
+            }
+            // per tick from the first tick that moves: (distance along the facing, height)
+            static List<(float D, float Y)> FromMove(List<Vector3> t, Vector3 dir)
+            {
+                int i = t.FindIndex(q => (q - t[0]).Xz.Length > 0.0005f);
+                return i <= 0 ? [] : t.Skip(i - 1).Select(q => (Vector3.Dot(q - t[i - 1], dir), q.Y)).ToList();
+            }
+            var m = new List<Vector3> { host.Player.Position };
+            var walk = new CampaignInput { Move = new System.Numerics.Vector2(0, 1) };
+            for (int k = 0; k < frames / 2; k++)
+            {
+                host.Step(walk);
+                host.Step(walk);
+                m.Add(host.Player.Position);
+            }
+            List<(float D, float Y)> mt = FromMove(m, facing), vt = [];
+            Console.WriteLine($"  MphRead start {Fmt(m[0])} facing {Fmt(facing)}");
+            if (tracePath != null)
+            {
+                string[] lines = File.ReadAllLines(tracePath);
+                var rows = lines.Skip(1).Select(l => l.Split(',').Select(s => Int32.Parse(s, _inv)).ToArray()).ToList();
+                var vp = rows.Select(r => new Vector3(r[1], r[2], r[3]) / 4096f).ToList();
+                int first = vp.FindIndex(q => (q - vp[0]).Xz.Length > 0.0005f);
+                // vanilla moves on every 2nd frame (30 Hz ticks): sample from the frame before the first move
+                var ticks = new List<Vector3>();
+                for (int i = Math.Max(0, first - 2); i < vp.Count; i += 2) ticks.Add(vp[i]);
+                Console.WriteLine($"  vanilla start {Fmt(vp[0])}, first move at trace frame {rows[Math.Max(0, first)][0]}");
+                vt = FromMove([vp[0], .. ticks], facing);
+            }
+            Console.WriteLine("  tick   vanilla d     y    step |  MphRead d     y    step");
+            for (int k = 1; k < Math.Max(mt.Count, vt.Count); k++)
+            {
+                string Col(List<(float D, float Y)> t) => k < t.Count ? $"{t[k].D,9:F3} {t[k].Y,6:F3} {t[k].D - t[k - 1].D,7:F4}" : new string(' ', 24);
+                if (k <= 16 || k % 5 == 0)
+                {
+                    Console.WriteLine($"  {k,4}  {Col(vt)} | {Col(mt)}");
+                }
+            }
+            // ticks to cover a stretch of the walk (by distance along the facing)
+            static float Ticks(List<(float D, float Y)> t, float x)
+            {
+                int i = t.FindIndex(q => q.D >= x);
+                return i < 0 ? Single.NaN : i == 0 ? 0 : i - 1 + (x - t[i - 1].D) / (t[i].D - t[i - 1].D);
+            }
+            if (vt.Count > 0)
+            {
+                foreach ((float a, float b) in new[] { (0f, 1f), (1f, 3f), (3f, 5f), (5f, 7f), (7f, 9f), (9f, 11f), (11f, 13f), (0f, 13f) })
+                {
+                    float tv = Ticks(vt, b) - Ticks(vt, a), tm = Ticks(mt, b) - Ticks(mt, a);
+                    Console.WriteLine($"  d {a,4} .. {b,4}: vanilla {tv,6:F2} ticks (y {vt[Math.Min(vt.Count - 1, (int)Ticks(vt, b))].Y:F2}), "
+                        + $"MphRead {tm,6:F2} ticks = {tv / tm * 100:F1}% of vanilla's speed");
                 }
             }
         }

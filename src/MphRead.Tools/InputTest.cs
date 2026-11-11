@@ -88,6 +88,46 @@ namespace MphRead
             }
             finally { try { Directory.Delete(dir, recursive: true); } catch { } }
 
+            // 8) STICK CURVE MODERN (Input/StickCurve.cs): the tilt becomes a d-pad direction and a push in 16ths
+            var ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(0, 1) };
+            StickCurve.Apply(ref ci);
+            Check("curve: full tilt -> whole push (0), straight up", ci.MovePush == 0 && ci.Move == new Vector2(0, 1));
+            ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(0.1f, 0.05f) };
+            StickCurve.Apply(ref ci);
+            Check("curve: inside the dead zone -> at rest", ci.Move == Vector2.Zero && ci.MovePush == 0);
+            ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(0.46f, 0.46f) }; // 0.65 tilt, 45 degrees
+            StickCurve.Apply(ref ci);
+            Check("curve: 0.65 diagonal -> (1,1) at 11/16 (the ramp)", ci.Move == new Vector2(1, 1) && ci.MovePush == 11);
+            ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(-0.2f, 0.05f) };
+            StickCurve.Apply(ref ci);
+            Check("curve: light tilt left -> (-1,0), a small push", ci.Move == new Vector2(-1, 0) && ci.MovePush is >= 1 and <= 4);
+            // 360-degree steering: MoveDir is the stick's angle, each axis its part of the press (the d-pad's at 45 degrees)
+            ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(0, 1) };
+            StickCurve.Apply(ref ci);
+            bool any = StickCurve.Axes(ci.MoveDir, out float ar, out float af);
+            Check("360: straight up -> dir 31, forward only", ci.MoveDir == 31 && any && ar == 0 && af == 1);
+            ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(-0.7f, -0.7f) };
+            StickCurve.Apply(ref ci);
+            StickCurve.Axes(ci.MoveDir, out ar, out af);
+            Check("360: back-left diagonal -> both axes whole, like the d-pad", ci.Move == new Vector2(-1, -1) && ar == -1 && af == -1);
+            ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(MathF.Cos(MathF.PI / 8), MathF.Sin(MathF.PI / 8)) };
+            StickCurve.Apply(ref ci);
+            StickCurve.Axes(ci.MoveDir, out ar, out af);
+            Check($"360: 22.5 degrees -> right whole, forward part ({ar:0.000}, {af:0.000})", ar == 1 && af > 0.38f && af < 0.45f);
+            ci = new MphRecomp.Campaign.CampaignInput { Move = new Vector2(0.1f, 0.05f), MoveDir = 9 };
+            StickCurve.Apply(ref ci);
+            Check("360: inside the dead zone -> no direction", ci.MoveDir == 0 && !StickCurve.Axes(ci.MoveDir, out _, out _));
+            bool square = true;
+            for (byte d = 1; d <= StickCurve.DirSteps; d++)
+            {
+                StickCurve.Axes(d, out ar, out af);
+                square &= MathF.Max(MathF.Abs(ar), MathF.Abs(af)) == 1;
+            }
+            Check("360: every direction presses its bigger axis whole (full tilt keeps vanilla's top speed)", square);
+            bool rising = true;
+            for (float t = 0.16f, last = 0; t <= 1; t += 0.01f) { float pu = StickCurve.Push(t); rising &= pu >= last; last = pu; }
+            Check("curve: push rises with the tilt, whole from Edge", rising && StickCurve.Level(StickCurve.Push(StickCurve.Edge)) == 0);
+
             Console.WriteLine($"\nINPUT TESTS: {_pass} passed, {_fail} failed  =>  {(_fail == 0 ? "ALL GREEN" : "FAILURES")}");
             Environment.ExitCode = _fail == 0 ? 0 : 1;
         }

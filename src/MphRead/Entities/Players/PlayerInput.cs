@@ -314,6 +314,10 @@ namespace MphRead.Entities
 
         private void UpdateAimFacing()
         {
+            if (GrappleViewHold()) // recomp: on an Echoes grapple's rope the view is the swing's (PlayerGrapple.cs)
+            {
+                return;
+            }
             float dot = Vector3.Dot(_gunVec1, _facingVector);
             if (dot < Fixed.ToFloat(3956))
             {
@@ -552,7 +556,7 @@ namespace MphRead.Entities
             _gunVec1.Z = x * -sin + z * cos;
             _gunVec1 = _gunVec1.Normalized();
             _aimPosition = CameraInfo.Position + _gunVec1 * Fixed.ToFloat(Values.AimDistance);
-            if (EquipInfo.Zoomed)
+            if (EquipInfo.Zoomed && !GrappleViewActive) // recomp: + the grapple's view (UpdateAimFacing)
             {
                 _facingVector = _gunVec1;
             }
@@ -635,7 +639,7 @@ namespace MphRead.Entities
             AnimFlags animFlags2 = AnimFlags.None;
             if (_frozenTimer == 0 && _health > 0 && !_field6D0)
             {
-                if (Biped1Anim == PlayerAnimation.Turn)
+                if (Biped1Anim == PlayerAnimation.Turn || FirstHuntLeftTurn(Biped1Anim)) // recomp: + First Hunt's left turn
                 {
                     if (Biped1Frame <= Biped1FrameCount / 2)
                     {
@@ -647,7 +651,7 @@ namespace MphRead.Entities
                     }
                     Biped1Flags |= AnimFlags.NoLoop;
                 }
-                if (Biped2Anim == PlayerAnimation.Turn)
+                if (Biped2Anim == PlayerAnimation.Turn || FirstHuntLeftTurn(Biped2Anim)) // recomp: + First Hunt's left turn
                 {
                     if (Biped2Frame <= Biped2FrameCount / 2)
                     {
@@ -690,6 +694,7 @@ namespace MphRead.Entities
                             _timeIdle = 0;
                             anim1 = PlayerAnimation.Turn;
                             animFlags1 = AnimFlags.Reverse;
+                            FirstHuntTurnLeft(ref anim1, ref animFlags1); // recomp: First Hunt has its own clip (PlayerFirstHunt.cs)
                             if (Biped2Anim == PlayerAnimation.Turn)
                             {
                                 _bipedModel2.AnimInfo.Flags[0] &= ~AnimFlags.NoLoop;
@@ -736,12 +741,14 @@ namespace MphRead.Entities
                 {
                     jumping = true; // recomp: the Trooper's wall jump (PlayerWallCling.cs)
                 }
-                if (!Flags2.TestAny(PlayerFlags2.BipedLock | PlayerFlags2.BipedStuck) && !ShieldWallLocked && !WallClingHeld && !ParalyzerStunned) // recomp: stunned = no moving or jumping
+                if (!Flags2.TestAny(PlayerFlags2.BipedLock | PlayerFlags2.BipedStuck) && !ShieldWallLocked && !WallClingHeld && !ParalyzerStunned
+                    && !(HostGrapplePoints != null && GrappleSwinging)) // recomp: stunned = no moving or jumping; on a grapple rope too (PlayerGrapple.cs)
                 {
                     // unimpl-controls: the game also tests for either the free strafe flag, or the strafe button held
                     // and later, for up/down, it tests for either flag, or the look button not held
 
-                    void MoveRightLeft(PlayerAnimation walkAnim, int sign)
+                    // recomp: sign = the axis's part of the press, +-1 on the d-pad (360-degree stick, PlayerStickPush.cs)
+                    void MoveRightLeft(PlayerAnimation walkAnim, float sign)
                     {
                         Flags1 |= PlayerFlags1.Strafing;
                         Flags1 |= PlayerFlags1.MovingBiped;
@@ -762,6 +769,10 @@ namespace MphRead.Entities
                         {
                             traction *= Metadata.TractionFactors[_slipperiness];
                         }
+                        if (_jumpPadControlLockMin <= 0)
+                        {
+                            traction *= MovePushScale; // recomp: a part stick push (PlayerStickPush.cs)
+                        }
                         speedDelta.X -= _field78 * traction * sign;
                         speedDelta.Z -= _field7C * traction * sign;
                         if (!Controls.MoveUp.IsDown && !Controls.MoveDown.IsDown
@@ -776,7 +787,7 @@ namespace MphRead.Entities
                         }
                     }
 
-                    void MoveForwardBack(PlayerAnimation walkAnim, int sign)
+                    void MoveForwardBack(PlayerAnimation walkAnim, float sign)
                     {
                         Flags1 |= PlayerFlags1.MovingBiped;
                         if (Flags1.TestFlag(PlayerFlags1.Standing))
@@ -796,6 +807,10 @@ namespace MphRead.Entities
                         {
                             traction *= Metadata.TractionFactors[_slipperiness];
                         }
+                        if (_jumpPadControlLockMin <= 0)
+                        {
+                            traction *= MovePushScale;
+                        }
                         speedDelta.X += _field70 * traction * sign;
                         speedDelta.Z += _field74 * traction * sign;
                         if (Flags1.TestFlag(PlayerFlags1.Grounded) && _timeSinceJumpPad > 7 * 2) // todo: FPS stuff
@@ -809,13 +824,14 @@ namespace MphRead.Entities
                         }
                     }
 
-                    if (Controls.MoveRight.IsDown)
+                    float moveRight = MoveRightAxis, moveForward = MoveForwardAxis; // recomp: the d-pad's, or the stick's (PlayerStickPush.cs)
+                    if (moveRight > 0)
                     {
-                        MoveRightLeft(PlayerAnimation.WalkRight, sign: 1);
+                        MoveRightLeft(PlayerAnimation.WalkRight, sign: moveRight);
                     }
-                    else if (Controls.MoveLeft.IsDown)
+                    else if (moveRight < 0)
                     {
-                        MoveRightLeft(PlayerAnimation.WalkLeft, sign: -1);
+                        MoveRightLeft(PlayerAnimation.WalkLeft, sign: moveRight);
                     }
                     if (_field684 < Fixed.ToFloat(500) && _field684 > Fixed.ToFloat(-500))
                     {
@@ -825,13 +841,13 @@ namespace MphRead.Entities
                     {
                         _field684 *= _tiltDecay;
                     }
-                    if (Controls.MoveUp.IsDown)
+                    if (moveForward > 0)
                     {
-                        MoveForwardBack(PlayerAnimation.WalkForward, sign: 1);
+                        MoveForwardBack(PlayerAnimation.WalkForward, sign: moveForward);
                     }
-                    else if (Controls.MoveDown.IsDown)
+                    else if (moveForward < 0)
                     {
-                        MoveForwardBack(PlayerAnimation.WalkBackward, sign: -1);
+                        MoveForwardBack(PlayerAnimation.WalkBackward, sign: moveForward);
                     }
                     if (_field688 < Fixed.ToFloat(500) && _field688 > Fixed.ToFloat(-500))
                     {
@@ -845,11 +861,9 @@ namespace MphRead.Entities
                     {
                         Flags1 &= ~PlayerFlags1.UsedJump;
                     }
-                    // unimpl-controls: in the up/down code path, the game processes aim reset if that flag is off
-                    // unimpl-controls: the aim input disable flag is also checked by the game
-                    // recomp: under water in an Echoes arena an air press is the Gravity Boost's (PlayerEchoesMoves.cs)
-                    if (_jumpPadControlLockMin == 0 && (Controls.Jump.IsPressed || TouchJumpPressed) && !Flags1.TestFlag(PlayerFlags1.UsedJump)
-                        && !(HostEchoesMoves && EchoesMovesAirPress()))
+                    if (_jumpPadControlLockMin == 0 && (Controls.Jump.IsPressed || TouchJumpPressed)
+                        && (!Flags1.TestFlag(PlayerFlags1.UsedJump) || HostSwimWater && EchoesSubmerged)
+                        && !(HostEchoesMoves && EchoesMovesAirPress()) && !(HostSwimWater && SwimPress()))
                     {
                         // recomp: double tap jump is hard coded as an alternate condition to the jump input (TouchJumpPressed)
                         jumping = true;
@@ -1097,12 +1111,19 @@ namespace MphRead.Entities
                 float magBefore = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
                 Speed += speedDelta; // todo: FPS stuff?
                 float magAfter = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
-                if (magAfter > magBefore && magAfter > _hSpeedCap)
+                // recomp: a part stick push tops out at that part of the speed (PlayerStickPush.cs); a jump pad's flight
+                // keeps the whole cap, and speed already above it (air momentum) is kept as vanilla keeps it
+                float walkCap = _hSpeedCap;
+                if (_jumpPadControlLockMin <= 0 && !Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
+                {
+                    walkCap *= MovePushScale;
+                }
+                if (magAfter > magBefore && magAfter > walkCap)
                 {
                     float factor;
-                    if (magBefore <= _hSpeedCap)
+                    if (magBefore <= walkCap)
                     {
-                        factor = _hSpeedCap / magAfter;
+                        factor = walkCap / magAfter;
                     }
                     else
                     {
@@ -1231,6 +1252,7 @@ namespace MphRead.Entities
             {
                 flags |= BeamSpawnFlags.PrimeHunter;
             }
+            ShotLogFire(shotVec); // recomp dev: TRY CONTROLS shot log (PlayerShotLog.cs)
             _hitClaimFiring = true; // recomp: the beams spawned here are this shot's (PlayerHitClaims.cs)
             BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, _muzzlePos, shotVec, flags, NodeRef, _scene);
             _hitClaimFiring = false;
@@ -1242,7 +1264,9 @@ namespace MphRead.Entities
                 return false;
             }
             NetCountShot(-1, pressed, _muzzlePos, shotVec);
+            if (GameEvents.Any) GameEvents.Raise("fire", SlotIndex, curWeapon.Beam.ToString(), EquipInfo.ChargeLevel >= curWeapon.MinCharge * 2); // recomp: mod event (GameEvents.cs)
             // todo: update license stats
+            GameState.ShotsFired[SlotIndex]++; // recomp (Gaming Hub): SHOTS FIRED
             _timeSinceShot = 0;
             OnPirateBlasterShot(curWeapon); // recomp: the Pirate Blaster's burst (PlayerPirateBlaster.cs)
             if (HudViewer) // recomp: HudViewer, was IsMainPlayer
@@ -1473,7 +1497,17 @@ namespace MphRead.Entities
                         // unimpl-controls: the game also tests for either the free strafe flag, or the strafe button held
                         // and later, for up/down, it tests for either flag, or the look button not held
 
-                        void MoveRightLeft(int walkAnim, int sign)
+                        // per 30 Hz tick vanilla adds the whole traction, caps, then does speed *= factor. Like the rolling forms
+                        // below, the friction is split as sqrt(factor) per 60 Hz frame and the traction weighted s / (1 + s), which
+                        // lands on vanilla's speed at every tick end. The whole traction every frame (with (1 + factor) / 2
+                        // friction) sped Trace, Sylux and Weavel up ~2x as fast as the game: docs/ACCURACY.md A12.
+                        float AltStrafeTractionWeight()
+                        {
+                            return (Flags1.TestFlag(PlayerFlags1.UsedJumpPad) ? 1 : _walkFriction / (1 + _walkFriction)) * MovePushScale;
+                        }
+
+                        // recomp: sign = the axis's part of the press, +-1 on the d-pad (360-degree stick, PlayerStickPush.cs)
+                        void MoveRightLeft(int walkAnim, float sign)
                         {
                             Flags1 |= PlayerFlags1.Strafing;
                             Flags1 |= PlayerFlags1.MovingBiped;
@@ -1490,8 +1524,18 @@ namespace MphRead.Entities
                             {
                                 traction *= Fixed.ToFloat(Values.JumpPadSlideFactor);
                             }
-                            speedDelta.X -= _field78 * traction * sign;
-                            speedDelta.Z -= _field7C * traction * sign;
+                            traction *= AltStrafeTractionWeight();
+                            if (AltCamMoveActive) // recomp: relative to the room's fixed camera (PlayerAltCamMove.cs)
+                            {
+                                speedDelta.X -= _altRollLrX * traction * sign;
+                                speedDelta.Z -= _altRollLrZ * traction * sign;
+                                _altCamWish -= new Vector3(_altRollLrX, 0, _altRollLrZ) * sign;
+                            }
+                            else
+                            {
+                                speedDelta.X -= _field78 * traction * sign;
+                                speedDelta.Z -= _field7C * traction * sign;
+                            }
                             if (!EquipInfo.Zoomed)
                             {
                                 // todo: update field684 (using sign)
@@ -1503,7 +1547,7 @@ namespace MphRead.Entities
                             }
                         }
 
-                        void MoveForwardBack(int walkAnim, int sign)
+                        void MoveForwardBack(int walkAnim, float sign)
                         {
                             Flags1 |= PlayerFlags1.MovingBiped;
                             if (Flags1.TestFlag(PlayerFlags1.Standing))
@@ -1523,8 +1567,18 @@ namespace MphRead.Entities
                             {
                                 traction *= Metadata.TractionFactors[_slipperiness];
                             }
-                            speedDelta.X += _field70 * traction * sign;
-                            speedDelta.Z += _field74 * traction * sign;
+                            traction *= AltStrafeTractionWeight();
+                            if (AltCamMoveActive) // recomp: relative to the room's fixed camera (PlayerAltCamMove.cs)
+                            {
+                                speedDelta.X += _altRollFbX * traction * sign;
+                                speedDelta.Z += _altRollFbZ * traction * sign;
+                                _altCamWish += new Vector3(_altRollFbX, 0, _altRollFbZ) * sign;
+                            }
+                            else
+                            {
+                                speedDelta.X += _field70 * traction * sign;
+                                speedDelta.Z += _field74 * traction * sign;
+                            }
                             if (!EquipInfo.Zoomed)
                             {
                                 // todo: update field688 (using sign)
@@ -1536,22 +1590,23 @@ namespace MphRead.Entities
                             }
                         }
 
-                        if (Controls.MoveRight.IsDown)
+                        float moveRight = MoveRightAxis, moveForward = MoveForwardAxis; // recomp: the d-pad's, or the stick's (PlayerStickPush.cs)
+                        if (moveRight > 0)
                         {
-                            MoveRightLeft(walkAnim: 4, sign: 1); // TraceAltAnim.MoveRight or WeavelAltAnim.MoveRight
+                            MoveRightLeft(walkAnim: 4, sign: moveRight); // TraceAltAnim.MoveRight or WeavelAltAnim.MoveRight
                         }
-                        else if (Controls.MoveLeft.IsDown)
+                        else if (moveRight < 0)
                         {
-                            MoveRightLeft(walkAnim: 2, sign: -1); // TraceAltAnim.MoveLeft or WeavelAltAnim.MoveLeft
+                            MoveRightLeft(walkAnim: 2, sign: moveRight); // TraceAltAnim.MoveLeft or WeavelAltAnim.MoveLeft
                         }
                         // todo: update field684
-                        if (Controls.MoveUp.IsDown)
+                        if (moveForward > 0)
                         {
-                            MoveForwardBack(walkAnim: 3, sign: 1); // TraceAltAnim.MoveForward or WeavelAltAnim.MoveForward
+                            MoveForwardBack(walkAnim: 3, sign: moveForward); // TraceAltAnim.MoveForward or WeavelAltAnim.MoveForward
                         }
-                        else if (Controls.MoveDown.IsDown)
+                        else if (moveForward < 0)
                         {
-                            MoveForwardBack(walkAnim: 5, sign: -1); // TraceAltAnim.MoveBackward or WeavelAltAnim.MoveBackward
+                            MoveForwardBack(walkAnim: 5, sign: moveForward); // TraceAltAnim.MoveBackward or WeavelAltAnim.MoveBackward
                         }
                         // todo: update field684
                         // unimpl-controls: in the up/down code path, the game processes aim reset if that flag is off
@@ -1575,25 +1630,39 @@ namespace MphRead.Entities
                         // fast as the game, measured in an emulator: docs/ACCURACY.md A8.
                         traction *= _walkFriction / (1 + _walkFriction);
                     }
-                    if (Controls.RollUp.IsDown)
+                    if (_jumpPadControlLockMin <= 0)
                     {
-                        speedDelta.X += _altRollFbX * traction;
-                        speedDelta.Z += _altRollFbZ * traction;
+                        traction *= MovePushScale; // recomp: a part stick push (PlayerStickPush.cs)
                     }
-                    else if (Controls.RollDown.IsDown)
+                    if (MoveAnalog)
                     {
-                        speedDelta.X -= _altRollFbX * traction;
-                        speedDelta.Z -= _altRollFbZ * traction;
+                        // recomp: the stick's part of each axis (360-degree stick, PlayerStickPush.cs; the roll controls are
+                        // the move controls, CampaignHost.ApplyLocalInput); at the d-pad's eight directions the same as below
+                        speedDelta.X += (_altRollFbX * HostMoveForward - _altRollLrX * HostMoveRight) * traction;
+                        speedDelta.Z += (_altRollFbZ * HostMoveForward - _altRollLrZ * HostMoveRight) * traction;
                     }
-                    if (Controls.RolltLeft.IsDown)
+                    else
                     {
-                        speedDelta.X += _altRollLrX * traction;
-                        speedDelta.Z += _altRollLrZ * traction;
-                    }
-                    else if (Controls.RollRight.IsDown)
-                    {
-                        speedDelta.X -= _altRollLrX * traction;
-                        speedDelta.Z -= _altRollLrZ * traction;
+                        if (Controls.RollUp.IsDown)
+                        {
+                            speedDelta.X += _altRollFbX * traction;
+                            speedDelta.Z += _altRollFbZ * traction;
+                        }
+                        else if (Controls.RollDown.IsDown)
+                        {
+                            speedDelta.X -= _altRollFbX * traction;
+                            speedDelta.Z -= _altRollFbZ * traction;
+                        }
+                        if (Controls.RolltLeft.IsDown)
+                        {
+                            speedDelta.X += _altRollLrX * traction;
+                            speedDelta.Z += _altRollLrZ * traction;
+                        }
+                        else if (Controls.RollRight.IsDown)
+                        {
+                            speedDelta.X -= _altRollLrX * traction;
+                            speedDelta.Z -= _altRollLrZ * traction;
+                        }
                     }
                 }
                 if (!IsMorphing && !SlotBombInput()) // recomp: in the bomb slot the others lay Samus's bomb (PlayerEchoesSeat.cs)
@@ -1601,6 +1670,7 @@ namespace MphRead.Entities
                     if (!HostSlotHeld) // recomp: in the turret's bomb slot she lays bombs (owner D3, PlayerEchoesSeat.cs)
                     {
                         HyperBallInput(); // recomp: Dark Samus's ball hop + Hyper Ball (PlayerHyperBall.cs); no bombs with it
+                        AltHopInput(); // recomp: the campaign's hop for alt forms without bombs (PlayerAltHop.cs)
                     }
                     if (_abilities.TestFlag(AbilityFlags.Bombs) && Controls.AltAttack.IsPressed && (!HostHyperBall || HostSlotHeld)
                         && _bombAmmo > 0 && _bombCooldown == 0 && _field35C == null)
@@ -1807,15 +1877,38 @@ namespace MphRead.Entities
                 {
                     speedDelta = sameArcFb; // host hook (Echoes arenas): left/right steered across the push, forward/back left to MPH's rule, see SameArcSteer
                 }
+                Vector3 altEdgePush = Vector3.Zero;
+                if (Values.AltFormStrafe != 0 && !Flags1.TestFlag(PlayerFlags1.UsedJumpPad) && !AltEdgePushOff && _altEdgeNormal != Vector3.Zero
+                    && Vector3.Dot(_altWallNormal.Normalized(), _altEdgeNormal) < 0.7f)
+                {
+                    // the traction into the last frame's edge at the whole weight, as vanilla's per tick (PlayerAltCamMove.cs)
+                    float into = -(speedDelta.X * _altEdgeNormal.X + speedDelta.Z * _altEdgeNormal.Z);
+                    if (into > 0)
+                    {
+                        // vanilla has no part push (d-pad), so a light push still drives into an edge at the whole traction
+                        float back = into * ((1 + _walkFriction) / (_walkFriction * MovePushScale) - 1);
+                        altEdgePush = -_altEdgeNormal * back; // added past the cap, so sliding along a wall keeps its speed
+                    }
+                }
+                _altEdgeNormal = Vector3.Zero;
+                _altWallNormal = Vector3.Zero;
                 float magBefore = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
                 Speed += speedDelta; // todo: FPS stuff?
                 float magAfter = MathF.Sqrt(Speed.X * Speed.X + Speed.Z * Speed.Z);
-                if (magAfter > magBefore && magAfter > _hSpeedCap)
+                float capNow = _hSpeedCap;
+                // A12 capped the strafe forms at cap * sqrt(factor) here, which measured 2-8% slow against vanilla's top speed
+                // (BizHawk, 11-08: Trace .273 vs .288, Sylux .376 vs .384, Weavel .253 vs .273 a tick); the plain cap matches
+                // it (.2846, .3839, .2728)
+                if (!Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
+                {
+                    capNow *= MovePushScale; // a part stick push tops out at that part of the speed (PlayerStickPush.cs)
+                }
+                if (magAfter > magBefore && magAfter > capNow)
                 {
                     float factor;
-                    if (magBefore <= _hSpeedCap)
+                    if (magBefore <= capNow)
                     {
-                        factor = _hSpeedCap / magAfter;
+                        factor = capNow / magAfter;
                     }
                     else
                     {
@@ -1823,6 +1916,7 @@ namespace MphRead.Entities
                     }
                     Speed = Speed.WithX(Speed.X * factor).WithZ(Speed.Z * factor);
                 }
+                Speed += altEdgePush;
                 if (_field35C != null)
                 {
                     Speed = Speed.WithX(0).WithZ(0);
@@ -1860,6 +1954,7 @@ namespace MphRead.Entities
 
         private void SpawnBomb()
         {
+            if (GameEvents.Any) GameEvents.Raise("bomb", SlotIndex); // recomp: mod event (GameEvents.cs)
             // todo?: wi-fi condition and alternate function for spawning Lockjaw bombs
             Matrix4 transform = Matrix4.Identity;
             if (Hunter == Hunter.Kanden)
@@ -2046,6 +2141,7 @@ namespace MphRead.Entities
             {
                 WallClingHold(); // recomp: nothing moves the Trooper on a wall (PlayerWallCling.cs)
             }
+            AltCamMoveFace(); // recomp: strafe alt forms face the held direction under a room camera (PlayerAltCamMove.cs)
             var hSpeed = new Vector3(Speed.X, 0, Speed.Z);
             float hSpeedMag = hSpeed.Length;
             if (hSpeedMag == 0)
@@ -2205,7 +2301,7 @@ namespace MphRead.Entities
                 }
             }
             UpdateSlidingSfx(slideSfxAmount);
-            if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad) || (IsAltForm || IsMorphing) && Values.AltFormStrafe != 0)
+            if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
             {
                 Vector3 speedMul = Speed.WithX(Speed.X * speedFactor).WithZ(Speed.Z * speedFactor);
                 Speed += (speedMul - Speed) / 2; // todo: FPS stuff
@@ -2219,10 +2315,18 @@ namespace MphRead.Entities
                 // Walking keeps its traction whole on every frame: halving it (or ticking the walk at 30 Hz) made her stick in
                 // floor creases MphRead's 60 Hz collision gets her out of. Measured against the game in an emulator:
                 // docs/ACCURACY.md A7. Left over: top speed in 2 frames vs vanilla's 3 ticks, ~9% shorter stops.
-                // The rolling morph balls (Samus, Kanden, Spire, Noxus) use the same split, with their traction weighted per
-                // frame (the roll controls above): docs/ACCURACY.md A8.
+                // The alt forms use the same split, with their traction weighted per frame (the roll and strafe controls above):
+                // docs/ACCURACY.md A8 (rolling), A12 (Trace, Sylux, Weavel).
                 _walkFriction = MathF.Sqrt(speedFactor);
                 Speed = Speed.WithX(Speed.X * _walkFriction).WithZ(Speed.Z * _walkFriction);
+                if (IsAltForm || IsMorphing)
+                {
+                    // vanilla's fixed-point multiply drops the remainder (toward zero, each axis on its own), so a slow ball loses at
+                    // least 1/4096 a tick and comes to a stop: on ice exactly 1/4096 a tick (BizHawk taps both ways). Floats only ever
+                    // shrink it, so the ball crept on after a tap and the rest bob drifted sideways. Dropping the remainder on a
+                    // half-unit grid each 60 Hz frame loses vanilla's unit a tick; docs/ACCURACY.md A13
+                    Speed = Speed.WithX(MathF.Truncate(Speed.X * 8192) / 8192).WithZ(MathF.Truncate(Speed.Z * 8192) / 8192);
+                }
             }
             if (Flags1.TestFlag(PlayerFlags1.UsedJumpPad))
             {
@@ -2253,11 +2357,15 @@ namespace MphRead.Entities
                 _gravityHold--;
             }
             float gravityStep = 0;
-            // recomp: the Trooper's drone hovers instead of falling (PlayerScoutDrone.cs)
-            bool droneHover = HostScoutDrone && ScoutDroneHover();
+            // recomp: held on an Echoes spider track, the track is its ground (PlayerSpiderBall.cs)
+            bool spider = HostSpiderBall && SpiderStep();
+            // recomp: the Trooper's drone hovers instead of falling (PlayerScoutDrone.cs); attached to a track it can't
+            bool droneHover = !spider && HostScoutDrone && ScoutDroneHover();
+            // recomp: on an Echoes grapple point's rope the swing is her gravity (PlayerGrapple.cs)
+            bool grappling = HostGrapplePoints != null && GrappleStep();
             if (_health > 0)
             {
-                if (_jumpPadControlLock == 0 && !Flags2.TestFlag(PlayerFlags2.BipedStuck) && !WallClingHeld && !droneHover)
+                if (_jumpPadControlLock == 0 && !Flags2.TestFlag(PlayerFlags2.BipedStuck) && !WallClingHeld && !droneHover && !grappling && !spider)
                 {
                     if (holdGravity)
                     {
@@ -2306,14 +2414,14 @@ namespace MphRead.Entities
                         }
                     }
                     // recomp: Echoes arenas' Gravity Boost under water (PlayerEchoesMoves.cs)
-                    gravityStep = (HostEchoesMoves ? EchoesMovesGravity(_gravity) : _gravity) / 2; // todo: FPS stuff
+                    gravityStep = (HostEchoesMoves ? EchoesMovesGravity(_gravity) : HostSwimWater ? SwimMovesGravity(_gravity) : _gravity) / 2; // todo: FPS stuff
                     Speed = Speed.AddY(gravityStep);
                 }
                 // vanilla (30 Hz) does speed += g, then position += speed. Our two 60 Hz halves of that are speed += g/2,
                 // then position += speed/2 plus g/8, which puts her exactly where vanilla does at the end of each tick.
                 Vector3 position = Position + Speed / 2; // todo: FPS stuff
                 position.Y += gravityStep / 4;
-                // the horizontal half of the walking scheme above (1 on jump pads and in Trace/Sylux/Weavel's alt forms)
+                // the horizontal half of the walking scheme above (1 on jump pads)
                 position.X += Speed.X * (_walkFriction - 1) / 2;
                 position.Z += Speed.Z * (_walkFriction - 1) / 2;
                 if (AttachedEnemy?.EnemyType == EnemyType.Quadtroid)
@@ -2326,7 +2434,8 @@ namespace MphRead.Entities
                 // --> does so outside of the _health > 0 condition, before the player collision check (which is inside another _health > 0)
                 CheckPlayerCollision();
             }
-            if (Hunter == Hunter.Kanden && IsAltForm && Flags1.TestFlag(PlayerFlags1.Standing))
+            // recomp: attached to a spider track the segments lie on it (no sag toward world down)
+            if (Hunter == Hunter.Kanden && IsAltForm && Flags1.TestFlag(PlayerFlags1.Standing) && !SpiderAttached)
             {
                 for (int i = 1; i < _kandenSegPos.Length; i++)
                 {
@@ -2382,6 +2491,10 @@ namespace MphRead.Entities
             else
             {
                 _fieldC0 = Vector3.UnitY;
+            }
+            if (HostSpiderBall)
+            {
+                SpiderAfterCollision();
             }
             if (_standTerrain != prevTerrain)
             {

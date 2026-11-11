@@ -618,6 +618,29 @@ namespace MphRecomp.Campaign
             return true;
         }
 
+        // after Pose: the Echoes grapple's left arm (MphRead's PlayerGrapple.GrapplePoseWorld does it on MPH's own nodes,
+        // which this body doesn't draw from): straight out at the beam's tip by p.HostGrapplePose, the elbow's bend side
+        // kept (two-bone IK onto a point an arm's length out). model: the draw's model matrix. Returns the wrist in world
+        // space (the beam leaves it), null when the arm isn't up or the body has no L_shoulder / L_elbow / L_wrist
+        public Vector3? GrappleArm(PlayerEntity p, Matrix4 model)
+        {
+            float w = p.HostGrapplePose;
+            if (w <= 0) return null;
+            int sh = _body.Bone("L_shoulder"), el = _body.Bone("L_elbow"), wr = _body.Bone("L_wrist");
+            if (sh < 0 || el < 0 || wr < 0) return null;
+            Vector3 s = _body.World[sh].ExtractTranslation(), e = _body.World[el].ExtractTranslation();
+            Vector3 h = _body.World[wr].ExtractTranslation();
+            Vector3 tip = Vector3.TransformPosition(p.HostGrapplePoseTip, model.Inverted());
+            Vector3 dir = tip - s;
+            if (dir.LengthSquared < 1e-8f) return null;
+            dir.Normalize();
+            Vector3 reach = s + dir * ((e - s).Length + (h - e).Length);
+            Matrix4 target = _body.World[wr];
+            target.Row3.Xyz = h + (reach - h) * w;
+            _body.PinLimb(sh, el, wr, target);
+            return Vector3.TransformPosition(_body.World[wr].ExtractTranslation(), model);
+        }
+
         // the legs' pose with BodyClips.Lean's blend in it (now, or the clip it cross-fades from)
         void PoseLean()
         {
@@ -729,6 +752,22 @@ namespace MphRecomp.Campaign
         // unmorph and jumps: owner 2026-10-08), and the morph ball trail's colour (null = MPH's)
         public readonly HashSet<PlayerAnimation> SuitLegs = new();
         public Vector3? Trail;
+        // the DEATH look's RAGDOLL on this body (SuitRagdoll's native fit, owner 2026-11-08): its bones' DS counterparts
+        // (Bone, a DS bone name), naming one bone for each ragdoll driver; null = the body dies as MPH's
+        public (string Bone, string Ds)[]? Ragdoll;
+
+        // a DsRetarget map as a Ragdoll map: each bone's DS bone, and a cannon arm's wrist (its "*fwd" child, laid down
+        // the DS cannon) as that side's wrist, so the forearm lies along the ragdoll's
+        public static (string Bone, string Ds)[] RagdollOf((string Dst, string Src, string? DstChild, string? SrcChild)[] map)
+        {
+            var list = new List<(string, string)>();
+            foreach (var e in map)
+            {
+                list.Add((e.Dst, e.Src));
+                if (e.SrcChild == "*fwd" && e.DstChild != null) list.Add((e.DstChild, e.Src.Replace("elbow", "wrist")));
+            }
+            return list.ToArray();
+        }
         // the legs' 4 directional clips (forward, back, left, right) blended by the move direction instead of one per walk
         // state (NativeBodyAnimator.Lean: Dark Samus's glide/float leans, owner 2026-10-08 "she kind of snaps to different
         // positions" circling the stick); null = one clip per state
@@ -769,15 +808,46 @@ namespace MphRecomp.Campaign
             {
                 foreach (Func<NativeBody, BodyClips?> f in _registered)
                 {
-                    if (f(body) is BodyClips m) return m;
+                    if (f(body) is BodyClips m)
+                    {
+                        m.Ragdoll ??= NamedRagdoll(body); // (a map without its own: Dark Samus, MP3 Zero Suit)
+                        return m;
+                    }
                 }
             }
             if (body.Clip("B_ready_pirate") != null)
             {
                 BodyFlourish.Prepare(body, BodyFlourish.Trooper, "B_ready_pirate");
-                return Pirate();
+                BodyClips m = Pirate();
+                m.Ragdoll = NamedRagdoll(body);
+                return m;
             }
             return null;
+        }
+
+        // the RAGDOLL on a Retro rig without a DS map (the Prime 1 pirate moves on his own clips) or whose map gives none (Dark
+        // Samus, MP3 Zero Suit): its joints carry the DS rig's names, all but its pelvis, the bone its hips hang from
+        // (Skeleton_Root). Null unless every driver has its bone (the Scout Drones', Lockjaw's rigs): that body dies vanilla
+        static readonly string[] _named = { "Spine_1", "Spine_2", "Head_1", "L_shoulder", "L_elbow", "L_wrist", "R_shoulder", "R_elbow",
+            "R_wrist", "L_hip", "L_knee", "L_ankle", "R_hip", "R_knee", "R_ankle" };
+        static readonly string[] _namedDrivers = { "Spine_2", "Head_1", "L_shoulder", "L_elbow", "R_shoulder", "R_elbow", "L_hip", "L_knee",
+            "R_hip", "R_knee" };
+
+        static (string Bone, string Ds)[]? NamedRagdoll(NativeBody body)
+        {
+            int hip = body.Bone("L_hip");
+            int pelvis = hip >= 0 ? body.Data.Parent[hip] : -1;
+            if (pelvis < 0 || pelvis != (body.Bone("R_hip") is int r && r >= 0 ? body.Data.Parent[r] : -1)) return null;
+            foreach (string d in _namedDrivers)
+            {
+                if (body.Bone(d) < 0) return null;
+            }
+            var map = new List<(string, string)> { (body.Data.Names[pelvis], "Pelvis") };
+            foreach (string ds in _named)
+            {
+                if (ds != body.Data.Names[pelvis] && body.Bone(ds) >= 0) map.Add((ds, ds));
+            }
+            return map.ToArray();
         }
 
         static BodyClips Pirate()

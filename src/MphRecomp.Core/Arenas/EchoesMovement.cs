@@ -54,6 +54,17 @@ namespace MphRecomp.Arenas
             }
         }
 
+        static readonly Dictionary<int, (Vector3 Min, Vector3 Max)[]> _swim = new();
+
+        public static void SetSwimWater(int roomId, (Vector3 Min, Vector3 Max)[]? boxes)
+        {
+            lock (_water)
+            {
+                if (boxes == null || boxes.Length == 0) _swim.Remove(roomId);
+                else _swim[roomId] = boxes;
+            }
+        }
+
         // SceneSetup.HostExtraEntities, on every room load (the campaign's too): MphRead's hooks on for an Echoes arena in a
         // match with it on, off for any other room
         public static IReadOnlyList<EntityBase> Extra(Scene scene, int roomId, IReadOnlyList<EntityBase> entities)
@@ -62,6 +73,10 @@ namespace MphRecomp.Arenas
             PlayerEntity.HostEchoesMoves = on;
             PlayerEntity.HostEchoesLedgeJump = on && LedgeJump;
             PlayerEntity.HostEchoesPadNoFall = on && PadNoFall;
+            // the spider ball on the arenas' spider tracks: always on in a match (owner 2026-11-06; docs/SPIDER_BALL.md). It only
+            // acts with the spider button held (an input bit old replays never set), and only on track faces
+            // (wave 2: off in public builds, owner 2026-11-07)
+            PlayerEntity.HostSpiderBall = !MphRecomp.Config.RecompSettings.PublicBuild && GameState.Multiplayer && IsArena(roomId);
             PlayerEntity.HostBotUnstick = GameState.Multiplayer && ArenaNav.Unstick(roomId);   // Echoes bots: get unstuck
             // T7: Echoes' moves on the graph's links + items they can't get (BotMoves: old replays off)
             PlayerEntity.HostBotMoves = PlayerEntity.HostBotUnstick && BotMoves;
@@ -69,6 +84,12 @@ namespace MphRecomp.Arenas
             lock (_water)
             {
                 PlayerEntity.HostWater = on && _water.TryGetValue(roomId, out (Vector3, Vector3)[]? boxes) ? boxes : null;
+                PlayerEntity.HostSwimWater = false;
+                if (!on && _swim.TryGetValue(roomId, out (Vector3, Vector3)[]? swim))
+                {
+                    PlayerEntity.HostSwimWater = true;
+                    PlayerEntity.HostWater = swim;
+                }
             }
             // the intro's middle line (owner 2026-10-10, N8; MphRead PlayerIntroBanner): the Gravity Boost where there's water
             PlayerEntity.HostIntroBanner = !on ? null

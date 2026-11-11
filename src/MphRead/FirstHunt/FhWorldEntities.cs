@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using MphRead.Formats;
 using MphRead.Formats.Collision;
 using OpenTK.Mathematics;
 
@@ -18,10 +19,20 @@ namespace MphRead.Entities
         public bool FirstHuntOpen => _fhOpen;
         public FhDoorEntityData Data => _data;
 
+        // the level's doors, for the beams' check (BeamProjectileEntity.FirstHuntDoorHit)
+        public static readonly List<FhDoorEntity> All = new List<FhDoorEntity>();
+
         public override void Initialize()
         {
             base.Initialize();
             _fhLocked = _data.Locked != 0;
+            All.Add(this);
+        }
+
+        public override void Destroy()
+        {
+            All.Remove(this);
+            base.Destroy();
         }
 
         public override bool Process()
@@ -70,7 +81,20 @@ namespace MphRead.Entities
             {
                 _fhLocked = false;
                 _soundSource.PlayFreeSfx(SfxId.DOOR_UNLOCK); // (0x45 + 0x38)
-                FirstHuntMission.MusicCue(2);
+                // 0x2020cdc: the cue only once every spawner has spawned its total and lost them all (0x20234fc() == 0)
+                bool spawnersDone = true;
+                foreach (EntityBase entity in _scene.Entities)
+                {
+                    if (entity is FhEnemySpawnEntity spawn && !spawn.Finished)
+                    {
+                        spawnersDone = false;
+                        break;
+                    }
+                }
+                if (spawnersDone)
+                {
+                    FirstHuntMission.MusicCue(2);
+                }
             }
         }
 
@@ -91,6 +115,41 @@ namespace MphRead.Entities
             else if (side < 0 && side > -min)
             {
                 position -= normal * (min + side);
+            }
+        }
+    }
+
+    // beams stop at a closed door: its plane 0.2 out on the beam's side, hit within 2.0 of its centre
+    public partial class BeamProjectileEntity
+    {
+        private void FirstHuntDoorHit(ref CollisionResult anyRes, ref float minDist, ref EntityBase? colWith, ref bool noColEff)
+        {
+            CollisionResult colRes = default;
+            foreach (FhDoorEntity door in FhDoorEntity.All)
+            {
+                if (door.FirstHuntOpen)
+                {
+                    continue;
+                }
+                Vector3 facing = door.FacingVector;
+                var plane = new Vector4(facing, 0);
+                if (Vector3.Dot(BackPosition - door.Position, facing) < 0)
+                {
+                    plane *= -1;
+                }
+                plane.W = Vector3.Dot(plane.Xyz, door.Position + 0.2f * plane.Xyz);
+                if (CollisionDetection.CheckCylinderIntersectPlane(BackPosition, Position, plane, ref colRes)
+                    && colRes.Distance < minDist
+                    && Vector3.DistanceSquared(colRes.Position, door.Position) < 2 * 2)
+                {
+                    minDist = colRes.Distance;
+                    anyRes = colRes;
+                    colWith = null;
+                    noColEff = false;
+                    anyRes.Field0 = 0;
+                    anyRes.Plane = plane;
+                    anyRes.Flags = CollisionFlags.None;
+                }
             }
         }
     }
@@ -296,6 +355,33 @@ namespace MphRead.Entities
 
         // First Hunt drops a link to the module itself (link 0x202a8dc): the last modules link to themselves
         private bool FirstHuntSelfLink(int id) => PlayerEntity.HostFirstHunt && id == Id;
+
+        // the cart draws the trees from the current module's Next and Prev, not the current one (0x202a7e0 ->
+        // 0x202a77c: the node, its Prev's tree, then on along Next, 5 deep), so a module vanishes once rolled through
+        private static void FirstHuntUpdateChain(PointModuleEntity? entity, bool state)
+        {
+            if (entity == null)
+            {
+                return;
+            }
+            FirstHuntTree(entity.Next, 5, state);
+            FirstHuntTree(entity.Prev, 5, state);
+            if (state)
+            {
+                entity.SetActive(false);
+            }
+        }
+
+        private static void FirstHuntTree(PointModuleEntity? node, int depth, bool state)
+        {
+            while (node != null && depth > 0)
+            {
+                node.SetActive(state);
+                FirstHuntTree(node.Prev, depth - 1, state);
+                node = node.Next;
+                depth--;
+            }
+        }
 
         public static void ResetCurrent()
         {

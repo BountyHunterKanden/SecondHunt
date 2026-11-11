@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using MphRead;
 using MphRead.Entities;
 using MphRecomp.Multiplayer;
+using MphRecomp.Online;
 
 // A finished match's results, kept for the vanilla multiplayer menu's RESULTS page (47; MultiplayerMenu). The match screen
 // captures them from MphRead's match state when a match the menu started ends (MatchSession), then hands back to the menus,
@@ -18,7 +19,10 @@ namespace MphRecomp.Frontend
         public sealed record Player(int Seat, Hunter Hunter, string Nickname, bool Bot, int Team, int Place,
             int Points, float Time, int Kills, int Deaths, int SelfDestructs, int DamageDealt, int HeadshotKills,
             int AltFormKills, int FriendKills, int Interceptions, int Field260, int Field268, int Efficiency, int BestWeapon,
-            string? Character = null); // the picked character's name (D7: TROOPER, DARK SAMUS), null = the hunter
+            string? Character = null, // the picked character's name (D7: TROOPER, DARK SAMUS), null = the hunter
+            int BestStreak = 0, // the longest run of kills (Gaming Hub)
+            IReadOnlyDictionary<string, int>? WeaponKills = null, // kills per ContentKeys weapon key, alt_form included
+            int Shots = 0); // shots fired (Gaming Hub)
 
         // best weapon: the beam index (MphRead BeamType order, 0-8), AltForm when the alt-form kills are the most, None
         // when nothing killed
@@ -28,6 +32,9 @@ namespace MphRecomp.Frontend
         public bool Teams { get; init; }
         public bool FriendlyFire { get; init; }
         public int LocalSeat { get; init; }
+        // the arena's room name (MatchSettings.Arena; null when the caller didn't say) and the seconds the match ran
+        public string? Arena { get; init; }
+        public int Seconds { get; init; }
         // the game's result order (team rank, then player rank: GameState.ResultSlots), one per player
         public IReadOnlyList<Player> Rows { get; init; } = Array.Empty<Player>();
 
@@ -46,7 +53,7 @@ namespace MphRecomp.Frontend
         }
 
         // MphRead's match state as it stands (call once the match is over)
-        public static MatchResults Capture(int localSeat)
+        public static MatchResults Capture(int localSeat, string? arena = null)
         {
             // the order and places from the points as they stand now: a match client takes the host's last points from a
             // snapshot that can come after its frame's own UpdateState (the Samsung read "tied for 1st place" in seat order
@@ -74,9 +81,27 @@ namespace MphRecomp.Frontend
                 Teams = MatchSettings.IsTeamMode(GameState.Mode),
                 FriendlyFire = GameState.FriendlyFire,
                 LocalSeat = localSeat,
+                Arena = arena,
+                Seconds = (int)GameState.MatchSeconds,
                 Rows = rows,
             };
         }
+
+        // the Gaming Hub's keys and numbers for a match (docs/GAMING_HUB.md): sent with the host's result report
+        public string ModeKey => ContentKeys.ModeKey(HunterLicense.ModeIndex(Mode));
+        public string? ArenaKey => Arena == null ? null : ContentKeys.ArenaKey(Arena);
+
+        public static ResultStats HubStats(Player p) => new()
+        {
+            Hunter = ContentKeys.HunterKey(p.Character, p.Hunter.ToString()),
+            Kills = p.Kills,
+            Deaths = p.Deaths,
+            Headshots = p.HeadshotKills,
+            AltKills = p.AltFormKills,
+            BestStreak = p.BestStreak,
+            Shots = p.Shots,
+            Weapons = p.WeaponKills == null ? new() : new Dictionary<string, int>(p.WeaponKills),
+        };
 
         private static Player Read(int s)
         {
@@ -96,6 +121,13 @@ namespace MphRecomp.Frontend
                 }
             }
             if (best == 0) weapon = None;
+            var weaponKills = new Dictionary<string, int>();
+            if (GameState.AltDamageCount[s] > 0) weaponKills[ContentKeys.AltForm] = GameState.AltDamageCount[s];
+            for (int b = 0; b < GameState.ExtraBeamSlots; b++)
+            {
+                int kills = b < 9 ? GameState.BeamKills[s, b] : GameState.ExtraBeamKills[s, b];
+                if (kills > 0 && ContentKeys.WeaponKey(b) is string key) weaponKills[key] = kills;
+            }
             // field260 / field268: the mode's own counters (octolith scores / drops, node captures / losses, kills as the
             // prime hunter / primes killed), the same two words in the game
             int field260 = GameState.Mode switch
@@ -113,7 +145,8 @@ namespace MphRecomp.Frontend
             return new Player(s, p.Hunter, GameState.Nicknames[s] ?? "", p.IsBot, p.TeamIndex, GameState.Standings[s],
                 GameState.Points[s], GameState.Time[s], GameState.Kills[s], GameState.Deaths[s], GameState.Suicides[s],
                 GameState.DamageCount[s], GameState.HeadshotKills[s], GameState.AltDamageCount[s], GameState.FriendlyKills[s],
-                GameState.OctolithStops[s], field260, field268, efficiency, weapon, p.HostCharacterName);
+                GameState.OctolithStops[s], field260, field268, efficiency, weapon, p.HostCharacterName,
+                GameState.BestKillStreak[s], weaponKills, GameState.ShotsFired[s]);
         }
     }
 }

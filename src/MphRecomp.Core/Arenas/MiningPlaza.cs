@@ -11,8 +11,7 @@ namespace MphRecomp.Arenas
 {
     using Anim = MphRecomp.Import.Retro.Anim;
 
-    // Mining Plaza (Echoes' Agon Wastes room, Metroid3.pak MREA 427fad9a) as a multiplayer arena (owner
-
+    // Mining Plaza (Echoes' Agon Wastes room, Metroid3.pak MREA 427fad9a) as a multiplayer arena (thread 3d373d, owner
     // 2026-10-31). A story room, so what EchoesArena.Import does for the six multiplayer arenas isn't enough: its exits
     // are sealed here, each with the disc's own pieces as Echoes draws them locked.
     //   the four doors: the door shell in its closed pose, the Door Lock actor (Metroid_Lock, closed_lock) at the door's

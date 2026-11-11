@@ -84,6 +84,7 @@ namespace SecondHunt.Server
             }
             else
             {
+                DateTime started;
                 lock (_gamesLock)
                 {
                     if (!_rounds.TryGetValue(r.GameId ?? "", out Round? round) || !round.Members.Contains(me))
@@ -99,7 +100,9 @@ namespace SecondHunt.Server
                         return new OkMsg { Done = false };
                     }
                     round.Reported = true;
+                    started = round.At;
                 }
+                CountHubStats(rows, r.Teams, r.Mode, r.Arena, r.Seconds, started); // (the Gaming Hub: online only, HubStats.cs)
             }
             return new OkMsg { Done = CountHeadToHead(rows, r.Teams) > 0 };
         }

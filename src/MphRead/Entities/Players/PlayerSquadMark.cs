@@ -54,13 +54,41 @@ namespace MphRead.Entities
             }
         }
 
-        // every frame (ProcessPlayer): the mark wears off; dying clears it
+        // every frame (ProcessPlayer): the mark wears off; dying clears it, and also the marks this seat made and its
+        // burst's hits so far (owner 2026-10-31: your own marks don't carry through your respawn)
         private void UpdateSquadMark()
         {
             if (_health == 0)
             {
                 _squadMarkedBy = 0;
                 _squadMarkTimer = 0;
+                _squadMarkTarget = null;
+                _squadMarkHitCount = 0;
+                if (SlotIndex >= 0 && SlotIndex < 8)
+                {
+                    byte bit = (byte)(1 << SlotIndex);
+                    for (int i = 0; i < MaxPlayers; i++)
+                    {
+                        PlayerEntity other = Players[i];
+                        if (other == this)
+                        {
+                            continue;
+                        }
+                        if ((other._squadMarkedBy & bit) != 0)
+                        {
+                            other._squadMarkedBy &= (byte)~bit;
+                            if (other._squadMarkedBy == 0)
+                            {
+                                other._squadMarkTimer = 0;
+                            }
+                        }
+                        if (other._squadMarkTarget == this)
+                        {
+                            other._squadMarkTarget = null;
+                            other._squadMarkHitCount = 0;
+                        }
+                    }
+                }
             }
             else if (_squadMarkTimer > 0 && --_squadMarkTimer == 0)
             {

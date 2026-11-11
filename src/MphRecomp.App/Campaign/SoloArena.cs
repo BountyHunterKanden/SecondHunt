@@ -34,6 +34,9 @@ namespace MphRecomp.App;
 //                          the player put in front of it (owner 10-16: every hunter side by side to judge the Trooper's size).
 //                          A hunter's name, trooper, or a skin id (MP2DarkSamus, MP3ZeroSuit); at most 7 (8 seats)
 //   --es lineupgap <units>  the row's spacing (default 1.6)
+//   --es lowhp <n>  (dev, with targets 1) the targets' health is kept at n or less instead of filled, so a hit kills;
+//                   they respawn idle, a lineup bot back in its place, and the player keeps every weapon but the
+//                   Omega Cannon with full ammo (owner 11-10: every death look on idle bots)
 //   --es turretbot 1  (with targets 1, Shooting Gallery) a practice target sits idle in the turret, put back in its seat
 //                     whenever the turret is free again (owner 10-16: bomb the slot as each hunter)
 //   --es turretview 1  (with turretbot) once the target is seated, the player is put by the bomb slot facing the turret
@@ -70,6 +73,7 @@ internal sealed partial class CampaignRenderer
     {
         PlayerEntity.HostSelfBodyHits = false; // (static: only the solo run that asks for it)
         PlayerEntity.HostSpawnAtOnce = false; PlayerEntity.HostHideScore = false; // (static: TRY CONTROLS only)
+        PlayerEntity.HostShotLog = null; // (static: dev TRY CONTROLS only)
         PlayerEntity.HostIdleBots = false;
     }
 
@@ -81,6 +85,7 @@ internal sealed partial class CampaignRenderer
         _soloTargets = false;
         _devTurretBot = false;
         _lineupGap = 0;
+        _devLowHp = 0;
         _soloInfUa = args.Get("infua") == "1" && !MphRecomp.Config.RecompSettings.PublicBuild;
         _devMorphAt = !MphRecomp.Config.RecompSettings.PublicBuild && int.TryParse(args.Get("morphat"), out int ma) ? ma : 0;
         _devJumpAt = !MphRecomp.Config.RecompSettings.PublicBuild && int.TryParse(args.Get("jumpat"), out int ja) ? ja : 0;
@@ -124,6 +129,11 @@ internal sealed partial class CampaignRenderer
             settings.Mode = GameMode.Bounty;
             settings.PointGoal = 99;
         }
+        if (System.Enum.TryParse(args.Get("solomode"), out GameMode soloMode))
+        {
+            settings.Mode = soloMode;
+            settings.PointGoal = 99;
+        }
         _soloTargets = args.Get("targets") == "1";
         PlayerEntity.HostIdleBots = _soloTargets;
         if (_soloTargets) settings.BotStuckFix = false; // (as ConfigureTry: idle targets stay where they spawn)
@@ -139,13 +149,17 @@ internal sealed partial class CampaignRenderer
             && float.TryParse(vf[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float vfx)
             && float.TryParse(vf[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float vfz)
             ? new Vector2(vfx, vfz) : null;
+        bool soloBots = args.Get("solobots") == "1";
         for (int i = settings.Players.Count - 1; i >= 1; i--)
         {
-            if (!_soloTargets || !settings.Players[i].Bot) settings.Players.RemoveAt(i); // practice targets stay
+            if (!(_soloTargets || soloBots) || !settings.Players[i].Bot) settings.Players.RemoveAt(i); // practice targets stay
         }
         ConfigureLineup(args, settings);
         _ddTestLoaded = false;
         _ddTest = args.Get("ddtest") == "1"; // dev: every seat keeps double damage (custom vs vanilla look)
+        _freezeTest = args.Get("freezetest") == "1"; // dev: the other seats held frozen (their pose must hold in the ice)
+        _devLowHp = _soloTargets && int.TryParse(args.Get("lowhp"), out int lowHp) ? Math.Max(lowHp, 1) : 0;
+        if (_devLowHp > 0) settings.PointGoal = 99; // (the player's kills don't end the run)
         settings.TimeLimitSeconds = -1; // MphRead: a negative match time never runs out (and the HUD leaves it off)
         if (float.TryParse(args.Get("orbit"), System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out float deg))
@@ -184,6 +198,8 @@ internal sealed partial class CampaignRenderer
         _tryControls = true;
         PlayerEntity.HostSpawnAtOnce = true;
         PlayerEntity.HostHideScore = true; // (owner 10-17: no points counter)
+        // dev: each Imperialist shot's reticle/shot line vs every hunter's hit cylinder + where hits land (PlayerShotLog.cs)
+        if (!MphRecomp.Config.RecompSettings.PublicBuild) PlayerEntity.HostShotLog = msg => Log.Info("MPHShot", msg);
         _soloTargets = !active;
         PlayerEntity.HostIdleBots = !active;
         // idle targets: no stuck fix (owner 10-29: bots in lava) -- they never reach a node, so its edge/drift nudges (direct
@@ -240,6 +256,26 @@ internal sealed partial class CampaignRenderer
     static readonly System.Reflection.FieldInfo? DdTimer = typeof(PlayerEntity).GetField("_doubleDmgTimer",
         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
+    bool _freezeTest; // dev --es freezetest 1 (solo only)
+    int _devLowHp; // dev --es lowhp <n> (solo targets only)
+    static readonly System.Reflection.FieldInfo? FrozenTimer = typeof(PlayerEntity).GetField("_frozenTimer",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    static readonly System.Reflection.FieldInfo? FrozenGfxTimer = typeof(PlayerEntity).GetField("_frozenGfxTimer",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+    // DevCaptureInput, every sim step with --es freezetest 1: tops up every other live seat's freeze (as a Judicator hit's
+    // timers), so a frozen body can be watched holding still (dev only: the solo launch is off in public builds)
+    void FreezeTestStep()
+    {
+        if (!_freezeTest || FrozenTimer == null || FrozenGfxTimer == null) return;
+        foreach (PlayerEntity b in PlayerEntity.Players)
+        {
+            if (b == null || b.IsMainPlayer || b.Health <= 0) continue;
+            FrozenTimer.SetValue(b, (ushort)150);
+            FrozenGfxTimer.SetValue(b, (ushort)160);
+        }
+    }
+
     // DevCaptureInput, every sim step with --es ddtest 1: tops up each live seat's double damage timer, so a custom
     // hunter's double damage look can be checked beside a vanilla one's (dev only: the solo launch is off in public builds)
     void DdTestStep()
@@ -285,6 +321,7 @@ internal sealed partial class CampaignRenderer
         {
             if (b == null || !b.IsBot) continue;
             int slot = i++;
+            if (b.Health <= 0 && _devLowHp > 0) _lineupPlaced.Remove(b); // (killed: put back in its place on respawn)
             if (b.Health <= 0 || _lineupPlaced.Contains(b)) continue;
             Vector3 pos = at + right * ((slot - (n - 1) / 2f) * _lineupGap);
             b.Teleport(pos, -fwd, LineupWalk(_host.Scene, atPart, at, pos));
@@ -292,6 +329,16 @@ internal sealed partial class CampaignRenderer
             _lineupPlaced.Add(b);
             Log.Info("MPHMatch", $"lineup: seat {b.SlotIndex} ({b.Hunter}) at {pos.X:0.00} {pos.Y:0.00} {pos.Z:0.00}, part {b.NodeRef.PartIndex}"
                 + $" (lookup {_host.Scene.GetNodeRefContaining(pos).PartIndex})");
+        }
+        // (owner 2026-11-09: an easy way to see every ball) the player's own morph button morphs and unmorphs the whole
+        // row: each placed bot follows the player's form, starting as the player starts. Not in the death test: the player
+        // morphs to bomb the row there (owner 2026-11-10)
+        if (_devLowHp > 0) return;
+        bool ball = p.IsMorphing || (p.IsAltForm && !p.IsUnmorphing);
+        foreach (PlayerEntity b in PlayerEntity.Players)
+        {
+            if (b == null || !b.IsBot || b.Health <= 0 || !_lineupPlaced.Contains(b) || b.IsMorphing || b.IsUnmorphing) continue;
+            if (b.IsAltForm != ball) b.AuditMorph();
         }
     }
 
@@ -508,6 +555,7 @@ internal sealed partial class CampaignRenderer
     {
         LineupStep(p);
         DdTestStep();
+        FreezeTestStep();
         TurretBotStep(p);
         if (_devTurretViewed && _devTurretViewAim != 0 && _devTurretViewAimed < 30)
         {
@@ -639,9 +687,12 @@ internal sealed partial class CampaignRenderer
         {
             foreach (PlayerEntity bot in PlayerEntity.Players)
             {
-                if (bot != null && bot.IsBot && bot.Health > 0) bot.Health = bot.HealthMax; // hit, never killed
+                if (bot == null || !bot.IsBot || bot.Health <= 0) continue;
+                bot.Health = _devLowHp > 0 ? Math.Min(bot.Health, _devLowHp) : bot.HealthMax; // hit, never killed (lowhp: a hit kills)
             }
         }
+        // (lowhp) every weapon but the Omega Cannon and full ammo, as TRY CONTROLS, to kill with each of them
+        if (_devLowHp > 0 && PlayerEntity.Main is PlayerEntity main && main.Health > 0) main.HostGiveAllWeapons();
         if (!_solo) return false;
         bool r3 = pad[PadButton.ThumbR];
         if (r3 && pad[PadButton.ThumbL]) _soloR3Combo = true;
@@ -744,7 +795,7 @@ internal sealed partial class CampaignRenderer
     string SoloStatusLine() => !_solo ? ""
         : (_soloOrbit ? "\nSOLO  ORBIT CAMERA: right stick circles you, D-pad up / down zooms  (R3: over the shoulder)"
         : _soloFirstPerson ? "\nSOLO  FIRST PERSON  (R3: orbit camera)"
-        : "\nSOLO  right stick aims  (R3: first person)") + SelfBodyStatusLine() + PlacerStatusLine();
+        : "\nSOLO  right stick aims  (R3: first person)") + SoloFlyStatusLine() + SelfBodyStatusLine() + PlacerStatusLine();
 
     // --es selfbody 1: the body's hits so far, how many in the head band, the last one's place, the body's health
     static string SelfBodyStatusLine()

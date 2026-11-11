@@ -39,7 +39,8 @@ namespace MphRecomp.Frontend
         private readonly string _grnd, _top;
         private readonly UiTextureCache _textures;
         private readonly MenuFont _font;
-        private readonly int _frame1, _console, _reticle, _main, _lyr2, _log, _banner;
+        private readonly int _frame1, _console, _reticle, _main, _lyr2, _banner;
+        private readonly int[] _log = new int[4];
         private readonly int[] _box = new int[5], _yesNo = new int[5];
         // the flash sprites (image 0 = the lit piece, image 1 is empty): button corners, tab brackets, BACK, the popup's
         // button brackets and the bar under its text
@@ -140,6 +141,8 @@ namespace MphRecomp.Frontend
         public int PreviewTexture { get; set; } = -1;
         // the window reticle redrawn as clean geometry (PixelRedraw) at the screen's own scale; off = the DS pixels
         public bool RedrawArt { get; set; } = true;
+        // SETTINGS > GAME > CAMPAIGN > LOGBOOK SCANS: ALL (ShipLogbook.Entries allScans)
+        public bool LogbookAllScans { get; set; }
         private DsImage? _reticleSrc;
         private Task<DsImage>? _reticleJob;
         private float _reticleJobScale;
@@ -317,6 +320,10 @@ namespace MphRecomp.Frontend
         // the logbook (0x214523c rects, 0x2145480 sprites, 0x2144f98 text; log layer BG1 at HOFS -48, VOFS 32 for the
         // entry list and -64 for an entry)
         private static readonly (float X, float Y)[] LogIconAt = { (73, 30), (108, 30), (143, 30), (202, 30) };
+        // the picked category colours the page like its icon (ov0 0x210b9c0: ship_grnd_log palette bank {0,1,3,2}[cat]
+        // = brown / yellow / blue / green loaded over the layer's, and the list + header text palette {5,5,2,0}[cat]
+        // = orange / orange / cyan / green, kept at state +0x5C)
+        private static readonly int[] LogBank = { 0, 1, 3, 2 }, LogTextPal = { 5, 5, 2, 0 };
         private const int LogRows = 5;
         private const float LogRowX = 70, LogRowY = 86, LogRowPitch = 15;
 
@@ -332,7 +339,10 @@ namespace MphRecomp.Frontend
             _reticle = Bg(_top, "ship_topBG3");
             _main = Bg(_grnd, "ship_grnd_main");
             _lyr2 = Bg(_grnd, "ship_grnd_lyr2");
-            _log = Bg(_grnd, "ship_grnd_log");
+            for (int c = 0; c < 4; c++)
+            {
+                _log[c] = Bg(_grnd, "ship_grnd_log", LogBank[c]);
+            }
             _banner = Sprite(_top, "screen", 0, 0);
             _colours = DsGraphics.LoadSprite(Path.Combine(_grnd, "fontcolors.bin"));
             foreach (int bank in new[] { 0, 4 })
@@ -396,9 +406,9 @@ namespace MphRecomp.Frontend
             }
         }
 
-        private int Bg(string dir, string name) => _textures.GetOrAdd("ship/" + name, () =>
+        private int Bg(string dir, string name, int? bank = null) => _textures.GetOrAdd(bank == null ? "ship/" + name : $"ship/{name}/{bank}", () =>
         {
-            DsImage im = DsGraphics.LoadBg(Path.Combine(dir, name + ".bin"));
+            DsImage im = DsGraphics.LoadBg(Path.Combine(dir, name + ".bin"), bank);
             return (im.Width, im.Height, im.Rgba);
         }).Id;
 
@@ -1020,7 +1030,7 @@ namespace MphRecomp.Frontend
             if (c == _logCategory && _logState == LogState.List) return;
             StopScroll();
             _logCategory = c;
-            _logEntries = Story == null ? new List<LogEntry>() : ShipLogbook.Entries(Story, c);
+            _logEntries = Story == null ? new List<LogEntry>() : ShipLogbook.Entries(Story, c, LogbookAllScans);
             // the first category since the page opened, or another (0x210a13c: category 5 = none yet)
             SlotSound(_logState == LogState.Categories ? SfxId.LOGBOOK_1ST_CATEGORY_SCR : SfxId.LOGBOOK_NEXT_CATEGORY_SCR);
             StartTyping(LogHeader(), _logState == LogState.Categories ? TypeAfterFirstCategory : TypeAfterNextCategory, category: true);
@@ -1046,7 +1056,7 @@ namespace MphRecomp.Frontend
 
         private void OpenEntry(int index)
         {
-            if (index < 0 || index >= _logEntries.Count) return;
+            if (index < 0 || index >= _logEntries.Count || !_logEntries[index].Scanned) return;   // "-" rows (0x210ae78)
             StopScroll();
             SlotSound(SfxId.CHOOSE_ITEM_SCR); // a row touched (0x210a450)
             _logSel = index;
@@ -1145,14 +1155,20 @@ namespace MphRecomp.Frontend
                 Sound(SfxId.ITEM_ARROW); // next / prev page of the entry (0x210a7d4 / 0x210a85c)
                 _logTextPage = page;
             }
-            else if (by > 0 && _logSel + 1 < _logEntries.Count)
+            else if (NextScanned(_logSel, by) is int other)
             {
-                OpenEntry(_logSel + 1);
+                OpenEntry(other);
             }
-            else if (by < 0 && _logSel > 0)
+        }
+
+        // the nearest scanned row before / after this one (the entry's prev / next skip the "-" rows)
+        private int? NextScanned(int from, int by)
+        {
+            for (int i = from + by; i >= 0 && i < _logEntries.Count; i += by)
             {
-                OpenEntry(_logSel - 1);
+                if (_logEntries[i].Scanned) return i;
             }
+            return null;
         }
 
         private void LogTouch(float x, float y)
@@ -1506,26 +1522,27 @@ namespace MphRecomp.Frontend
                 return;
             }
             string header = LogHeader();
-            Text(header, 152, 20, 2, 0, 5, shown: Typed(header));
+            int pal = LogTextPal[(int)_logCategory];
+            Text(header, 152, 20, 2, 0, pal, shown: Typed(header));
             if (_logState == LogState.List)
             {
                 // the list box and scroll column (log layer rows 112+ at VOFS 32, HOFS -48)
-                BlendedLayer(_log, 48, 80, 256, 80, 0, 112, 256, 80, 1);
-                if (_logEntries.Count == 0)
+                BlendedLayer(_log[(int)_logCategory], 48, 80, 256, 80, 0, 112, 256, 80, 1);
+                if (!_logEntries.Exists(e => e.Scanned))
                 {
-                    Text(S('L', 5), LogRowX, LogRowY - 1, 0, 0, 5);   // NO ENTRIES FOUND
+                    Text(S('L', 5), LogRowX, LogRowY - 1, 0, 0, pal);   // NO ENTRIES FOUND
                     return;
                 }
                 for (int i = 0; i < LogRows && _logTop + i < _logEntries.Count; i++)
                 {
                     int index = _logTop + i;
-                    Text(_logEntries[index].Name, LogRowX, LogRowY + i * LogRowPitch - 1, 0, 0, _keyFocus && index == _logSel ? 2 : 5);
+                    Text(_logEntries[index].Scanned ? _logEntries[index].Name : "-", LogRowX, LogRowY + i * LogRowPitch - 1, 0, 0, _keyFocus && index == _logSel ? (pal == 2 ? 5 : 2) : pal);
                 }
             }
             else
             {
                 // an entry: title bar, text box and prev / back / next (log layer rows 0-111 at VOFS -64, HOFS -48)
-                BlendedLayer(_log, 48, 64, 256, 112, 0, 0, 256, 112, 1);
+                BlendedLayer(_log[(int)_logCategory], 48, 64, 256, 112, 0, 0, 256, 112, 1);
                 LogEntry entry = _logEntries[_logSel];
                 Text(entry.Name, 66, 80, 0, 0, 0);
                 List<string> lines = EntryLines();
@@ -1533,7 +1550,7 @@ namespace MphRecomp.Frontend
                 {
                     Text(lines[_logTextPage * 3 + i], 153, 104 + i * 11, 2, 0, 2);
                 }
-                bool prev = _logTextPage > 0 || _logSel > 0, next = _logTextPage + 1 < EntryPages() || _logSel + 1 < _logEntries.Count;
+                bool prev = _logTextPage > 0 || NextScanned(_logSel, -1) != null, next = _logTextPage + 1 < EntryPages() || NextScanned(_logSel, 1) != null;
                 Quad(_logArrow[prev ? 1 : 0], 80, 144, 112, 160, 1, 0, 0, 1, 1, 1, 1, 1);   // mirrored
                 Quad(_logArrow[next ? 1 : 0], 192, 144, 224, 160, 0, 0, 1, 1, 1, 1, 1, 1);
                 Text(S('M', 8), 153, 148, 2, 0, 2);   // back

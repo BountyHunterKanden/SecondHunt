@@ -69,6 +69,7 @@ namespace MphRead.Entities
         private bool _netPrevAltForm; // recomp: the last applied snapshot's alt form (Weavel's split cost, NetApply)
         private int _netMergeAheadFrames; // recomp: snapshots in a row still showing Weavel's drone after this device merged
         private static bool _netApplyingDamage;
+        private static bool _netHeadShown; // recomp: this device's prediction already showed the hit's HEADSHOT! (NetApply)
         public static bool NetDamageAllowed => !NetClient || _netApplyingDamage;
 
         // the buttons that were down this frame, the same for bots and humans (bots set their Controls too)
@@ -127,8 +128,13 @@ namespace MphRead.Entities
                 Ammo1 = (short)_ammo[1],
                 Controls = NetControlBits(),
                 LastAttacker = NetLastAttacker,
-                LastBeam = (sbyte)((int)NetLastBeam | (NetLastDrone ? NetDroneBeamBit : 0) | (NetLastTurret ? NetTurretBeamBit : 0)),
-                LastFlags = (byte)NetLastFlags
+                LastBeam = (sbyte)((int)NetLastBeam | (NetLastDrone ? NetDroneBeamBit : 0) | (NetLastTurret ? NetTurretBeamBit : 0)
+                    | (NetLastCharged ? NetChargedBeamBit : 0)),
+                LastFlags = (byte)NetLastFlags,
+                // the ragdoll's launch while dead (the snapshot's throws block: a guest's body falls exactly as here)
+                HasThrow = _health == 0 && NetThrowSet,
+                ThrowSpeed = NetThrowSpeed,
+                ThrowPush = NetThrowPush
             };
         }
 
@@ -145,6 +151,11 @@ namespace MphRead.Entities
         public bool NetLastTurret { get; private set; }
         private const int NetTurretBeamBit = 0x20;
         private static bool _netDamageTurret;
+        // the hit was a charged shot: a client's ragdoll twitches for a charged Volt Driver kill (PlayerRagdoll.cs), in
+        // LastBeam's 0x10 bit the same way (owner 2026-11-09, "I want this to happen online")
+        public bool NetLastCharged { get; private set; }
+        private const int NetChargedBeamBit = 0x10;
+        private static bool _netDamageCharged;
         private static PlayerEntity? _netDamageAttacker;
         private static BeamType _netDamageBeam = BeamType.Platform;
 
@@ -154,7 +165,20 @@ namespace MphRead.Entities
             NetLastBeam = beam?.Beam ?? BeamType.Platform;
             NetLastDrone = DroneHit(attacker, beam);
             NetLastTurret = TurretHit(beam);
+            NetLastCharged = beam != null && beam.Flags.TestFlag(BeamFlags.Charged);
             NetLastFlags = flags & (DamageFlags.Headshot | DamageFlags.Burn | DamageFlags.Deathalt | DamageFlags.Halfturret);
+        }
+
+        // no last hit: a rejoin, and Weavel's split (HalfturretEntity.Initialize), whose health cost isn't a hit; a client
+        // that took that drop as damage would credit the last attacker again (its opponent health box, owner 2026-10-31)
+        internal void NetClearLastHit()
+        {
+            NetLastAttacker = -1;
+            NetLastBeam = BeamType.Platform;
+            NetLastDrone = false;
+            NetLastTurret = false;
+            NetLastCharged = false;
+            NetLastFlags = 0;
         }
 
         private int _netFormMismatch;
@@ -201,12 +225,17 @@ namespace MphRead.Entities
                 _netDamageAttacker = s.LastAttacker >= 0 && s.LastAttacker < MaxPlayers ? Players[s.LastAttacker] : null;
                 _netDamageDrone = s.LastBeam >= 0 && (s.LastBeam & NetDroneBeamBit) != 0;
                 _netDamageTurret = s.LastBeam >= 0 && (s.LastBeam & NetTurretBeamBit) != 0;
-                _netDamageBeam = (BeamType)(s.LastBeam >= 0 ? s.LastBeam & ~(NetDroneBeamBit | NetTurretBeamBit) : s.LastBeam);
+                _netDamageCharged = s.LastBeam >= 0 && (s.LastBeam & NetChargedBeamBit) != 0;
+                _netDamageThrow = s.HasThrow ? (s.ThrowSpeed, s.ThrowPush) : null;
+                _netDamageBeam = (BeamType)(s.LastBeam >= 0
+                    ? s.LastBeam & ~(NetDroneBeamBit | NetTurretBeamBit | NetChargedBeamBit) : s.LastBeam);
                 // recomp: this device's own hits it already showed (PlayerNetPredict.cs): no second flash or HEADSHOT!
                 (bool predicted, bool predictedHead) = NetConfirmPredicted(_health - s.Health);
                 ushort flashBefore = _timeSinceDamage;
                 DamageFlags netFlags = DamageFlags.IgnoreInvuln | (DamageFlags)s.LastFlags;
-                if (predictedHead) netFlags &= ~DamageFlags.Headshot;
+                // (only the HEADSHOT! message is skipped: the flag stays, so a killing headshot still reads YOUR HEADSHOT
+                // KILLED %s! and counts as a headshot kill; owner 2026-11-04, it read YOU KILLED %s! on guests)
+                _netHeadShown = predictedHead;
                 try
                 {
                     TakeDamage((uint)(_health - s.Health), netFlags, direction: null, source: null);
@@ -215,9 +244,12 @@ namespace MphRead.Entities
                 finally
                 {
                     _netApplyingDamage = false;
+                    _netHeadShown = false;
                     _netDamageAttacker = null;
                     _netDamageDrone = false;
                     _netDamageTurret = false;
+                    _netDamageCharged = false;
+                    _netDamageThrow = null;
                 }
             }
             else if (s.Health > 0 && _health == 0 && (s.Flags & PlayerNetState.Spawned) != 0)
@@ -531,7 +563,7 @@ namespace MphRead.Entities
                 if (IsMainPlayer)
                 {
                     // (a First Hunt match: the cart's own sound, as its pickup plays on the host)
-                    _soundSource.PlayFreeSfx(HostFirstHunt ? FirstHuntSounds.Sfx(39, SfxId.DOUBLE_DAMAGE_POWER_UP) : (int)SfxId.DOUBLE_DAMAGE_POWER_UP);
+                    if (SoundViewer) _soundSource.PlayFreeSfx(HostFirstHunt ? FirstHuntSounds.Sfx(39, SfxId.DOUBLE_DAMAGE_POWER_UP) : (int)SfxId.DOUBLE_DAMAGE_POWER_UP);
                     UpdateDoubleDamageSfx(index: 0, play: true);
                     UpdateDoubleDamageSpeed(1);
                 }
@@ -551,7 +583,7 @@ namespace MphRead.Entities
                 Flags2 |= PlayerFlags2.Cloaking;
                 if (IsMainPlayer)
                 {
-                    _soundSource.PlayFreeSfx(SfxId.CLOAK_POWER_UP);
+                    if (SoundViewer) _soundSource.PlayFreeSfx(SfxId.CLOAK_POWER_UP); // recomp: SoundViewer, also above and below
                     UpdateCloakSfx(index: 0, play: true);
                 }
             }
@@ -566,7 +598,7 @@ namespace MphRead.Entities
             if (e.Deathalt > 0 && _deathaltTimer == 0)
             {
                 _deathaltTimer = e.Deathalt;
-                if (IsMainPlayer)
+                if (IsMainPlayer && SoundViewer)
                 {
                     _soundSource.PlayFreeSfx(SfxId.DOUBLE_DAMAGE_POWER_UP);
                 }
@@ -609,11 +641,7 @@ namespace MphRead.Entities
                 LoadFlags &= ~LoadFlags.Spawned;
                 _scene.AddEntity(this); // (Initialize: health 0, respawn timers reset)
                 // the hit before it left isn't its last hit any more (a client would credit it again)
-                NetLastAttacker = -1;
-                NetLastBeam = BeamType.Platform;
-                NetLastDrone = false;
-                NetLastTurret = false;
-                NetLastFlags = 0;
+                NetClearLastHit();
             }
         }
 
@@ -701,5 +729,9 @@ namespace MphRead.Entities
         public sbyte LastAttacker; // seat, -1 none
         public sbyte LastBeam;
         public byte LastFlags; // DamageFlags: headshot / burn / deathalt / halfturret
+        // the ragdoll's launch at the seat's death, while it's dead (not in the seat's bytes: the snapshot's throws block)
+        public bool HasThrow;
+        public Vector3 ThrowSpeed;
+        public Vector3 ThrowPush;
     }
 }

@@ -55,7 +55,7 @@ namespace MphRecomp.Frontend
         public static bool IsOnlinePageIndex(int page) => IsOnline(page);
         private static bool IsOnline(int page) => page >= 0
             && (page == s_onHub || page == s_onBrowse || page == s_onDetail || page == s_onWho || page == s_onLobby || page == s_onFriends
-                || page == s_onAdd || page == s_onLicense || page == s_onSettings || IsFindPage(page) || IsChatPage(page));
+                || page == s_onAdd || page == s_onLicense || page == s_onSettings || IsFindPage(page) || IsChatPage(page) || IsHubPage(page));
 
         // CREATE's setup pages and "change hunter" (FrontendSession)
         public MultiplayerMenu? Multiplayer { get; set; }
@@ -427,6 +427,7 @@ namespace MphRecomp.Frontend
             InstallFind(AddFramePage, Input, Touch, Panel, Back, title); // (FIND GAME, the vote: OnlineMenus.Find.cs)
             InstallChat(AddFramePage, Input, Panel, Back, title); // (CHAT, REPORT A HUNTER, the lobby's CHAT bar: OnlineMenus.Chat.cs)
             InstallResultNames(Touch);
+            InstallHub(AddFramePage, Input, Panel, Back, title, hub); // (GAMING HUB, LEADERBOARDS, the license's STATS: OnlineMenus.Hub.cs)
             _pageSnap = ReadOnlinePages();
             OnlineIdentity.Preload(ProfileDir); // (the friend code's key derivation, off the UI thread: it hitched the ONLINE SETTINGS entry)
             if (prevPages != null) WriteOnlinePages(prevPages); // (building a second copy must not move the first one's pages)
@@ -449,7 +450,7 @@ namespace MphRecomp.Frontend
             if (hubA != a._pageSnap?[0] || hubB != b._pageSnap?[0] || s_onHub != hubA) { Console.WriteLine("  <-- FAULT: online page numbers not kept per session"); faults++; }
         }
         private static int[] ReadOnlinePages() => new[] { s_onHub, s_onBrowse, s_onDetail, s_onWho, s_onLobby, s_onChat, s_onReport,
-            s_onFind, s_onVote, s_onFriends, s_onAdd, s_onLicense, s_onSettings };
+            s_onFind, s_onVote, s_onFriends, s_onAdd, s_onLicense, s_onSettings, s_onGHub, s_onLeaders };
         private void RestoreOnlinePages()
         {
             if (_pageSnap is { } p) WriteOnlinePages(p);
@@ -457,7 +458,8 @@ namespace MphRecomp.Frontend
         private static void WriteOnlinePages(int[] p)
         {
             (s_onHub, s_onBrowse, s_onDetail, s_onWho, s_onLobby, s_onChat, s_onReport, s_onFind, s_onVote, s_onFriends, s_onAdd,
-                s_onLicense, s_onSettings) = (p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[12]);
+                s_onLicense, s_onSettings, s_onGHub, s_onLeaders) = (p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11],
+                p[12], p[13], p[14]);
         }
 
         // WHO CAN JOIN's rows, and its BOTS (0) / PLAYERS (1) value boxes
@@ -516,6 +518,7 @@ namespace MphRecomp.Frontend
             ApplyLobbyBotsSounds(Like);
             ApplyFriendsSounds(Like);
             ApplyLicenseSounds(Like);
+            ApplyHubSounds(Like);
             ApplySettingsSounds(Like);
             ApplyFindSounds(Like);
             ApplyChatSounds(Like);
@@ -638,7 +641,7 @@ namespace MphRecomp.Frontend
             {
                 MultiplayerMenu.EndOnlineSetup();
                 ShowHub(menu);
-                menu.SetState(_lastPage == s_onSettings ? _hSettings : _hQuick, MenuState.Focused);
+                menu.SetState(_lastPage == s_onSettings ? _hSettings : _lastPage == s_onGHub && HubOn ? _hGaming : _hQuick, MenuState.Focused);
                 RefreshOnline(lists: true);
                 FirstVisit();
             }
@@ -669,6 +672,17 @@ namespace MphRecomp.Frontend
             else if (page == s_onLicense)
             {
                 ShowLicense(menu, focus: true);
+            }
+            else if (page == s_onGHub)
+            {
+                if (_lastPage == s_onHub) _ghOffset = 0;
+                FetchHub();
+                ShowGamingHub(menu, focus: true);
+            }
+            else if (page == s_onLeaders)
+            {
+                FetchLeaders();
+                ShowLeaders(menu, focus: _lastPage == s_onGHub);
             }
             else if (IsFindPage(page))
             {
@@ -743,7 +757,7 @@ namespace MphRecomp.Frontend
         {
             int page = _onlineMenu?.Page?.Index ?? -1;
             bool listing = page == s_onHub || page == s_onBrowse || page == s_onDetail || page == s_onFriends || page == s_onAdd
-                || page == s_onSettings;
+                || page == s_onSettings || IsHubPage(page);
             if (!listing || _connecting || _joining || _creating || _hosting != null || _previewMe != null) return;
             if (Environment.TickCount64 < _retryAt) return;
             RefreshOnline(lists: true);
@@ -843,10 +857,12 @@ namespace MphRecomp.Frontend
                             _netError = null;
                             _retries = 0;
                             KnowFindable(c.Findable);
+                            if (c.Held == null) ChargeQuitPenalty(c, "the online login"); // (a held seat: its rejoin decides)
                             if (!RunWhenConnected()) OfferRejoin(c); // (a settings row that waited on it: OnlineMenus.Settings.cs)
                             RefreshOnline(lists: true);
                             if (_onlineMenu is MenuEngine at) TryRehost(at); // (PLAY AGAIN after the host left)
                             if (_onlineMenu?.Page?.Index == s_onLicense) FetchLicense();
+                            FetchHubPage(); // (OnlineMenus.Hub.cs)
                             FetchReplayRecord(); // (a replay's license open: its head to head from the server)
                         });
                     }
@@ -884,7 +900,7 @@ namespace MphRecomp.Frontend
                         _pingMs = ping;
                         _friendsOn = roster.Friends.Where(f => f.Presence != Presence.Offline)
                             .OrderBy(f => f.Presence == Presence.Lobby ? 0 : f.Presence == Presence.Match ? 1 : 2).ToList();
-                        _roster = roster;
+                        _roster = WithFakeFriends(roster);
                         _recent = recent;
                         if (hunters >= 0) _hunters = hunters;
                         _netError = null;
@@ -979,10 +995,13 @@ namespace MphRecomp.Frontend
             else if (page == s_onFind) ShowFind(menu, focus: false);
             else if (page == s_onVote) ShowVote(menu, focus: false);
             else if (page == s_onChat) ShowChat(menu, focus: false);
+            else if (page == s_onGHub) ShowGamingHub(menu, focus: false);
+            else if (page == s_onLeaders) ShowLeaders(menu, focus: false);
         }
 
         private void ShowHub(MenuEngine menu)
         {
+            Show(menu, _hGaming, HubOn); // (GAMING HUB: server 0.10.0, OnlineMenus.Hub.cs)
             for (int r = 0; r < OnFriendRows; r++)
             {
                 bool joinable = r < _friendsOn.Count && _friendsOn[r].Presence == Presence.Lobby && _friendsOn[r].GameId != null;
@@ -1039,8 +1058,14 @@ namespace MphRecomp.Frontend
                 && (call < LicenseFirstCall || call > LicenseLastCall) && (call < LicTabCall || call > LicTabLastCall)
                 && (call < SettingsFirstCall || call > SettingsLastCall)
                 && (call < FindFirstCall || call > FindLastCall) && (call < ChatFirstCall || call > ChatLastCall)
-                && (call < OnTeam8Call || call > OnTeam8LastCall) && (call < LobbyBotsFirstCall || call > LobbyBotsLastCall)) return false;
+                && (call < OnTeam8Call || call > OnTeam8LastCall) && (call < LobbyBotsFirstCall || call > LobbyBotsLastCall)
+                && (call < HubFirstCall || call > HubLastCall)) return false;
             _onlineMenu = menu;
+            if (call is >= HubFirstCall and <= HubLastCall)
+            {
+                HubCall(menu, call); // (OnlineMenus.Hub.cs)
+                return true;
+            }
             if (call is >= ChatFirstCall and <= ChatLastCall)
             {
                 ChatCall(menu, call);
@@ -1775,9 +1800,20 @@ namespace MphRecomp.Frontend
                     Rejoin(held);
                     return;
                 }
+                ChargeQuitPenalty(_client, "a rejoin declined");
                 if (_client is OnlineClient now) _ = LeaveHeld(now);
             });
         }
+
+        // a match left without RESULTS (MultiplayerMenu.ChargeQuitPenalty: QUIT, the app closed; a lost connection ends on
+        // RESULTS and isn't one), once the server holds no seat in it: charged, and the license sent again. A rejoin that
+        // fails comes back through the next login (nothing held then)
+        private void ChargeQuitPenalty(OnlineClient? c, string why)
+        {
+            if (Multiplayer is MultiplayerMenu mp && mp.ChargeQuitPenalty(why) > 0 && c != null) _ = UploadLicense(c, LicenseJson(mp.License));
+        }
+
+        private OnlineMatch? _rejoined; // (RejoinRun: Play arms it as the same match, its quit penalty kept, not charged)
 
         private static async Task LeaveHeld(OnlineClient client)
         {
@@ -1820,6 +1856,7 @@ namespace MphRecomp.Frontend
                     throw new OnlineException("refused", match.Net.Status);
                 }
                 Console.WriteLine($"online: rejoined {match.Game.Id} as seat {match.Net.Settings?.LocalSeat}");
+                _rejoined = match;
             }
             catch (Exception ex) when (ex is OnlineException or System.Net.WebSockets.WebSocketException or OperationCanceledException
                 or ObjectDisposedException or InvalidOperationException or IOException)
@@ -2045,7 +2082,9 @@ namespace MphRecomp.Frontend
             MatchResults.Last = null;
             MatchSettings s = match.Net.Settings!;
             s_lastMatch = s;
-            if (Multiplayer != null) Multiplayer.ArmOnlineMatch(s, s_onHub);
+            bool rejoin = ReferenceEquals(match, _rejoined);
+            _rejoined = null;
+            if (Multiplayer != null) Multiplayer.ArmOnlineMatch(s, s_onHub, rejoin);
             else MultiplayerMenu.PendingReturn = s_onHub;
             Console.WriteLine($"online: start {s.Mode} in {s.Arena} as seat {s.LocalSeat} of {s.Players.Count}");
             // the local START's sound (the lobby's START tap made it already when this device pressed it; a joiner or a
@@ -2083,7 +2122,8 @@ namespace MphRecomp.Frontend
             int panel = page.Index == s_onHub ? _hPanel : page.Index == s_onBrowse ? _bPanel : page.Index == s_onDetail ? _gPanel
                 : page.Index == s_onWho ? _wPanel : page.Index == s_onFriends ? _frPanel : page.Index == s_onAdd ? _adPanel
                 : page.Index == s_onLicense ? _liPanel : page.Index == s_onSettings ? _stPanel : page.Index == s_onFind ? _fiPanel
-                : page.Index == s_onVote ? _voPanel : page.Index == s_onChat ? _chPanel : page.Index == s_onReport ? _rpPanel : _lbPanel;
+                : page.Index == s_onVote ? _voPanel : page.Index == s_onChat ? _chPanel : page.Index == s_onReport ? _rpPanel
+                : page.Index == s_onGHub ? _ghPanel : page.Index == s_onLeaders ? _ldPanel : _lbPanel;
             bool settled = menu.PendingPage == -1 && menu.ItemState(panel) == MenuState.Idle && menu.ItemCode(panel) == (int)MenuState.Idle;
             var glows = new Dictionary<int, List<WidgetTri>>();
             for (int t = tris.Count - 1; t >= 0; t--)
@@ -2109,6 +2149,8 @@ namespace MphRecomp.Frontend
                 else if (page.Index == s_onVote) DrawVote(glows);
                 else if (page.Index == s_onChat) DrawChat(glows);
                 else if (page.Index == s_onReport) DrawReport(glows);
+                else if (page.Index == s_onGHub) DrawGamingHub(glows);
+                else if (page.Index == s_onLeaders) DrawLeaders(glows);
                 else DrawLobby(glows);
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or KeyNotFoundException)
@@ -2182,6 +2224,7 @@ namespace MphRecomp.Frontend
             TextS("all friends", Mx(1580), My(844), 2, Orange, side, SizeM);
             if (Live && Incoming > 0) RequestDot(1804, 832, side); // a friend request waits (owner 10-21)
             DrawSettingsButton(glows);
+            DrawGamingHubButton(glows); // (OnlineMenus.Hub.cs)
         }
 
         private void DrawBrowse(Dictionary<int, List<WidgetTri>> glows)

@@ -337,6 +337,10 @@ namespace MphRead.Entities
                         }
                     }
                 }
+                if (PlayerEntity.HostFirstHunt)
+                {
+                    FirstHuntDoorHit(ref anyRes, ref minDist, ref colWith, ref noColEff); // (recomp: First Hunt's doors, FhWorldEntities)
+                }
                 foreach (ForceFieldEntity forceField in _scene.GetForceFieldEntities())
                 {
                     // todo: some of these properties are compatible with the entity moving, some aren't
@@ -603,6 +607,7 @@ namespace MphRead.Entities
                                 }
                             }
                             wholeDamage = (uint)Math.Clamp(damage, 0, Int32.MaxValue);
+                            PlayerEntity.ShotLogHit(this, player, anyRes.Position, isHeadshot, hitHalfturret, wholeDamage); // recomp dev: TRY CONTROLS shot log (PlayerShotLog.cs)
                             PlayerEntity.HitClaimBeamHit(this, player, anyRes.Position, isHeadshot, hitHalfturret, wholeDamage); // recomp: hit claims, instant hit feedback (PlayerHitClaims.cs)
                             if (wholeDamage != 0)
                             {
@@ -1619,9 +1624,10 @@ namespace MphRead.Entities
             ushort speedInterpolation = weapon.SpeedInterpolations[charged ? 1 : 0];
             float gravity = GetAmount(weapon.UnchargedGravity, weapon.MinChargeGravity, weapon.ChargedGravity) / 4096f;
             Vector3 acceleration = new Vector3(0, gravity, 0) / 2;
-            // homing caps a per-tick change of velocity, like gravity, so it scales by 1/4 at 60 Hz (the game steers once per
-            // 30 Hz tick by up to the raw spawn value). The old 1/2 turned homing shots twice as fast as the game. Off: replays
-            // before format 76
+            // recomp: homing caps a per-tick change of velocity, like gravity, so it scales by 1/4 at 60 Hz (rev 1 arm9 0x203D6A0
+            // steers once per 30 Hz tick by up to the raw spawn value, 0x2040FA8). MphRead's 1/2 turned homing shots twice as fast
+            // as the game (2026-10-31 player reports: missiles curving into doors, charged missiles undodgeable; BizHawk 22.7 deg/s
+            // vs 45.3). Off: replays before format 76
             bool vanillaHoming = owner is not PlayerEntity ownerHm || ownerHm.HostVanillaHoming;
             float homing = GetAmount(weapon.UnchargedHoming, weapon.MinChargeHoming, weapon.ChargedHoming) / 4096f
                 / (vanillaHoming ? 4 : 2);

@@ -1628,6 +1628,11 @@ namespace MphRead.Sound
         {
         }
 
+        // keep this sound out of the mixer's instance takeover and voice cap (First Hunt's music)
+        public virtual void KeepHandle(int handle)
+        {
+        }
+
         public virtual bool IsHandlePlaying(int handle)
         {
             return false;

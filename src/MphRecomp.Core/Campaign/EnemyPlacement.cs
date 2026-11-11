@@ -158,7 +158,6 @@ namespace MphRecomp.Campaign
                 }
                 return AddEntities(scene, room, entities);
             };
-#if ENEMY_DAMAGE_HOOK
             Func<uint, EntityBase, uint>? nextDamage = PlayerEntity.HostEnemyDamage;
             PlayerEntity.HostEnemyDamage = (damage, source) =>
             {
@@ -168,7 +167,6 @@ namespace MphRecomp.Campaign
                 }
                 return EnemyDamage(damage, source);
             };
-#endif
         }
 
         static bool On => Dir != null && GameState.Mode == GameMode.SinglePlayer;
@@ -352,7 +350,7 @@ namespace MphRecomp.Campaign
 
         // a placed MPH enemy's data: the template's per-type settings (relative to the spawner) at the new spot, with
         // the entry's counts and trigger; no links, messages or room node
-        public static EnemySpawnEntityData PlacedData(EnemySpawnEntityData template, PlacedEnemy p, int id)
+        public static EnemySpawnEntityData PlacedData(EnemySpawnEntityData template, PlacedEnemy p, int id, Hunter? hunter = null)
         {
             byte[] b = Bytes(template);
             WriteHeader<EnemySpawnEntityData>(b, id, V(p.Pos), FacingVector(p.Facing));
@@ -379,7 +377,29 @@ namespace MphRecomp.Campaign
             {
                 W32(b, Off<EnemySpawnEntityData>(f), 0);
             }
+            if (hunter is Hunter h)
+            {
+                WriteHunter(b, template, h);
+            }
             return Read.ReadStruct<EnemySpawnEntityData>(b);
+        }
+
+        // a placed hunter's spawner fields (EnemySpawnFields09): that hunter, always there (chance 100), encounter type 0
+        // (no story encounter bit or music); health and weapon stay the template's, the weapon only when the template is
+        // that hunter's own (else 255 = the hunter's own beam); one bot, spawned once
+        static void WriteHunter(byte[] b, EnemySpawnEntityData template, Hunter h)
+        {
+            int f = Off<EnemySpawnEntityData>("Fields");
+            W32(b, f, (int)h);
+            W32(b, f + 4, 0);
+            if (template.Fields.S09.HunterId != (uint)h)
+            {
+                W32(b, f + 8, 255);
+            }
+            b[f + 19] = 100;
+            b[Off<EnemySpawnEntityData>("SpawnTotal")] = 1;
+            b[Off<EnemySpawnEntityData>("SpawnLimit")] = 1;
+            b[Off<EnemySpawnEntityData>("SpawnCount")] = 1;
         }
 
         // a room's own spawner replaced by a catalogue MPH enemy: everything of its own (id, spot, counts, messages)
@@ -428,7 +448,7 @@ namespace MphRecomp.Campaign
                 FhEnemySpawnEntityData data = PlacedFhData(entry.Fh, id, V(p.Pos), FacingVector(p.Facing), p.Total, p.Limit, p.Count);
                 return new PlacedFhEnemySpawner(data, scene) { Held = held };
             }
-            return new PlacedEnemySpawner(PlacedData(entry.Mph, p, id), scene);
+            return new PlacedEnemySpawner(PlacedData(entry.Mph, p, id, entry.Hunter), scene);
         }
 
         static EntityBase? BuildRoomOwn(Scene scene, Tracked t)
@@ -445,7 +465,14 @@ namespace MphRecomp.Campaign
                     own.Header.FacingVector.ToFloatVector(), own.SpawnTotal, Math.Max((int)own.SpawnLimit, 1), Math.Max((int)own.SpawnCount, 1));
                 return new PlacedFhEnemySpawner(data, scene);
             }
-            return new PlacedEnemySpawner(ReplacedData(own, entry.Mph), scene);
+            EnemySpawnEntityData data2 = ReplacedData(own, entry.Mph);
+            if (entry.Hunter is Hunter h)
+            {
+                byte[] b = Bytes(data2);
+                WriteHunter(b, entry.Mph, h);
+                data2 = Read.ReadStruct<EnemySpawnEntityData>(b);
+            }
+            return new PlacedEnemySpawner(data2, scene);
         }
 
         // ---- per frame ----
@@ -666,6 +693,12 @@ namespace MphRecomp.Campaign
                 return EnemyCatalogue.Find("fh:" + fh.Data.EnemyType) ?? new EnemyCatalogue.Entry { FirstHunt = true };
             }
             EnemyType type = spawner is EnemySpawnEntity es ? es.Data.EnemyType : EnemyType.Zoomer;
+            if (type == EnemyType.Hunter && ((EnemySpawnEntity)spawner).Data.Fields.S09.HunterId <= (uint)Hunter.Guardian
+                && EnemyCatalogue.Find(EnemyCatalogue.HunterId((Hunter)((EnemySpawnEntity)spawner).Data.Fields.S09.HunterId))
+                is EnemyCatalogue.Entry hunter)
+            {
+                return hunter;
+            }
             return EnemyCatalogue.Find("mph:" + type) ?? new EnemyCatalogue.Entry
             {
                 Id = "mph:" + type, Label = EnemyCatalogue.SplitWords(type.ToString()), Type = type,
@@ -731,6 +764,98 @@ namespace MphRecomp.Campaign
                 SceneSetup.LoadEnemyResources(s, _scene!);
             }
             _scene!.AddEntity(spawner);
+            if (spawner is EnemySpawnEntity hs && hs.Data.EnemyType == EnemyType.Hunter)
+            {
+                AttachBot(hs);
+            }
+        }
+
+        // a hunter spawner added live gets its bot the way SceneSetup.InitHunterSpawns gives a room's own one (that runs
+        // after AddEntities, so hunters from the file need nothing here): a free player slot, the hunter and its colour,
+        // in the scene; no octolith drop. A slot freed by DetachBot is used again.
+        static void AttachBot(EnemySpawnEntity spawner)
+        {
+            for (int i = 1; i < PlayerEntity.PlayerCount; i++)
+            {
+                if (PlayerEntity.Players[i].EnemySpawner == spawner)
+                {
+                    return;
+                }
+            }
+            int slot = -1;
+            for (int i = 1; i < PlayerEntity.PlayerCount && slot < 0; i++)
+            {
+                PlayerEntity q = PlayerEntity.Players[i];
+                if (!q.IsBot && q.EnemySpawner == null && !q.LoadFlags.TestFlag(LoadFlags.SlotActive))
+                {
+                    slot = i;
+                }
+            }
+            if (slot < 0)
+            {
+                if (PlayerEntity.PlayerCount >= PlayerEntity.MaxPlayers || PlayerEntity.PlayersCreated != PlayerEntity.PlayerCount)
+                {
+                    LastError = "no free player slot for a hunter (" + PlayerEntity.MaxPlayers + " players at most)";
+                    return;
+                }
+                slot = PlayerEntity.PlayerCount++;
+            }
+            var hunter = (Hunter)spawner.Data.Fields.S09.HunterId;
+            int color = spawner.Data.Fields.S09.HunterColor;
+            if (hunter == PlayerEntity.Main.Hunter && color == PlayerEntity.Main.Recolor && Features.AlternateHunters1P)
+            {
+                color = PlayerEntity.Main.Recolor == 0 ? 1 : 0;
+            }
+            PlayerEntity player = PlayerEntity.Players[slot];
+            player.IsBot = true;
+            player.EnemySpawner = spawner;
+            int created = PlayerEntity.PlayersCreated;
+            PlayerEntity.PlayersCreated = slot;
+            PlayerEntity.Create(hunter, color);
+            PlayerEntity.PlayersCreated = Math.Max(created, slot + 1);
+            player.LoadFlags |= LoadFlags.SlotActive;
+            player.Initialized = false;
+            if (!InScene(player))
+            {
+                _scene!.AddEntity(player);
+            }
+            GameState.EncounterState[slot] = 0;
+            player.BotLevel = 1;
+            // the AI SceneSetup gives every bot after InitHunterSpawns (AiPersonality.LoadAll, then InitializeAtLoad)
+            AiPersonality.Load(player, GameState.Mode, slot);
+            player.AiData.InitializeAtLoad();
+        }
+
+        // the bot of a hunter spawner being taken out: gone from the scene, its slot free (the last one is given back)
+        static void DetachBot(EntityBase spawner)
+        {
+            for (int i = PlayerEntity.PlayerCount - 1; i >= 1; i--)
+            {
+                PlayerEntity p = PlayerEntity.Players[i];
+                if (p.EnemySpawner != spawner)
+                {
+                    continue;
+                }
+                if (p.Halfturret is { Health: > 0 } turret)
+                {
+                    turret.Die();
+                }
+                p.Health = 0;
+                p.IsBot = false;
+                p.EnemySpawner = null;
+                p.BotLevel = 0;
+                p.LoadFlags &= ~(LoadFlags.SlotActive | LoadFlags.Active | LoadFlags.Spawned);
+                GameState.EncounterState[i] = 0;
+                if (InScene(p))
+                {
+                    _scene!.RemoveEntity(p);
+                }
+                if (i == PlayerEntity.PlayerCount - 1 && PlayerEntity.PlayersCreated == PlayerEntity.PlayerCount)
+                {
+                    PlayerEntity.PlayerCount--;
+                    PlayerEntity.PlayersCreated--;
+                }
+            }
         }
 
         // take a spawner and its enemies out of the scene
@@ -752,6 +877,10 @@ namespace MphRecomp.Campaign
             {
                 e.Destroy();
                 _scene.RemoveEntity(e);
+            }
+            if (spawner is EnemySpawnEntity hs && hs.Data.EnemyType == EnemyType.Hunter)
+            {
+                DetachBot(spawner);
             }
             if (InScene(spawner))
             {

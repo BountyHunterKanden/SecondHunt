@@ -75,7 +75,9 @@ namespace MphRecomp.Frontend
             rgba[at + 3] = 255;
         }
 
-        public static DsImage LoadBg(string path)
+        // bank: draw every tile in this palette bank instead of the map's (the game swaps a layer's colours by
+        // loading another bank of the file's palette over the one the map names)
+        public static DsImage LoadBg(string path, int? bank = null)
         {
             byte[] f = File.ReadAllBytes(path);
             int tileBytes = BitConverter.ToInt32(f, 4), palBytes = BitConverter.ToInt32(f, 8);
@@ -89,7 +91,7 @@ namespace MphRecomp.Frontend
                 {
                     int index = w == 64 ? tx / 32 * 1024 + ty * 32 + tx % 32 : ty * w + tx;
                     int e = BitConverter.ToUInt16(f, map + index * 2);
-                    int tile = tiles + (e & 0x3FF) * 32, bank = e >> 12;
+                    int tile = tiles + (e & 0x3FF) * 32, pb = bank ?? e >> 12;
                     bool hf = (e & 0x400) != 0, vf = (e & 0x800) != 0;
                     for (int y = 0; y < 8; y++)
                     {
@@ -100,7 +102,7 @@ namespace MphRecomp.Frontend
                             int ci = (sx & 1) != 0 ? b >> 4 : b & 0xF;
                             if (ci != 0)
                             {
-                                Put(rgba, ((ty * 8 + y) * w * 8 + tx * 8 + x) * 4, BitConverter.ToUInt16(f, pal + (bank * 16 + ci) * 2));
+                                Put(rgba, ((ty * 8 + y) * w * 8 + tx * 8 + x) * 4, BitConverter.ToUInt16(f, pal + (pb * 16 + ci) * 2));
                             }
                         }
                     }

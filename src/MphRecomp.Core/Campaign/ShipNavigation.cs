@@ -228,9 +228,11 @@ namespace MphRecomp.Campaign
         }
 
         // What MphRead's GameState.CommitSave does to the story save before writing it: the Omega Cannon doesn't
-        // survive a save, and Gorea's two arenas always start fresh.
+        // survive a save, and Gorea's two arenas always start fresh. Health and ammo are refilled here too: Scene.QuitGame's
+        // enteringShip refill is undone by PlayerEntity.SaveStatus on the frames the host still steps before Ended.
         public static void PrepareForSave(StorySave save)
         {
+            Refill(save);
             save.Weapons &= 0xFF;
             if (save.WeaponSlots[2] == (int)BeamType.OmegaCannon)
             {
@@ -240,6 +242,14 @@ namespace MphRecomp.Campaign
             {
                 Array.Clear(save.RoomState[r - 27]);
             }
+        }
+
+        // every adventure starts from the ship with full energy and ammo, as in vanilla (it only saves at the ship)
+        public static void Refill(StorySave save)
+        {
+            save.Health = save.HealthMax;
+            save.Ammo[0] = save.AmmoMax[0];
+            save.Ammo[1] = save.AmmoMax[1];
         }
     }
 }

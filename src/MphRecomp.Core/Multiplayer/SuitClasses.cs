@@ -12,7 +12,7 @@ namespace MphRecomp.Multiplayer
     // (in a glow texture: the lights); R+G without A = the face, drawn in the visor glass colour.
     public static class SuitClasses
     {
-        const byte Bg = 0, Grey = 1, Main = 2, Second = 3, Chest = 4, Lights = 5, Keep = 6, Dots = 7, Glass = 8;
+        const byte Bg = 0, Grey = 1, Main = 2, Second = 3, Chest = 4, Lights = 5, Keep = 6, Dots = 7, Glass = 8, Shift = 9;
 
         // per-suit extras (SuitColours.Rules): Dark, the brightness under which a big dark patch (the under-suit between the
         // plates) keeps its own colour; Dots, the hue of small bright marks drawn in the lights colour (MP2 Dark Suit's red
@@ -21,8 +21,11 @@ namespace MphRecomp.Multiplayer
         // (0-1) whose biggest paint patch is helmet/chest whole; Dim, the brightness under which paint can't be a light (MP2 Dark
         // Suit's dark brown neck ribbing sits at the orange visor's hue, so it went two colours, owner 2026-10-24)
         // Pieces: the suit is recoloured on the CPU piece by piece instead (SuitPieces; Beta Phazon, owner 2026-10-29)
+        // Shift: textures recoloured whole as one image, every texel's hue turned from the lights hue to the lights colour's,
+        // its brightness kept (MP2 Dark Suit's visor: grouping its texels drew lines the original hasn't and dimmed the glow
+        // until the helmet showed through, owner 2026-11-06 "it should just be one texture that gets a new gradient")
         public sealed record Rules(float Dark = -1, float Dots = -1, string[]? Glow = null, string[]? Plain = null, bool Split = false,
-            float Dim = -1, SuitPieces.Spec? Pieces = null, params Region[] Regions);
+            float Dim = -1, SuitPieces.Spec? Pieces = null, string[]? Shift = null, params Region[] Regions);
         // Poly (optional): x,y pairs in 1/512ths of the texture, an outline the patch must stay inside (the rect is then ignored);
         // Second: the patch goes second colour whole instead (PED's gold knee band went two colours, owner 2026-10-24); Keep:
         // every texel in the rect keeps its own colour (PED's helmet tubes and neck ticks share the body texture); Glass: the
@@ -102,6 +105,11 @@ namespace MphRecomp.Multiplayer
                             if (lab[i] is Grey or Main or Second or Chest) lab[i] = Lights;
                     if (rules.Plain != null && Array.Exists(rules.Plain, g => name.StartsWith(g, StringComparison.OrdinalIgnoreCase)))
                         for (int i = 0; i < n; i++) if (lab[i] != Bg) lab[i] = Keep;
+                    if (rules.Shift != null && Array.Exists(rules.Shift, g => name.StartsWith(g, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        Array.Fill(lab, Shift);
+                        Array.Clear(glow);
+                    }
                 }
                 if (rules.Dark > 0) Under(lab, rgb, w, h, rules.Dark, minsz * 2);
             }
@@ -115,6 +123,7 @@ namespace MphRecomp.Multiplayer
                     Lights => unchecked((int)0xFFFF0000),
                     Dots => 0x00FF0000,
                     Glass => unchecked((int)0xFFFF0001), // lights, R = 1/255: the shader paints it lights colour whole
+                    Shift => unchecked((int)0xFFFF0003), // lights, R = 3/255: the shader turns its hue, brightness kept
                     _ => 0,
                 };
                 if (glow[i] && lab[i] is Main or Second or Chest) outPx[i] |= 0x00FF0000;

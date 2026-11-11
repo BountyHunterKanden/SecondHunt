@@ -84,7 +84,9 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
 
     // streamed music next to the sequenced (Echoes' arena music: ArenaMusic, attached by CampaignAudio): it follows this
     // player's Pause/Play, MasterVolume and Dispose, so whatever pauses the music pauses it too
-    public StreamMusicPlayer Stream { get; } = new();
+    public StreamMusicPlayer Stream { get; }
+    // seconds of music each track holds (the constructor's bufferSeconds)
+    readonly float _bufferSeconds;
 
     // the DS's master volume steps 0..9 (OPTIONS > AUDIO) as an amplitude: the game sets v * 127 / 9 on its sound
     // players, which put a volume through the squared decibel curve (Player.DecibelSquare, tenths of a dB)
@@ -176,9 +178,15 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
     }
 
     // music: RecompSettings.Music (see MusicMode)
-    public GameMusicPlayer(string? music)
+    // bufferSeconds: how far ahead the music is rendered. 0.25 s keeps the campaign's live Tracks/Tempo changes quick;
+    // the front end asks for more (FrontendRenderer, MenuBufferSeconds) because after a match a Mono major GC stops
+    // every managed thread, this pump too, for 0.4-0.5 s on the Odin, and a 0.25 s buffer ran dry: the owner heard the
+    // menu music skip in the LAN lobby (2026-11-06, slow frames 461/427 ms right after the GC bridge's Java GC)
+    public GameMusicPlayer(string? music, float bufferSeconds = 0.25f)
     {
         _mode = MusicMode.For(music);
+        _bufferSeconds = System.Math.Max(0.25f, bufferSeconds);
+        Stream = new StreamMusicPlayer(_bufferSeconds);
         MusicDuck.Register(this);
     }
 
@@ -219,8 +227,8 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
             mode.Tone ? ToneShelfHz : 0, mode.Tone ? ToneShelfDb : 0);
     }
 
-    // >= 250 ms of stereo float
-    static IPcmTrack BuildTrack(int rate) => AppPlatform.Audio.CreateTrack(rate, 2, PcmFormat.Float32, rate / 4, PcmUsage.Music);
+    // bufferSeconds (>= 250 ms) of stereo float
+    IPcmTrack BuildTrack(int rate) => AppPlatform.Audio.CreateTrack(rate, 2, PcmFormat.Float32, (int)(rate * _bufferSeconds), PcmUsage.Music);
 
     public void Load(SeqId seqId, ushort tracks, float volume, System.Action loaded) => Load(seqId, tracks, volume, loaded, startPaused: false);
 
@@ -464,7 +472,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
             Log.Info("MPHAudio", $"music gen {_gen}: {old.Name} -> {next.Name} live");
             if (next.Rate == old.Rate) return true;
 
-            IPcmTrack oldTrack = _track, fresh = BuildTrack(next.Rate);
+            IPcmTrack oldTrack = _track, fresh = _owner.BuildTrack(next.Rate);
             fresh.SetVolume(_owner.Level);
             _echo = new MphRecomp.Frontend.DsEcho(next.Rate);
             // a track that hasn't started takes what fits in its buffer; the chunk that doesn't fit waits in _floats
@@ -766,6 +774,12 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         // SDK's linear decibel table (see StreamGain), so the amplitude falls linearly: Fade drops by FadeStep a sample
         public float Fade = 1, FadeStep;
         public bool Stream; // a STRM channel (see the streams section): never dropped by the voice cap
+        public bool Kept; // KeepHandle: never dropped by the voice cap either
+        // a host PCM loop (PlayPcmLoop): its source and volume, so the free-cam ear (FreeCamEar) can mute it and put it back
+        public bool HostLoop;
+        public SoundSource? HostSource;
+        public float HostVolume;
+        public bool SeatMuted;
         public bool Alive => !Stopped && !Finished && !Releasing;
     }
 
@@ -792,6 +806,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         public float PlayTime;
         public bool NoUpdate;
         public bool Cancellable;
+        public bool Kept; // KeepHandle: never taken over when the instances run out
         public bool Paused;
         public bool Removed;
         public Vector3? FrozenPosition; // noUpdate: the source position when the sound started
@@ -802,6 +817,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         // game, the briefing and the planet select, half that for an id the game plays with bit 31 (the briefing's
         // TELEPATHIC_MESSAGE, ARM9 0x206eda8). SfxScriptEntry.Delay is raw / 30 s, so script time runs at ScriptRate / 30.
         public float ScriptRate = 30;
+        public bool Ui; // PlayUi: a front-end / menu sound, never a seat cue (FreeCamEar)
         public readonly List<Layer> Layers = new();
 
         public bool AnyVoicePlaying => Layers.Exists(l => l.Voice.Alive);
@@ -811,6 +827,18 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
 
     readonly List<Instance> _instances = new();
     readonly List<Voice> _voices = new(); // what the mixer thread actually reads each chunk
+
+    // recomp: a replay's free cam is its own camera and its own ear, tied to no seat (owner 2026-11-08). In the game's
+    // audio a seat's own cues are the sounds with no source or a Self source (SoundSource.Update with rangeIndex -1):
+    // everything "you" hear unplaced -- HUD beeps, the Imperialist zoom, a turret's hit and hum, node
+    // and flag cues. So the free-cam ear drops every one of them here, at the mixer, whatever plays it (MphRead or a
+    // host sound), and keeps every placed world sound, heard from the free camera (ListenerPosition). The main player's
+    // own sounds are placed in free cam (PlayerEntity.HostMainSoundsPlaced), so they stay as world sounds. Menu sounds
+    // (PlayUi) are not seat cues, and the announcer's voices (streams, QueueStream) stay: the owner keeps them all.
+    static bool FreeCamEar => MphRead.Entities.PlayerEntity.HostNoViewer;
+    static bool IsSeatCue(SoundSource? source) => source == null || source.Self;
+    bool _uiRequest; // inside PlayUi
+    bool SeatCueMuted(Instance inst) => FreeCamEar && !inst.Ui && IsSeatCue(inst.Source);
     int _nextHandle = 1;
     readonly HashSet<int> _logged = new(); // one MPHAudio line per distinct sample id, first time it plays
 
@@ -1049,6 +1077,19 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
     // nothing), for a loop the caller stops. (Script clock + handle: see Instance.ScriptRate.)
     public int PlayUi(int sfxId, float scriptRate = 30)
     {
+        _uiRequest = true;
+        try
+        {
+            return PlayUiSound(sfxId, scriptRate);
+        }
+        finally
+        {
+            _uiRequest = false;
+        }
+    }
+
+    int PlayUiSound(int sfxId, float scriptRate)
+    {
         if (sfxId < 0)
         {
             return -1;
@@ -1124,8 +1165,9 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
     }
 
     // SfxInstance.SetUpInstance: false (with the existing instance) when the request should reuse a playing one
+    // silent: the request has no volume (a DGN whose curves are all 0), so it may only update a playing instance
     bool SetUpInstance(int id, SoundSource? source, bool loop, float recency, bool sourceOnly, bool cancellable,
-        bool noUpdate, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Instance? inst)
+        bool noUpdate, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Instance? inst, bool silent = false)
     {
         if (loop)
         {
@@ -1134,15 +1176,22 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         }
         if (recency >= 0)
         {
-            Instance? recent = _instances.Find(i => i.SfxId == id && i.PlayTime <= recency && i.IsPlaying
-                && (!sourceOnly || ReferenceEquals(i.Source, source)));
-            if (recent != null)
+            // a loop asks again every frame (an item's hum), so this is a loop, not a capturing lambda: no garbage per request
+            foreach (Instance i in _instances)
             {
-                inst = recent;
-                return false;
+                if (i.SfxId == id && i.PlayTime <= recency && i.IsPlaying && (!sourceOnly || ReferenceEquals(i.Source, source)))
+                {
+                    inst = i;
+                    return false;
+                }
             }
         }
-        if (source != null && !TakeSlot(id, source, noUpdate))
+        if (silent || (FreeCamEar && !_uiRequest && IsSeatCue(source)))
+        {
+            inst = null;
+            return false; // silent, or a seat cue in a replay's free cam (FreeCamEar)
+        }
+        if (source != null && !TakeSlot(id, source, noUpdate, loop))
         {
             inst = null;
             return false; // every slot of this id holds a louder sound: the game drops the request
@@ -1150,7 +1199,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         if (_instances.Count(i => !i.Removed) >= MaxInstances)
         {
             // SfxInstance.FindInstance: take over the longest-playing instance, preferring one from the same source
-            Instance oldest = _instances.Where(i => !i.Removed)
+            Instance oldest = _instances.Where(i => !i.Removed && !i.Kept)
                 .OrderByDescending(i => source != null && ReferenceEquals(i.Source, source))
                 .ThenByDescending(i => i.PlayTime).First();
             StopInstance(oldest);
@@ -1162,6 +1211,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
             Source = source,
             Cancellable = cancellable,
             NoUpdate = noUpdate,
+            Ui = _uiRequest,
             FrozenPosition = noUpdate && source != null && !source.Self ? source.Position : null,
         };
         _instances.Add(inst);
@@ -1193,12 +1243,13 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
 
     // A host's own sound, not in MPH's tables (Scout Drone MP1 beam: Prime's drone sounds, CampaignRenderer.DroneFx.cs):
     // mono PCM at its own rate, once, at a volume, placed like a sample from its source where it starts (no handle, no
-    // later position updates: the sounds are short).
-    public void PlayPcm(short[] pcm, int rate, float volume, SoundSource? source)
+    // later position updates: the sounds are short). `everyone`: an unplaced sound the whole match hears (Mining Plaza's
+    // gate jingle), not a seat cue, so a replay's free cam keeps it.
+    public void PlayPcm(short[] pcm, int rate, float volume, SoundSource? source, bool everyone = false)
     {
-        if (pcm.Length == 0 || rate <= 0)
+        if (pcm.Length == 0 || rate <= 0 || (FreeCamEar && !everyone && IsSeatCue(source)))
         {
-            return;
+            return; // nothing, or a seat cue in a replay's free cam (FreeCamEar)
         }
         lock (_lock)
         {
@@ -1220,7 +1271,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
             _voices.Add(v);
             if (_voices.Count > MaxVoices)
             {
-                int oldest = _voices.FindIndex(x => !x.Stream);
+                int oldest = _voices.FindIndex(x => !x.Stream && !x.Kept);
                 _voices[oldest].Stopped = true;
                 _voices.RemoveAt(oldest);
             }
@@ -1237,7 +1288,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         }
         lock (_lock)
         {
-            var v = new Voice { Pcm = pcm, Step = rate / (double)_mixRate, Loop = true };
+            var v = new Voice { Pcm = pcm, Step = rate / (double)_mixRate, Loop = true, HostLoop = true };
             PcmGains(v, volume, source);
             _voices.Add(v);
             return v;
@@ -1264,7 +1315,10 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
 
     void PcmGains(Voice v, float volume, SoundSource? source)
     {
-        float vol = SfxDsGain * volume * (Sfx.SfxMute && source != null ? 0 : 1) * (source?.Volume ?? 1);
+        v.HostSource = source;
+        v.HostVolume = volume;
+        v.SeatMuted = FreeCamEar && IsSeatCue(source);
+        float vol = SfxDsGain * volume * (Sfx.SfxMute && source != null || v.SeatMuted ? 0 : 1) * (source?.Volume ?? 1);
         float pan = 0;
         if (source != null && !source.Self)
         {
@@ -1300,9 +1354,18 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         {
             pcms[i] = GetPcm((int)file.Entries[i].SfxId);
         }
+        // a silent request (a resting piston: amount 0) never sets up an instance (2026-11-05, Piston Cave): it used
+        // to take over a playing slot first and only then stop for "no volume", so with the room's ~55 pistons on
+        // PISTON1's 7 slots the resting ones evicted a moving one every frame and its loop restarted (buzz/stutter)
+        bool anyVolume = false;
+        for (int i = 0; i < file.Entries.Count; i++)
+        {
+            anyVolume |= DgnCurves(file, file.Entries[i], amountA, amountB).Volume > 0;
+        }
         lock (_lock)
         {
-            if (!SetUpInstance(id, source, loop, recency, sourceOnly: true, cancellable, noUpdate, out Instance? inst))
+            if (!SetUpInstance(id, source, loop, recency, sourceOnly: true, cancellable, noUpdate, out Instance? inst,
+                silent: !anyVolume))
             {
                 // the same held sound from the same source: only its curve inputs change (the charge sounds, lava);
                 // null = no free slot (TakeSlot)
@@ -1313,20 +1376,14 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
                 return;
             }
             inst.Dgn = file;
-            bool anyVolume = false;
             for (int i = 0; i < file.Entries.Count; i++)
             {
                 (float volume, float pitch) = DgnCurves(file, file.Entries[i], amountA, amountB);
-                anyVolume |= volume > 0;
                 if (!AddLayer(inst, (int)file.Entries[i].SfxId, pcms[i], volume, pitch, pan: null, loop))
                 {
                     StopInstance(inst);
                     return;
                 }
-            }
-            if (!anyVolume)
-            {
-                StopInstance(inst); // SfxInstance.PlayDgn: "no volume was above 0"
             }
         }
     }
@@ -1370,6 +1427,14 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
     {
         lock (_lock)
         {
+            // a host loop placed once (PlayPcmLoop without MovePcm) mutes as free cam starts and comes back as it ends
+            foreach (Voice v in _voices)
+            {
+                if (v.HostLoop && v.Alive && v.SeatMuted != (FreeCamEar && IsSeatCue(v.HostSource)))
+                {
+                    PcmGains(v, v.HostVolume, v.HostSource);
+                }
+            }
             for (int i = 0; i < _instances.Count; i++)
             {
                 Instance inst = _instances[i];
@@ -1543,7 +1608,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         if (_voices.Count > MaxVoices)
         {
             // hard cap on simultaneous voices: drop the oldest (never a stream's channel)
-            int oldest = _voices.FindIndex(x => !x.Stream);
+            int oldest = _voices.FindIndex(x => !x.Stream && !x.Kept);
             _voices[oldest].Stopped = true;
             _voices.RemoveAt(oldest);
         }
@@ -1578,7 +1643,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
     {
         SoundSample sample = _samples![layer.SampleId];
         SoundSource? source = inst.Source;
-        float mute = Sfx.SfxMute && source != null ? 0 : 1;
+        float mute = (Sfx.SfxMute && source != null) || SeatCueMuted(inst) ? 0 : 1;
         float vol = SfxDsGain * layer.RelVolume * (layer.TableVolume ? sample.Volume : 1) * mute * (source?.Volume ?? 1);
         float pan = layer.Pan ?? 0;
         if (source != null && !source.Self && layer.Pan == null)
@@ -1641,18 +1706,51 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
     // playing instance of the id that is no louder than the new sound; else this source's own oldest instance of it;
     // else the request is dropped. Without this every repeat of a one-shot (a Magmaul shot's 5-8 bounces, a hit sound
     // requested every frame) stacked a new voice on the old ones.
-    bool TakeSlot(int id, SoundSource source, bool noUpdate)
+    //
+    // A silent request (out of range: audibility 0) never takes over a playing slot (2026-11-01, Mining Plaza GC dips):
+    // the arena's item hums (POWER_UP_LOOP1, 3 slots) ask again every frame, and with more silent items than slots each
+    // request took over another silent one -- ~1150 new instances a second, ~1 MB/s of garbage on the Odin, for no sound.
+    // Both are silent, so nothing audible changes; the item takes a slot once it's louder than one.
+    //
+    // A loop takes over another playing loop only when it is clearly louder (2026-11-05, Piston Cave buzz): the room's
+    // ~55 pistons (PISTON1, 7 slots) ask every frame, and mirrored pairs at equal volume, or two moving pistons
+    // crossing in volume, took each other's slot back and forth every frame. Each takeover restarts the sample, so the
+    // loops never got past ~0.1 s and buzzed (457 restarts in 8 s at the room's start). The game compares integer
+    // volume bytes at 30 Hz, which ties far less often than per-frame floats; the margin stands in for that.
+    const float LoopTakeoverMargin = 1.25f;
+
+    bool TakeSlot(int id, SoundSource source, bool noUpdate, bool loop = false)
     {
-        List<Instance> same = _instances.FindAll(i => i.SfxId == id && i.Source != null && i.IsPlaying);
-        if (same.Count < SlotLimit(id))
+        int count = 0;
+        foreach (Instance i in _instances)
+        {
+            if (SameSlot(i, id))
+            {
+                count++;
+            }
+        }
+        if (count < SlotLimit(id))
         {
             return true;
         }
         Instance? victim = null;
-        float quietest = Audibility(source, noUpdate && !source.Self ? source.Position : null);
-        foreach (Instance i in same)
+        float requested = Audibility(source, noUpdate && !source.Self ? source.Position : null);
+        float quietest = requested;
+        if (quietest <= 0)
         {
+            return false;
+        }
+        foreach (Instance i in _instances)
+        {
+            if (!SameSlot(i, id))
+            {
+                continue;
+            }
             float a = Audibility(i.Source!, i.FrozenPosition);
+            if (loop && i.IsLooping && a > 0 && a * LoopTakeoverMargin >= requested)
+            {
+                continue;
+            }
             if (a <= quietest)
             {
                 quietest = a;
@@ -1662,9 +1760,9 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         if (victim == null)
         {
             float oldest = -1;
-            foreach (Instance i in same)
+            foreach (Instance i in _instances)
             {
-                if (ReferenceEquals(i.Source, source) && i.PlayTime >= oldest)
+                if (SameSlot(i, id) && ReferenceEquals(i.Source, source) && i.PlayTime >= oldest)
                 {
                     oldest = i.PlayTime;
                     victim = i;
@@ -1678,6 +1776,8 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         StopInstance(victim);
         return true;
     }
+
+    static bool SameSlot(Instance i, int id) => i.SfxId == id && i.Source != null && i.IsPlaying;
 
     void StopInstance(Instance inst)
     {
@@ -2086,6 +2186,20 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
                 {
                     inst.Paused = paused;
                 }
+            }
+        }
+    }
+
+    // First Hunt's music (FirstHuntSounds.PlayMusic): the cart streams it on its own channel, so a busy room never cuts it
+    public override void KeepHandle(int handle)
+    {
+        lock (_lock)
+        {
+            Instance? inst = _instances.Find(i => i.Handle == handle && !i.Removed);
+            if (inst != null)
+            {
+                inst.Kept = true;
+                inst.Layers.ForEach(l => l.Voice.Kept = true);
             }
         }
     }

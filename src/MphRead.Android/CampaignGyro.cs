@@ -22,7 +22,7 @@ namespace MphRecomp.App;
 // Settings (recomp_settings.json, read by name so this works before and after the settings screen grows the rows):
 //   "Gyro": "off" | "on" (always) | "zoom" (only while zoomed or in the scan visor, like Zelda's bow aiming)
 //   "GyroSensitivity": percent (150 = the view turns 1.5x as far as the device did)
-//   "GyroAxis": "yaw" (the screen's own vertical: GyroWiki's handheld pick) | "player" (the world's vertical) | "roll"
+//   "GyroAxis": "yaw" (the screen's own vertical: GyroWiki's handheld pick) | "player" (the world's vertical) | "roll" | "yaw+roll"
 //   tuning (thread D 10-24, all off or the old fixed value by default): "GyroPitchSensitivity" percent (0 = same as
 //   GyroSensitivity), "GyroInvertPitch"/"GyroInvertYaw", "GyroDeadband" deg/s tightening, "GyroSmoothing" percent (100 = soft tiered below 30 deg/s), "GyroAccel"
 //   percent (slow motion scaled down by that much, full speed by 75 deg/s)
@@ -67,7 +67,6 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyro
     readonly Sensor? _gyroscope, _accelerometer;
     SensorManager? _listening; // the manager the listener is on: the handheld's or the pad's
     volatile bool _onPad;      // samples come from a controller (its own axes, its drift taken off)
-    float _padScale = 1f;      // to rad/s (a driver reporting deg/s)
     GyroTurnAxis _deviceAxis = GyroTurnAxis.Yaw, _padAxis = GyroTurnAxis.Player;
     readonly string _settingsPath;
     readonly Intent? _intent;
@@ -197,6 +196,7 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyro
         {
             "player" => GyroTurnAxis.Player,
             "roll" => GyroTurnAxis.Roll,
+            "yaw+roll" => GyroTurnAxis.YawRoll,
             _ => GyroTurnAxis.Yaw
         };
         _deviceAxis = Axis(axis);
@@ -252,8 +252,6 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyro
             _handler = new Handler(_thread.Looper!);
         }
         _onPad = pad;
-        // (a rad/s gyro tops out near 35; a range in the hundreds or thousands is deg/s)
-        _padScale = pad && gyro.MaximumRange > 100f ? MathF.PI / 180f : 1f;
         Aim.Options.TurnAxis = pad ? _padAxis : _deviceAxis;
         _rotation = DisplayRotation();
         _lastGyroNs = _lastAccelNs = 0;
@@ -270,7 +268,7 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyro
         _listening = manager;
         _registered = true;
         Log.Info(Tag, pad
-            ? $"sensors on: controller \"{padName}\" ({gyro.Name}, max {gyro.MaximumRange:0.#}{(_padScale != 1f ? " deg/s" : " rad/s")}; "
+            ? $"sensors on: controller \"{padName}\" ({gyro.Name}, max {gyro.MaximumRange:0.#} deg/s; "
                 + $"accelerometer {accel?.Name ?? "none"}), turn axis {_padAxis}"
             : $"sensors on (display {_rotation})");
     }
@@ -357,11 +355,9 @@ internal sealed class GyroSensor : Java.Lang.Object, ISensorEventListener, IGyro
         {
             float dt = _lastGyroNs == 0 ? 0f : (e.Timestamp - _lastGyroNs) * 1e-9f;
             _lastGyroNs = e.Timestamp;
-            if (pad)
-            {
-                v *= _padScale;
-                Calibrate(v, dt);
-            }
+            // a controller's samples are rad/s like the handheld's: Android converts the kernel's deg/s
+            // (SensorInputMapper), though its MaximumRange stays in deg/s
+            if (pad) Calibrate(v, dt);
             Aim.AddSample(v, dt, e.Timestamp);
             if (_log) LogSample(v, dt);
         }

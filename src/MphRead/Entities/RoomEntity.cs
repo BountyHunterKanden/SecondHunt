@@ -27,6 +27,8 @@ namespace MphRead.Entities
         private NodeData? _nodeData;
         public NodeData? NodeData => _nodeData;
         private readonly List<ModelInstance> _connectorModels = new List<ModelInstance>();
+        private ModelInstance? _skyInst;
+        private readonly List<Node> _skyNodes = new List<Node>();
         private readonly float[] _emptyMatrixStack = Array.Empty<float>();
 
         protected override bool UseNodeTransform => false; // default -- will use transform if setting is enabled
@@ -98,6 +100,7 @@ namespace MphRead.Entities
                 _morphCameraExcludeNodes.Add(Nodes[16]);
             }
             _meta = meta;
+            SetUpHostSky(meta);
             Model model = inst.Model;
             // portals are already filtered by layer mask
             _portals.AddRange(collision.Info.Portals);
@@ -828,6 +831,7 @@ namespace MphRead.Entities
                     + (HostTransitionGc ? $"forced GC {Stopwatch.GetElapsedTime(traceHandOver).TotalMilliseconds:0} ms" : "no forced GC"));
             }
             GameState.TransitionState = TransitionState.None;
+            if (GameEvents.Any) GameEvents.Raise("room_enter", roomMeta.Name, roomMeta.Id); // recomp: mod event (GameEvents.cs)
             GameState.TransitionRoomId = -1;
         }
 
@@ -1516,6 +1520,7 @@ namespace MphRead.Entities
                             Array.Copy(_hostStepAudible, _audibleRoomParts, _roomPartMax);
                         }
                     }
+                    DrawHostSky();
                     if (_partVisInfoHead == null || _scene.ShowAllNodes)
                     {
                         DrawAllNodes(inst);
@@ -1617,7 +1622,7 @@ namespace MphRead.Entities
         private void DrawRoomParts(ModelInstance roomInst)
         {
             _excludedNodes.Clear();
-            if (PlayerEntity.Main.MorphCamera != null)
+            if (PlayerEntity.Main.MorphCamera != null && !PlayerEntity.HostNoViewer) // recomp: not from a replay's free cam (HostNoViewer)
             {
                 for (int i = 0; i < _morphCameraExcludeNodes.Count; i++)
                 {
@@ -1758,6 +1763,63 @@ namespace MphRead.Entities
                         }
                     }
                 }
+            }
+        }
+
+        private void SetUpHostSky(RoomMetadata meta)
+        {
+            _skyInst = null;
+            _skyNodes.Clear();
+            if (meta.HostSkyRoom == null || meta.HostSkyNodes == null || meta.HostSkyNodes.Count == 0)
+            {
+                return;
+            }
+            try
+            {
+                ModelInstance sky = Read.GetRoomModelInstance(meta.HostSkyRoom);
+                IReadOnlyList<Node> nodes = sky.Model.Nodes;
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    if (meta.HostSkyNodes.Contains(nodes[i].Name))
+                    {
+                        nodes[i].Enabled = true;
+                        _skyNodes.Add(nodes[i]);
+                    }
+                }
+                if (_skyNodes.Count == 0)
+                {
+                    return;
+                }
+                _scene.LoadModel(sky.Model, isRoom: true);
+                sky.SetAnimation(0);
+                _skyInst = sky;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Host sky {meta.HostSkyRoom}: {ex.Message}");
+            }
+        }
+
+        private void DrawHostSky()
+        {
+            if (_skyInst == null)
+            {
+                return;
+            }
+            UpdateTransforms(_skyInst, Matrix4.CreateScale(_skyInst.Model.Scale) * Matrix4.CreateTranslation(_meta.HostSkyOffset), recolor: 0);
+            for (int i = 0; i < _skyNodes.Count; i++)
+            {
+                DrawSkyNode(_skyNodes[i]);
+            }
+        }
+
+        private void DrawSkyNode(Node node)
+        {
+            GetItems(_skyInst!, node);
+            IReadOnlyList<Node> nodes = _skyInst!.Model.Nodes;
+            for (int i = node.ChildIndex; i != -1; i = nodes[i].NextIndex)
+            {
+                DrawSkyNode(nodes[i]);
             }
         }
 

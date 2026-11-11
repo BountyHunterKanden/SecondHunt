@@ -384,7 +384,9 @@ namespace MphRecomp.Multiplayer.Net
             {
                 if (shooter.TryClaimShot(number, out PlayerEntity.ClaimShotInfo info) && (info.HitMask & (1u << c.Victim)) != 0)
                 {
-                    return Verdict.Agreed;
+                    // (the guest's screen saw it in the head where the host's copy hit the body: HeadUpgrade)
+                    return c.Head && (info.HeadMask & (1u << c.Victim)) == 0
+                        && HeadUpgrade(host, shooter, victim, p, c, number, info, frame, out hit) ? Verdict.Apply : Verdict.Agreed;
                 }
             }
             // the frame the guest's screen showed: recent enough, and the player there then (not since respawned)
@@ -408,6 +410,53 @@ namespace MphRecomp.Multiplayer.Net
         }
 
         private static readonly List<int> _candidates = new();
+
+        private const float HeadReach = 0.3f; // a head upgrade: how far the guest's drawn victim may be from the host's history
+
+        // head upgrades taken (the host's log)
+        public static int HeadUpgrades { get; private set; }
+
+        // head upgrade (2026-10-31 player report: a zoomed Imperialist shot struck 0.004 under Noxus's head line on the host but
+        // over it on the shooter's screen, which showed HEADSHOT! while Noxus lived on at 61 and killed back): the host's own copy
+        // of the shot hit the victim's body, the guest's screen saw the head. Taken when the guest drew the victim within
+        // HeadReach of the host's history at that frame, the claimed point is on the victim and on the shot's line with no wall
+        // between, and the head rule holds on the guest's own view of the victim (the shooter's screen counts, as for any claim)
+        private static bool HeadUpgrade(CampaignHost host, PlayerEntity shooter, PlayerEntity victim, Pending p, Claim c, int number,
+            in PlayerEntity.ClaimShotInfo shot, long frame, out CampaignHost.ClaimedHit hit)
+        {
+            hit = default;
+            if (!shot.Claimable || victim.Health == 0 || frame - c.View > LagCompensation.MaxRewind + ExtraAge || host.Lag == null
+                || !host.Lag.TryPoseAt(c.Victim, c.View, out Vector3 was, out int epoch) || epoch != victim.NetAimEpoch
+                || (was - c.VictimPosition).Length > HeadReach)
+            {
+                return false;
+            }
+            Vector3 off = c.Point - was;
+            if (MathF.Sqrt(off.X * off.X + off.Z * off.Z) > BodyRadius || off.Y < -BodyBelow || off.Y > BodyAbove) return false;
+            Vector3 dir = shot.Direction.LengthSquared > 1e-8f ? shot.Direction.Normalized() : Vector3.UnitZ;
+            Vector3 toPoint = c.Point - shot.Origin;
+            float along = Vector3.Dot(toPoint, dir);
+            if (along < 0 || (toPoint - dir * along).Length > LineReach + shot.Radius || along > shot.Reach + LineReach + shot.Radius)
+            {
+                return false;
+            }
+            CollisionResult res = default;
+            if (along > 0.3f && CollisionDetection.CheckBetweenPoints(shot.Origin, shot.Origin + dir * (along - 0.3f), TestFlags.Beams,
+                host.Scene, ref res))
+            {
+                return false;
+            }
+            if (!BeamProjectileEntity.HostClaimHeadshot(shot.Beam, shot.Origin, c.Point, c.VictimPosition,
+                Fixed.ToFloat(victim.Values.MaxPickupHeight), victim.IsAltForm))
+            {
+                return false;
+            }
+            hit = new CampaignHost.ClaimedHit(p.Seat, number, c.Victim, c.Point, Head: true, Upgrade: true);
+            HeadUpgrades++;
+            Console.WriteLine($"hit claims: head upgrade seat {p.Seat} -> seat {c.Victim} f{frame} (seen f{c.View}, "
+                + $"drawn {(was - c.VictimPosition).Length:0.000} off, {HeadUpgrades} this session)");
+            return true;
+        }
 
         private const int RescueShotAge = 900; // frames: how old the newest shot lent for its weapon's damage may be
 

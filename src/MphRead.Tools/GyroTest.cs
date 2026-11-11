@@ -73,6 +73,25 @@ namespace MphRead
                 && ZoomAim.GyroScale(false) == 1f, $"zoomed {ZoomAim.GyroScale(true)}");
             ZoomAim.Load(new MphRecomp.Config.RecompSettings());
             System.IO.File.Delete(path);
+            // GYRO BUTTON (finRatman via owner 11-07): always on by default, its button on no default button, controller only,
+            // and the BUTTONS tab's reset leaves it alone (it's on GYRO)
+            var fresh = new MphRecomp.Config.RecompSettings();
+            var gyroFn = Array.Find(MphRecomp.Config.ControlBinds.PadFunctions, f => f.Id == MphRecomp.Config.ControlBinds.Gyro);
+            Check("gyro button: ALWAYS by default, no default button, not a keyboard function", fresh.GyroButton == "always"
+                && gyroFn != null && gyroFn.Defaults.Length == 0
+                && !Array.Exists(MphRecomp.Config.ControlBinds.KeyFunctions, f => f.Id == MphRecomp.Config.ControlBinds.Gyro));
+            fresh.PadBinds[MphRecomp.Config.ControlBinds.Gyro] = new[] { "ThumbL" };
+            fresh.PadBinds[MphRecomp.Config.ControlBinds.Talk] = new[] { "Select" };
+            bool atDefault = MphRecomp.Config.ControlBinds.IsDefault(fresh, false, MphRecomp.Config.ControlBinds.Gyro);
+            MphRecomp.Config.ControlBinds.Reset(fresh, false, MphRecomp.Config.ControlBinds.Gyro);
+            Check("BUTTONS reset keeps the gyro button, resets the rest", !atDefault
+                && MphRecomp.Config.ControlBinds.IsDefault(fresh, false, MphRecomp.Config.ControlBinds.Gyro)
+                && fresh.PadBinds.Count == 1 && fresh.PadBinds.ContainsKey(MphRecomp.Config.ControlBinds.Gyro));
+            var savedButton = Saved("{ \"GyroButton\": \"toggle\", \"PadBinds\": { \"gyro\": [\"ThumbL\"] } }");
+            MphRecomp.Config.ControlBinds.Tidy(savedButton);
+            Check("a saved gyro button and mode load and survive Tidy", savedButton.GyroButton == "toggle"
+                && System.Linq.Enumerable.SequenceEqual(MphRecomp.Config.ControlBinds.Get(savedButton, false, MphRecomp.Config.ControlBinds.Gyro), new[] { "ThumbL" }));
+            System.IO.File.Delete(path);
         }
 
         private static readonly NVec3 Upright = new(0, 1, 0);
@@ -89,9 +108,9 @@ namespace MphRead
             return aim.TakeDegrees();
         }
 
-        private static GyroAim NewAim(GyroTurnAxis axis, float sens = 1f)
+        private static GyroAim NewAim(GyroTurnAxis axis, float sens = 1f, long lagCapNs = MphRecomp.Input.PacedSum.DefaultLagCapNs)
         {
-            var aim = new GyroAim(new GyroAimOptions { TurnAxis = axis, Sensitivity = sens });
+            var aim = new GyroAim(new GyroAimOptions { TurnAxis = axis, Sensitivity = sens }, lagCapNs);
             aim.AddAccelerometer(Upright * 9.81f, 0f);
             return aim;
         }
@@ -127,6 +146,26 @@ namespace MphRead
             Check("upright, roll 30 -> no turn (player space)", Near(d.X, 0, 0.5f), $"got {d.X:0.00}");
             d = Rotate(NewAim(GyroTurnAxis.Roll), new NVec3(0, 0, 60), 0.5f, Upright);
             Check("upright, roll left 30 -> turn left 30 (roll)", Near(d.X, 30, 0.5f), $"got {d.X:0.00}");
+            // yaw+roll (finRatman 11-04): either turns, together they add up to the length of the two, never double
+            d = Rotate(NewAim(GyroTurnAxis.YawRoll), new NVec3(0, 90, 0), 1f, Upright);
+            Check("yaw+roll: turn left 90 -> 90", Near(d.X, 90, 0.5f), $"got {d.X:0.00}");
+            d = Rotate(NewAim(GyroTurnAxis.YawRoll), new NVec3(0, 0, 60), 0.5f, Upright);
+            Check("yaw+roll: roll left 30 -> turn left 30", Near(d.X, 30, 0.5f), $"got {d.X:0.00}");
+            d = Rotate(NewAim(GyroTurnAxis.YawRoll), new NVec3(0, 60, 60), 0.5f, Upright);
+            Check("yaw+roll: turn 30 + roll 30 together -> 42.4, not 60", Near(d.X, 42.4f, 0.5f), $"got {d.X:0.00}");
+            d = Rotate(NewAim(GyroTurnAxis.YawRoll), new NVec3(0, 60, -60), 0.5f, Upright);
+            Check("yaw+roll: turn left 30 + roll right 30 -> 0", Near(d.X, 0, 0.5f), $"got {d.X:0.00}");
+            // held tilted back 45 (aiming down, owner 11-08): a steering-wheel tilt about the true horizontal still turns
+            var tiltedRoll = new GyroAim(new GyroAimOptions { TurnAxis = GyroTurnAxis.YawRoll, Sensitivity = 1f });
+            tiltedRoll.AddAccelerometer(tilted * 9.81f, 0f); // a fresh aim takes its first gravity reading as is
+            d = Rotate(tiltedRoll, NVec3.Normalize(new NVec3(0, -1, 1)) * 60f, 0.5f, tilted);
+            Check("yaw+roll, tilted 45: steering-wheel tilt left 30 -> turn left 30", Near(d.X, 30, 1f), $"got {d.X:0.00}");
+            var tiltedYaw = new GyroAim(new GyroAimOptions { TurnAxis = GyroTurnAxis.YawRoll, Sensitivity = 1f });
+            tiltedYaw.AddAccelerometer(tilted * 9.81f, 0f); // a fresh aim takes its first gravity reading as is
+            d = Rotate(tiltedYaw, new NVec3(0, 90, 0), 1f, tilted);
+            NVec2 body = Rotate(tiltedYaw, bodyTurn, 1f, tilted);
+            Check("yaw+roll, tilted 45: wrist yaw 90 and body turn 90 -> 90 each", Near(d.X, 90, 1f) && Near(body.X, 90, 1f),
+                $"got {d.X:0.00}, {body.X:0.00}");
 
             // 4. pitch
             d = Rotate(NewAim(GyroTurnAxis.Player), new NVec3(60, 0, 0), 0.5f, Upright);
@@ -296,6 +335,78 @@ namespace MphRead
                 Check("paced touch: a steady drag gives even steps (under 15% of a step); after a rest the drag turns at once",
                     touchSpread < 0.15f && firstAfterRest > 1f, $"step spread {touchSpread:0.00}, first step after the rest {firstAfterRest:0.0} px");
             }
+
+            // a PC pad over Bluetooth (owner 2026-11-09, 8BitDo Ultimate in Switch mode: shaky): packets of 3 samples every
+            // ~10.7 ms, late by 0-8 ms (one 40 ms stall, one packet lost), read once an uneven frame; SDL stamps the
+            // samples on its own count from 0 (1% off the true rate), which SensorClock moves onto the local clock
+            // spellNs: packets late by up to this much more, a new spell every second (a PC's Bluetooth)
+            (float spread, float total, int off) PadPaced(bool paced, double hz = 120, long spellNs = 0, long capNs = MphRecomp.Input.PacedSum.DefaultLagCapNs)
+            {
+                var a = NewAim(GyroTurnAxis.Yaw, 1f, capNs);
+                a.Options.TightenDps = 0f;
+                var spells = new Random(9);
+                long spell = 0;
+                var clock = new MphRecomp.Input.SensorClock();
+                var prng = new Random(5);
+                const long PacketNs = 10_714_000, Start = 7_000_000_000; // (the local clock isn't the pad's)
+                const double CountNs = 3_571_000 * 1.01; // SDL's measured sample spacing, a little off
+                long frameNs = Start, made = Start, count = 0;
+                long arrives = made + 4_000_000;
+                bool lostOne = false;
+                double accum = 0;
+                float lo = float.MaxValue, hi = 0, sum = 0;
+                int off = 0; // steps more than half a step off
+                for (int f = 0; f < 480; f++)
+                {
+                    long dt = hz < 100 ? (long)(1e9 / hz * (0.94 + 0.12 * prng.NextDouble())) : (long)(1e9 / 120 * (0.6 + 0.8 * prng.NextDouble()));
+                    frameNs += dt;
+                    // late all at once, then catching up at ~60 ms a second (as recorded: an 8BitDo on a PC)
+                    spell = Math.Max(0, spell - dt * 6 / 100);
+                    if (spellNs > 0 && f % 60 == 30) spell = Math.Max(spell, (long)(spellNs * spells.NextDouble()));
+                    while (arrives <= frameNs)
+                    {
+                        bool lost = f >= 300 && !lostOne;
+                        lostOne |= lost;
+                        for (int k = 0; k < 3 && !lost; k++)
+                        {
+                            count++;
+                            long t = paced ? clock.ToLocal((long)(count * CountNs), frameNs) : 0;
+                            a.AddSample(new NVec3(0, 60, 0) * (MathF.PI / 180f), PacketNs / 3 * 1e-9f, t);
+                        }
+                        made += PacketNs;
+                        arrives = Math.Max(arrives, made + (long)(8_000_000 * prng.NextDouble()) + (f == 200 ? 40_000_000 : 0) + spell);
+                    }
+                    accum += dt * 1e-9;
+                    while (accum >= 1 / 60.0)
+                    {
+                        accum -= 1 / 60.0;
+                        float x = (paced ? a.TakePaced(frameNs, (long)(accum * 1e9)) : a.TakeDegrees()).X;
+                        sum += x;
+                        if (f < 60 || (f >= 200 && f < 215)) continue; // settled, and not the stall itself
+                        lo = MathF.Min(lo, x);
+                        hi = MathF.Max(hi, x);
+                        if (MathF.Abs(x - 1f) > 0.5f) off++;
+                    }
+                }
+                return ((hi - lo) / (60f * 1.5f / 60f), sum + a.TakeDegrees().X, off);
+            }
+            (float padRawSpread, float padRawTotal, _) = PadPaced(false);
+            (float padSpread, float padTotal, _) = PadPaced(true);
+            Check("paced pad (Bluetooth, SDL's own sample count): even steps (spread under 15% of a step), nothing lost",
+                padSpread < 0.15f && padRawSpread > 0.5f && Near(padTotal, padRawTotal, 0.01f),
+                $"step spread {padRawSpread:0.00} -> {padSpread:0.00} (1 = a whole step), total {padRawTotal:0.00} / {padTotal:0.00} deg");
+            (float pad60Raw, _, _) = PadPaced(false, 60); // a 60 Hz monitor: the pad read once a picture
+            (float pad60, _, _) = PadPaced(true, 60);
+            Check("paced pad on a 60 Hz monitor: even steps", pad60 < 0.15f && pad60Raw > 0.5f,
+                $"step spread {pad60Raw:0.00} -> {pad60:0.00}");
+            // (a spell later than any for a while still stalls a step or two: the lag it learned had faded)
+            (_, _, int spellRaw) = PadPaced(false, 60, 60_000_000);
+            (_, _, int spellOld) = PadPaced(true, 60, 60_000_000);
+            (_, float spellTotal, int spellPc) = PadPaced(true, 60, 60_000_000, 80_000_000);
+            (_, float spellRawTotal, _) = PadPaced(false, 60, 60_000_000, 80_000_000);
+            Check("paced pad, packets 0-60 ms late in spells (a PC's Bluetooth): few uneven steps with the PC's 80 ms cap",
+                spellPc * 4 <= spellOld && spellPc <= 8 && Near(spellTotal, spellRawTotal, 0.01f),
+                $"steps over half a step off: {spellRaw} unpaced, {spellOld} with the 30 ms cap -> {spellPc} of 400");
         }
 
         // ------------------------------------------------------------ through MphRead's sim

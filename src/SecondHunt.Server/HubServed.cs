@@ -432,11 +432,13 @@ namespace SecondHunt.Server
                     rows.Add(new ResultRow
                     {
                         Code = code, Place = Math.Clamp(x.Place, 0, MatchResultReq.MaxRows - 1), Team = line.Teams && x.Team is 0 or 1 ? x.Team : -1,
+                        Stats = x.Stats,
                     });
                 }
             }
             round.Reported = true;
             int pairs = rows.Count >= 2 ? CountHeadToHead(rows, line.Teams) : 0;
+            CountHubStats(rows, line.Teams, line.Mode, line.Arena, line.Seconds, round.At); // (the Gaming Hub, HubStats.cs)
             Console.WriteLine($"served game {g.Id}: result for {rows.Count} players ({pairs} pairs)");
         }
 
@@ -444,6 +446,9 @@ namespace SecondHunt.Server
         {
             public bool Teams { get; set; }
             public List<ServedResultRow>? Rows { get; set; }
+            public string? Mode { get; set; }
+            public string? Arena { get; set; }
+            public int Seconds { get; set; }
         }
 
         private sealed class ServedResultRow
@@ -451,6 +456,7 @@ namespace SecondHunt.Server
             public int Slot { get; set; }
             public int Place { get; set; }
             public int Team { get; set; } = -1;
+            public ResultStats? Stats { get; set; }
         }
     }
 }
