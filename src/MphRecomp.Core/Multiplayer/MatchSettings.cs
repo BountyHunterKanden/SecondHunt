@@ -327,6 +327,10 @@ namespace MphRecomp.Multiplayer
         // bots on an Echoes turret errand steer a strafing alt form the way it moves and re-plan a lost route (2026-11-11,
         // issue turret-bot-stall; PlayerEntity.HostTurretBotNav): null = on (not on the wire); replays before format 91 read as off
         public bool? TurretBotNav { get; set; }
+        // a weapon pickup the rules equip switches to it while the gun is rising (the 40 frames after leaving the ball) or
+        // lowered after idling, where the game put it in the third slot only (Discord report 2026-11-12: an Omega Cannon
+        // that didn't switch; PlayerEntity.HostPickupEquipRaise): null = on (not on the wire); replays before format 92 read as off
+        public bool? PickupEquipRaise { get; set; }
         // the zoom (Imperialist) as the game does it (2026-10-16, owner: the zoom felt bad; PlayerEntity.HostVanillaZoom):
         // the zoomed aim speed, the zoom's step in and ease out, the facing's catch-up. null = on (not on the wire: each
         // device plays its own seat's aim); replays recorded before it (format < 39) read as off, so they play exactly

@@ -248,6 +248,8 @@ namespace MphRecomp.Replay
     //   turret (Settings.TurretSeatSafe, PlayerEntity.HostSeatSafe); older files read it as off.
     //   Format 91: the same layout; bots on an Echoes turret errand steer a strafing alt form (Trace, Weavel) the way it
     //   moves and re-plan a route they've lost (Settings.TurretBotNav, PlayerEntity.HostTurretBotNav); older files read it as off.
+    //   Format 92: the same layout; a weapon pickup the rules equip switches to it while the gun is rising or lowered too
+    //   (Settings.PickupEquipRaise, PlayerEntity.HostPickupEquipRaise); older files read it as off.
     //   Format 46: the same layout; an online host's lag compensation no longer shifts a homing beam (the Shock Coil, homing
     //   missiles) off its own target or Weavel's turret's shots, and shifts bombs, Lockjaw's lines + snare and the drone's laser
     //   (Settings.LagCompFix, PlayerEntity.HostLagFix);
@@ -259,7 +261,7 @@ namespace MphRecomp.Replay
     //   MatchSettings.Validate refuses at the start, so it saves the file and refuses to play it, never plays it wrong.
     public sealed class ReplayFile
     {
-        public const int FormatVersion = 91;
+        public const int FormatVersion = 92;
         // Bump when a code change alters how a match plays: an old replay then is refused instead of drifting.
         // (R2c: golden replays checked on every build say when.)
         // 2 (R1): matches play with Scene.HostDrawFreeSim (Spire's rocks placed whether or not a frame draws).
@@ -639,6 +641,7 @@ namespace MphRecomp.Replay
             file.Settings.BlasterBuff = format >= 87 ? null : false; // not written: on from format 87
             file.Settings.TurretSeatSafe = format >= 90 ? null : false; // not written: on from format 90
             file.Settings.TurretBotNav = format >= 91 ? null : false; // not written: on from format 91
+            file.Settings.PickupEquipRaise = format >= 92 ? null : false; // not written: on from format 92
             file.Settings.EchoesTurretBots = format >= 41 ? null : false; // not written: on from format 41
             file.Settings.RecolorPerSkin = format >= 43 ? null : false; // not written: on from format 43
             file.Settings.NoBallJump = format >= 44 ? null : false; // not written: on from format 44
@@ -801,6 +804,7 @@ namespace MphRecomp.Replay
         static int SavedFormat(MatchSettings s)
         {
             int f = FormatVersion;
+            if (s.PickupEquipRaise == false) f = 91;
             if (s.TurretBotNav == false) f = 90;
             if (s.TurretSeatSafe == false) f = Math.Min(f, 89);
             if (s.BlasterBuff == false) f = 86;
@@ -892,6 +896,7 @@ namespace MphRecomp.Replay
             copy.BlasterBuff = s.BlasterBuff; // format 87 (not written)
             copy.TurretSeatSafe = s.TurretSeatSafe; // format 90 (not written)
             copy.TurretBotNav = s.TurretBotNav; // format 91 (not written)
+            copy.PickupEquipRaise = s.PickupEquipRaise; // format 92 (not written)
             copy.EchoesTurretBots = s.EchoesTurretBots; // format 41 (not written)
             copy.RecolorPerSkin = s.RecolorPerSkin; // format 43 (not written)
             copy.NoBallJump = s.NoBallJump; // format 44 (not written)

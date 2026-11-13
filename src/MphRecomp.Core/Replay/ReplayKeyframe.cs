@@ -139,15 +139,87 @@ namespace MphRecomp.Replay
             }
         }
 
+        // (11-11, hotfix 0.5.1) and every other empty static collection (a Dictionary, HashSet, Queue, Stack) is given a new
+        // one's storage, its comparer kept: its arrays are walked too, and an online match's tables, once emptied, still had
+        // the room the match grew them to (a fresh process has none; the viewer refused its keyframes)
+        [System.Diagnostics.CodeAnalysis.DynamicDependency(FreshMembers, typeof(Dictionary<,>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency(FreshMembers, typeof(HashSet<>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency(FreshMembers, typeof(Queue<>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency(FreshMembers, typeof(Stack<>))]
         public static void TrimStaticLists()
         {
             foreach (FieldInfo f in _staticFields)
             {
-                if (f.GetValue(null) is not System.Collections.IList list) continue;
-                Type t = list.GetType();
-                if (!t.IsGenericType || t.GetGenericTypeDefinition() != typeof(List<>)) continue;
-                PropertyInfo capacity = t.GetProperty(nameof(List<int>.Capacity))!;
-                if ((int)capacity.GetValue(list)! != list.Count) capacity.SetValue(list, list.Count);
+                object? value = f.GetValue(null);
+                if (value is System.Collections.IList list && list.GetType() is { IsGenericType: true } t
+                    && t.GetGenericTypeDefinition() == typeof(List<>))
+                {
+                    PropertyInfo capacity = t.GetProperty(nameof(List<int>.Capacity))!;
+                    if ((int)capacity.GetValue(list)! != list.Count) capacity.SetValue(list, list.Count);
+                }
+                else if (value != null)
+                {
+                    MakeFresh(value);
+                }
+            }
+        }
+
+        const System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes FreshMembers
+            = System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicConstructors
+            | System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties
+            | System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.NonPublicFields;
+
+        static readonly Type[] _freshKinds = { typeof(Dictionary<,>), typeof(HashSet<>), typeof(Queue<>), typeof(Stack<>) };
+
+        // an empty collection made what a new one is (a full one is left alone)
+        static void MakeFresh(object collection)
+        {
+            Type t = collection.GetType();
+            if (!t.IsGenericType || Array.IndexOf(_freshKinds, t.GetGenericTypeDefinition()) < 0
+                || t.GetProperty("Count")?.GetValue(collection) is not 0)
+            {
+                return;
+            }
+            PropertyInfo? comparer = t.GetProperty("Comparer");
+            object? fresh;
+            if (comparer == null)
+            {
+                fresh = Activator.CreateInstance(t);
+            }
+            else
+            {
+                // (a new one with its comparer; none to be had: left as it is rather than lose the comparer)
+                fresh = t.GetConstructor(new[] { comparer.PropertyType })?.Invoke(new[] { comparer.GetValue(collection) });
+            }
+            if (fresh == null) return;
+            lock (collection)
+            {
+                foreach (FieldInfo f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    f.SetValue(collection, f.GetValue(fresh));
+                }
+            }
+        }
+
+        // (11-11, hotfix 0.5.1) empties the static collections `which` picks (ReplayCheckpoints: the tables a network match
+        // fills, which a replay, played with no network, starts without). Arrays are left: fixed tables live in them too.
+        [System.Diagnostics.CodeAnalysis.DynamicDependency("Clear", typeof(List<>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency("Clear", typeof(Dictionary<,>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency("Clear", typeof(HashSet<>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency("Clear", typeof(Queue<>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency("Clear", typeof(Stack<>))]
+        [System.Diagnostics.CodeAnalysis.DynamicDependency("Clear", typeof(System.Collections.Concurrent.ConcurrentQueue<>))]
+        public static void ClearStaticCollections(Func<FieldInfo, bool> which)
+        {
+            foreach (FieldInfo f in _staticFields)
+            {
+                if (!which(f) || f.GetValue(null) is not object value) continue;
+                Type t = value.GetType();
+                if (!t.IsGenericType || t.Namespace is not ("System.Collections.Generic" or "System.Collections.Concurrent")) continue;
+                if (t.GetMethod("Clear", Type.EmptyTypes) is MethodInfo clear)
+                {
+                    lock (value) clear.Invoke(value, null);
+                }
             }
         }
 

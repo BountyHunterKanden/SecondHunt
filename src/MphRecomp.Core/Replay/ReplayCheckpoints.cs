@@ -100,7 +100,17 @@ namespace MphRecomp.Replay
                 BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
             ricochet.Beams = null!;
             ricochet.Weapon = null!; // (and its weapon, set with it)
-            // (PlacedPickups._placed and any other static list: their spare room)
+            // (11-11, hotfix 0.5.1) a network match's tables end with it: the hit claims, shot checks, confirmed pickups and
+            // shot logs an online match fills stayed full in this process after it, and a replay plays with no network (its
+            // claimed hits come from its file), so at its step 0 they are as a fresh process has them. By rule: every static
+            // collection of the net classes and every Net* one (the player's net logs and tables), so the next one added is
+            // covered too; arrays are left (fixed tables), and so are the ones excluded from the walk (cleared by Start)
+            MphRead.Entities.PlayerEntity.NetShotLogOn = false; // (set only by a network match's ShotCheck.Start)
+            MphRead.Entities.PlayerEntity.ResetNetShots();
+            SimSnapshot.ClearStaticCollections(f => f.DeclaringType?.Namespace == "MphRecomp.Multiplayer.Net"
+                || (f.Name.StartsWith('<') ? f.Name[1..] : f.Name).StartsWith("Net", StringComparison.Ordinal));
+            // (PlacedPickups._placed and any other static list: their spare room; any other empty static collection: a new
+            // one's storage)
             SimSnapshot.TrimStaticLists();
             SimSnapshot.SortArenaTables();
         }
@@ -321,7 +331,11 @@ namespace MphRecomp.Replay
                 (typeof(MphRead.Entities.PlayerEntity), "HostHideScore"), (typeof(MphRead.Entities.PlayerEntity), "HostNoHelmet"),
                 (typeof(MphRead.Entities.PlayerEntity), "HostScanVisorOpacity"), (typeof(MphRead.Entities.PlayerEntity), "HostHudSeat"),
                 (typeof(MphRead.Entities.PlayerEntity), "HostScoreboardHeld"), (typeof(MphRead.Entities.PlayerEntity), "HostNoViewer"),
-                (typeof(MphRead.Entities.PlayerEntity), "HostOutsideHead"), (typeof(MphRead.Entities.BeamProjectileEntity), "HostDrawFade")
+                (typeof(MphRead.Entities.PlayerEntity), "HostOutsideHead"), (typeof(MphRead.Entities.BeamProjectileEntity), "HostDrawFade"),
+                // (11-11, hotfix 0.5.1) the host body's draw caches, filled by whatever this process drew (a headless prepare
+                // draws nothing): the fitted ice shell per body and the float pose's scratch, written before every read; draw
+                // only, never read by the sim
+                (typeof(MphRead.Entities.PlayerEntity), "_fittedIceModels"), (typeof(MphRead.Entities.PlayerEntity), "_floatClip")
             };
             // every static Host* hook (Action / Func): the app wires them, a headless prepare doesn't, and they hold app
             // objects, never match state -- named by rule so the next hook added doesn't break the walk again

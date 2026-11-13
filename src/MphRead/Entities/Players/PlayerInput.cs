@@ -1321,7 +1321,13 @@ namespace MphRead.Entities
                 _soundSource.PlaySfx(SfxId.SNIPER_RELOAD);
             }
             EquipInfo.Weapon = curWeapon;
-            UnequipOmegaCannon(); // todo?: set the flag if wifi
+            // recomp: a network client leaves the unequip to the host (PlayerNet.cs NetApply replays it when the host's
+            // snapshot drops the cannon): its own switch to the next weapon was pushed with this shot's press and reached
+            // the host first, so the host never fired and kept the cannon (Discord report 11-12: guest's cannon unusable)
+            if (!NetClient)
+            {
+                UnequipOmegaCannon(); // todo?: set the flag if wifi
+            }
             return true;
         }
 

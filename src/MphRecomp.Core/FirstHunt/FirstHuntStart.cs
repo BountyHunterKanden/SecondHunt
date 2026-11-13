@@ -53,6 +53,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotGrateItems = false;
             PlayerEntity.HostBotItemNoGain = false;
             PlayerEntity.HostBotNodeOccupied = false;
+            PlayerEntity.HostPickupEquipRaise = false; // (the game's pickup equip: a match's rule, MatchStart)
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = false;
@@ -159,6 +160,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotGrateItems = false;
             PlayerEntity.HostBotItemNoGain = false;
             PlayerEntity.HostBotNodeOccupied = false;
+            PlayerEntity.HostPickupEquipRaise = false; // (the game's pickup equip: a match's rule, MatchStart)
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = false;

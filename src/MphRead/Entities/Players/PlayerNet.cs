@@ -264,6 +264,7 @@ namespace MphRead.Entities
             }
             int gained = 0;
             int heldBits = HostFirstHunt ? s.Weapons & (NetFhChargeBit - 1) : s.Weapons;
+            bool omegaSpent = _availableWeapons[BeamType.OmegaCannon] && (heldBits & (1 << (int)BeamType.OmegaCannon)) == 0;
             for (int i = 0; i < 14; i++) // recomp: + the Pirate Blaster (bit 11) + the Paralyzer (bit 13)
             {
                 bool held = (heldBits & (1 << i)) != 0;
@@ -283,6 +284,13 @@ namespace MphRead.Entities
             }
             _ammo[0] = s.Ammo0;
             _ammo[1] = s.Ammo1;
+            // recomp: the host's snapshot drops the Omega Cannon after its shot (the client leaves that unequip to the host:
+            // PlayerInput.cs): replay it here so the third slot and the next weapon match the host's
+            if (omegaSpent && NetClient && CurrentWeapon == BeamType.OmegaCannon && _health > 0 && s.Health > 0)
+            {
+                _availableWeapons[BeamType.OmegaCannon] = true;
+                UnequipOmegaCannon();
+            }
             // a puppet takes the host's weapon at once; the local player's own switch reaches the host a round trip
             // later, so only a mismatch that outlasts that is corrected
             if (s.Weapon >= 0 && s.Weapon != (sbyte)CurrentWeapon && _health > 0)

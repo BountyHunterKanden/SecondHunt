@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using MphRead.Entities;
@@ -21,6 +22,9 @@ namespace MphRead
     //   -replayaftermatch prior=<a.mphreplay>[,<b>...] replay=<c.mphreplay>
     //       the same check for saved replays: plays each prior replay through here first (the matches the app ran before
     //       the viewer opened), then diffs this process's walk of the replay against a fresh process's
+    //   -replayaftermatch online [arena=<name>] [time=30]
+    //       (0.5.1) records a bot match, then plays an online match here as its guest (PlayOnline: a local server and an
+    //       -onlinetest host in another process), then diffs this process's walk of the recorded replay against a fresh one
     internal static partial class ReplayTest
     {
         public static void AfterMatchTest(string[] args)
@@ -57,6 +61,17 @@ namespace MphRead
                 }
                 path = replayPath;
             }
+            else if (args.Contains("online"))
+            {
+                // (0.5.1) the replay first, offline; then this process plays an online match as a guest, then views it
+                path = PlayMatch(args, Arg, dir);
+                if (PlayOnline(Arg) is string why)
+                {
+                    Console.WriteLine("FAIL: the online match: " + why);
+                    Environment.ExitCode = 1;
+                    return;
+                }
+            }
             else
             {
                 if (Arg("before") is string before)
@@ -73,7 +88,7 @@ namespace MphRead
                 Environment.ExitCode = 1;
                 return;
             }
-            (int code, string output) = RunChild("-replayaftermatch", "child=" + (args.Contains("whole") || Arg("replay") != null ? path : PartialPath()), "out=" + childOut);
+            (int code, string output) = RunChild("-replayaftermatch", "child=" + (args.Contains("whole") || args.Contains("online") || Arg("replay") != null ? path : PartialPath()), "out=" + childOut);
             if (!File.Exists(childOut))
             {
                 Console.WriteLine("FAIL: the other process: " + output);
@@ -122,7 +137,7 @@ namespace MphRead
 
         private static string PlayMatch(string[] args, Func<string, string?> Arg, string dir)
         {
-            string arena = Arg("arena") ?? MatchArenas.All.First().Name;
+            string arena = Arg("arena") is string name ? MatchArenas.Find(name)?.Name ?? name : MatchArenas.All.First().Name;
             GameMode mode = Enum.Parse<GameMode>(Arg("mode") ?? "Battle", ignoreCase: true);
             int bots = Int32.Parse(Arg("bots") ?? "3");
             MatchSettings settings = MatchSettings.Quick(mode, arena, Hunter.Samus, bots, 1);
@@ -151,6 +166,65 @@ namespace MphRead
             recorder.File.Save(path);
             Console.WriteLine($"played {recorder.File.Steps.Count} steps in {arena} ({mode}), saved {path}");
             return path;
+        }
+
+        // (0.5.1) an online match through the real server and relay, this process its guest (as the app that plays online
+        // and then opens a replay): an -onlinetest external=1 host in another process (its own local server, a bot, a
+        // player that hunts), joined here by OnlineMatchTool.Join. A saved replay (prior=) never runs the guest's net side.
+        private static string? PlayOnline(Func<string, string?> Arg)
+        {
+            string arena = Arg("arena") ?? MatchArenas.All.First().Name, time = Arg("time") ?? "30";
+            string exe = Environment.ProcessPath ?? "dotnet";
+            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            if (Path.GetFileNameWithoutExtension(exe).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            {
+                psi.ArgumentList.Add(typeof(ReplayTest).Assembly.Location);
+            }
+            foreach (string arg in new[] { "-onlinetest", "external=1", "players=2", "bots=1", "arena=" + arena, "time=" + time })
+            {
+                psi.ArgumentList.Add(arg);
+            }
+            using Process hostProcess = Process.Start(psi)!;
+            var output = new List<string>();
+            string? server = null, game = null;
+            using var ready = new System.Threading.ManualResetEventSlim();
+            hostProcess.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data == null) return;
+                lock (output)
+                {
+                    output.Add(e.Data);
+                    if (e.Data.StartsWith("server: ", StringComparison.Ordinal)) server = e.Data[8..].Split(',')[0].Trim();
+                    int at = e.Data.IndexOf(" hosts game ", StringComparison.Ordinal);
+                    if (at >= 0) game = e.Data[(at + 12)..].Split(',')[0].Trim();
+                    if (server != null && game != null) ready.Set();
+                }
+            };
+            hostProcess.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (output) output.Add("stderr: " + e.Data); };
+            hostProcess.BeginOutputReadLine();
+            hostProcess.BeginErrorReadLine();
+            try
+            {
+                if (!ready.Wait(60000)) return "the host didn't open a game: " + String.Join("\n", output);
+                try
+                {
+                    OnlineMatchTool.Join(new[] { "-onlinejoin", "server=" + server, "game=" + game, "index=1", "hunter=Kanden", "time=" + time });
+                }
+                catch (MphRecomp.Online.OnlineException ex)
+                {
+                    // the host's server goes when its match ends, so the guest's last leave request may find it gone
+                    Console.WriteLine("online: the guest's cleanup: " + ex.Message);
+                }
+                if (!hostProcess.WaitForExit(60000)) return "the host didn't end";
+                hostProcess.WaitForExit();
+                string? end = output.LastOrDefault(l => l.StartsWith("host: ") && l.Contains(" frames, ended "));
+                Console.WriteLine("online: " + (end ?? "no end line"));
+                return end?.Contains("ended True") == true ? null : "the match didn't end: " + String.Join("\n", output.TakeLast(20));
+            }
+            finally
+            {
+                if (!hostProcess.HasExited) hostProcess.Kill(entireProcessTree: true);
+            }
         }
 
         // a viewing as the app does one: drawn, its step-0 keyframe base walked, checkpoints taken, then a seek back

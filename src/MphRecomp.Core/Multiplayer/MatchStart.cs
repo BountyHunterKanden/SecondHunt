@@ -57,6 +57,7 @@ namespace MphRecomp.Campaign
             MphRecomp.Arenas.EchoesTurret.LeaverFootprint = settings.TurretLeaverFootprint ?? true; // (EchoesTurret.cs LeaverOut)
             PlayerEntity.HostSeatSafe = settings.TurretSeatSafe ?? true; // (PlayerEntity.TakeDamage)
             PlayerEntity.HostTurretBotNav = settings.TurretBotNav ?? true; // (PlayerEchoesSeat TurretErrand, EchoesTurretBots.Go)
+            PlayerEntity.HostPickupEquipRaise = settings.PickupEquipRaise ?? true; // (PlayerProcess.cs PickUpWeapon)
             PlayerEntity.HostBotEdgeJump = settings.BotEdgeJump ?? true; // (PlayerAiEdgeJump.cs)
             PlayerEntity.HostBotEdgePadJump = settings.BotEdgePadJump ?? true;
             PlayerEntity.HostBotReleaseControls = settings.BotReleaseControls ?? true; // (PlayerAi.cs ProcessInput)

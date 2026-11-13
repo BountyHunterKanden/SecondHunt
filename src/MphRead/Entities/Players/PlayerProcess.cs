@@ -1510,6 +1510,11 @@ namespace MphRead.Entities
             }
         }
 
+        // recomp (MatchSettings.PickupEquipRaise, set per match by MatchStart; replays before format 92 play without it): a
+        // weapon pickup the rules equip switches to it while the gun is rising or lowered too (Discord report 2026-11-12: an
+        // Omega Cannon picked up just after leaving the ball stayed in the ring with the Power Beam out)
+        public static bool HostPickupEquipRaise { get; set; }
+
         private void PickUpWeapon(ItemType itemType)
         {
             BeamType weapon;
@@ -1587,8 +1592,10 @@ namespace MphRead.Entities
                     if ((info.Priority > EquipInfo.Weapon.Priority || weapon == BeamType.OmegaCannon
                         || weapon == affinityWeapon) && !shooting)
                     {
-                        // recomp: the morph leaves the (hidden) gun in UpDown, which failed every equip in the ball (owner 2026-10-26)
-                        if (!TryEquipWeapon(weapon, ignoreGunAnim: IsAltForm || IsMorphing))
+                        // recomp: the morph leaves the (hidden) gun in UpDown, which failed every equip in the ball (owner 2026-10-26);
+                        // HostPickupEquipRaise: on foot too, where UpDown is the gun rising after the ball (40 frames after it)
+                        // or after an idle lower: a pickup then went to the third slot only and the old weapon stayed out
+                        if (!TryEquipWeapon(weapon, ignoreGunAnim: IsAltForm || IsMorphing || HostPickupEquipRaise))
                         {
                             UpdateAffinityWeaponSlot(weapon, slot: 2);
                         }
