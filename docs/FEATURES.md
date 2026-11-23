@@ -59,6 +59,10 @@ Nothing from any game ships with Second Hunt.
 - Automatic rejoin if your connection drops
 - LAN and bot matches in every mode and arena. Bots run on the game's own bot code, take jump pads, ledges and
   drop-downs, and the new hunters fight as bots too. You can set the bots' level for online matches you host.
+- Bots in online lobbies get their own seats with ADD BOT, so they never block a player from joining. Pick a bot's
+  hunter with the arrows on its card, or tap the card for the hunter picker, extra characters and skins included.
+- EDIT LOBBY lets the host change who can join, PLAYERS, BOTS and BOT LEVEL from the lobby. A friend you invite always
+  gets in.
 - EXTRA rules for hosts, to turn the extra pickups (the Pirate Blaster among them) and the extra characters on or off
 - The Hunter Hub: the old Nintendo WFC Gaming Hub pages for _Hunters_, rebuilt in the game, with leaderboards and
   everyone's license stats.
@@ -76,8 +80,9 @@ Nothing from any game ships with Second Hunt.
 - Bring a campaign file over from your DS save (story and logbook, with a backup of the file it replaces), or export
   yours back out to play on a DS or an emulator. Your Hunter License comes over on its own, with IMPORT LICENSE.
 - UNLOCKS ALL and LOGBOOK SCANS ALL switches, if you just want to look around
-- ALT FORM HOP: the ALT HOP button (L1 on a controller, which then hops without boosting, A still boosts; X on a keyboard) hops any alt form up to bomb jump height, so every hunter can get where Samus can,
-  and morph ball doors open for every hunter.
+- ALT FORM HOP: the ALT HOP button (L1 on a controller, X on a keyboard) hops any alt form up to bomb jump height, so
+  every hunter can get where Samus can, and morph ball doors open for every hunter. L1 then hops without boosting, and
+  A still boosts.
 
 ## Replays
 
@@ -96,9 +101,13 @@ Nothing from any game ships with Second Hunt.
 The full button lists are on the [Controls](CONTROLS.md) page.
 
 - Dual sticks on any controller, and full rebinding, button combos included
+- A dead zone for each stick and an AIM CURVE (CONTROLS > AIM > STICKS), and hold or toggle for the scoreboard and
+  SLOW MOVE buttons
+- Rumble where the game's Rumble Pak did it, on your controller, or on the phone when there's no controller motor
+  (OPTIONS > RUMBLE PAK, off by default)
 - A weapon ring on L2. Hold it and point the right stick at a weapon.
-- Gyro aim on phones, handhelds and controllers with a gyro, on top of the stick. Pick yaw or roll, filter the noise,
-  or YAW+ROLL for full turning at any aim height, filter the noise, and set a GYRO BUTTON to hold, pause or toggle it.
+- Gyro aim on phones, handhelds and controllers with a gyro, on top of the stick. Pick yaw or roll, or YAW+ROLL for
+  full turning at any aim height, filter the noise, and set a GYRO BUTTON to hold, pause or toggle it.
 - A touch overlay with the DS's own touch moves (double tap to jump, drag to roll and flick to boost in morph ball), and
   stylus aim like the DS
 - Keyboard and mouse on Windows, with MOUSE ROLL for the morph ball, SLOW MOVE and a MODERN or CLASSIC STICK CURVE,

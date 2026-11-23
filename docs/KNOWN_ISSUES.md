@@ -15,7 +15,6 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 ## Missing for now
 
 - Only USA ROMs (1.0 and 1.1) work.
-- No rumble yet. The original supported the DS Rumble Pak, but controller and phone vibration aren't hooked up.
 - Some save details aren't kept yet: the best-time records (the top three Gorea and total times), part of the game
   timer, a few stats and the artifact flags.
 - The speaker setting on OPTIONS > AUDIO is saved, but SURROUND and HEADPHONES sound the same as STEREO for now.
@@ -27,19 +26,16 @@ Anything on the menus that isn't in yet shows a WORK IN PROGRESS box when you pi
 - Players on different versions can't play together, online or on LAN (the game says "other version"). Update when
   the main menu asks.
 - After you quit a LAN match from the pause menu you can't rejoin it. Closing and reopening the app does.
-- A replay of an online match that ended early may not seek instantly.
 - The original's typed rules intro, with its sweeping camera, doesn't play at the start of a match yet.
 - Bots still get stuck for a moment on some _Echoes_ arenas.
 - The Pirate Trooper's wall cling doesn't hold on curved walls.
 - The Pirate Blaster doesn't leave a mark on walls yet.
-- Trace has been seen invisible to other players in his alt form online (Stasis Bunker). It's being looked into.
 
 ## Controls
 
 - The DS showed a weapon bar on the bottom screen. It isn't drawn yet, so the only on-screen list of your weapons is
   the weapon ring (hold L2).
 - The touch overlay has no buttons for stepping through weapons. Use the weapon button (hold and drag) instead.
-- The volume and screenshot buttons may not work on the title and menu screens.
 
 ## Looks and performance
 
@@ -74,10 +70,11 @@ Windows PC. Reports from other phones, handhelds and PCs are very welcome.
 
 ## If it crashes
 
-Go to SECOND HUNT SETTINGS > APP > HELP and pick SHARE CRASH LOG (on Windows, OPEN CRASH LOG shows the folder). Attach
-the report to a bug report on the [Issues](https://github.com/BountyHunterKanden/SecondHunt/issues) page, with your
-device and what you were doing. It has no personal data in it. For a bad online match or anything else that isn't a
-crash, SHARE LOG (SAVE LOG on Windows) on the same page sends the game's log.
+On Android the main menu offers to share the crash report the next time you open the game. You can also go to SECOND
+HUNT SETTINGS > APP > HELP and pick SHARE CRASH LOG (on Windows, OPEN CRASH LOG shows the folder). Attach the report to
+a bug report on the [Issues](https://github.com/BountyHunterKanden/SecondHunt/issues) page, with your device and what
+you were doing. It has no personal data in it. For a bad online match or anything else that isn't a crash, SHARE LOG
+(SAVE LOG on Windows) on the same page sends the game's log, from this run and the one before.
 
 ## What's planned
 
@@ -95,7 +92,6 @@ crash, SHARE LOG (SAVE LOG on Windows) on the same page sends the game's log.
 
 ### Later
 
-- Rumble on controllers and phones that have it
 - The original's SURROUND and HEADPHONES speaker modes, and HQ music that keeps more of the DS's treble
 - Unlocking the sound test the original way (after the true ending's results screen). For now it's always open.
 - European, Japanese and Korean ROMs

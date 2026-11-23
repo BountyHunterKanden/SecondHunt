@@ -7,8 +7,8 @@ filter it when you read it.
 
 | Platform | File | How to get it |
 | --- | --- | --- |
-| Windows / Linux | `logs\log.txt` in the game's data folder (`%LOCALAPPDATA%\Second Hunt\`, or `data\` beside the exe for a portable install). Older runs are `log.1.txt` (newest) to `log.4.txt` | OPTIONS > SAVE LOG copies it to `Downloads\Second Hunt\second-hunt-log-<time>.txt` |
-| Android | the app's own log file | OPTIONS > SAVE LOG (Save to Downloads, or Share) |
+| Windows / Linux | `logs\log.txt` in the game's data folder (`%LOCALAPPDATA%\Second Hunt\`, or `data\` beside the exe for a portable install). Older runs are `log.1.txt` (newest) to `log.4.txt` | SECOND HUNT SETTINGS > APP > HELP > SHARE LOG (SAVE) copies it to `Downloads\Second Hunt\second-hunt-log-<time>.txt` |
+| Android | the app's own log file | SECOND HUNT SETTINGS > APP > HELP > SHARE LOG (Share, or Save to Downloads) |
 
 A second copy of the game running at the same time on PC writes `logs\log-<pid>.txt` instead. A normal start deletes
 those once they are older than a week.

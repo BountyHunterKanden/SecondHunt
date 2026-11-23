@@ -125,7 +125,8 @@ plaza.
 - **Friends and parties**, voice chat (push to talk or always on) and text chat, a live scoreboard with everyone's ping,
   and automatic rejoin if your connection drops
 - **LAN and bot matches** in every mode and arena. Bots run on the game's own bot code, take jump pads, ledges and
-  drop-downs, and the new hunters fight as bots too.
+  drop-downs, and the new hunters fight as bots too. Online lobbies give bots their own seats, so they never block a
+  player from joining.
 - **The Hunter Hub**: the old Nintendo WFC Gaming Hub pages for _Hunters_, rebuilt in the game, with leaderboards and
   everyone's license stats
 - **Hunter License**, rank and stats like the original. Bring your license over from your DS save, make the Pirate Trooper or
@@ -143,8 +144,9 @@ plaza.
   camera. Send them to friends or save them as files.
 - **Music from every Prime game** you import, picked song by song for matches, menus and the lobby, and HQ music that
   takes out the DS's clicks and clipping
-- **Controls for today's hardware**: dual sticks, full rebinding, a weapon ring on L2, gyro aim with a gyro button, a
-  touch overlay, stylus aim like the DS, and SDL3 controllers on Windows (Switch Pro included)
+- **Controls for today's hardware**: dual sticks with dead zones and an aim curve, full rebinding, a weapon ring on L2,
+  gyro aim with a gyro button, rumble, a touch overlay, stylus aim like the DS, and SDL3 controllers on Windows (Switch
+  Pro included)
 - **Looks and options**: field of view up to 130, AIM VIEW (the view follows your aim instantly, or trails it like the
   DS), ragdoll deaths, HUD sway and opacity, a hit direction indicator, the campaign radar from the DS touch screen,
   third person, the two DS screens merged into one, clean redrawn HUD lines, and the option to skip the boot logos
@@ -173,7 +175,6 @@ Everything in detail: [Features](https://github.com/BountyHunterKanden/SecondHun
 
 
 - Only USA ROMs (1.0 and 1.1) work for now.
-- No rumble yet.
 - After you quit a LAN match from the pause menu you can't rejoin it (closing and reopening the app does).
 - Some save details aren't kept yet: the best-time records, part of the game timer, a few stats and the artifact flags.
 - Android's Play Protect may call the app harmful when you install it. Tap "More details", then "Install anyway".
@@ -186,10 +187,11 @@ The full list, and what's planned next:
 <p><a href="#help-and-bug-reports"><img src="docs/images/hy-h2-help-and-bug-reports.webp" width="100%" alt="Help and bug reports"></a></p>
 
 
-If the game crashes, go to SECOND HUNT SETTINGS > APP > HELP > SHARE CRASH LOG (OPEN CRASH LOG on Windows) and attach
-the report to a bug report on the [Issues](https://github.com/BountyHunterKanden/SecondHunt/issues) page, with your
-device and what you were doing. It has no personal data in it. For a bad online match or anything else, SHARE LOG
-(SAVE LOG on Windows) sends the game's log. You can also ask on the Discord above.
+If the game crashes, Android offers to share the crash report the next time you open it. You can also go to SECOND HUNT
+SETTINGS > APP > HELP > SHARE CRASH LOG (OPEN CRASH LOG on Windows). Attach the report to a bug report on the
+[Issues](https://github.com/BountyHunterKanden/SecondHunt/issues) page, with your device and what you were doing.
+It has no personal data in it. For a bad online match or anything else, SHARE LOG (SAVE LOG on Windows) sends the
+game's log. You can also ask on the Discord above.
 
 <a name="credits"></a>
 <p><a href="#credits"><img src="docs/images/hy-h2-credits.webp" width="100%" alt="Credits"></a></p>
