@@ -16,10 +16,10 @@ namespace MphRecomp.Import.Effects
     //   "hyperfx": { "beam": "06fe1d75af37114a", "ballspikes": "aab065969602e73f", "fire": "04f4f7c2c217a6e0", ... }
     // Each role names a WPSC (a shot), PART, SWHC, ELSC (lightning) or CAUD (a sound). Out, every id folded to 32 bits
     // (Part.Fold) and every file still in Corruption's own layout (read with mp3: true):
-    //   <id>.wpsc / .part / .swhc / .elsc / .crsc: the roles and everything they reach (child systems, swooshes, hit
-    //   tables); <txtr>.png: their textures (RGBA, the first row the top one); <role>_<n>.wav: a sound's samples (mono
+    //   <id>.wpsc / .part / .swhc / .elsc / .crsc / .dpsc: the roles and everything they reach (child systems, swooshes,
+    //   hit tables, wall decals); <txtr>.png: their textures (RGBA, the first row the top one); <role>_<n>.wav: a sound's samples (mono
     //   PCM16; several = alternatives); hyper.cfg:
-    //     role <role> <type> <id>          sound <role> <n> <volume> <loop 0/1>
+    //     role <role> <type> <id>          sound <role> <n> <volume> <loop 0/1> <pitch> <spread> (cents, Caud3) <loop start> (samples)
     // Core Campaign/RetroParticles.cs + RetroElectric.cs run them; the app draws them (CampaignRenderer.HyperFx.cs).
     // Added for the Dark Samus Hyper Mode thread, 2026-10-12.
     public static class HyperFx
@@ -73,10 +73,10 @@ namespace MphRecomp.Import.Effects
                     Caud3 c = Caud3.Load(res.Get(id));
                     for (int i = 0; i < c.Entries.Count; i++)
                     {
-                        (short[] pcm, int rate, bool _) = Caud3.Decode(res.Get(c.Entries[i].Csmp));
+                        (short[] pcm, int rate, bool _, int loopStart) = Caud3.Decode(res.Get(c.Entries[i].Csmp));
                         MusyX.WriteWav(Path.Combine(dir, SoundFile(role, i)), pcm, rate);
                         files++;
-                        cfg.Append(Inv($"sound {role} {i} {c.Entries[i].Volume:R} {(c.Loops ? 1 : 0)}\n"));
+                        cfg.Append(Inv($"sound {role} {i} {c.Entries[i].Volume:R} {(c.Loops ? 1 : 0)} {c.Entries[i].Pitch} {c.Entries[i].Spread} {loopStart}\n"));
                     }
                     continue;
                 }
@@ -105,11 +105,13 @@ namespace MphRecomp.Import.Effects
                     case "WPSC": deps = WpscDeps(Wpsc.Load(b, mp3: true)); break;
                     case "CRSC":
                     {
-                        // only the default hit effect (its sounds are CAUD ids, asked for as roles)
+                        // only the default hit effect and its wall decal (its sounds are CAUD ids, asked for as roles)
                         Crsc c = Crsc.Load(b, mp3: true);
-                        deps = c.DefaultEffect is 0 or UInt32.MaxValue ? Array.Empty<(string, uint)>() : new[] { ("PART", c.DefaultEffect) };
+                        deps = new[] { ("PART", c.DefaultEffect), ("DPSC", c.DefaultDecal) };
                         break;
                     }
+                    // a decal: its two quads' textures (its model, DMDL, is not drawn)
+                    case "DPSC": deps = Part.Dpsc.Load(b, mp3: true).Dependencies().Where(d => d.Type == "TXTR"); break;
                     case "USRC": deps = Array.Empty<(string, uint)>(); break;   // a tuning curve (PhazonBallParams)
                     default: throw new InvalidDataException($"{id:x16}: a {type} is not an effect");
                 }
@@ -119,7 +121,7 @@ namespace MphRecomp.Import.Effects
                 {
                     if (dep == 0 || dep == UInt32.MaxValue) continue;
                     if (t == "TXTR") textures.Add(dep);
-                    else if (t is "PART" or "SWHC" or "ELSC" or "CRSC") todo.Enqueue(Full(dep));
+                    else if (t is "PART" or "SWHC" or "ELSC" or "CRSC" or "DPSC") todo.Enqueue(Full(dep));
                 }
             }
             foreach (uint t in textures)
@@ -199,7 +201,7 @@ namespace MphRecomp.Import.Effects
         public sealed class Config
         {
             public readonly Dictionary<string, (string Type, uint Id)> Roles = new(StringComparer.Ordinal);
-            public readonly Dictionary<string, List<(int N, float Volume, bool Loop)>> Sounds = new(StringComparer.Ordinal);
+            public readonly Dictionary<string, List<(int N, float Volume, bool Loop, int Pitch, int Spread, int LoopStart)>> Sounds = new(StringComparer.Ordinal);
 
             public static Config? Load(string bodyDir)
             {
@@ -218,7 +220,8 @@ namespace MphRecomp.Import.Effects
                     else if (w[0] == "sound" && w.Length >= 5)
                     {
                         if (!c.Sounds.TryGetValue(w[1], out var l)) c.Sounds[w[1]] = l = new();
-                        l.Add((Int32.Parse(w[2], ci), Single.Parse(w[3], ci), w[4] == "1"));
+                        l.Add((Int32.Parse(w[2], ci), Single.Parse(w[3], ci), w[4] == "1",
+                            w.Length >= 7 ? Int32.Parse(w[5], ci) : 0, w.Length >= 7 ? Int32.Parse(w[6], ci) : 0, w.Length >= 8 ? Int32.Parse(w[7], ci) : 0));
                     }
                 }
                 return c;

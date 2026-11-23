@@ -30,6 +30,9 @@ namespace MphRecomp.Campaign
         // SPIDER BALL (owner 2026-11-06, docs/SPIDER_BALL.md; MphRead PlayerEntity.HostSpiderButton): held in alt form on an
         // Echoes spider track (the online input's last bit; replays from before never set it)
         Spider = 1 << 15,
+        // ALT HOP (owner 2026-11-12, MphRead PlayerEntity.HostAltHopButton): the campaign's alt-form hop, its own button
+        // (jump boosts Samus's ball). Campaign only: past the online input's 16 bits, and matches never hop
+        AltHop = 1 << 16,
     }
 
     // One frame of player intent for the campaign sim. Movement is digital like the DS d-pad the game was built
@@ -58,6 +61,9 @@ namespace MphRecomp.Campaign
         // the move stick's own direction (Input/StickCurve.cs MoveDir, owner 2026-11-08 "360 movement"): 0 = none, the
         // d-pad's bits in Move steer as vanilla (keys, d-pad, CLASSIC, old replays); 1..120 = its angle in 3-degree steps
         public byte MoveDir;
+        // the third-person camera's true aim (MphRead PlayerHostAim.cs, owner 2026-11-13): 0 = none, vanilla's aim (first
+        // person, held in, online, bots, old replays); else PlayerEntity.HostTrueAimCode(side, the app's camera distance)
+        public ushort TrueAim;
 
         public const float MoveDeadZone = 0.35f;
 
@@ -133,6 +139,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotItemNoGain = false;
             PlayerEntity.HostBotNodeOccupied = false;
             PlayerEntity.HostPickupEquipRaise = false; // (the game's pickup equip: a match's rule, MatchStart)
+            PlayerEntity.HostPickupOneTaker = false; // (the game's pickup check: a match's rule, MatchStart)
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = true; // vanilla: one button set, nothing left held across a morph
@@ -197,11 +204,12 @@ namespace MphRecomp.Campaign
             // included), then the Trooper's own two on the main player
             PlayerEntity.HostAnyShieldWall = false;
             PlayerEntity.HostSevenWeaponSlots = false;
+            PlayerEntity.HostEightWeaponSlots = false;
             foreach (PlayerEntity seat in PlayerEntity.Players)
             {
                 if (seat == null) continue;
                 seat.HostShieldWall = seat.HostWallCling = seat.HostHoverWalk = seat.HostBallJump = seat.HostAltHop = seat.HostAltCamMove = false;
-                seat.HostHyperBall = seat.HostHyperBallCorruption = seat.HostScoutDrone = seat.HostSoloUa = false;
+                seat.HostHyperBall = seat.HostHyperBallCorruption = seat.HostScoutDrone = seat.HostCrawl = seat.HostSoloUa = false;
                 seat.HostWallClingJumpRule = seat.HostWallClingOnce = seat.HostWallClingHold = true;
                 seat.HostDronePadArc = seat.HostDroneSwitchRule = seat.HostDroneWaitsOnFoot = true;
                 seat.HostDroneBodyHeadshots = seat.HostDroneBodySplash = true;
@@ -251,6 +259,8 @@ namespace MphRecomp.Campaign
             // the desktop window applies pending dialog/menu pauses right before each update frame
             GameState.ApplyPause();
             ApplyClaimedHits(); // an online host's hit claims it took (Multiplayer/MatchHitClaims.cs)
+            ApplyClaimedPickups(); // a served host's pickup claims it took (Multiplayer/MatchPickupClaims.cs)
+            ApplyRemoteShots(); // and the shots its guests' devices fired (Multiplayer/MatchShotEvents.cs)
             ApplyClientPositions(); // and its guests' own positions it took (Multiplayer/MatchClientPosition.cs)
             LagFrame(); // a match host's N4 lag compensation (Multiplayer/MatchRemote.cs)
             Scene.OnUpdateFrame();
@@ -314,6 +324,8 @@ namespace MphRecomp.Campaign
             c.AffinitySlot.HostDown = (b & CampaignButtons.AffinitySlot) != 0;
             Player.HostZoomButtons((b & CampaignButtons.ZoomStep) != 0, (b & CampaignButtons.ZoomIn) != 0, (b & CampaignButtons.ZoomOut) != 0);
             Player.HostSpiderButton = (b & CampaignButtons.Spider) != 0;
+            Player.HostAltHopButton = (b & CampaignButtons.AltHop) != 0;
+            Player.HostTrueAimCam = input.TrueAim;
             c.PowerBeam.HostDown = input.SelectWeapon == BeamType.PowerBeam;
             c.VoltDriver.HostDown = input.SelectWeapon == BeamType.VoltDriver;
             c.Missile.HostDown = input.SelectWeapon == BeamType.Missile;
@@ -385,7 +397,8 @@ namespace MphRecomp.Campaign
             if (stick.LengthSquared() > 0.25f)
             {
                 int sector = WheelSector(stick);
-                // seven slots (the Pirate Blaster, PlayerEntity.WeaponSlotCount): the quarter in seven
+                // seven or eight slots (the Pirate Blaster, the Hyper Beam: PlayerEntity.WeaponSlotCount): the quarter in
+                // seven or eight
                 float width = 90f / PlayerEntity.WeaponSlotCount;
                 float q = (sector * width + width / 2) * MathF.PI / 180;
                 px = 224 - 40 * DetMathF.Sin(q);
@@ -399,9 +412,16 @@ namespace MphRecomp.Campaign
         // DetMathF: the same sector on every device (replays; MphRead/Utility/DetMath.cs)
         // With the Pirate Blaster on (PlayerEntity.WeaponSlotCount 7, owner 2026-10-09): seven ~51-degree sectors from
         // straight up (0 = just right of up: the Volt Driver ... 6 = just left of up: the blaster; the Judicator straight down)
+        // With the Hyper Beam too (8, owner 2026-11-14 Ring A): eight 45-degree sectors, the Hyper Beam (7) straight up,
+        // then Volt Driver (0) up-right ... the Judicator (3) straight down ... the blaster (6) up-left
         public static int WheelSector(System.Numerics.Vector2 stick)
         {
             float clockwiseFromUp = DetMathF.Atan2(stick.X, stick.Y) * 180 / MathF.PI;
+            if (PlayerEntity.WeaponSlotCount == 8)
+            {
+                int s = Math.Min(7, (int)(((clockwiseFromUp + 360 + 22.5f) % 360) / 45));
+                return s == 0 ? 7 : s - 1;
+            }
             if (PlayerEntity.WeaponSlotCount == 7)
             {
                 return Math.Min(6, (int)(((clockwiseFromUp + 360) % 360) * 7 / 360));
@@ -415,7 +435,7 @@ namespace MphRecomp.Campaign
         // a sector's middle as a full-lean stick direction (the weapon ring's remembered pick, WeaponRingInput)
         public static System.Numerics.Vector2 WheelDirection(int sector)
         {
-            float a = PlayerEntity.WeaponSlotCount == 7 ? (sector + 0.5f) * 2 * MathF.PI / 7 : sector * MathF.PI / 3;
+            float a = PlayerEntity.RingSlotAngle(sector, PlayerEntity.WeaponSlotCount);
             return new System.Numerics.Vector2(DetMathF.Sin(a), DetMathF.Cos(a));
         }
 

@@ -33,6 +33,17 @@ namespace MphRead
         // the same either way. CollectDrawItems itself stays on (it also decides whether loaded models keep their meshes).
         public bool HostSkipDrawList { get; set; }
 
+        // HostClearHud: the recorded HUD emptied. A replay's restore puts back the HUD list the checkpoint was taken with (a
+        // seat view's portrait and health box), which then stayed up through a seek's unseen steps, also in free cam; the
+        // next drawn step records the view's own
+        public void HostClearHud()
+        {
+            _hudItemCount = 0;
+            DamageArrowItem = -1;
+            HostReticleItem = -1;
+            HudMaskBindingId = -1;
+        }
+
         // HostRefreshView: the camera and the draw list worked out again from the match as it stands, nothing stepped (an
         // update frame with ProcessFrame off, as MphRead's frame advance runs one). A replay's free cam moves every picture,
         // not only on the steps, so between steps (and paused) its view is redrawn with this. Drawing only: with

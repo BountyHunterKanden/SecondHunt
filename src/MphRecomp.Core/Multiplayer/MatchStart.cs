@@ -58,6 +58,8 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostSeatSafe = settings.TurretSeatSafe ?? true; // (PlayerEntity.TakeDamage)
             PlayerEntity.HostTurretBotNav = settings.TurretBotNav ?? true; // (PlayerEchoesSeat TurretErrand, EchoesTurretBots.Go)
             PlayerEntity.HostPickupEquipRaise = settings.PickupEquipRaise ?? true; // (PlayerProcess.cs PickUpWeapon)
+            PlayerEntity.HostPickupOneTaker = settings.PickupOneTaker ?? true; // (PlayerProcess.cs PickUpItems)
+            MphRecomp.Arenas.MiningPlazaCrates.PendingHealth = settings.CrateHealthPending ?? !MphRecomp.Config.RecompSettings.PublicBuild; // (MiningPlazaCrates.PickDrops; off in the fixes-only release until the owner has checked it)
             PlayerEntity.HostBotEdgeJump = settings.BotEdgeJump ?? true; // (PlayerAiEdgeJump.cs)
             PlayerEntity.HostBotEdgePadJump = settings.BotEdgePadJump ?? true;
             PlayerEntity.HostBotReleaseControls = settings.BotReleaseControls ?? true; // (PlayerAi.cs ProcessInput)
@@ -80,6 +82,7 @@ namespace MphRecomp.Campaign
             // the game's 4 seats, or 8 for a match of 5-8 (P8, MphRead PlayerSlots.cs): set before the scene makes the players
             PlayerEntity.MaxPlayers = PlayerEntity.MaxPlayersFor(settings.Players.Count);
             CampaignHost? host = null;
+            long loadStart = System.Diagnostics.Stopwatch.GetTimestamp(); // (MatchLoadTimes)
             var scene = new Scene(new Vector2i(viewWidth, viewHeight), null!, null!, _ => { }, () =>
             {
                 if (host != null)
@@ -88,6 +91,7 @@ namespace MphRecomp.Campaign
                 }
             });
             host = new CampaignHost(scene) { Match = settings };
+            double sceneMs = System.Diagnostics.Stopwatch.GetElapsedTime(loadStart).TotalMilliseconds;
             // the DEATH look (owner 2026-11-07, Anim/DeathCollapse.cs): First Hunt's collapse added to this scene's fresh
             // hunter models, this device's look only (the clip a death plays isn't sent or recorded)
             PlayerEntity.HostDeathCollapse = MphRecomp.Anim.DeathCollapse.Root is string fhRoot
@@ -96,6 +100,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostRagdoll = MphRecomp.Anim.DeathCollapse.Ragdoll && !MatchSettings.IsFirstHuntArena(settings.Arena);
             PlayerEntity.MainPlayerIndex = settings.LocalSeat;
             PlayerEntity.NetClient = settings.IsClient;
+            PlayerEntity.NetRagdollRest = false; // (a network match's host sets it: MatchNetDriver)
             PlayerEntity.HostNoLocalSeat = settings.ServedHost && !settings.IsClient; // (a served match host: docs/DEDICATED_SERVERS.md)
             int[]? teams = MatchSettings.IsTeamMode(settings.Mode) ? settings.TeamAssignment() : null;
             settings.AssignRecolors(); // (the same hunter twice: palettes 0-3; every device and replay works it out the same)
@@ -104,6 +109,8 @@ namespace MphRecomp.Campaign
             bool abilities = Characters.AbilitiesFor(settings);
             PlayerEntity.HostAnyShieldWall = false;
             PlayerEntity.HostSevenWeaponSlots = settings.PirateBlaster != false; // the weapon ring's 7th slot (the Pirate Blaster)
+            // ... and its 8th, the Hyper Beam (a pickup for everyone where it's on: Characters.HyperBeamOn)
+            PlayerEntity.HostEightWeaponSlots = PlayerEntity.HostSevenWeaponSlots && Characters.HyperBeamOn(settings);
             System.Array.Clear(GameState.HiddenNames);
             for (int i = 0; i < settings.Players.Count; i++)
             {
@@ -138,6 +145,7 @@ namespace MphRecomp.Campaign
                 player.HostPirateBlasterKey = settings.PirateBlasterKey ?? true;
                 player.HostTeamHitsIgnored = settings.TeamHitsIgnored ?? true; // friendly fire off: no hit at all (old replays: vanilla's)
                 player.HostScoutDrone = abilities && Characters.HasScoutDrone(seat);
+                player.HostCrawl = abilities && Characters.CrawlFor(settings, seat); // Brawl Zero Suit's army crawl
                 player.HostAffinityBeam = Characters.AffinityBeamFor(settings, seat); // recomp: the Trooper's Pirate Blaster
                 player.HostHealthPercent = Characters.HealthPercentFor(settings, seat); // Zero Suit: 90 (no armour)
                 PlayerEntity.HostAnyShieldWall |= player.HostShieldWall;
@@ -174,7 +182,10 @@ namespace MphRecomp.Campaign
             MphRecomp.Arenas.EchoesAmmo.Enabled = MphRecomp.Arenas.EchoesAmmo.For(settings);
             // and the owner's baked pickup placements in any arena, with EXTRA PICKUPS (old replays: none)
             MphRecomp.Arenas.PlacedPickups.Setup(settings);
-            scene.AddRoom(settings.Arena, settings.Mode, settings.Players.Count);
+            string room = settings.Arena;
+            double setupMs = System.Diagnostics.Stopwatch.GetElapsedTime(loadStart).TotalMilliseconds;
+            scene.AddRoom(room, settings.Mode, settings.Players.Count);
+            double roomMs = System.Diagnostics.Stopwatch.GetElapsedTime(loadStart).TotalMilliseconds;
             MphRecomp.Arenas.PlacedPickups.ResolveNodes(scene);
             // AddRoom's GameState.Setup applied the mode's defaults; the match's own rules go on top
             if (settings.PointGoal is int points) GameState.PointGoal = points;
@@ -187,7 +198,14 @@ namespace MphRecomp.Campaign
             if (settings.AffinityWeapons is bool affinity) GameState.AffinityWeapons = affinity;
             MphRecomp.Mods.LiveMods.MatchSetup(); // gameplay mods' mode.setup (offline only: no gameplay mods run online)
             scene.OnLoad();
+            double totalMs = System.Diagnostics.Stopwatch.GetElapsedTime(loadStart).TotalMilliseconds;
+            MatchLoadTimes = $"scene {sceneMs:0} ms, players {setupMs - sceneMs:0} ms, room {roomMs - setupMs:0} ms"
+                + $" (hunters {SceneSetup.HostHunterResourceMs:0} ms), onload {totalMs - roomMs:0} ms, total {totalMs:0} ms";
             return host;
         }
+
+        // where the last StartMatch's time went (2026-11-21, faster match loading): logged by the App with its
+        // "MPHCampaign started" line and printed by MphRead.Tools -matchloadtime
+        public static string MatchLoadTimes = "";
     }
 }

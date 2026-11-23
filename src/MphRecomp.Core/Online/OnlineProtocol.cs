@@ -271,6 +271,13 @@ namespace MphRecomp.Online
     [JsonDerivedType(typeof(LeadersMsg), "leaders")]
     [JsonDerivedType(typeof(StatsReq), "get_stats")]
     [JsonDerivedType(typeof(StatsMsg), "stats")]
+    // server 0.10.3: restart notices (OnlineProtocol.Notice.cs; only sent to clients whose hello set Notices)
+    [JsonDerivedType(typeof(ServerNoticeEvent), "ev_notice")]
+    [JsonDerivedType(typeof(CloudGetReq), "cloud_get")] // (0.11.0: CLOUD SAVE, Online/CloudSave.cs)
+    [JsonDerivedType(typeof(CloudSaveMsg), "cloud_save")]
+    [JsonDerivedType(typeof(CloudPutReq), "cloud_put")]
+    [JsonDerivedType(typeof(CloudPutMsg), "cloud_put_result")]
+    [JsonDerivedType(typeof(CloudDeleteReq), "cloud_delete")]
     public abstract class OnlineMsg
     {
         public int? Id { get; set; }
@@ -292,6 +299,11 @@ namespace MphRecomp.Online
         public string Name { get; set; } = "";
         // a scrambled device ID (DeviceTag; "" = none): a ban holds for the device too, not just the key
         public string Device { get; set; } = "";
+        // server 0.10.3: this client understands ServerNoticeEvent (older servers ignore the field; older clients never get one)
+        public bool Notices { get; set; }
+        // server 0.11.0: a CLOUD SAVE connection (CloudSave.cs): it doesn't take the player's place (no kick of their other
+        // connection, no presence) and only cloud_* requests are answered
+        public bool CloudOnly { get; set; }
     }
 
     public sealed class WelcomeMsg : OnlineMsg
@@ -305,6 +317,8 @@ namespace MphRecomp.Online
         // server 0.7.0: a started match this player still has a seat in but isn't playing (the app closed or its connection
         // dropped mid-match): the hub offers REJOIN (JoinGameReq with no id) or leaves it (LeaveGameReq); null = none
         public GameCard? Held { get; set; }
+        // server 0.10.3: the server is draining for a restart, about this many seconds left (0 = not restarting)
+        public int Restart { get; set; }
     }
 
     public sealed class ErrorMsg : OnlineMsg
@@ -528,6 +542,8 @@ namespace MphRecomp.Online
         public int? HostSlot { get; set; }
         // a served game (server 0.8.0): the lobby's owner left and this player owns it now; null = no owner change
         public string? Owner { get; set; }
+        // a join: the game's PLAYERS after it (an invited player grows a full game: HubGames.JoinGame); null = an older server
+        public int? MaxPlayers { get; set; }
     }
 
     public sealed class GameClosedEvent : OnlineMsg

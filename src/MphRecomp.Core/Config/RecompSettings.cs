@@ -68,6 +68,17 @@ namespace MphRecomp.Config
         public bool MouseRoll { get; set; }
         public static readonly int[] SlowMovePercents = { 25, 40, 60 };
         public int SlowMovePercent { get; set; } = 40;
+        // CONTROLS > AIM > STICKS (owner GO 2026-11-16, Core Input/StickShape.cs): each stick's dead zone in percent (15 =
+        // the old fixed 0.15 cut on each axis) and the aim stick's curve (linear = the stick as it is, the old aim)
+        public int LeftStickDeadZone { get; set; } = 15;
+        public int RightStickDeadZone { get; set; } = 15;
+        public string AimCurve { get; set; } = "linear";
+        // CONTROLS > BUTTONS' hold-or-toggle rows (owner GO 2026-11-16; Input/StickShape.cs HoldToggle): false = hold the
+        // button as before, true = press to turn it on, press again for off. The scoreboard (controller and keys), the
+        // spider ball (dev builds, where it has a row) and the keyboard's slow move
+        public bool ScoreboardToggle { get; set; }
+        public bool SpiderToggle { get; set; }
+        public bool SlowMoveToggle { get; set; }
         public int RenderScale { get; set; } = 100;
         public string Music { get; set; } = "original";
         public string MenuLayout { get; set; } = "combined";
@@ -121,6 +132,9 @@ namespace MphRecomp.Config
         // The campaign's camera: first person (the game's own) or third person (the suit's body seen from behind; render
         // only, CampaignActivity.UpdateThirdPerson). Was a Select toggle until 2026-10-03; Select opens the map now.
         public bool ThirdPerson { get; set; }
+        // Third person's shoulder (SECOND HUNT SETTINGS > GAME > CAMPAIGN > CAMERA SIDE, owner 2026-11-12): the camera sits
+        // behind and to the right of the eye (the default), or the left with this on. Campaign and matches alike.
+        public bool ThirdPersonLeft { get; set; }
         // Multiplayer matches' camera (SECOND HUNT SETTINGS > GAME > MULTIPLAYER, owner 2026-10-17: separate from the
         // campaign's): bot and LAN matches follow it; online matches are always first person (CampaignRenderer.SetThirdPerson).
         public bool MatchThirdPerson { get; set; }
@@ -226,6 +240,16 @@ namespace MphRecomp.Config
         // aim while firing (thread D 10-24): the thumb holding the on-screen FIRE button (to charge) aims like a stick as it
         // slides; a tap fires as before (MatchTouchOverlay)
         public bool TouchFireAim { get; set; } = true;
+        // the touch controls' layout editor (owner 2026-11-15, wave 2; MphRead.Android/TouchLayoutEditor.cs): per layout
+        // ("match", "campaign"), per button (its label, e.g. "WEAPON"), the player's move / size / opacity / hide
+        // (Config/LayoutEdit.cs, overrides only: a button with no entry is where it ships). TouchOpacity is the ALL
+        // BUTTONS opacity in percent (10-100) on top of each button's own.
+        public Dictionary<string, Dictionary<string, LayoutEdit>> TouchLayouts { get; set; } = new();
+        public int TouchOpacity { get; set; } = 100;
+        // the HUD editor (owner 2026-11-15, wave 2; MphRecomp.App/Hud/HudEditor.cs): per profile ("all" for now; a hunter's
+        // name once profiles come), per HUD element (Scene.HostHudTag ids: "energy", "ammo", "reticle"...), the player's
+        // move / size / opacity / hide (Config/LayoutEdit.cs, overrides only: an element with no entry draws where it ships).
+        public Dictionary<string, Dictionary<string, LayoutEdit>> HudLayouts { get; set; } = new();
         // The game's own OPTIONS page in the gunship (the DS keeps these in its save; our campaign saves are per file, so
         // they live here): control type 0 stylus right / 1 stylus left / 2 dual right / 3 dual left, aim sensitivity
         // 1-15 (8 = the DS default spot on the slider), look invert. The campaign applies sensitivity and invert to aiming.
@@ -277,6 +301,8 @@ namespace MphRecomp.Config
         // the controller's CHAT button (online quick-message wheel): false = hold it, true = press to open, press to close
         // (owner 2026-10-11; the customizer's "chat mode" row under CHAT)
         public bool ChatToggle { get; set; }
+        // the game's OPTIONS > RUMBLE PAK (Frontend/RecompMenus.Rumble.cs): off by default, as a fresh DS save
+        public bool Rumble { get; set; }
         // Dev builds: OPTIONS > CONTROLS and the ship's OPTIONS as the game has them (the four stylus / dual mode boxes,
         // kept for dual-screen Thor testing) in place of the customizer buttons. Public builds ignore it.
         public bool ClassicControlsPage { get; set; }
@@ -290,11 +316,15 @@ namespace MphRecomp.Config
         // MatchMusic "" = the arena's own music, "shuffle" = another shown song each match, else a song's id
         // ("tracks:MP1PhendranaDrifts"); MenuMusic the same for the menus' theme ("" = the game's, "shuffle" = another each
         // start); MusicPicker = a small MUSIC row on the match rules pages, like the arena picker; HiddenSongs = song ids
-        // left out of the lists and the shuffles.
+        // left out of the match lists and shuffles (SOUND > ARENA SONGS), HiddenMenuSongs the same for the menus' (MENU
+        // SONGS, owner 2026-11-13: "same pool of songs, two different playlists"). A file from before the split has no
+        // menu list: MenuHiddenSongs starts it as a copy of the match one, so the menus keep the songs they had.
         public string MatchMusic { get; set; } = "";
         public string MenuMusic { get; set; } = "";
         public bool MusicPicker { get; set; }
         public List<string> HiddenSongs { get; set; } = new();
+        public List<string>? HiddenMenuSongs { get; set; }
+        public List<string> MenuHiddenSongs() => HiddenMenuSongs ??= new List<string>(HiddenSongs);
         // STREAMING (owner 2026-10-28: "toggle off their ip address, username, and friend code, hiding them anywhere they
         // appear in the game"): on = shown as usual, off = masked on screen (Config/StreamerPrivacy.cs). Draw only: the
         // other players, the server and the logs still get the real ones.
@@ -327,6 +357,9 @@ namespace MphRecomp.Config
         // UPDATES at launch (owner 2026-10-11): once per run the game asks GitHub in the background and, only if a signed
         // update is out, asks on the main menu whether to install it (FrontendSession.TickLaunchCheck); off = CHECK only
         public bool CheckUpdatesAtLaunch { get; set; } = true;
+        // CLOUD SAVE (docs/PROFILE_SYNC.md Phase 2): this device keeps an encrypted copy of the profile on the hub and syncs
+        // with it (Profile/CloudSync.cs); off by default, per device
+        public bool CloudSave { get; set; }
         // STARTUP (owner 2026-10-29): skip the white NINTENDO/ACTIMAGINE screen and the ESRB notice at launch; with
         // SkipIntro also on, the NINTENDO PRESENTS logos and the intro movie too, straight to TOUCH TO START
         // (FrontendSession.Start). SkipIntro only counts with SkipBootLogos on (its row only shows then)
@@ -334,6 +367,12 @@ namespace MphRecomp.Config
         // owner 2026-11-06: the SECOND HUNT logo (the SteamGridDB one) under the game's logo on the main menu, page 18
         // (FrontendSession.DrawSecondHuntLogo); off by default
         public bool SecondHuntLogo { get; set; }
+        // LOOK > MENUS ARENA BACKGROUND (owner 2026-11-20, App MenuArenaBackdrop.cs): a random multiplayer arena, live, in
+        // place of the Samus menu art: sharp behind TOUCH TO START, blurred and darkened behind the menus; off by default
+        public bool MenuArenaBackdrop { get; set; }
+        // HOLIDAY MODE (owner 2026-11-20, MphRecomp.Holiday): "off", "on" or "auto" (December 1 to January 6); snow falls
+        // where the sky is open. Look only, each player's own
+        public string HolidayMode { get; set; } = "off";
         // DEATH (owner 2026-11-07, docs/IDEAS_SURVEY.md D1): "vanilla" = MPH's death, "firsthunt" = First Hunt's collapse
         // on every hunter's body (dev only, needs First Hunt imported: MphRecomp.Anim.DeathCollapse), "ragdoll" = the body
         // falls as a ragdoll pushed by the killing shot (PlayerRagdoll.cs; every build, no import). Independent of each
@@ -351,6 +390,9 @@ namespace MphRecomp.Config
         // owner 2026-10-26: making a new file in the campaign's file select first offers to fill it from a vanilla DS save
         // (an emulator's or a dumped cart's .sav: Campaign/CartSave.cs); off = new files start as before
         public bool ImportSavesOnNewFile { get; set; }
+        // owner 2026-11-16: the campaign speedrun timer (App/Campaign/SpeedrunTimer.cs): off / igt / rta / both, and its splits
+        public string SpeedrunTimer { get; set; } = "off";
+        public bool SpeedrunSplits { get; set; } = true;
         public List<string> DisabledMods { get; set; } = new();
         // the player's mod load order (ids, first loads first; mods not listed follow in folder order). Mods/ModManager.Resolve
         // still puts a mod after the mods it requires.

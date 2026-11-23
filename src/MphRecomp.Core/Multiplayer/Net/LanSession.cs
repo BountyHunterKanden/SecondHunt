@@ -31,7 +31,7 @@ namespace MphRecomp.Multiplayer.Net
     {
         public const int GamePort = 47770;
         public const int BeaconPort = 47771;
-        private const byte Protocol = 25; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
+        private const byte Protocol = 26; // 2: snapshots carry the last hit (kill messages); 3: items; 4: START;
                                          // 5: JOIN carries the game logic version (Replay ReplayFile.CurrentSimVersion);
                                          // 6: JOIN and the players carry the Hunter License rank level;
                                          // 7: JOIN and the players carry the character + skin (MatchPlayer.Character/Skin);
@@ -66,6 +66,8 @@ namespace MphRecomp.Multiplayer.Net
                                          // 25: inputs carry the move stick's push (NetInput.MovePush, the move byte's
                                          //     top 4 bits; PlayerStickPush.cs) and its direction (NetInput.MoveDir, the
                                          //     touch byte's top 7 bits)
+                                         // 26: inputs carry the third-person true aim (NetInput.TrueAim, u16 after the
+                                         //     input; MphRead PlayerHostAim.cs); snapshots the seats' (Snapshot.AimCams)
         private const byte MsgBeacon = 1, MsgJoin = 2, MsgWelcome = 3, MsgRefuse = 4, MsgInput = 5, MsgSnapshot = 6, MsgBye = 7,
             MsgStart = 8, MsgLobby = 9, MsgLook = 10;
         // SNAPSHOT: type, the joiner's input ack (u16), frames held on it (u8), then the snapshot (protocol 17)
@@ -74,6 +76,33 @@ namespace MphRecomp.Multiplayer.Net
 
         // the session an activity hands to the next (lobby in the launcher -> match in CampaignActivity)
         public static LanSession? Current { get; set; }
+
+        // the match screen's hold on this session (MatchReplay ReplayLinkHold): true while the match's replay is still going
+        // across over it. The menus come back before the match screen lets go, and their leaving a LAN page ended the session
+        // under the transfer: owner 2026-11-22, both quit a LAN match at once, the guest's copy stopped at 43 of 60
+        // pieces and it got no replay
+        public Func<bool>? KeepOpen { get; set; }
+
+        // the menus leaving the LAN pages: Current ends (BYE to the other devices), or, while its last match's replay is still
+        // going across (KeepOpen), is only let go of (Current = null): the match screen's hold ends it once the replay is done.
+        // True when it was let go of
+        public static bool EndCurrent()
+        {
+            LanSession? lan = Current;
+            if (lan == null) return false;
+            Current = null;
+            bool keep;
+            try
+            {
+                keep = lan.KeepOpen?.Invoke() == true;
+            }
+            catch (Exception)
+            {
+                keep = false;
+            }
+            if (!keep) lan.Dispose();
+            return keep;
+        }
 
         public bool IsHost { get; }
         public string RomKey { get; }
@@ -223,6 +252,7 @@ namespace MphRecomp.Multiplayer.Net
 
         // (under _inputLock)
         private Joiner? BySeat(int seat) => _joiners.FirstOrDefault(j => !j.Left && j.Seat == seat);
+
         private Joiner? ByEndPoint(IPEndPoint from) => _joiners.FirstOrDefault(j => !j.Left && j.EndPoint.Equals(from));
         // (under _inputLock) a joiner of the running match gone quiet: its seat waits for it (LAN rejoin)
         private const long HeldAfterMs = 3000;
@@ -991,7 +1021,8 @@ namespace MphRecomp.Multiplayer.Net
             }
             _sendBuffer[0] = MsgInput;
             input.Write(_sendBuffer.AsSpan(1));
-            Send(_sendBuffer, 1 + NetInput.Size, _peer);
+            BinaryPrimitives.WriteUInt16LittleEndian(_sendBuffer.AsSpan(1 + NetInput.Size), input.TrueAim); // (protocol 26)
+            Send(_sendBuffer, 1 + NetInput.Size + 2, _peer);
         }
 
         // ---------------------------------------------------------------- both
@@ -1057,6 +1088,10 @@ namespace MphRecomp.Multiplayer.Net
             if (data[0] == MsgInput && IsHost)
             {
                 NetInput input = NetInput.Read(data.AsSpan(1));
+                if (data.Length >= 1 + NetInput.Size + 2)
+                {
+                    input.TrueAim = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(1 + NetInput.Size));
+                }
                 lock (_inputLock)
                 {
                     Joiner? j = ByEndPoint(from);

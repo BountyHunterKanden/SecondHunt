@@ -76,6 +76,11 @@ internal sealed partial class CampaignRenderer
         public int Bone = -1, Mode, EmitLeft;
         public float Scale = 1;
         public float Fade = 1;           // times its alpha (the Echoes turret's own effects seen by its occupant)
+        public EntityBase? Carry;        // smooth frames only: carried with this entity (a gun effect; P is unset)
+        public bool Whole;               // no near fade (Corruption draws its gun charge at full strength)
+        public bool Graded;              // a Hyper Beam effect: drawn under Corruption's Hyper Mode grade (HyperGrade.cs)
+        public Matrix4? Ride;            // this picture: a move in the world placing it, in place of the carry (a Pirate
+                                         // Blaster bolt's in the player's own view: PlaceBlasterFx)
     }
 
     readonly Dictionary<PlayerEntity, DroneFxSeat> _fxSeats = new();
@@ -86,6 +91,8 @@ internal sealed partial class CampaignRenderer
     // turret effects (an ATEX tile can run past the texture: the column bolts' 256-wide tiles on a 128 texture)
     readonly HashSet<uint> _fxTexRepeat = new();
     readonly Dictionary<uint, int> _fxTex = new();
+    // Corruption ALSC copies (RetroBillboard.AlphaFrom): a texture with its alpha taken from its red, green or blue
+    readonly Dictionary<(uint, byte), int> _fxTexAlpha = new();
     readonly HashSet<CampaignRetroBody> _fxTexListed = new();
     readonly List<RetroBillboard> _fxBoards = new();
     readonly Dictionary<PlayerEntity, Matrix4?> _fxPose = new();
@@ -425,13 +432,15 @@ internal sealed partial class CampaignRenderer
     }
 
     // DrawSkins (MatchSkins.cs), additive pass: every live effect's particles and the drone shots' streaks
-    void DrawDroneFx(Scene scene, SuitPass pass)
+    // hyper: only the Hyper Beam's effects (DroneFxLive.Graded), drawn on their own inside its grade; otherwise all the others
+    void DrawDroneFx(Scene scene, SuitPass pass, bool hyper = false)
     {
         if (pass != SuitPass.Additive || _host == null || scene != _host.Scene) return;
         _fxBoards.Clear();
         Vector3 cam = scene.CameraPosition;
         foreach (DroneFxLive fx in _fxLive)
         {
+            if (fx.Graded != hyper) continue;
             int from = _fxBoards.Count;
             fx.Sys.Collect(_fxBoards);
             // the local player's own drone fades its effects with its body (MatchDrones.DroneAlpha), and any effect
@@ -439,7 +448,7 @@ internal sealed partial class CampaignRenderer
             // would fill the screen)
             float alpha = (fx.P != null ? DroneAlpha(scene, fx.P) : 1) * fx.Fade;
             // smooth frames: carried with the seat, as its drone and body are (SmoothView)
-            Matrix4 carry = SmoothCarry(fx.P, scene);
+            Matrix4 carry = fx.Ride ?? SmoothCarry(fx.P ?? fx.Carry, scene);
             bool carried = carry != Matrix4.Identity;
             for (int k = from; k < _fxBoards.Count; k++)
             {
@@ -448,8 +457,9 @@ internal sealed partial class CampaignRenderer
                 {
                     bb.Position = Vector3.TransformPosition(bb.Position, carry);
                     bb.Fore = Vector3.TransformVector(bb.Fore, carry);
+                    if (bb.LineWidthPx > 0) bb.LineEnd = Vector3.TransformPosition(bb.LineEnd, carry);
                 }
-                float near = bb.Size > 1e-4f ? ((bb.Position - cam).Length / bb.Size - FxNearGone) / (FxNearWhole - FxNearGone) : 1;
+                float near = fx.Whole || bb.Size <= 1e-4f ? 1 : ((bb.Position - cam).Length / bb.Size - FxNearGone) / (FxNearWhole - FxNearGone);
                 bb.Color.W *= alpha * Math.Clamp(near, 0, 1);
                 _fxBoards[k] = bb;
             }
@@ -459,6 +469,7 @@ internal sealed partial class CampaignRenderer
         int streaks = 0;
         foreach (PlayerEntity p in PlayerEntity.Players)
         {
+            if (hyper) break;
             if (p?.DroneBeams is not BeamProjectileEntity[] beams || !_fxSeats.ContainsKey(p)) continue;
             foreach (BeamProjectileEntity b in beams)
             {
@@ -469,6 +480,7 @@ internal sealed partial class CampaignRenderer
         int lasers = 0;
         foreach (PlayerEntity p in _fxSeats.Keys)
         {
+            if (hyper) break;
             if (p.HostOwnDroneLaser && p.DroneLaserOn) lasers++;
         }
         if (boards == 0 && streaks == 0 && lasers == 0) return;
@@ -478,26 +490,50 @@ internal sealed partial class CampaignRenderer
         var right = new Vector3(view.M11, view.M21, view.M31);
         var up = new Vector3(view.M12, view.M22, view.M32);
         var fwd = -new Vector3(view.M13, view.M23, view.M33);
-        // alpha-blended ones first, then the additive ones, grouped by texture
-        _fxBoards.Sort((a, b) => a.Additive != b.Additive ? (a.Additive ? 1 : -1) : a.Texture.CompareTo(b.Texture));
+        // alpha-blended ones first, then the additive ones, grouped by blend, texture and ALSC; SORT ones back to front
+        // within their group
+        _fxBoards.Sort((a, b) => a.Mode.Adds() != b.Mode.Adds() ? (a.Mode.Adds() ? 1 : -1)
+            : a.Mode != b.Mode ? a.Mode.CompareTo(b.Mode)
+            : a.Texture != b.Texture ? a.Texture.CompareTo(b.Texture)
+            : a.AlphaFrom != b.AlphaFrom ? a.AlphaFrom.CompareTo(b.AlphaFrom)
+            : a.Sorted != b.Sorted ? a.Sorted.CompareTo(b.Sorted)
+            : a.Sorted ? Vector3.Dot(b.Position - cam, fwd).CompareTo(Vector3.Dot(a.Position - cam, fwd)) : 0);
         GLES30.GlUseProgram(_fxProg);
         GLES30.GlBindVertexArray(_fxVao);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _fxVbo);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
-        GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_fxProg, "uTex"), 0);
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(false);
         GLES30.GlDisable(CullFaceCap);
+        float linePx = 2f / 448f / MathF.Max(1e-3f, scene.PerspectiveMatrix.M22); // a pixel of Corruption's 640x448 frame at distance 1 (GX line width is in EFB pixels)
         int i = 0;
         while (i < _fxBoards.Count)
         {
             RetroBillboard first = _fxBoards[i];
             int n = 0;
             int j = i;
-            for (; j < _fxBoards.Count && _fxBoards[j].Additive == first.Additive && _fxBoards[j].Texture == first.Texture; j++)
+            for (; j < _fxBoards.Count && _fxBoards[j].Mode == first.Mode && _fxBoards[j].Texture == first.Texture
+                && _fxBoards[j].AlphaFrom == first.AlphaFrom; j++)
             {
                 RetroBillboard bb = _fxBoards[j];
+                if (bb.LineWidthPx > 0)
+                {
+                    // LINE (Retro's CLineRenderer): a strip LineWidthPx pixels wide, the tile's first corner at the start and
+                    // its last at the end, the same on both edges
+                    Vector3 d = bb.LineEnd - bb.Position;
+                    if (d.LengthSquared < 1e-10f) continue;
+                    Vector3 side = Vector3.Cross(d, cam - (bb.Position + bb.LineEnd) / 2);
+                    side = side.LengthSquared > 1e-12f ? side.Normalized() : right;
+                    Vector3 sa = side * (bb.LineWidthPx * 0.5f * linePx * (cam - bb.Position).Length);
+                    Vector3 sb = side * (bb.LineWidthPx * 0.5f * linePx * (cam - bb.LineEnd).Length);
+                    Vector4 luv = bb.Uv == default ? new Vector4(0, 0, 1, 1) : bb.Uv;
+                    if ((n + 6) * 10 > _fxVerts.Length) Array.Resize(ref _fxVerts, _fxVerts.Length * 2);
+                    Vert(ref n, vp, bb.Position + sa, (luv.X, luv.Y), bb.Color); Vert(ref n, vp, bb.LineEnd + sb, (luv.Z, luv.W), bb.Color);
+                    Vert(ref n, vp, bb.Position - sa, (luv.X, luv.Y), bb.Color); Vert(ref n, vp, bb.Position - sa, (luv.X, luv.Y), bb.Color);
+                    Vert(ref n, vp, bb.LineEnd + sb, (luv.Z, luv.W), bb.Color); Vert(ref n, vp, bb.LineEnd - sb, (luv.Z, luv.W), bb.Color);
+                    continue;
+                }
                 if (bb.Fore != Vector3.Zero)
                 {
                     // ORNT: u along Fore, v across (Fore x the camera's forward, times Width), as Retro's corners
@@ -510,9 +546,11 @@ internal sealed partial class CampaignRenderer
                 Vector3 ax = right * c + up * s, ay = -right * s + up * c;
                 Quad(ref n, vp, bb.Position - ax + ay, bb.Position + ax + ay, bb.Position - ax - ay, bb.Position + ax - ay, bb.Color, uv: bb.Uv);
             }
-            DrawRun(first.Texture, first.Additive, n);
+            DrawRun(first.Texture, first.Mode, n, alphaFrom: first.AlphaFrom);
             i = j;
         }
+        // no bloom about Corruption's glowing sprites and lines (PBDM 4-6, 8-10): its frame has no bloom pass (main.dol audit
+        // step 4; Dolphin FIFO log of the charged orb 11-14: they draw with constant dest alpha 0 and nothing reads it back)
         // the streaks: a yellow glow and a white core from a little behind each shot to it, and a flash at its head
         if (streaks > 0)
         {
@@ -601,6 +639,7 @@ internal sealed partial class CampaignRenderer
     void Vert(ref int n, Matrix4 vp, Vector3 at, (float U, float V) uv, Vector4 col)
     {
         Vector4 c = new Vector4(at, 1) * vp;
+        if (_hgTrack) HyperGradeTrack(c);
         int o = n * 10;
         _fxVerts[o] = c.X; _fxVerts[o + 1] = c.Y; _fxVerts[o + 2] = c.Z; _fxVerts[o + 3] = c.W;
         _fxVerts[o + 4] = uv.U; _fxVerts[o + 5] = uv.V;
@@ -608,29 +647,51 @@ internal sealed partial class CampaignRenderer
         n++;
     }
 
-    void DrawRun(uint tex, bool additive, int verts, bool white = false)
+    void DrawRun(uint tex, bool additive, int verts, bool white = false, byte alphaFrom = 0)
+        => DrawRun(tex, additive ? RetroBlend.Add : RetroBlend.Alpha, verts, white, alphaFrom: alphaFrom);
+
+    // gl: a texture of ours (the bloom's) instead; alphaFrom: as RetroBillboard.AlphaFrom
+    void DrawRun(uint tex, RetroBlend blend, int verts, bool white = false, int gl = 0, byte alphaFrom = 0)
     {
         if (verts == 0) return;
         int id;
-        if (white) id = _fxWhite;
-        else if (FxTexture(tex) is int t) id = t;
+        if (gl != 0) id = gl;
+        else if (white) id = _fxWhite;
+        else if (FxTexture(tex, alphaFrom) is int t) id = t;
         else return;
         // the MPH passes leave a nearest-filter sampler object on unit 0, and a sampler object overrides the texture's own
         // filter: the effects drew blocky (owner 10-16, the turret's explosions), not smooth as Retro's bilinear ones
         GLES30.GlBindSampler(0, 0);
         GLES30.GlBindTexture(GLES30.GlTexture2d, id);
-        GLES30.GlBlendFunc(GLES30.GlSrcAlpha, additive ? GLES30.GlOne : GLES30.GlOneMinusSrcAlpha);
+        (int src, int dst) = blend switch
+        {
+            RetroBlend.Add => (GLES30.GlSrcAlpha, GLES30.GlOne),
+            RetroBlend.PremulAlpha => (GLES30.GlOne, GLES30.GlOneMinusSrcAlpha),
+            RetroBlend.AddOne => (GLES30.GlOne, GLES30.GlOne),
+            RetroBlend.Opaque => (GLES30.GlOne, GLES30.GlZero),
+            _ => (GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha),
+        };
+        GLES30.GlBlendFunc(src, dst);
         GLES30.GlBufferData(GLES30.GlArrayBuffer, verts * 10 * 4, _fxVerts, GLES30.GlDynamicDraw);
         GLES30.GlDrawArrays(GLES30.GlTriangles, 0, verts);
     }
 
-    int? FxTexture(uint t)
+    int? FxTexture(uint t, byte alphaFrom = 0)
     {
-        if (_fxTex.TryGetValue(t, out int id)) return id;
+        if (alphaFrom == 0 ? _fxTex.TryGetValue(t, out int id) : _fxTexAlpha.TryGetValue((t, alphaFrom), out id))
+            return id;
         if (!_fxTexFile.TryGetValue(t, out string? file) || AppPlatform.DecodeImage(file) is not (int[] px, int w, int h))
         {
-            _fxTex[t] = 0;
+            if (alphaFrom == 0) _fxTex[t] = 0;
+            else _fxTexAlpha[(t, alphaFrom)] = 0;
             return null;
+        }
+        if (alphaFrom != 0)
+        {
+            // (the pixels are RGBA bytes: red the low byte, alpha the high one)
+            int shift = (alphaFrom - 1) * 8;
+            for (int k = 0; k < px.Length; k++)
+                px[k] = (int)((uint)px[k] & 0x00ffffffu | ((uint)px[k] >> shift & 0xffu) << 24);
         }
         var ids = new int[1];
         GLES30.GlGenTextures(1, ids, 0);
@@ -642,6 +703,7 @@ internal sealed partial class CampaignRenderer
         int wrap = _fxTexRepeat.Contains(t) ? GLES30.GlRepeat : GLES30.GlClampToEdge;
         GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapS, wrap);
         GLES30.GlTexParameteri(GLES30.GlTexture2d, GLES30.GlTextureWrapT, wrap);
+        if (alphaFrom != 0) return _fxTexAlpha[(t, alphaFrom)] = ids[0];
         return _fxTex[t] = ids[0];
     }
 
@@ -658,6 +720,7 @@ internal sealed partial class CampaignRenderer
         {
             _fxProg = _fxVao = _fxVbo = _fxWhite = 0;
             _fxTex.Clear();
+            _fxTexAlpha.Clear();
             _u["dronefx"] = 1;
         }
         if (_fxProg == 0)

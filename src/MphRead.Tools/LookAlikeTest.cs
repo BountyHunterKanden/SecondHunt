@@ -219,7 +219,7 @@ namespace MphRead
                 if (!ok) fails++;
                 Console.WriteLine($"  free {name}: {String.Join(",", got)} (want {String.Join(",", want)}) {(ok ? "OK" : "FAIL")}");
             }
-            Free("all auto", Samuses(3), new[] { -1, -1, -1 }, 1, new[] { 0, 1, 2, 3, 4, 5, 6, 7 });
+            Free("all auto", Samuses(3), new[] { -1, -1, -1 }, 1, new[] { 1, 3, 4, 5, 6, 7 });
             Free("others picked 0 and 5", Samuses(3), new[] { 0, -1, 4 }, 1, new[] { 1, 2, 3, 5, 6, 7 });
             Free("own pick stays", Samuses(2), new[] { 3, 2 }, 1, new[] { 0, 1, 2, 4, 5, 6, 7 });
             Free("other hunter holds nothing", new List<MatchPlayer> { P(Hunter.Kanden, null, null), P(Hunter.Samus, null, null) },
@@ -228,6 +228,35 @@ namespace MphRead
                 new[] { 0, -1 }, 1, new[] { 0, 1, 2, 3, 4, 5, 6, 7 });
             Free("Gravity copy next to Varia's", new List<MatchPlayer> { P(Hunter.Samus, null, "MP1VariaSuit"), P(Hunter.Samus, null, "MP1GravitySuit") },
                 new[] { 2, -1 }, 1, new[] { 0, 1, 3, 4, 5, 6, 7 });
+            // owner 2026-11-13: two Traces, the host automatic in the default: the guest can't pick it from him
+            Free("automatic holds its default", new List<MatchPlayer> { P(Hunter.Trace, null, null), P(Hunter.Trace, null, null) },
+                new[] { -1, -1 }, 1, new[] { 1, 2, 3, 4, 5, 6, 7 });
+            // the online host's book (LookAlikes.ColourBook): a seat keeps what it wears, a pick gets only a free colour, a
+            // refused one comes true once it's free (asks: a joiner's LOOK pick, null = the seat's ColourPick, the host's)
+            void Book(string name, LookAlikes.ColourBook book, List<MatchPlayer> seats, int?[] asks, int[] want)
+            {
+                book.Settle(seats, p => asks[seats.FindIndex(q => ReferenceEquals(q, p))]);
+                int[] got = seats.Select(p => p.ColourPick).ToArray();
+                bool ok = got.SequenceEqual(want) && LookAlikes.CopyIndices(seats).SequenceEqual(want);
+                if (!ok) fails++;
+                Console.WriteLine($"  book {name}: {String.Join(",", got)} (want {String.Join(",", want)}) {(ok ? "OK" : "FAIL")}");
+            }
+            var book = new LookAlikes.ColourBook();
+            var traces = new List<MatchPlayer> { P(Hunter.Trace, null, null), P(Hunter.Trace, null, null) };
+            Book("two Traces", book, traces, new int?[] { null, -1 }, new[] { 0, 1 });
+            Book("guest asks the host's default", book, traces, new int?[] { null, 0 }, new[] { 0, 1 });
+            Book("guest asks a free 4", book, traces, new int?[] { null, 3 }, new[] { 0, 3 });
+            Book("guest asks the default again", book, traces, new int?[] { null, 0 }, new[] { 0, 3 });
+            traces[0].Hunter = Hunter.Kanden;
+            Book("host turns Kanden: the ask comes true", book, traces, new int?[] { null, 0 }, new[] { 0, 0 });
+            traces[0].Hunter = Hunter.Trace;
+            Book("host back to Trace: the guest keeps it", book, traces, new int?[] { null, 0 }, new[] { 1, 0 });
+            traces[0].ColourPick = 0;
+            Book("host's own pick can't take it", book, traces, new int?[] { null, 0 }, new[] { 1, 0 });
+            traces.Add(P(Hunter.Trace, null, null));
+            Book("a joiner asks a worn colour", book, traces, new int?[] { null, 0, 1 }, new[] { 1, 0, 2 });
+            traces.RemoveAt(1);
+            Book("the guest leaves: both pending picks come true", book, traces, new int?[] { null, 1 }, new[] { 0, 1 });
             return fails;
         }
 

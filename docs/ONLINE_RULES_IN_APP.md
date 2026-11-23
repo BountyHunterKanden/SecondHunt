@@ -6,8 +6,8 @@ chat and voice. The campaign, bots and local multiplayer never go online.
 
 PRIVACY
 -------
-Second Hunt is a free fan project. Your game files stay on your device and are never uploaded. Online play keeps only
-what it needs, on our server in the US (hosted by Akamai / Linode):
+Second Hunt is a free fan project. Your game files stay on your device and are never uploaded, unless you turn on
+CLOUD SAVE. Online play keeps only what it needs, on our server in the US (hosted by Akamai / Linode):
 
   - your online profile key (a random key your device made; no email, phone or real name is ever asked for)
   - your hunter name and tag, friend code and Hunter License numbers
@@ -16,6 +16,8 @@ what it needs, on our server in the US (hosted by Akamai / Linode):
   - if your profile is banned: a scrambled ID of the device(s) it used, so the ban holds after a reinstall
     (until the ban ends)
   - reports: for a chat report, the last few typed lines of that game (kept 30 days once handled, 90 days if not)
+  - if you turn on CLOUD SAVE (SETTINGS > APP > FILES): an encrypted copy of your settings and saves, kept until you
+    delete your online profile or stop playing for a year (turning it off can delete it too)
   - a nightly backup of the above (kept 14 days)
 
 Never kept: voice (never recorded), typed chat (only inside a report), IP addresses (only in memory while you're

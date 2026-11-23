@@ -782,7 +782,7 @@ namespace MphRecomp.Frontend
             }
             if (count == 0)
             {
-                (string first, string second) = !Live ? (_connecting ? "connecting..." : "can't reach the server.", _netError ?? "")
+                (string first, string second) = !Live ? (Trying ? TryingText : "can't reach the server.", _netError ?? "")
                     : _roster == null ? ("loading...", "") : s_frTab switch
                     {
                         0 => ("no friends yet.", "tap add to find hunters."),
@@ -839,7 +839,7 @@ namespace MphRecomp.Frontend
             }
             if (count == 0)
             {
-                string line = !Live ? (_connecting ? "connecting..." : "can't reach the server.") : s_adTab == 2 ? "nobody yet: play online first."
+                string line = !Live ? (Trying ? TryingText : "can't reach the server.") : s_adTab == 2 ? "nobody yet: play online first."
                     : _searching ? "searching..." : _found == null ? "" : "no hunter found with that name.";
                 TextS(line, Mx(960), My(560), 2, White, tag, SizeM);
             }

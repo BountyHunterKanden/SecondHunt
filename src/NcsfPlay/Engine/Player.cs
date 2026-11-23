@@ -67,6 +67,12 @@ public sealed partial class Player
             this.SlotStop(i);
     }
 
+    /// <summary>
+    /// ncsf-change: sequence ticks run since Begin (48 per quarter note), counted at the start of each RunTick, so
+    /// tick k of the song is the one RunTick processed once this passes k. Follows every tempo change.
+    /// </summary>
+    public long SequenceTicks { get; private set; }
+
     /// <summary>Spec 5.2. Does not run a tick.</summary>
     public void Begin(SSEQ sseq, short sequenceVolume)
     {
@@ -75,6 +81,7 @@ public sealed partial class Player
         this.tempo = 120;
         this.TempoRatio = 256;
         this.tempoAcc = 240;
+        this.SequenceTicks = 0;
         this.masterVolume = 127;
         this.enginePriority = 64;
         Array.Clear(this.slots);
@@ -140,6 +147,7 @@ public sealed partial class Player
             this.tempoAcc -= 240;
             n += 1;
         }
+        this.SequenceTicks += n;
         for (int pass = 0; pass < n; pass++)
             for (int i = 0; i < 16; i++)
             {

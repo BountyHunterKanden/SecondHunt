@@ -66,6 +66,7 @@ namespace MphRecomp.Frontend
         private Mode _mode;
         private string _text = "";
         private Action<bool>? _answered;
+        private Action<bool>? _pressedCb; // (ours) the moment YES / NO is pressed, before its flash: Ask's `pressed`
         private Action? _done;
         private Action? _cancel; // a busy box the player can stop (BusyCancel)
         private int _tick, _busyTicks;
@@ -151,6 +152,14 @@ namespace MphRecomp.Frontend
             _answered = answered;
         }
 
+        // ours: as Ask, and `pressed` runs the moment a button is pressed (true = YES), before its flash and `answered`
+        // (the pause's QUIT: the game starts handing over to the menus during the flash, owner 2026-11-21)
+        public void Ask(string text, Action<bool> answered, Action<bool> pressed)
+        {
+            Ask(text, answered);
+            _pressedCb = pressed;
+        }
+
         // ours: a question that holds a host-drawn body (Body) beside its text and YES / NO
         public void Ask(string text, Body body, Action<bool> answered)
         {
@@ -197,6 +206,7 @@ namespace MphRecomp.Frontend
             _noX = NoX;
             _body = null;
             _answered = null;
+            _pressedCb = null;
             _done = null;
             _cancel = null;
         }
@@ -374,6 +384,7 @@ namespace MphRecomp.Frontend
             _pressTick = 0;
             _focus = -1;
             Sound?.Invoke(button == 0 ? (int)SfxId.CREATE_CONFIRM_SCR : (int)SfxId.CREATE_CANCEL_SCR, button == 0 ? "popup YES" : "popup NO");
+            if (_mode == Mode.Ask) _pressedCb?.Invoke(button == 0);
         }
 
         // ---- drawing: triangles in menu space (Y up, the touch screen below y = 0), for the host to place ----

@@ -48,6 +48,9 @@ namespace MphRecomp.Multiplayer.Net
     // host's copy of the player missed hid the item and took the gain back): an item gone on the host with this device's
     // player the nearest to it is handed to the player's own pickup (PlayerEntity.NetConfirmedPickups) for its sound,
     // message and weapon, and gone by the next snapshot either way; the host's health and ammo already have it.
+    // 11-13 (Fruity Prime port, its spawner's PickerSlot): the host names who took each item (Snapshot.Taken), so the
+    // client no longer guesses by position (its predicted self against the puppets' older poses gave a contested pickup's
+    // sound to the wrong player, or none); an older host's snapshots don't name it and the guess stays for those.
     public sealed class ItemSync
     {
         public ItemSync()
@@ -60,11 +63,18 @@ namespace MphRecomp.Multiplayer.Net
         private ushort _next = 1;
         private int _lastSignature;
         private readonly Dictionary<FhItemEntity, ushort> _fhIds = new(ReferenceEqualityComparer.Instance);
+        private readonly List<(ushort Id, byte Seat, long Frame)> _taken = new();
+        private const long TakenFrames = 60; // (how long a pickup stays in the snapshots: a client misses some)
         // client
+        private readonly Dictionary<ushort, byte> _hostTaken = new();
+        private bool _hostNamesPickers;
         private readonly Dictionary<ushort, ItemInstanceEntity> _local = new();
         private readonly Dictionary<ushort, long> _takenHere = new();
         private const long TakenHereFrames = 90; // 1.5 s: the host has long seen the pickup by then
         private readonly List<ItemInstanceEntity> _confirming = new();
+        // (the host's items this device has heard appear, and whether it has had a list yet: the first, at a join, is silent)
+        private readonly HashSet<ushort> _heard = new();
+        private bool _listed;
         // (how near the local player must be to an item the host took to have taken it: the pickup reach plus the lag)
         private const float ConfirmReach = 3;
         // client, a First Hunt match (P5): its spawners' items, which run no timers of their own there (FhItemSpawnEntity)
@@ -110,11 +120,15 @@ namespace MphRecomp.Multiplayer.Net
             if (_ids.Count != seen.Count)
             {
                 var gone = new List<ItemInstanceEntity>();
-                foreach (ItemInstanceEntity item in _ids.Keys)
+                foreach ((ItemInstanceEntity item, ushort id) in _ids)
                 {
                     if (!seen.Contains(item))
                     {
                         gone.Add(item);
+                        if (item.PickedUpBy >= 0)
+                        {
+                            _taken.Add((id, (byte)item.PickedUpBy, (long)scene.FrameCount));
+                        }
                     }
                 }
                 foreach (ItemInstanceEntity item in gone)
@@ -126,6 +140,32 @@ namespace MphRecomp.Multiplayer.Net
             changed = signature != _lastSignature;
             _lastSignature = signature;
             return list.ToArray();
+        }
+
+        // host: the items taken in the last TakenFrames and by whom (Snapshot.Taken)
+        public (ushort Id, byte Seat)[] TakenList(long frame)
+        {
+            _taken.RemoveAll(t => frame - t.Frame >= TakenFrames || t.Frame > frame);
+            var list = new (ushort, byte)[_taken.Count];
+            for (int i = 0; i < list.Length; i++)
+            {
+                list[i] = (_taken[i].Id, _taken[i].Seat);
+            }
+            return list;
+        }
+
+        // client, every snapshot before Apply: the host's pickers (null: an older host, which doesn't name them)
+        public void NoteTaken((ushort Id, byte Seat)[]? taken)
+        {
+            _hostNamesPickers = taken != null;
+            if (taken == null)
+            {
+                return;
+            }
+            foreach ((ushort id, byte seat) in taken)
+            {
+                _hostTaken[id] = seat;
+            }
         }
 
         // a First Hunt match: each spawner's item out (one at most)
@@ -268,8 +308,13 @@ namespace MphRecomp.Multiplayer.Net
                 }
                 else if (!hostIds.Contains(id))
                 {
-                    // gone on the host: someone took it, or it expired; this device's player, if it was the one there
-                    if (TakenByLocal(item.Position))
+                    // gone on the host: someone took it, or it expired; this device's player's, if the host says so (an older
+                    // host: if it was the one there; 11-13: a weapon by whether the host's snapshot just gave it to this
+                    // player, PlayerNetConfirm.cs)
+                    bool mine = _hostNamesPickers
+                        ? _hostTaken.TryGetValue(id, out byte seat) && seat == PlayerEntity.Main.SlotIndex
+                        : PlayerEntity.Main.NetWeaponPickupMine(item.ItemType) ?? TakenByLocal(item.Position);
+                    if (mine)
                     {
                         PlayerEntity.NetConfirmedPickups.Add(item);
                         _confirming.Add(item);
@@ -285,6 +330,7 @@ namespace MphRecomp.Multiplayer.Net
             {
                 _local.Remove(id);
             }
+            _hostTaken.Clear(); // (the next snapshot names them again while they're recent)
             foreach (NetItem n in items)
             {
                 if (_local.ContainsKey(n.Id) || (n.Type & NetItem.FhFlag) != 0)
@@ -311,9 +357,21 @@ namespace MphRecomp.Multiplayer.Net
                     item.Owner = spawner;
                     item.ParentId = spawner.Data.ParentId;
                     spawner.Item = item;
+                    // recomp (owner 11-13: "is the Omega pickup supposed to make a noise when it spawns"): a spawner's
+                    // new item chimes, as its spawn on the host does (ItemSpawnEntity.Process: a client spawns none)
+                    if (_listed && _heard.Add(n.Id))
+                    {
+                        spawner.NetSpawnSfx();
+                    }
                 }
                 _local[n.Id] = item;
             }
+            _heard.IntersectWith(hostIds);
+            foreach (ushort id in hostIds)
+            {
+                if (!_listed) _heard.Add(id); // (lying there at the join: no chime)
+            }
+            _listed = true;
             if (_takenHere.Count > 0)
             {
                 var stale = new List<ushort>();
@@ -329,6 +387,7 @@ namespace MphRecomp.Multiplayer.Net
                     _takenHere.Remove(id);
                 }
             }
+            PlayerEntity.Main.NetUnseenWeaponPickups(); // (11-13: one the host spawned and gave in the same step)
         }
 
         // the local player is alive, in reach and the nearest active player to it (the host's poses: the puppets')
@@ -369,6 +428,45 @@ namespace MphRecomp.Multiplayer.Net
         // client: the item it shows for the host's id, if any
         public ItemInstanceEntity? LocalItem(ushort id) => _local.TryGetValue(id, out ItemInstanceEntity? item) ? item : null;
 
+        // client: the host's id for an item it shows, 0 = none (a pickup claim names it: Net/PickupClaims.cs)
+        public ushort LocalId(ItemInstanceEntity item)
+        {
+            foreach ((ushort id, ItemInstanceEntity local) in _local)
+            {
+                if (ReferenceEquals(local, item))
+                {
+                    return id;
+                }
+            }
+            return 0;
+        }
+
+        // host: the item it numbered `id`, while it still lists it (Net/PickupClaims.cs)
+        public ItemInstanceEntity? HostItem(ushort id)
+        {
+            foreach ((ItemInstanceEntity item, ushort itemId) in _ids)
+            {
+                if (itemId == id)
+                {
+                    return item;
+                }
+            }
+            return null;
+        }
+
+        // host: the seat that took item `id` in the last TakenFrames, -1 = none known
+        public int HostTakenBy(ushort id)
+        {
+            foreach ((ushort takenId, byte seat, long _) in _taken)
+            {
+                if (takenId == id)
+                {
+                    return seat;
+                }
+            }
+            return -1;
+        }
+
         // a client promoted to host: the items it shows keep the old host's numbers (the other devices know them by those),
         // new ones count on from the highest
         public void TakeOver()
@@ -396,6 +494,10 @@ namespace MphRecomp.Multiplayer.Net
             _next = (ushort)(highest + 1 == 65536 ? 1 : highest + 1);
             _local.Clear();
             _takenHere.Clear();
+            _heard.Clear();
+            _listed = false;
+            _hostTaken.Clear();
+            _taken.Clear();
             _lastSignature = 0;
         }
     }

@@ -72,9 +72,10 @@ namespace MphRead.Entities
         }
         private HudObjectInstance _cloakInst = null!;
         private HudObjectInstance _doubleDamageInst = null!;
-        // recomp: 6 -> 7 (slot 6 = the Pirate Blaster, only shown with WeaponSlotCount 7: PlayerPirateBlaster.cs)
-        private readonly HudObjectInstance[] _weaponSelectInsts = new HudObjectInstance[7];
-        private readonly HudObjectInstance[] _selectBoxInsts = new HudObjectInstance[7];
+        // recomp: 6 -> 8 (slot 6 = the Pirate Blaster, 7 = the Hyper Beam, only shown with WeaponSlotCount 7/8:
+        // PlayerPirateBlaster.cs)
+        private readonly HudObjectInstance[] _weaponSelectInsts = new HudObjectInstance[8];
+        private readonly HudObjectInstance[] _selectBoxInsts = new HudObjectInstance[8];
         private HudObjectInstance _textInst = null!;
 
         private HudMeter _healthbarMainMeter = null!;
@@ -201,12 +202,15 @@ namespace MphRead.Entities
                 new Vector2(77 / 256f, 32 / 192f)
             };
             HudObject iconInst = HudInfo.GetHudObject(_hudObjects.SelectIcon);
-            for (int i = 0; i < 7; i++) // recomp: + slot 6, the Pirate Blaster (its own icon, PlayerPirateBlaster.cs)
+            // recomp: + slot 6, the Pirate Blaster, and 7, the Hyper Beam (their own icons, PlayerPirateBlaster.cs,
+            // PlayerHyperBeamIcons.cs)
+            for (int i = 0; i < 8; i++)
             {
                 var weaponInst = new HudObjectInstance(weaponSelectObj.Width, weaponSelectObj.Height);
                 int frame = PirateBlaster.BaseIndex(WeaponSlotBeam(i)); // vanilla: i == 0 ? 1 : i + 2
-                weaponInst.SetCharacterData(i == 6 ? PirateBlasterSelectIcon(weaponSelectObj) : weaponSelectObj.CharacterData,
-                    i == 6 ? 0 : frame, _scene);
+                IReadOnlyList<byte> selectData = i == 6 ? PirateBlasterSelectIcon(weaponSelectObj)
+                    : i == 7 ? HyperBeamSelectIcon(weaponSelectObj) : weaponSelectObj.CharacterData;
+                weaponInst.SetCharacterData(selectData, i >= 6 ? 0 : frame, _scene);
                 weaponInst.SetPaletteData(weaponSelectObj.PaletteData, _scene);
                 weaponInst.Alpha = 0.722f;
                 var boxInst = new HudObjectInstance(selectBoxObj.Width, selectBoxObj.Height);
@@ -761,13 +765,15 @@ namespace MphRead.Entities
             float ratioY = _scene.Size.Y / 192f;
             float distX = 224 * ratioX - x; // todo: invert for left-handed mode
             float distY = y - 38 * ratioY;
-            if (WeaponSlotCount == 7)
+            int slots = WeaponSlotCount;
+            if (slots >= 7)
             {
-                // recomp: seven even sectors over the same quarter (Volt Driver straight down ... Pirate Blaster to the left)
+                // recomp: seven (eight) even sectors over the same quarter (Volt Driver straight down ... Pirate Blaster,
+                // then the Hyper Beam, to the left)
                 if (distX > 0 && distY > 0 && distX * distX + distY * distY > 20 * ratioY * 20 * ratioY)
                 {
                     float degrees = DetMathF.Atan2(distX / ratioX, distY / ratioY) * 180 / MathF.PI;
-                    int slot = Math.Clamp((int)(degrees * 7 / 90), 0, 6);
+                    int slot = Math.Clamp((int)(degrees * slots / 90), 0, slots - 1);
                     BeamType beam = WeaponSlotBeam(slot);
                     if (_availableWeapons[beam])
                     {
@@ -1265,9 +1271,11 @@ namespace MphRead.Entities
             {
                 DrawWeaponRing(); // recomp: the same six slots on a full ring in the middle (PlayerWeaponRing.cs)
             }
-            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && WeaponSlotCount == 7)
+            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && WeaponSlotCount >= 7)
             {
-                DrawWeaponArc7(); // recomp: the corner arc with the Pirate Blaster's seventh slot (PlayerWeaponRing.cs)
+                // recomp: the corner arc with the Pirate Blaster's seventh slot (and the Hyper Beam's eighth:
+                // PlayerWeaponRing.cs)
+                DrawWeaponArc7();
             }
             else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen))
             {
@@ -1288,12 +1296,14 @@ namespace MphRead.Entities
                 // (which causes one frame of flicker when the escape starts)
                 if (GameState.SinglePlayer && !GameState.DialogPause)
                 {
+                    _scene.HostHudTag("escape"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                     DrawEscapeTime();
                 }
                 // recomp (2026-11-06): the turret's seat keeps the health box of whoever its shots hit (owner: "the vanilla
                 // damage indicator from when you shoot an enemy and see their picture and health")
                 if (Health > 0 && HostSeated && !GameState.DialogPause && !GameState.SinglePlayer)
                 {
+                    _scene.HostHudTag("opponent"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                     DrawOpponent();
                 }
                 // recomp: the turret's seat has its own HUD in place of the combat HUD (CampaignRenderer.TurretHud.cs)
@@ -1303,23 +1313,28 @@ namespace MphRead.Entities
                     {
                         if (IsAltForm || IsMorphing || IsUnmorphing)
                         {
+                            _scene.HostHudTag("bombs"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                             DrawBoostBombs();
                             if (HostScoutDrone && _targetCircleInst.Enabled) // recomp: the drone's reticle (PlayerScoutDrone.cs)
                             {
                                 _targetCircleInst.Alpha = Features.ReticleOpacity;
+                                _scene.HostHudTag("reticle"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                                 DrawReticle();
                             }
                             if (HostScoutDrone)
                             {
+                                _scene.HostHudTag("drone"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                                 DrawDroneDials(); // recomp: the drone's attack waits (PlayerDroneHud.cs)
                             }
                         }
                         else if (!ScanVisor)
                         {
+                            _scene.HostHudTag("ammo"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                             DrawAmmoBar();
                             _weaponIconInst.PositionX = (_hudObjects.WeaponIconPosX + _objShiftX) / 256f;
                             _weaponIconInst.PositionY = (_hudObjects.WeaponIconPosY + _objShiftY) / 192f;
                             _weaponIconInst.Alpha = Features.HudOpacity;
+                            _scene.HostHudTag("weapon"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                             _scene.DrawHudObject(_weaponIconInst);
                             // recomp: faint until ZOOM STEP's target zoom is ready (PlayerZoomReady.cs)
                             _targetCircleInst.Alpha = Features.ReticleOpacity * ZoomReadyReticleAlpha();
@@ -1328,6 +1343,7 @@ namespace MphRead.Entities
                                 // recomp: which HUD item is the reticle, and what it points at, for a host that draws a
                                 // turned view between steps (the app's view following the aim, CampaignLookAhead.cs)
                                 int reticleItem = _scene.HudItemCount;
+                                _scene.HostHudTag("reticle"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                                 DrawReticle();
                                 if (_scene.HudItemCount > reticleItem)
                                 {
@@ -1337,8 +1353,11 @@ namespace MphRead.Entities
                                 }
                             }
                         }
+                        _scene.HostHudTag("match"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                         DrawModeHud();
+                        _scene.HostHudTag("doubledamage"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                         DrawDoubleDamageHud();
+                        _scene.HostHudTag("cloak"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                         DrawCloakHud();
                         if (HostPrimeHud)
                         {
@@ -1350,11 +1369,15 @@ namespace MphRead.Entities
                     if (!GameState.DialogPause || DialogType != DialogType.Event
                         && (Hunter == Hunter.Samus || Hunter == Hunter.Guardian))
                     {
+                        _scene.HostHudTag("energy"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                         DrawHealthbars();
                     }
                 }
+                _scene.HostHudTag(null); // recomp: HUD editor element (HUD/HostHudElements.cs)
                 DrawIntroBannerInPlay(); // recomp: Echoes arenas' middle line with no intro (PlayerIntroBanner.cs)
+                _scene.HostHudTag("messages"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                 DrawQueuedHudMessages();
+                _scene.HostHudTag(null); // recomp: HUD editor element (HUD/HostHudElements.cs)
                 DrawDialogs();
             }
         }
@@ -2244,11 +2267,15 @@ namespace MphRead.Entities
             _primeHunterInst.ProcessAnimation(_scene);
         }
 
+        // recomp: the mode score below reads this player's own slot (SlotIndex), was MainPlayerIndex. It runs on HudOwner, which
+        // is Main in play (the same slot); a replay watching another seat, or any served match's replay (Main = seat 0,
+        // PlayerServedHost.cs), showed seat 0's points / lives / prime time on every seat (bug report 2026-11-22)
         private void DrawModeHud()
         {
             GameMode mode = GameState.Mode;
             if (mode == GameMode.SinglePlayer)
             {
+                _scene.HostHudTag(ScanVisor ? null : "target"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                 DrawHudAdventure();
             }
             else
@@ -2281,6 +2308,7 @@ namespace MphRead.Entities
                 {
                     DrawHudPrimeHunter();
                 }
+                _scene.HostHudTag("opponent"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                 DrawOpponent();
             }
         }
@@ -2350,8 +2378,12 @@ namespace MphRead.Entities
             return " ";
         }
 
+        // recomp (Tools -replayhudseats): each mode score as drawn (the drawing player's slot, the label's message id, the text)
+        public static Action<int, int, string>? HostModeScoreNote;
+
         private void DrawModeScore(int messageId, string text)
         {
+            HostModeScoreNote?.Invoke(SlotIndex, messageId, text);
             float posX = _hudObjects.ScorePosX + _objShiftX;
             float posY = _hudObjects.ScorePosY + _objShiftY;
             _textSpacingY = 8;
@@ -2365,12 +2397,12 @@ namespace MphRead.Entities
 
         private void DrawHudBattle()
         {
-            if (!HostHideScore) DrawModeScore(212, FormatModeScore(MainPlayerIndex)); // points (recomp: HostHideScore)
+            if (!HostHideScore) DrawModeScore(212, FormatModeScore(SlotIndex)); // points (recomp: HostHideScore)
         }
 
         private void DrawHudSurvival()
         {
-            DrawModeScore(213, FormatModeScore(MainPlayerIndex)); // lives left
+            DrawModeScore(213, FormatModeScore(SlotIndex)); // lives left
         }
 
         private void DrawOctolithInst(int frame)
@@ -2404,24 +2436,24 @@ namespace MphRead.Entities
 
         private void DrawHudBounty()
         {
-            DrawModeScore(215, FormatModeScore(MainPlayerIndex)); // octoliths
+            DrawModeScore(215, FormatModeScore(SlotIndex)); // octoliths
             DrawOctolithInst(frame: 0);
         }
 
         private void DrawHudCapture()
         {
-            DrawModeScore(216, FormatModeScore(MainPlayerIndex)); // octoliths
+            DrawModeScore(216, FormatModeScore(SlotIndex)); // octoliths
             DrawOctolithInst(frame: TeamIndex == 0 ? 4 : 3);
         }
 
         private void DrawHudDefender()
         {
-            DrawModeScore(217, FormatModeScore(MainPlayerIndex)); // ring time
+            DrawModeScore(217, FormatModeScore(SlotIndex)); // ring time
         }
 
         private void DrawHudNodes()
         {
-            DrawModeScore(218, FormatModeScore(MainPlayerIndex)); // points
+            DrawModeScore(218, FormatModeScore(SlotIndex)); // points
             DrawNodesBonuses();
             DrawNodesIcons();
             if (_nodesHudState == 1 && !IsHudMessageQueued(mask: 16))
@@ -2565,7 +2597,7 @@ namespace MphRead.Entities
                     _textSpacingY = 0;
                 }
             }
-            DrawModeScore(214, FormatModeScore(MainPlayerIndex)); // prime time
+            DrawModeScore(214, FormatModeScore(SlotIndex)); // prime time
         }
 
         private int _doubleDamageSpeed = 0;

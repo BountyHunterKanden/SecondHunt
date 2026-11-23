@@ -3,9 +3,9 @@ namespace MphRead.Entities
     // recomp: bots and the Hyper Beam (owner 2026-10-12, docs/DARK_SAMUS_HYPER.md H2; Metadata/HyperBeam.cs). The beam has no
     // touch button, so a bot equips it directly (like the Pirate Blaster and the Paralyzer). Index 12 = its BeamType in the
     // AI's weapon choice, affinity seek and switch candidates (PlayerAi.cs, recomp lines).
-    // - Anyone else: presses (a bolt each), or a full charge and release for the 40-damage shot when the AI chose to charge.
-    // - Dark Samus (her affinity row): holds fire through the charge into Hyper Mode rapid fire while she has a player
-    //   target, and lets go when she loses it (PlayerHyperBeam.UpdateHyperBeamRapid fires; PlayerInput ends it on low UA).
+    // - Anyone: presses (a bolt each), or a full charge and release into the stream when the AI chose to charge.
+    // - Dark Samus (her affinity row): charges whenever she has a player target and releases at full charge, or when she
+    //   loses the target (a shorter stream). Nobody presses while a stream runs (PlayerHyperBeam.UpdateHyperBeamStream).
     public partial class PlayerEntity
     {
         public partial class PlayerAiData
@@ -22,16 +22,21 @@ namespace MphRead.Entities
                 {
                     _player.TryEquipWeapon(BeamType.HyperBeam);
                 }
+                else if (_player.HyperBeamStreaming)
+                {
+                    SetRandomDelay(); // the stream fires itself
+                }
                 else if (weapon == HyperBeam.WeaponMPAffinity && CanChargeWeapon()
                     && (_targetPlayer != null && Flags2.TestFlag(AiFlags2.TargetPlayer) || equip.ChargeLevel > 0))
                 {
-                    if (_targetPlayer == null || !Flags2.TestFlag(AiFlags2.TargetPlayer))
+                    if (_targetPlayer == null || !Flags2.TestFlag(AiFlags2.TargetPlayer)
+                        || equip.ChargeLevel >= weapon.FullCharge * 2) // todo: FPS stuff
                     {
-                        SetRandomDelay(); // target lost: let go (no charged shot on her row)
+                        SetRandomDelay(); // full, or the target's lost: release into the stream
                     }
                     else if (_buttons.R.FramesDown > 0 || _buttons.R.FramesUp > _shotDelay)
                     {
-                        _buttons.R.IsDown = true; // charge, then rapid fire for as long as it's held
+                        _buttons.R.IsDown = true; // charge
                     }
                 }
                 else if (Flags4.TestFlag(AiFlags4.Bit1) && CanChargeWeapon())
@@ -39,7 +44,7 @@ namespace MphRead.Entities
                     if (!_player.Flags2.TestFlag(PlayerFlags2.Shooting) && _buttons.R.FramesUp <= _shotDelay
                         || equip.ChargeLevel >= weapon.FullCharge * 2) // todo: FPS stuff
                     {
-                        SetRandomDelay(); // release: the charged shot
+                        SetRandomDelay(); // release: the stream
                     }
                     else
                     {

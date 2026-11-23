@@ -13,8 +13,9 @@ namespace MphRecomp.App;
 // offscreen target (1.38x the screen, so the magnified centre keeps 1:1 pixels; mipmapped, so the squeezed edges don't
 // shimmer) and warps it onto the screen before the HUD; Scene.HostScreenWarp moves the reticle, locator icons and scan
 // brackets with the picture. The Prime gun keeps its vanilla size in every mode (GunProjection: its own projection, as
-// modern games draw viewmodels); in Panini it is drawn after the warp, unwarped, on top (MPH's own gun, the "original"
-// suit, is part of the scene and still follows the mode). The in-ship cockpit always uses WIDE. Bot vision is separate
+// modern games draw viewmodels); in Panini it is drawn after the warp, unwarped, on top. MPH's own gun (the "original"
+// suit) is part of the scene but takes the same projection (RenderItem.HostViewmodel, DrawItem), so the FIELD OF VIEW
+// slider widens only the room; in Panini it is still warped with it. The in-ship cockpit always uses WIDE. Bot vision is separate
 // (Scene.HostAiAspect, fixed 16:9).
 // CampaignActivity.cs calls: AttachView (OnCreate), ViewGlReset (OnSurfaceCreated),
 // BeginViewWarp / EndViewWarp (Render, around the 3D passes), GunWaitsForWarp / GunProjection (DrawPrimeGun),
@@ -43,6 +44,7 @@ internal sealed partial class CampaignRenderer
         s_viewMode = ViewFraming.Parse(args.Get("view")) is ViewMode mode
             ? Array.IndexOf(ViewFraming.Modes, mode) : Array.IndexOf(ViewFraming.Modes, ViewMode.Wide);
         ResetViewHooks();
+        ConfigureRenderScale(args); // dev extra renderscale <pct> (CampaignRenderScale.cs)
         Log.Info("MPHView", "view: " + ViewFraming.Label(CurrentViewMode));
     }
 
@@ -63,9 +65,10 @@ internal sealed partial class CampaignRenderer
         }
     }
 
-    // UI thread, the touch overlay: MISSILE reads POWER BEAM while missiles are selected (R1 toggles the two;
-    // BuildInput). A read of the game thread's weapon: a frame stale at worst.
-    public bool TouchMissileSelected => _host?.Player.CurrentWeapon == MphRead.BeamType.Missile;
+    // UI thread, the touch overlay: MISSILE reads POWER BEAM when R1 would take the Power Beam (owner 2026-11-13): from
+    // missiles, and from a pickup beam picked off the Power Beam or with no missiles left (BuildInput,
+    // .MissileToggle.cs). A read of the game thread's weapon: a frame stale at worst.
+    public bool TouchMissileTogglesToPower => _host?.Player is { } p && MissileToggleWeapon(p) == MphRead.BeamType.PowerBeam;
     // a zooming weapon (the Imperialist) in hand: the touch WEAPON button reads WEAPON/ZOOM (owner 2026-10-26)
     public bool TouchCanZoom => _host?.Player is { IsAltForm: false } p && p.EquipInfo.Weapon is { } w
         && (w.Flags & MphRead.WeaponFlags.CanZoom) != 0;
@@ -90,6 +93,8 @@ internal sealed partial class CampaignRenderer
         _warpProgram = _warpVao = _warpFbo = _warpTex = _warpDepth = 0;
         _warpW = _warpH = 0;
         _warpBroken = false;
+        RenderScaleGlReset(); // RENDER SCALE's target (CampaignRenderScale.cs)
+        DisruptionGlReset(); // the disruption wobble's copy (CampaignRenderer.Disruption.cs)
     }
 
     // Render, after the frame's clear, before the 3D passes. Applies the mode (the projection and HUD hooks take effect in
@@ -109,12 +114,13 @@ internal sealed partial class CampaignRenderer
         }
         if (d <= 0 || _width <= 0 || _height <= 0)
         {
-            return false;
+            return BeginRenderScale(scene); // RENDER SCALE's own target (CampaignRenderScale.cs); false at 100%: as before
         }
         // the warp magnifies the centre by 1 / CropScale at MPH's normal 78-degree view (every hunter's NormalFov is 39);
         // render at that scale so the centre keeps 1:1 pixels (zooming in magnifies less)
         float aspect = _width / (float)_height;
         float scale = 1 / ViewFraming.CropScale(MathF.Tan(39 * MathF.PI / 180) * Scene.HostFovScale * aspect, d); // FIELD OF VIEW
+        scale = RenderScaleOver(scale); // RENDER SCALE (CampaignRenderScale.cs): unchanged at 100%
         int w = (int)MathF.Round(_width * scale), h = (int)MathF.Round(_height * scale);
         if (_warpProgram == 0)
         {
@@ -190,6 +196,12 @@ internal sealed partial class CampaignRenderer
     // Render, after the 3D passes and before the HUD: the offscreen picture through the Panini warp onto the screen
     void EndViewWarp(Scene scene)
     {
+        if (RenderScaleActive)
+        {
+            EndRenderScale(); // RENDER SCALE's picture stretched onto the screen (CampaignRenderScale.cs)
+            return;
+        }
+        _rsLine = 1;
         GLES30.GlBindFramebuffer(GL_FRAMEBUFFER, 0);
         GLES30.GlViewport(0, 0, _width, _height);
         var warp = PaniniWarp.FromProjection(scene.PerspectiveMatrix, _warpD);
@@ -235,6 +247,22 @@ internal sealed partial class CampaignRenderer
         }
         float fov = _host!.Player.CameraInfo.Fov > 0 ? _host.Player.CameraInfo.Fov : ViewFraming.MphFovY;
         return ViewFraming.VanillaProjection(scene.PerspectiveMatrix, fov, _width / (float)_height);
+    }
+
+    // DrawItem: MPH's own first-person gun, its smoke and the effects at its muzzle (RenderItem.HostViewmodel, PlayerDraw)
+    // take GunProjection too, so at any FIELD OF VIEW the gun is framed as at the default 110 (owner 11-13: "The arm cannon
+    // view should always look like default regardless of fov"; 130 showed the back of the gun). Only x/y change, so its
+    // depth against the room is as before
+    bool _vmProjOn;
+    Matrix4 _vmProj;
+
+    void BeginViewmodelProjection(Scene scene)
+    {
+        _vmProjOn = false;
+        if (_host == null) return;
+        _vmProj = GunProjection(scene);
+        // (not in the fixes-only release: the gun follows the view's FOV there, as before, until the owner has checked this)
+        _vmProjOn = _vmProj != scene.PerspectiveMatrix && !MphRecomp.Config.RecompSettings.PublicBuild;
     }
 
     const string WarpVertexShader = @"#version 300 es

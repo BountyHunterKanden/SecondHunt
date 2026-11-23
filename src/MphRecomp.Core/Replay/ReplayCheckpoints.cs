@@ -107,6 +107,7 @@ namespace MphRecomp.Replay
             // covered too; arrays are left (fixed tables), and so are the ones excluded from the walk (cleared by Start)
             MphRead.Entities.PlayerEntity.NetShotLogOn = false; // (set only by a network match's ShotCheck.Start)
             MphRead.Entities.PlayerEntity.ResetNetShots();
+            MphRead.Entities.PlayerEntity.ResetNetShotEvents(); // (and the shot events' counters: Fruity P2)
             SimSnapshot.ClearStaticCollections(f => f.DeclaringType?.Namespace == "MphRecomp.Multiplayer.Net"
                 || (f.Name.StartsWith('<') ? f.Name[1..] : f.Name).StartsWith("Net", StringComparison.Ordinal));
             // (PlacedPickups._placed and any other static list: their spare room; any other empty static collection: a new
@@ -245,6 +246,8 @@ namespace MphRecomp.Replay
                 // of them, so the viewer's walk differed and every prepared keyframe was refused; not match state
                 (typeof(MphRead.Entities.BeamProjectileEntity), "HostSpawned"), (typeof(MphRead.Entities.RoomEntity), "HostTransitionTrace"),
                 (typeof(Read), "HostExtraRecolors"), (typeof(Scene), "HostEffectPoolWarning"), (typeof(Scene), "HostEntityInitTrace"),
+                // (11-21, walk 56) the kept-loads cache's copy of HostExtraRecolors (Read.KeepForNextScene)
+                (typeof(Read), "_keptRecolors"),
                 (typeof(Music), "RoomHost"), (typeof(MusicPlayer), "Host"),
                 // the music's audio output: the viewer opens a sound device when music plays, the prepare never does
                 (typeof(MusicPlayer), "_audioEngine"), (typeof(MusicPlayer), "_playbackDevice"), (typeof(MusicPlayer), "_provider"),
@@ -300,9 +303,17 @@ namespace MphRecomp.Replay
                 // (11-09) DEATH's FOLLOW CAM: the setting and the view following the body (view only)
                 (typeof(MphRead.Entities.PlayerEntity), "HostDeathFollow"), (typeof(MphRead.Entities.PlayerEntity), "_deathCam"),
                 (typeof(MphRead.Entities.PlayerEntity), "HostDeathFollowSeat"),
+                // (11-22) a replay's dead remote seat's steady view (PlayerDeathCam.cs RemoteDeadStep; view only)
+                (typeof(MphRead.Entities.PlayerEntity), "_remoteDeadCam"),
                 // (11-09) the ragdoll's launch the host sends its guests (online send only; the ragdoll itself is walked)
                 (typeof(MphRead.Entities.PlayerEntity), "NetThrowSet"), (typeof(MphRead.Entities.PlayerEntity), "NetThrowSpeed"),
                 (typeof(MphRead.Entities.PlayerEntity), "NetThrowPush"),
+                // (11-15) and the pose it built from, the host's undrawn body run for its rest and a guest's copy of that
+                // rest (online only: PlayerRagdollNet.cs)
+                (typeof(MphRead.Entities.PlayerEntity), "NetDeathPoseSet"), (typeof(MphRead.Entities.PlayerEntity), "_netDeathPoseNow"),
+                (typeof(MphRead.Entities.PlayerEntity), "_netDeathPose"), (typeof(MphRead.Entities.PlayerEntity), "NetRagdollRest"),
+                (typeof(MphRead.Entities.PlayerEntity), "_netRagdoll"), (typeof(MphRead.Entities.PlayerEntity), "_netRest"),
+                (typeof(MphRead.Entities.PlayerEntity), "_netRestFor"),
                 // (10-27) texture binding ids handed out by this process's renderer: the prepare's ids are other textures
                 // in the viewer (the HUD drew and repainted into another sprite's texture after a seek); the pixels are
                 // painted again from the restored frame (PlayerEntity.HostAfterRestore)
@@ -335,16 +346,29 @@ namespace MphRecomp.Replay
                 // (11-11, hotfix 0.5.1) the host body's draw caches, filled by whatever this process drew (a headless prepare
                 // draws nothing): the fitted ice shell per body and the float pose's scratch, written before every read; draw
                 // only, never read by the sim
-                (typeof(MphRead.Entities.PlayerEntity), "_fittedIceModels"), (typeof(MphRead.Entities.PlayerEntity), "_floatClip")
+                (typeof(MphRead.Entities.PlayerEntity), "_fittedIceModels"), (typeof(MphRead.Entities.PlayerEntity), "_floatClip"),
+                // (11-21, walk 56) the host's rumble motor (Sdl3Pads / AndroidRumble) with its timer, and the play log's and
+                // mods' event hooks with the switch they keep on: the viewer sets them, a headless prepare never does, so
+                // every prepared keyframe was refused ("started differently") and a restored one would have dropped the
+                // motor and the log; device output, never match state
+                (typeof(MphRead.Rumble), "Output"), (typeof(MphRead.Rumble), "Enabled"), (typeof(MphRead.Rumble), "_clock"),
+                (typeof(MphRead.Rumble), "_strength"), (typeof(MphRead.Rumble), "_endMs"), (typeof(MphRead.Rumble), "_paused"),
+                (typeof(MphRead.GameEvents), "Any"), (typeof(MphRead.GameEvents), "Tick"), (typeof(MphRead.GameEvents), "Listener"),
+                (typeof(MphRead.GameEvents), "LogListener"), (typeof(MphRead.GameEvents), "Messages")
             };
-            // every static Host* hook (Action / Func): the app wires them, a headless prepare doesn't, and they hold app
-            // objects, never match state -- named by rule so the next hook added doesn't break the walk again
+            // every static hook or event (Action / Func / event): the app wires them, a headless prepare doesn't, and they
+            // hold app objects, never match state -- by rule, whatever the name, so the next hook added doesn't break the walk
+            // again ((11-21) CampaignSaves.Saved, CLOUD SAVE's 11-17 hook, refused every keyframe on the Odin). Kept: the
+            // two the match sets itself (the mode's tick, First Hunt's kill count)
             foreach (Type t in SafeTypes(typeof(MphRead.Entities.PlayerEntity).Assembly).Concat(SafeTypes(typeof(ReplayCheckpoints).Assembly)))
             {
                 foreach (FieldInfo f in t.GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
+                    if (!typeof(Delegate).IsAssignableFrom(f.FieldType)) continue;
                     string n = f.Name.StartsWith('<') ? f.Name[1..] : f.Name;
-                    if (n.StartsWith("Host", StringComparison.Ordinal) && typeof(Delegate).IsAssignableFrom(f.FieldType)) yield return f;
+                    if ((t == typeof(MphRead.GameState) && n.StartsWith("ModeState>", StringComparison.Ordinal))
+                        || (t == typeof(MphRead.Entities.FirstHunt.FhEnemyEntity) && n.StartsWith("Killed>", StringComparison.Ordinal))) continue;
+                    yield return f;
                 }
             }
             foreach ((Type type, string name) in fields)

@@ -150,7 +150,7 @@ internal sealed partial class CampaignRenderer
             return;
         }
         _audioPaused = paused;
-        _sfx?.SetPaused(paused);
+        _sfx?.SetPaused(paused, keepOutput: true);
     }
 
     // Activity.OnPause: always pauses, regardless of the in-game pause state (the app is backgrounding)

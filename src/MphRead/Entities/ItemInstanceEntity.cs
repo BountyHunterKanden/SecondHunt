@@ -34,6 +34,22 @@ namespace MphRead.Entities
         public int DespawnTimer { get; set; } = -1;
         public ItemSpawnEntity? Owner { get; set; }
         public NodeData3? ClosestNode { get; set; } = null;
+        // recomp (network play, 11-13): the seat that picked it up (-1: none yet); a network host names it to the clients
+        public int PickedUpBy { get; set; } = -1;
+        // recomp (a served match's device, Fruity P3 pickups: PlayerEntity.NetPredictPickup): the steps it stays hidden and quiet
+        // for, its own player's touch claimed and its sound played; the host's confirmation takes it, and one it refused shows
+        // again when this runs out (0: shown)
+        public int NetPredictedTaken { get; private set; }
+
+        public void NetPredictTake(int steps)
+        {
+            NetPredictedTaken = steps;
+            int sfx = (int)ItemType < _sfxIds.Count ? _sfxIds[(int)ItemType] : -1;
+            if (sfx != -1)
+            {
+                _soundSource.StopSfx(sfx);
+            }
+        }
 
         // recomp: the model an item draws with, by the host (dev pictures: each Pirate Blaster pickup in a lineup in its own
         // look, MphRecomp.Core BlasterPickup.cs); null = MPH's item table
@@ -50,7 +66,7 @@ namespace MphRead.Entities
         {
             Position = data.Position;
             ItemType = data.ItemType;
-            _scanId = _scanIds[(int)data.ItemType];
+            _scanId = (int)data.ItemType < _scanIds.Count ? _scanIds[(int)data.ItemType] : 0; // recomp: HyperBeam/Paralyzer (24, 25) have no scan entry
             if (GameState.Multiplayer && GameState.AffinityWeapons && (ItemType == ItemType.VoltDriver
                 || ItemType == ItemType.Battlehammer || ItemType == ItemType.Imperialist
                 || ItemType == ItemType.Judicator || ItemType == ItemType.Magmaul || ItemType == ItemType.ShockCoil))
@@ -139,7 +155,11 @@ namespace MphRead.Entities
             }
             // recomp: the Pirate Blaster (item 23) is past the table -- no hum, as the other weapons
             int sfx = (int)ItemType < _sfxIds.Count ? _sfxIds[(int)ItemType] : -1;
-            if (sfx != -1)
+            if (NetPredictedTaken > 0)
+            {
+                NetPredictedTaken--; // (recomp: hidden, no hum)
+            }
+            else if (sfx != -1)
             {
                 _soundSource.PlaySfx(sfx, loop: true);
             }
@@ -183,7 +203,7 @@ namespace MphRead.Entities
 
         public override void GetDrawInfo()
         {
-            if (IsVisible(NodeRef))
+            if (NetPredictedTaken == 0 && IsVisible(NodeRef)) // recomp: NetPredictedTaken
             {
                 base.GetDrawInfo();
             }

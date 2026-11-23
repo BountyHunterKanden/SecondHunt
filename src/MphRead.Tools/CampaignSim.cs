@@ -759,6 +759,8 @@ namespace MphRead
                     host.Step(input);
                     input.DialogButton = HostDialogButton.None;
                     sawTransition |= GameState.TransitionState != TransitionState.None;
+                    // room-load frames don't eat the walk budget (else the case ended mid-load; CampaignRoomLoadWait.cs)
+                    WaitRoomLoad(host, input.Move);
                     everOpen |= door.Flags.TestFlag(DoorFlags.ShotOpen) || door.Flags.TestFlag(DoorFlags.Open);
                     lockedOnApproach |= door.Flags.TestFlag(DoorFlags.Locked) && door.Data.PaletteId >= 8;
                     // LockConnectors (High Ground / Elder Passage) locks the far loader doors, not the one you shoot

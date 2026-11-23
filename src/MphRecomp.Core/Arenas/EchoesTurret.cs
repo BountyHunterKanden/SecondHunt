@@ -312,18 +312,19 @@ namespace MphRecomp.Arenas
         }
 
         // an Echoes DCLN's first mesh: its vertices (Echoes metres, as stored) and triangles (vertex indices). The collision
-        // index layout is the area collision's (Mrea.ReadCollision) after its own 12-byte header
-        internal static (float[] Verts, int[] Tris)? ReadDcln(byte[] s)
+        // index layout is the area collision's (Mrea.ReadCollision) after its own 12-byte header. prime1: a Prime 1 DCLN
+        // (32-bit materials, no u16 array before the vertices; MainQuarry)
+        internal static (float[] Verts, int[] Tris)? ReadDcln(byte[] s, bool prime1 = false)
         {
             if (s.Length < 16 || Be.U32(s, 0) == 0 || Be.U32(s, 4) != 0xDEAFBABE) return null;
             int o = 16;
-            int mc = (int)Be.U32(s, o); o += 4 + 8 * mc;
+            int mc = (int)Be.U32(s, o); o += 4 + (prime1 ? 4 : 8) * mc;
             o += 4 + (int)Be.U32(s, o);     // vertex materials
             o += 4 + (int)Be.U32(s, o);     // edge materials
             o += 4 + (int)Be.U32(s, o);     // triangle materials
             int ec = (int)Be.U32(s, o); int edges = o + 4; o += 4 + 4 * ec;
             int ti = (int)Be.U32(s, o); int tris = o + 4; o += 4 + 2 * ti;
-            int unk = (int)Be.U32(s, o); o += 4 + 2 * unk;
+            if (!prime1) { int unk = (int)Be.U32(s, o); o += 4 + 2 * unk; }
             int vc = (int)Be.U32(s, o); o += 4;
             var v = new float[vc * 3];
             for (int i = 0; i < vc * 3; i++) v[i] = Be.F32(s, o + 4 * i);

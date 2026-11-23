@@ -30,10 +30,95 @@ namespace MphRead
 
         public static void ClearCache()
         {
+            KeepForNextScene();
             _modelCache.Clear();
             _fhModelCache.Clear();
             _effects.Clear();
             _particleDefs.Clear();
+        }
+
+        // recomp: the eight hunters' models and effects outlive a scene (faster match loading, 2026-11-21: re-parsing
+        // them was most of a match's room load). SceneSetup sets HostKeepLoads around the hunter loads; whatever is first
+        // loaded then, from the ROM's files (not a HostBuildModel model, no content mod's HostReadFile), is set aside at
+        // the next ClearCache and handed back on its first request in a later scene with its parsed state put back
+        // (Model.RestoreParsedState), so each scene's caches look exactly as a fresh parse would have left them. Anything
+        // first loaded outside that window (a model DeathCollapse prepares before the room, a room's own) goes as before.
+        // HostKeepAcrossScenes off = the old full clear (-matchloadtime keep=0).
+        public static bool HostKeepLoads;
+        public static bool HostKeepAcrossScenes = true;
+
+        private static readonly Dictionary<(string, bool), Model> _keptModels = [];
+        private static readonly Dictionary<int, Effect> _keptEffects = [];
+        private static readonly Dictionary<(string, string), Particle> _keptParticles = [];
+        private static readonly HashSet<(string, bool)> _sceneKeptModels = [];
+        private static readonly HashSet<int> _sceneKeptEffects = [];
+        private static readonly HashSet<(string, string)> _sceneKeptParticles = [];
+        private static string? _keptFileSystem;
+        private static object? _keptRecolors;
+
+        private static bool CanKeep => HostKeepAcrossScenes && HostReadFile == null;
+
+        private static void KeepForNextScene()
+        {
+            string? fileSystem = null;
+            try { fileSystem = Paths.FileSystem; } catch (Exception) { }
+            if (!CanKeep || fileSystem != _keptFileSystem || !ReferenceEquals(HostExtraRecolors, _keptRecolors))
+            {
+                _keptModels.Clear();
+                _keptEffects.Clear();
+                _keptParticles.Clear();
+            }
+            if (CanKeep)
+            {
+                foreach ((string name, bool firstHunt) key in _sceneKeptModels)
+                {
+                    if ((key.firstHunt ? _fhModelCache : _modelCache).TryGetValue(key.name, out Model? model))
+                    {
+                        _keptModels[key] = model;
+                    }
+                }
+                foreach ((string, string) key in _sceneKeptParticles)
+                {
+                    if (_particleDefs.TryGetValue(key, out Particle? particle)
+                        && _keptModels.TryGetValue((particle.Model.Name, particle.Model.FirstHunt), out Model? m)
+                        && ReferenceEquals(m, particle.Model))
+                    {
+                        _keptParticles[key] = particle;
+                    }
+                }
+                foreach (int id in _sceneKeptEffects)
+                {
+                    if (_effects.TryGetValue(id, out Effect? effect) && effect.Elements.All(e => e.Particles.All(p =>
+                        _keptParticles.TryGetValue((e.ModelName, p.Name), out Particle? kept) && ReferenceEquals(kept, p))))
+                    {
+                        _keptEffects[id] = effect;
+                    }
+                }
+            }
+            _keptFileSystem = fileSystem;
+            _keptRecolors = HostExtraRecolors;
+            _sceneKeptModels.Clear();
+            _sceneKeptEffects.Clear();
+            _sceneKeptParticles.Clear();
+        }
+
+        // a kept model's first request in this scene (null = not kept)
+        private static Model? TakeKeptModel(string name, bool firstHunt)
+        {
+            if (!_keptModels.Remove((name, firstHunt), out Model? model))
+            {
+                return null;
+            }
+            if (!CanKeep)
+            {
+                return null;
+            }
+            model.RestoreParsedState();
+            if (HostKeepLoads)
+            {
+                _sceneKeptModels.Add((name, firstHunt));
+            }
+            return model;
         }
 
         public static ModelInstance GetModelInstance(string name, bool firstHunt = false,
@@ -52,10 +137,15 @@ namespace MphRead
             Dictionary<string, Model> cache = firstHunt ? _fhModelCache : _modelCache;
             if (noCache || !cache.TryGetValue(name, out Model? model))
             {
-                model = GetModel(name, firstHunt, dir);
+                model = GetModel(name, firstHunt, dir, noCache, out bool parsed);
                 if (model == null)
                 {
                     return null;
+                }
+                if (!noCache && parsed && HostKeepLoads && CanKeep) // recomp: HostKeepLoads
+                {
+                    model.SaveParsedState();
+                    _sceneKeptModels.Add((name, firstHunt));
                 }
                 if (!noCache)
                 {
@@ -65,12 +155,19 @@ namespace MphRead
             return new ModelInstance(model);
         }
 
-        private static Model? GetModel(string name, bool firstHunt, MetaDir dir)
+        // (parsed: read from the files just now, not the host's own build or a kept model: Read.HostKeepLoads)
+        private static Model? GetModel(string name, bool firstHunt, MetaDir dir, bool noCache, out bool parsed)
         {
+            parsed = false;
             if (!firstHunt && HostBuildModel?.Invoke(name) is Model built)
             {
                 return built;
             }
+            if (!noCache && TakeKeptModel(name, firstHunt) is Model kept)
+            {
+                return kept;
+            }
+            parsed = true;
             ModelMetadata? meta;
             if (firstHunt)
             {
@@ -125,6 +222,9 @@ namespace MphRead
             return new ModelInstance(model);
         }
 
+        // a room's own copy, outside the cache (holiday mode's background snow build: HolidayGround.Prebuild)
+        public static Model ReadRoomModelUncached(RoomMetadata meta) => GetRoomModel(meta);
+
         private static Model GetRoomModel(RoomMetadata meta)
         {
             var recolors = new List<RecolorMetadata>()
@@ -137,6 +237,8 @@ namespace MphRead
 
         public static void RemoveModel(string name, bool firstHunt = false)
         {
+            _keptModels.Remove((name, firstHunt)); // recomp: HostKeepLoads
+            _sceneKeptModels.Remove((name, firstHunt));
             if (firstHunt)
             {
                 _fhModelCache.Remove(name);
@@ -926,6 +1028,11 @@ namespace MphRead
             {
                 return cached;
             }
+            if (id != -1 && TakeKeptEffect(id) is Effect kept) // recomp: HostKeepLoads
+            {
+                _effects.Add(id, kept);
+                return kept;
+            }
             var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, path)));
             RawEffect effect = ReadStruct<RawEffect>(bytes);
             var funcs = new Dictionary<uint, FxFuncInfo>();
@@ -969,8 +1076,37 @@ namespace MphRead
             if (id != -1)
             {
                 _effects.Add(id, newEffect);
+                if (HostKeepLoads && CanKeep)
+                {
+                    _sceneKeptEffects.Add(id);
+                }
             }
             return newEffect;
+        }
+
+        // recomp: a kept effect's first request in this scene, its particles (and their models) taken back with it
+        private static Effect? TakeKeptEffect(int id)
+        {
+            if (!_keptEffects.Remove(id, out Effect? effect) || !CanKeep)
+            {
+                return null;
+            }
+            foreach (EffectElement element in effect.Elements)
+            {
+                foreach (Particle particle in element.Particles)
+                {
+                    if (!ReferenceEquals(GetParticle(element.ModelName, particle.Name), particle))
+                    {
+                        return null; // (a particle came back new: parse the effect again)
+                    }
+                }
+            }
+            effect.Persistent = false; // (as parsed: LoadEffect sets it)
+            if (HostKeepLoads)
+            {
+                _sceneKeptEffects.Add(id);
+            }
+            return effect;
         }
 
         public static Particle GetSingleParticle(SingleType type)
@@ -988,6 +1124,17 @@ namespace MphRead
             {
                 return particle;
             }
+            // recomp: a kept particle comes back with its model (HostKeepLoads)
+            if (_keptParticles.Remove((modelName, particleName), out Particle? kept) && CanKeep
+                && ReferenceEquals(GetModelInstance(modelName).Model, kept.Model))
+            {
+                _particleDefs.Add((modelName, particleName), kept);
+                if (HostKeepLoads)
+                {
+                    _sceneKeptParticles.Add((modelName, particleName));
+                }
+                return kept;
+            }
             ModelInstance inst = GetModelInstance(modelName);
             Model model = inst.Model;
             Node? node = model.Nodes.FirstOrDefault(n => n.Name == particleName);
@@ -1001,6 +1148,10 @@ namespace MphRead
                 int materialId = model.Meshes[node.MeshId / 2].MaterialId;
                 var newParticle = new Particle(particleName, inst.Model, node, materialId);
                 _particleDefs.Add((modelName, particleName), newParticle);
+                if (HostKeepLoads && CanKeep)
+                {
+                    _sceneKeptParticles.Add((modelName, particleName));
+                }
                 return newParticle;
             }
             throw new ProgramException("Could not get particle.");

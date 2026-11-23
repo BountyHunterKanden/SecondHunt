@@ -34,6 +34,7 @@ namespace MphRead
                 viewWidth: 1920, viewHeight: 1080, arriving: false);
             Scene scene = host.Scene;
             float tpDist = Single.MaxValue;
+            ushort tpCode = 0;
             int frame = 0;
             var trace = new SfxTrace { Where = () => $"f{frame,5} room {scene.RoomId} scene frame {scene.FrameCount}" };
             void Step(CampaignInput input)
@@ -46,11 +47,12 @@ namespace MphRead
                 {
                     Sfx.SetHost(trace);
                 }
+                input.TrueAim = tpCode; // (the app's: the last step's camera, CampaignRenderer.cs)
                 host.Step(input);
                 frame++;
                 if (tp && !host.Ended)
                 {
-                    ThirdPerson(host, ref tpDist);
+                    tpCode = ThirdPerson(host, ref tpDist);
                 }
             }
             // past the room's own intro camera sequence (Alinos Gateway's first visit has one)
@@ -149,37 +151,26 @@ namespace MphRead
                 + $"sceneView finite {Finite(scene.ViewMatrix)} offset {Fmt(scene.HostCameraOffset)} items {items} hud {scene.HudItemCount}");
         }
 
-        // CampaignActivity.UpdateThirdPerson (constants TpBack 2.4, TpUp 0.35, TpSide 0.5, TpMargin 0.3), host-side only
-        private static void ThirdPerson(CampaignHost host, ref float tpDist)
+        // CampaignRenderer.UpdateThirdPerson's campaign case (left = CAMERA SIDE LEFT), host-side only: the camera's offset,
+        // and the true aim code the app sends with the next step's input (0 = held in: vanilla aim)
+        private static ushort ThirdPerson(CampaignHost host, ref float tpDist, bool left = false)
         {
-            const float TpBack = 2.4f, TpUp = 0.35f, TpSide = 0.5f, TpMargin = 0.3f;
             Scene scene = host.Scene;
             PlayerEntity p = host.Player;
-            if (p.IsAltForm || CameraSequence.Current != null)
+            if (p.IsAltForm || CameraSequence.Current != null || p.HostSeated || !p.LoadFlags.TestFlag(LoadFlags.Spawned))
             {
                 tpDist = 0;
                 scene.HostCameraOffset = Vector3.Zero;
-                return;
+                return 0;
             }
-            if (!(MathF.Abs(p.CameraInfo.ViewMatrix.Determinant) > 1e-3f))
+            if (!PlayerEntity.HostThirdPersonOffset(scene, p.CameraInfo.ViewMatrix, left, ref tpDist, out Vector3 offset))
             {
                 tpDist = Single.MaxValue;
                 scene.HostCameraOffset = Vector3.Zero;
-                return;
+                return PlayerEntity.HostTrueAimCode(left, tpDist);
             }
-            Matrix4 cam = p.CameraInfo.ViewMatrix.Inverted();
-            Vector3 eye = cam.Row3.Xyz;
-            Vector3 want = cam.Row2.Xyz.Normalized() * TpBack + cam.Row1.Xyz.Normalized() * TpUp + cam.Row0.Xyz.Normalized() * TpSide;
-            float len = want.Length;
-            Vector3 dir = want / len;
-            float allowed = len;
-            CollisionResult res = default;
-            if (CollisionDetection.CheckBetweenPoints(eye, eye + dir * (len + TpMargin), TestFlags.Players, scene, ref res))
-            {
-                allowed = Math.Clamp(res.Distance * (len + TpMargin) - TpMargin, 0, len);
-            }
-            tpDist = allowed < tpDist ? allowed : tpDist + (allowed - tpDist) * 0.15f;
-            scene.HostCameraOffset = dir * tpDist;
+            scene.HostCameraOffset = offset;
+            return PlayerEntity.HostTrueAimCode(left, tpDist);
         }
 
         private static bool Finite(Matrix4 m)

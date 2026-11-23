@@ -75,6 +75,8 @@ internal sealed class DesktopInput
         SetCapture(false);
     }
 
+    bool _clickedIn; // the owner has clicked in this window (a test run's leave to grab the mouse)
+
     void SetCapture(bool on)
     {
         if (on == _captured) return;
@@ -87,7 +89,9 @@ internal sealed class DesktopInput
     public void Poll()
     {
         CampaignRenderer? game = _app.Game;
-        SetCapture(game != null && game.InGameplay && !game.DialogUp && _w.IsFocused && !_app.Background); // a dialog frees it for its buttons; a test run never grabs
+        // a dialog frees it for its buttons; a test run grabs only once the owner clicks into it (owner 2026-11-20: test
+        // windows must never take focus, but "i cant control the open windows")
+        SetCapture(game != null && game.InGameplay && !game.DialogUp && _w.IsFocused && (!_app.Background || _clickedIn));
         DesktopApp.Step = "gamepads";
         PollGamepad();
         DesktopApp.Step = "input";
@@ -96,6 +100,29 @@ internal sealed class DesktopInput
             game.Pad.Set(PadButton.L1, false);
             game.Pad.Set(PadButton.R1, false);
         }
+        if (game != null) game.PhotoKeys(game.PhotoOpen ? (_w.IsFocused ? PhotoHeld() : 0) | _scriptPhoto : CampaignRenderer.PhotoHold.None);
+    }
+
+    // photo mode's held keys (CampaignRenderer.PhotoMode.cs): WASD move, Space / Ctrl or C up / down, Q / E roll, Shift fast,
+    // - / = zoom, , / . the menu shot picker's focus
+    CampaignRenderer.PhotoHold PhotoHeld()
+    {
+        var k = _w.KeyboardState;
+        var h = CampaignRenderer.PhotoHold.None;
+        if (k.IsKeyDown(Keys.W)) h |= CampaignRenderer.PhotoHold.Forward;
+        if (k.IsKeyDown(Keys.S)) h |= CampaignRenderer.PhotoHold.Back;
+        if (k.IsKeyDown(Keys.A)) h |= CampaignRenderer.PhotoHold.Left;
+        if (k.IsKeyDown(Keys.D)) h |= CampaignRenderer.PhotoHold.Right;
+        if (k.IsKeyDown(Keys.Space)) h |= CampaignRenderer.PhotoHold.Up;
+        if (k.IsKeyDown(Keys.LeftControl) || k.IsKeyDown(Keys.C)) h |= CampaignRenderer.PhotoHold.Down;
+        if (k.IsKeyDown(Keys.Q)) h |= CampaignRenderer.PhotoHold.RollLeft;
+        if (k.IsKeyDown(Keys.E)) h |= CampaignRenderer.PhotoHold.RollRight;
+        if (k.IsKeyDown(Keys.LeftShift) || k.IsKeyDown(Keys.RightShift)) h |= CampaignRenderer.PhotoHold.Fast;
+        if (k.IsKeyDown(Keys.Equal) || k.IsKeyDown(Keys.KeyPadAdd)) h |= CampaignRenderer.PhotoHold.ZoomIn;
+        if (k.IsKeyDown(Keys.Minus) || k.IsKeyDown(Keys.KeyPadSubtract)) h |= CampaignRenderer.PhotoHold.ZoomOut;
+        if (k.IsKeyDown(Keys.Comma)) h |= CampaignRenderer.PhotoHold.FocusNear;
+        if (k.IsKeyDown(Keys.Period)) h |= CampaignRenderer.PhotoHold.FocusFar;
+        return h;
     }
 
     // --script "<frame>:<key>,<frame>:click@<x>;<y>,<frame>:wheeldown,<frame>:text:<chars>,...": synthetic key presses (down
@@ -105,6 +132,8 @@ internal sealed class DesktopInput
     readonly List<Keys> _scriptHeld = new();
     int _frame;
     int _scriptFire; // "fire": the game's left click held this many more frames (a replay test's "press FIRE to begin")
+    // "photo:open" opens photo mode; "photo:Forward+RollLeft" holds those PhotoHold keys until "photo:none" (photo tests)
+    CampaignRenderer.PhotoHold _scriptPhoto;
 
     public void SetScript(string spec)
     {
@@ -135,6 +164,16 @@ internal sealed class DesktopInput
             else if (action.StartsWith("text:", StringComparison.Ordinal))
             {
                 foreach (char c in action[5..]) OnText(c); // typed, as the window's TextInput
+            }
+            else if (action.StartsWith("photo:", StringComparison.Ordinal))
+            {
+                if (action == "photo:open") _app.Game?.OpenPhotoMode();
+                else
+                {
+                    _scriptPhoto = CampaignRenderer.PhotoHold.None;
+                    foreach (string name in action[6..].Split('+'))
+                        if (Enum.TryParse(name, ignoreCase: true, out CampaignRenderer.PhotoHold h)) _scriptPhoto |= h;
+                }
             }
             else if (action == "fire")
             {
@@ -394,6 +433,26 @@ internal sealed class DesktopInput
             if (!e.IsRepeat) game.BackPressed(); // Android's Back: B on the game's screens, else the pause menu
             return;
         }
+        if (game.PhotoOpen)
+        {
+            // photo mode (CampaignRenderer.PhotoMode.cs): the held keys are read in Poll; Enter / F12 save a shot
+            if (e.IsRepeat) return;
+            if (e.Key is Keys.Enter or Keys.KeyPadEnter or Keys.F12) game.PhotoKeyPress(CampaignRenderer.PhotoPress.Shot);
+            else if (e.Key == Keys.R) game.PhotoKeyPress(CampaignRenderer.PhotoPress.Reset);
+            else if (e.Key == Keys.H) game.PhotoKeyPress(CampaignRenderer.PhotoPress.Hide);
+            // the menu shot picker's depth of field (CampaignRenderer.MenuShotPick.cs; ignored elsewhere)
+            else if (e.Key == Keys.F) game.PhotoKeyPress(CampaignRenderer.PhotoPress.AutoFocus);
+            else if (e.Key == Keys.D9) game.PhotoKeyPress(CampaignRenderer.PhotoPress.BlurDown);
+            else if (e.Key == Keys.D0) game.PhotoKeyPress(CampaignRenderer.PhotoPress.BlurUp);
+            else if (e.Key == Keys.D7) game.PhotoKeyPress(CampaignRenderer.PhotoPress.RangeDown);
+            else if (e.Key == Keys.D8) game.PhotoKeyPress(CampaignRenderer.PhotoPress.RangeUp);
+            return;
+        }
+        if (e.Key == Keys.F12 && !game.PauseMenuOpen && !MphRecomp.Config.RecompSettings.PublicBuild) // (with photo mode: after the fixes-only release)
+        {
+            if (!e.IsRepeat) game.TakeScreenshot(); // a screenshot of the game as it is (no menus), into Screenshots
+            return;
+        }
         // Tab is the keyboard SCOREBOARD key since 2026-10-11 (KeyboardMouseInput); Esc opens the pause menu
         if (e.Key == Keys.M && !game.PauseMenuOpen)
         {
@@ -430,6 +489,7 @@ internal sealed class DesktopInput
 
     void OnMouseDown(MouseButtonEventArgs e)
     {
+        _clickedIn = true;
         if (CaptureDevice() is string device)
         {
             // a mouse button is the answer on the keyboard & mouse page; waiting for a controller button, a click is a
@@ -447,6 +507,12 @@ internal sealed class DesktopInput
             break;
         case CampaignRenderer game:
             game.KeyboardHints = true;
+            if (game.PhotoOpen)
+            {
+                if (e.Button == MouseButton.Left) game.PhotoKeyPress(CampaignRenderer.PhotoPress.Shot);
+                else if (e.Button == MouseButton.Right) game.PhotoKeyPress(CampaignRenderer.PhotoPress.Back);
+                break;
+            }
             if (_captured) break; // playing: KeyboardMouseInput reads the buttons
             if (game.DialogUp && !game.PauseMenuOpen && !game.MapOpen && !game.ShipMenuOpen)
             {
@@ -545,7 +611,11 @@ internal sealed class DesktopInput
             front.Post(s => s.ScrollWheel(e.OffsetY)); // settings and CONTROLS scroll
             break;
         case CampaignRenderer game:
-            if (_captured)
+            if (game.PhotoOpen)
+            {
+                game.PhotoWheel(e.OffsetY); // photo mode's zoom
+            }
+            else if (_captured)
             {
                 KeyboardMouse.AddScroll(e.OffsetY); // MphRead: wheel up / down = previous / next weapon
             }
@@ -568,7 +638,6 @@ internal sealed class DesktopInput
 
     // ---- gamepads (the first one connected) ----
 
-    static float Dead(float v) => Math.Abs(v) < 0.15f ? 0f : v;
     static int Step(float v, float threshold) => v >= threshold ? 1 : v <= -threshold ? -1 : 0;
 
     // GLFW's gamepad layout (SDL's database: Xbox names)
@@ -781,12 +850,13 @@ internal sealed class DesktopInput
             return;
         }
         PadState pad = game.Pad;
-        pad.Lx = Dead(lx);
-        pad.Ly = Dead(ly);
+        // each axis under its stick's dead zone is at rest (CONTROLS > AIM > STICKS, 15% by default; Core Input/StickShape.cs)
+        pad.Lx = MphRecomp.Input.StickShape.Left(lx);
+        pad.Ly = MphRecomp.Input.StickShape.Left(ly);
         pad.RawRx = rx;
         pad.RawRy = ry;
-        pad.Rx = Dead(rx);
-        pad.Ry = Dead(ry);
+        pad.Rx = MphRecomp.Input.StickShape.Right(rx);
+        pad.Ry = MphRecomp.Input.StickShape.Right(ry);
         pad.L2 = l2;
         pad.R2 = r2;
         foreach ((GamepadButton b, PadButton p) in PadMap)

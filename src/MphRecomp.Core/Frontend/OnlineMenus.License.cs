@@ -25,7 +25,8 @@ using MphRecomp.Config;
 // never its name (the server's word-filtered name is the one shown) or the LAN address it keeps.
 // Head to head is counted as RESULTS comes in after an online match (CountHeadToHead: the match's seats matched to the lobby's
 // cards as it started, then each human opponent's place against this player's).
-// Not yet: ADD FRIEND / ADD RIVAL on RESULTS, a replay's license as it was (V_C, needs O10).
+// ADD FRIEND on RESULTS: OnlineMenus.ResultsFriend.cs (no ADD RIVAL there while rivals are hidden). Not yet: a replay's license
+// as it was (V_C, needs O10).
 namespace MphRecomp.Frontend
 {
     public sealed partial class RecompMenus
@@ -45,8 +46,11 @@ namespace MphRecomp.Frontend
         private readonly MenuAction[][] _liTabRect = new MenuAction[CardTabs][]; // (rects set as the card is drawn: it is fitted into its box)
 
         // items (-1 = none)
-        private int _liPanel = -1, _liSide = -1, _liTitle = -1, _liCard = -1, _liFriend = -1, _liRival = -1, _liJoin = -1, _liBlock = -1,
+        private int _liNarrow = -1, _liWide = -1, _liSide = -1, _liTitle = -1, _liCard = -1, _liFriend = -1, _liRival = -1, _liJoin = -1, _liBlock = -1,
             _liReport = -1;
+        // your own card has no side panel: one panel the screen's width, the card and the hub's views centred on it
+        private bool LicenseWide => _licCard != null && _licCard.Code == MeCard?.Code;
+        private int _liPanel => LicenseWide ? _liWide : _liNarrow; // (the page's settle anchor: DrawOnline)
         private readonly int[] _gSeat = Unset(4); // the details page's seats (a tap: their license)
         private readonly int[] _resultName = Unset(4); // RESULTS' names (a tap, after an online match: their license)
         // RESULTS' four name rows (MultiplayerMenu.BindResults: the name column at text y 117 / 89 / 61 / 33, x 38-42 to the first
@@ -85,8 +89,9 @@ namespace MphRecomp.Frontend
             // back (B and the arrow) runs LEAVE's call: OnlineCall sends it back where the license was opened from
             MenuPage page = addFramePage(-1, new[] { Call(MenuKeys.R, LicNextCall), Call(MenuKeys.L, LicPrevCall) });
             s_onLicense = page.Index;
-            _liPanel = page.AddItem(i => panelAt(i, Mx(70), Mx(1150))).Index;
+            _liNarrow = page.AddItem(i => panelAt(i, Mx(70), Mx(1150))).Index;
             _liSide = page.AddItem(i => panelAt(i, Mx(1190), Mx(1850))).Index;
+            _liWide = page.AddItem(i => panelAt(i, Mx(70), Mx(1850))).Index;
             back(page, -1);
             _liTitle = page.AddItem(i => Clone(title, i, 0, 0, stringId: _strings.Add("HUNTER LICENSE"))).Index;
             (float cx, float cy, float cx1, float cy1) = LicenseCardBox;
@@ -109,8 +114,12 @@ namespace MphRecomp.Frontend
             _liJoin = Px(page, 1230, 800, 580, 90, LicJoinCall).Index;
         }
 
-        // where the card may sit (mockup px: x0, top, x1, bottom): it keeps its own shape inside, centred, at the top
-        private (float X0, float Top, float X1, float Bottom) LicenseCardBox => (100, HubOn ? 290 : 225, 1120, 790); // (the hub's view tabs over it: OnlineMenus.Hub.cs)
+        // where the card may sit (mockup px: x0, top, x1, bottom): it keeps its own shape inside, centred, at the top (the wide
+        // one's bottom: the panel's edge, the card's lowest ~40 px under its tabs draw nothing)
+        private (float X0, float Top, float X1, float Bottom) LicenseCardBox => LicenseWide ? (100, LicenseCardTop + 12, 1820, 896)
+            : (100, LicenseCardTop, 1120, 790);
+
+        private float LicenseCardTop => HubOn ? 290 : 225; // (the hub's view tabs over it: OnlineMenus.Hub.cs)
 
         private static float LicenseButtonY(int row) => 470 + 82 * row;
 
@@ -130,11 +139,14 @@ namespace MphRecomp.Frontend
         // RESULTS coming in: its names tappable when it's an online match's and that seat's hunter is known
         private void ShowResultNames(MenuEngine menu)
         {
+            // (in RESULTS' shown order, teams split; 5-8 players: rows 5-8's taps too, every row moved as its name is)
             MatchResults? r = MatchResults.Last;
-            for (int k = 0; k < _resultName.Length; k++)
+            bool compact = r != null && r.Rows.Count > 4;
+            for (int k = 0; k < 8; k++)
             {
-                bool on = MultiplayerMenu.OnlineResults && r != null && k < r.Rows.Count && s_matchCards?.ContainsKey(r.Rows[k].Seat) == true;
-                Show(menu, _resultName[k], on);
+                bool on = ResultCard(r, k, others: false) != null && (k < 4 || compact);
+                Show(menu, ResultNameTap(k), on);
+                PlaceResultRow(menu, ResultNameTap(k), k, compact, 40); // (OnlineMenus.ResultsFriend.cs)
             }
         }
 
@@ -240,6 +252,9 @@ namespace MphRecomp.Frontend
                 if (!on && item >= 0 && menu.ItemState(item) == MenuState.Focused) lost = true;
                 Show(menu, item, on);
             }
+            bool wide = LicenseWide;
+            Set(_liNarrow, !wide);
+            Set(_liWide, wide);
             Set(_liSide, actions); // (your own card: no head to head, no actions)
             Set(_liFriend, actions && !blocked);
             Set(_liRival, actions && !blocked && ShowRivals);
@@ -249,6 +264,10 @@ namespace MphRecomp.Frontend
             Set(_liVoice, actions && !blocked); // (OnlineMenus.Voice.cs)
             Set(_liJoin, actions && !blocked && LicenseJoinable(c!));
             ShowLicenseViews(menu); // (OnlineMenus.Hub.cs)
+            // the card's tap area (made for the narrow box) moved to the wide panel's middle (DrawLicense then puts it on the
+            // card, left of the name and ranking column)
+            if (wide) menu.SetItemTransform(_liCard, 1, 0, 0, Mw(350), 0);
+            else menu.ClearItemTransform(_liCard);
             if (focus || lost) menu.SetState(_liCard, MenuState.Focused);
         }
 
@@ -270,11 +289,7 @@ namespace MphRecomp.Frontend
             if (call >= LicResultCall)
             {
                 int row = call - LicResultCall;
-                if (MultiplayerMenu.OnlineResults && MatchResults.Last is MatchResults res && row < res.Rows.Count
-                    && s_matchCards != null && s_matchCards.TryGetValue(res.Rows[row].Seat, out PlayerCard? who))
-                {
-                    OpenLicense(menu, who);
-                }
+                if (ResultCard(MatchResults.Last, row, others: false) is PlayerCard who) OpenLicense(menu, who); // (shown order)
                 return;
             }
             if (call >= LicSeatCall)
@@ -396,19 +411,57 @@ namespace MphRecomp.Frontend
             PlayerCard? c = _licCard;
             if (c == null) return;
             int tag = _liCard, side = _liTitle;
-            // the card: page 60's top screen for their license, fitted into the box with its own shape
+            bool view = DrawLicenseViews(c, glows); // (the hub's STATS / FAVOURITES instead of the card: OnlineMenus.Hub.cs)
+            string note = view ? "" : _licError != null ? _licError : _licLoading && _licLicense == null ? "loading..."
+                : _licLicense == null ? "no license stats yet." : "";
+            // the card: page 60's top screen for their license, fitted into the box with its own shape (a note keeps the
+            // narrow box's bottom: room for it under the card)
             (float px0, float py0, float px1, float py1) = LicenseCardBox;
+            if (note.Length > 0) py1 = MathF.Min(py1, LicenseWide ? 830 : 790);
             float bx0 = Mx(px0), btop = My(py0), bx1 = Mx(px1), bbottom = My(py1);
             var card = new List<WidgetTri>();
-            float cardBottom = bbottom;
-            bool view = DrawLicenseViews(c, glows); // (the hub's STATS / FAVOURITES instead of the card: OnlineMenus.Hub.cs)
+            float cardBottom = My(MathF.Min(py1, 840)), mid = (bx0 + bx1) / 2; // (the name under STATS / FAVOURITES: the narrow box's place)
+            string shown = StreamerPrivacy.Display(c.Name, c.Tag).ToLowerInvariant();
+            bool column = false;
             if (view) for (int t = 0; t < CardTabs; t++) _liTabRect[t][0] = TouchRect(0, 0, 0, 0, LicTabCall + t);
             else if (Multiplayer?.EmitCard(_drawMenu!, _licLicense ?? new HunterLicense(), StreamerPrivacy.Name(c.Name, c.Code == MeCard?.Code), _licTab, card) == true)
             {
+                // your own card's wide panel: page 60's own faint HUNTER LICENSE title (the panel's title already says it: y 179..187
+                // on the DS's top screen, the card's name plate ends at 177) and the ranking points block (under the card's tabs)
+                // come out, so the card fills the panel's height; the block and name#tag in a column beside it, the two centred
+                const float HeaderY = 178, ColGap = 60, NameGap = 30, NameHeight = 40, RankScale = 0.75f;
+                if (LicenseWide) card.RemoveAll(t => MinY(t) >= HeaderY);
+                List<WidgetTri> rank = LicenseWide ? card.Where(t => MaxY(t) < MultiplayerMenu.CardTabY0 - 1).ToList() : new();
+                column = rank.Count > 0 && rank.Count < card.Count;
+                if (column) card.RemoveAll(t => MaxY(t) < MultiplayerMenu.CardTabY0 - 1);
                 float x0 = card.Min(MinX), x1 = card.Max(MaxX), y0 = card.Min(MinY), y1 = card.Max(MaxY);
+                float rx0 = column ? rank.Min(MinX) : 0, rx1 = column ? rank.Max(MaxX) : 0, ry0 = column ? rank.Min(MinY) : 0, ry1 = column ? rank.Max(MaxY) : 0;
+                float nameW = _drawMenu!.Font.Measure(shown) * SizeS, gap = column ? Mw(ColGap) : 0;
                 float s = MathF.Min((bx1 - bx0) / MathF.Max(x1 - x0, 1), (btop - bbottom) / MathF.Max(y1 - y0, 1));
-                float cx0 = (bx0 + bx1 - (x1 - x0) * s) / 2;
+                if (column) s = MathF.Min(s, MathF.Min((bx1 - bx0 - gap) / MathF.Max(x1 - x0 + (rx1 - rx0) * RankScale, 1),
+                    (bx1 - bx0 - gap - nameW) / MathF.Max(x1 - x0, 1)));
+                float cw = (x1 - x0) * s, colW = column ? MathF.Max(nameW, (rx1 - rx0) * s * RankScale) : 0;
+                float cx0 = mid - (cw + gap + colW) / 2;
                 cardBottom = btop - (y1 - y0) * s;
+                if (column)
+                {
+                    // the column on the card's middle: name#tag over the block, each centred in it
+                    float rs = s * RankScale, bw = (rx1 - rx0) * rs, bh = (ry1 - ry0) * rs, colMid = cx0 + cw + gap + colW / 2;
+                    float top = (btop + cardBottom + Mw(NameHeight + NameGap) + bh) / 2, rtop = top - Mw(NameHeight + NameGap), left = colMid - bw / 2;
+                    TextS(shown, colMid, top, 2, White, tag, SizeS);
+                    foreach (WidgetTri t in rank)
+                    {
+                        WidgetTri m = t;
+                        m.A.X = left + (t.A.X - rx0) * rs; m.B.X = left + (t.B.X - rx0) * rs; m.C.X = left + (t.C.X - rx0) * rs;
+                        m.A.Y = rtop - (ry1 - t.A.Y) * rs; m.B.Y = rtop - (ry1 - t.B.Y) * rs; m.C.Y = rtop - (ry1 - t.C.Y) * rs;
+                        m.Item = tag;
+                        _out.Add(m);
+                    }
+                    mid = cx0 + cw / 2;
+                    cardBottom += Mw(74); // (a note: just under the card, where the name under it would be)
+                    // the card's tap area (made for the narrow box, 100..1120: LicenseCardBox) moved onto the card
+                    _drawMenu.SetItemTransform(_liCard, 1, 0, 0, mid - Mx(610), 0);
+                }
                 UiVertex Move(UiVertex v)
                 {
                     v.X = cx0 + (v.X - x0) * s;
@@ -433,8 +486,7 @@ namespace MphRecomp.Frontend
                 }
             }
             // name#tag, where they are (friends and rivals only: the server shows strangers offline), what's missing
-            float mid = (bx0 + bx1) / 2;
-            TextS(StreamerPrivacy.Display(c.Name, c.Tag).ToLowerInvariant(), mid, cardBottom - Mw(22), 2, White, tag, SizeS);
+            if (!column) TextS(shown, mid, cardBottom - Mw(22), 2, White, tag, SizeS);
             string where = "";
             (float, float, float) colour = Pale;
             if (c.Friend || c.Rival)
@@ -447,8 +499,6 @@ namespace MphRecomp.Frontend
                     _ => ("offline", OnGrey),
                 };
             }
-            string note = view ? "" : _licError != null ? _licError : _licLoading && _licLicense == null ? "loading..."
-                : _licLicense == null ? "no license stats yet." : "";
             if (where.Length > 0) TextS(where, mid, cardBottom - Mw(84), 2, colour, tag, SizeM);
             if (note.Length > 0) TextS(Fit(note, 40), mid, cardBottom - Mw(where.Length > 0 ? 130 : 84), 2, _licError != null ? Red : OnGrey, tag, SizeX);
 
@@ -596,7 +646,7 @@ namespace MphRecomp.Frontend
         // this device's license, when it changed since the last upload (as a connection comes in; a failure only logs)
         private static async Task UploadLicense(OnlineClient client, string? license)
         {
-            if (license == null || license == s_licenseSent) return;
+            if (license == null || license == s_licenseSent || s_restoreHold) return;
             try
             {
                 await client.RequestAsync<OkMsg>(new SetLicenseReq { License = license });
@@ -606,6 +656,71 @@ namespace MphRecomp.Frontend
                 or ObjectDisposedException or InvalidOperationException)
             {
                 Console.Error.WriteLine("online: license not uploaded: " + ex.Message);
+            }
+        }
+
+        // ---- after RESTORE (docs/PROFILE_SYNC.md, Phase 0) ----
+        // RESTORE (OnlineMenus.Settings.cs) makes this device another hunter, but this device's license would go up over that
+        // hunter's online card on the next connection (a new device's: HUNTER at rank 0). So it's held back until the player
+        // picks: the card ahead of this license asks "keep the online card?", else it goes up as usual. The file keeps the
+        // hold over a quit before the next connection
+        internal const string RestoreHoldFile = "online_restore_hold";
+        private static bool s_restoreHold; // (menu thread)
+        private bool _restoreAsking;
+
+        private void HoldLicense(bool hold)
+        {
+            s_restoreHold = hold;
+            if (ProfileDir is not string dir) return;
+            string path = Path.Combine(dir, RestoreHoldFile);
+            try
+            {
+                if (hold) File.WriteAllText(path, DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+                else File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"online: {RestoreHoldFile}: {ex.Message}");
+            }
+        }
+
+        // as a connection comes in (before its license upload): the hold from a RESTORE in an earlier run
+        private void LoadLicenseHold()
+        {
+            if (!s_restoreHold && ProfileDir is string dir && File.Exists(Path.Combine(dir, RestoreHoldFile))) s_restoreHold = true;
+        }
+
+        // with the connection there (its welcome holds the server's card for this hunter) and no other box open: ask, or let the
+        // license go up
+        private void AskRestoredLicense(OnlineClient client)
+        {
+            if (!s_restoreHold || _restoreAsking || Import.Popup is not MenuPopup popup || popup.IsOpen) return;
+            if (Multiplayer is not MultiplayerMenu mp)
+            {
+                return; // (no license here yet: the hold waits)
+            }
+            HunterLicense mine = mp.License;
+            HunterLicense? card = ParseLicense(client.Me.License);
+            if (card == null || !mine.TakeOnlineCard(card, apply: false))
+            {
+                Console.WriteLine("online: after restore: " + (card == null ? "no online card" : "this license is ahead of the online card") + ", sent as usual");
+                Release();
+                return;
+            }
+            _restoreAsking = true;
+            string Of(HunterLicense l) => $"{HubRankTitles[Math.Clamp(l.RankLevel, 0, HubRankTitles.Length - 1)]}, {l.RankPoints} points, {l.OnlineMatches + l.LocalMatches} matches";
+            popup.Ask($"this hunter's online license is ahead of this device's.\n\nonline: {Of(card)}\nhere: {Of(mine)}\n\nkeep the online license's numbers here?", yes =>
+            {
+                _restoreAsking = false;
+                if (yes) mp.TakeOnlineCard(card);
+                Console.WriteLine("online: after restore: " + (yes ? "the online card's numbers taken" : "this device's license kept") + ", sent");
+                Release();
+            });
+
+            void Release()
+            {
+                HoldLicense(false);
+                _ = UploadLicense(client, LicenseJson(mp.License));
             }
         }
 

@@ -355,6 +355,8 @@ namespace MphRecomp.Frontend
         // the lower right hand corner")
         private const float TransferX = 172;
         public const float TransferDrop = 64, TransferShift = 11;
+        // the menu x range the button (icon and label) draws in, for the description band's fit (MenuLayout.FitBand)
+        public const float TransferContentX0 = 143, TransferContentX1 = 203;
 
         private void BindTransfer(MenuFile file, MenuStrings strings, MenuPage page, Func<MenuItem, string, bool> hasWidget,
             Func<Func<MenuItem, bool>, int> find, int copyHighlight)

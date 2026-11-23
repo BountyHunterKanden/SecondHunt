@@ -48,6 +48,22 @@ namespace MphRecomp.Campaign
                 snap.Items = items;
                 _itemsSentAt = Frame;
             }
+            snap.Taken = _itemSync.TakenList((long)Scene.FrameCount); // (who took them: every snapshot, 11-13)
+            snap.Shots = PlayerEntity.NetHostShots(Scene.FrameCount); // (each seat's newest shots, a served host: Fruity P2)
+            // each seat's third-person true-aim code (PlayerHostAim.cs), so a guest's puppets aim where their players do
+            // (null: every seat in first person)
+            for (int i = 0; i < seats; i++)
+            {
+                if (PlayerEntity.Players[i].HostTrueAimCam != 0)
+                {
+                    snap.AimCams = new ushort[seats];
+                    for (int j = 0; j < seats; j++)
+                    {
+                        snap.AimCams[j] = PlayerEntity.Players[j].HostTrueAimCam;
+                    }
+                    break;
+                }
+            }
             if (GameState.Mode != GameMode.Battle && GameState.Mode != GameMode.BattleTeams)
             {
                 snap.Objective = NetObjective.Capture(Scene);
@@ -103,8 +119,12 @@ namespace MphRecomp.Campaign
                 }
                 bool wasDead = p.Health == 0;
                 p.NetApply(s, pose: !SmoothRemotes);
+                // (its true-aim code as the host has it; the local seat keeps its own, from its input)
+                p.HostTrueAimCam = snap.AimCams != null && i < snap.AimCams.Length ? snap.AimCams[i] : (ushort)0;
                 if (p.HostRemote)
                 {
+                    // (a served host's shots: the puppet fires those, not its trigger bit; Fruity P2, PlayerNetShotEvents.cs)
+                    p.NetPuppetShots(snap.Shots);
                     int c = s.Controls;
                     // the FIRE press that respawns a seat never shoots on the host (the spawn's NoShotsFired: a held
                     // trigger waits for the next press), but here it reaches the puppet after the spawn and reads as a
@@ -143,6 +163,7 @@ namespace MphRecomp.Campaign
             // the Trooper's cling + drone as the host has them (after the poses: a form change comes first)
             snap.Abilities?.Apply(local);
             snap.World?.Apply(Scene);
+            (_itemSync ??= new ItemSync()).NoteTaken(snap.Taken);
             if (snap.Items != null)
             {
                 _itemSync ??= new ItemSync();
@@ -203,6 +224,7 @@ namespace MphRecomp.Campaign
             }
             Match.IsClient = false;
             PlayerEntity.NetClient = false;
+            PlayerEntity.NetRagdollRest = true; // (its bodies' rests sent now: PlayerRagdollNet.cs)
             PlayerEntity.NetWeaponPending = false;
             MphRecomp.Arenas.EchoesBreakables.Mirror = false; // crates + breakables run here now (a broken one back soon)
             MphRecomp.Arenas.EchoesTurret.Mirror = false; // and Shooting Gallery's turret, from the state it mirrored
@@ -263,6 +285,7 @@ namespace MphRecomp.Multiplayer
         private Net.RemoteSmoothing? _smoothing;
         public Net.RemoteSmoothing? Smoothing => _smoothing;
         private readonly System.Collections.Generic.HashSet<int> _goneSeats = new();
+        private readonly System.Collections.Generic.List<NetShotEvent> _shotEvents = new(); // (host: a seat's new shot events)
         private int _seq; // (sent as 16 bits)
         private byte _epoch;
         private sbyte _hostWeapon = -1;
@@ -297,6 +320,17 @@ namespace MphRecomp.Multiplayer
             _host = host;
             // a served match on Fruity Prime's movement sync (Net/FruitySync.cs): set before the pieces below read it
             Net.FruitySync.On = _online != null && host.Match?.FruitySync == true;
+            // (its device claims the items its player touched and predicts the uncontested ones, when the host says it judges
+            // claims: Net/PickupClaims.cs; an older match host has no use for them)
+            PlayerEntity.NetPickupClaims = !net.IsHost && Net.FruitySync.On && Net.FruitySync.HostPickups;
+            PlayerEntity.NetPickupPredict = PlayerEntity.NetPickupClaims;
+            // (and sends its own player's shots as events, when the host fires the seat from them: Fruity P2, Net/NetMatchSession.Shots.cs)
+            PlayerEntity.NetShotEvents = !net.IsHost && Net.FruitySync.On && Net.FruitySync.HostShots;
+            // (a served host's snapshots carry every seat's shots, for the clients' copies of the seats: Fruity P2 part b)
+            PlayerEntity.NetHostShotEvents = net.IsHost && Net.FruitySync.On;
+            PlayerEntity.ResetNetShotEvents();
+            // (the host runs every biped death's ragdoll, drawn or not, and sends where it rests: PlayerRagdollNet.cs)
+            PlayerEntity.NetRagdollRest = net.IsHost;
             // (LAN guests too since LAN protocol 17: Wi-Fi to a handheld is a round trip of 30-150 ms, past the old 0.5 pull-back
             // that snapped them onto the host's older pose over and over: 0.2.0 owner 2026-10-11, rubber banding)
             _prediction = !net.IsHost ? new Net.ClientPrediction() : null;
@@ -310,6 +344,7 @@ namespace MphRecomp.Multiplayer
             Net.ShotReport.Start(net); // (each seat's shots and hits, here and on its device: Net/ShotReport.cs)
             Net.ShotCheck.Start(net); // (each shot and claimed hit checked against the host's, in shadow: Net/ShotCheck.cs)
             Net.HitClaims.Start(net); // (a guest's hits its host's copy of the shot missed, checked and applied: Net/HitClaims.cs)
+            Net.PickupClaims.Start(net); // (a served match: the items a device's player touched, judged and taken: Net/PickupClaims.cs)
             Net.ClientPosition.Start(net, host); // (an online guest's own position, checked and taken: Net/ClientPosition.cs)
             // (an online guest's snapshot-counted waits count frames: 60 Hz snapshots wait as long as 30 Hz ones did)
             PlayerEntity.NetApplyTicks = 1;
@@ -358,6 +393,7 @@ namespace MphRecomp.Multiplayer
                             Console.WriteLine($"match: seat {seat} back (inputs again, seq {back.Seq})");
                             _host.ReconnectSeat(seat);
                             _host.SetRemoteInput(seat, back);
+                            _host.SetRemoteTrueAim(seat, back.TrueAim);
                         }
                         continue;
                     }
@@ -372,16 +408,24 @@ namespace MphRecomp.Multiplayer
                     if (_net.TryTakeInput(seat, out Net.NetInput remote))
                     {
                         _host.SetRemoteInput(seat, remote);
+                        _host.SetRemoteTrueAim(seat, remote.TrueAim); // (its third-person camera: PlayerHostAim.cs; 0 online)
                         if (_online != null) Net.ClientPosition.HostOffer(_host, seat, remote); // (its own position: taken or not)
                     }
                     else if (_online != null)
                     {
+                        // (a new life with no input for it yet: Fruity P4, Net/NetMatchSession.Lives.cs)
+                        if (_online.TakeLifeReset(seat))
+                        {
+                            _host.HoldRemoteForLife(seat);
+                        }
                         // (a held frame: Fruity's hold at the last pinned place, or doesn't slide a seat whose device runs its push)
                         if (!Net.ClientPosition.HostHold(_host, seat))
                         {
                             _host.HoldClientPushed(seat);
                         }
                     }
+                    // (the shots its device fired, fired by its seat this step: Fruity P2, Net/NetMatchSession.Shots.cs)
+                    if (_online != null) _host.SetRemoteShots(seat, _online.TakeShotEvents(seat, _shotEvents), _shotEvents);
                 }
                 _gone = seats.Count > 0 && _goneSeats.Count >= seats.Count;
                 _host.Step(input);
@@ -389,6 +433,7 @@ namespace MphRecomp.Multiplayer
                 if (_online != null) Net.ClientPosition.HostPin(_host); // (pinned seats put at their devices' place: before the snapshot)
                 _net.SendSnapshot(_host.CaptureSnapshot(everyPart: _online != null, lanStats: _online == null));
                 if (_online != null) Net.SeatPings.HostTick(_online);
+                Net.PickupClaims.HostStep(_host); // (after the snapshot: its item sync has noted this step's pickups)
                 Net.HitClaims.HostStep(_host); // (before ShotCheck drains the shot log)
                 Net.ShotCheck.HostStep(_host);
                 return;
@@ -564,6 +609,7 @@ namespace MphRecomp.Multiplayer
                 MoveY = (sbyte)(input.Move.Y > Campaign.CampaignInput.MoveDeadZone ? 1 : input.Move.Y < -Campaign.CampaignInput.MoveDeadZone ? -1 : 0),
                 MovePush = input.MovePush,
                 MoveDir = input.MoveDir,
+                TrueAim = input.TrueAim, // (third-person true aim: LAN's trailer; online sends none, the app holds it 0 there)
                 SelectWeapon = select,
                 Yaw = me.NetYaw,
                 Pitch = me.NetPitch,
@@ -585,6 +631,9 @@ namespace MphRecomp.Multiplayer
             _prediction?.Record(_seq, me, Net.ClientPrediction.KeyOf(sent));
             _net.SendInput(sent);
             if (_online != null) Net.HitClaims.GuestStep(_online, local, _seq, sent.ViewTick, _seq); // (before ShotCheck drains it)
+            // (the host frame its own screen showed, not the others' smoothed one: the contact's report reaches the host a round
+            // trip after it)
+            if (PlayerEntity.NetPickupClaims && _online != null) Net.PickupClaims.GuestStep(_online, _host, _viewTick, _seq);
             if (_online != null) Net.ShotCheck.GuestStep(_online, local, _seq, sent.ViewTick, _seq);
             _seq++;
             if (_seq % 600 == 0)

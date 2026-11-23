@@ -40,11 +40,15 @@ namespace MphRead.Entities
         // The campaign and older matches keep the DS six. Read by UpdateWeaponSelect (the DS radial's sectors), the ring
         // (PlayerWeaponRing.cs) and the app's stick-to-sector math (MphRecomp CampaignHost.WheelSector)
         public static bool HostSevenWeaponSlots { get; set; }
+        // ... and an eighth, the Hyper Beam (owner 2026-11-14, Ring A: straight up on the ring, last on the corner arc), with
+        // the seven and the Hyper Beam on (MatchStart: Characters.HyperBeamOn; replays read MatchSettings.HyperBeam)
+        public static bool HostEightWeaponSlots { get; set; }
 
-        public static int WeaponSlotCount => HostSevenWeaponSlots && GameState.Multiplayer ? 7 : 6;
+        public static int WeaponSlotCount => !HostSevenWeaponSlots || !GameState.Multiplayer ? 6 : HostEightWeaponSlots ? 8 : 7;
 
-        // the weapon in DS radial slot i (0 = Volt Driver ... 5 = Shock Coil, 6 = the Pirate Blaster)
-        public static BeamType WeaponSlotBeam(int slot) => slot == 6 ? BeamType.PirateBlaster : (BeamType)(slot == 0 ? 1 : slot + 2);
+        // the weapon in DS radial slot i (0 = Volt Driver ... 5 = Shock Coil, 6 = the Pirate Blaster, 7 = the Hyper Beam)
+        public static BeamType WeaponSlotBeam(int slot) => slot == 7 ? BeamType.HyperBeam : slot == 6 ? BeamType.PirateBlaster
+            : (BeamType)(slot == 0 ? 1 : slot + 2);
 
         // bolts of the current burst fired so far (0 = no burst)
         private int _burstShots = 0;
@@ -52,6 +56,7 @@ namespace MphRead.Entities
         // TryFireWeapon: a blaster shot went out (bolt 1)
         private void OnPirateBlasterShot(WeaponInfo weapon)
         {
+            OnHyperBeamShot(weapon); // recomp: a charged Hyper Beam release starts its stream (PlayerHyperBeam.cs)
             _burstShots = weapon.Beam == BeamType.PirateBlaster ? 1 : 0;
             if (_burstShots == 1)
             {
@@ -182,17 +187,31 @@ namespace MphRead.Entities
 
         public static IReadOnlyList<byte> PirateBlasterSelectIcon(HudObject weaponSelect)
         {
+            return MaskSelectIcon(weaponSelect, _blasterIconMask, colorFrame: 4);
+        }
+
+        // a weapon menu icon from a mask ('#' = edge, 'o' = inside), centred, in the colours of one of the set's frames
+        private static IReadOnlyList<byte> MaskSelectIcon(HudObject weaponSelect, string[] mask, int colorFrame)
+        {
             int w = weaponSelect.Width;
             int h = weaponSelect.Height;
-            (byte edge, byte fill) = IconColors(weaponSelect, frame: 4);
+            (byte edge, byte fill) = IconColors(weaponSelect, colorFrame);
+            int ox = (w - mask[0].Length) / 2;
+            int oy = (h - mask.Length) / 2;
             var data = new byte[w * h];
-            for (int y = 0; y < h && y < _blasterIconMask.Length; y++)
+            for (int my = 0; my < mask.Length; my++)
             {
-                string row = _blasterIconMask[y];
-                for (int x = 0; x < w && x < row.Length; x++)
+                string row = mask[my];
+                for (int mx = 0; mx < row.Length; mx++)
                 {
-                    byte value = row[x] == '#' ? edge : (row[x] == 'o' ? fill : (byte)0);
-                    data[(y / 8) * (w / 8) * 64 + (x / 8) * 64 + (y % 8) * 8 + (x % 8)] = value;
+                    int x = ox + mx;
+                    int y = oy + my;
+                    if (x < 0 || y < 0 || x >= w || y >= h)
+                    {
+                        continue;
+                    }
+                    byte value = row[mx] == '#' ? edge : (row[mx] == 'o' ? fill : (byte)0);
+                    data[TiledIndex(w, x, y)] = value;
                 }
             }
             return data;
@@ -219,22 +238,25 @@ namespace MphRead.Entities
             ".......#.....",
         };
 
-        // the animation index of the blaster's frame (added after the file's frames by SetUpWeaponIcon)
+        // the animation index of the blaster's frame and the Hyper Beam's (added after the file's frames by SetUpWeaponIcon)
         private int _blasterWeaponIconAnim = -1;
+        private int _hyperWeaponIconAnim = -1;
 
         private void SetUpWeaponIcon(HudObject weaponIcon)
         {
-            (IReadOnlyList<byte> frame, IReadOnlyList<ColorRgba> palette) = PirateBlasterWeaponIcon(weaponIcon);
+            (IReadOnlyList<byte> blaster, IReadOnlyList<ColorRgba> palette) = PirateBlasterWeaponIcon(weaponIcon);
+            IReadOnlyList<byte> hyper = HyperBeamWeaponIcon(weaponIcon).Frame; // the same palette (both colours)
             int size = weaponIcon.Width * weaponIcon.Height;
             int count = weaponIcon.CharacterData.Count;
-            var data = new byte[count + size];
+            var data = new byte[count + 2 * size];
             for (int i = 0; i < count; i++)
             {
                 data[i] = weaponIcon.CharacterData[i];
             }
             for (int i = 0; i < size; i++)
             {
-                data[count + i] = frame[i];
+                data[count + i] = blaster[i];
+                data[count + size + i] = hyper[i];
             }
             _weaponIconInst.SetCharacterData(data, _scene);
             _weaponIconInst.SetPaletteData(palette, _scene);
@@ -242,18 +264,35 @@ namespace MphRead.Entities
             var frames = new List<int>(_weaponIconInst.AnimFrames!);
             _blasterWeaponIconAnim = frames.Count;
             frames.Add(count / size);
+            _hyperWeaponIconAnim = frames.Count;
+            frames.Add(count / size + 1);
             _weaponIconInst.AnimFrames = frames;
         }
 
         // the weapon icon's animation index for a beam (the vanilla ones: the beam's index)
         private int WeaponIconAnim(BeamType beam)
         {
-            return beam == BeamType.PirateBlaster && _blasterWeaponIconAnim >= 0
-                ? _blasterWeaponIconAnim
-                : PirateBlaster.BaseIndex(beam);
+            if (beam == BeamType.PirateBlaster && _blasterWeaponIconAnim >= 0)
+            {
+                return _blasterWeaponIconAnim;
+            }
+            if (beam == BeamType.HyperBeam && _hyperWeaponIconAnim >= 0)
+            {
+                return _hyperWeaponIconAnim;
+            }
+            return PirateBlaster.BaseIndex(beam);
         }
 
         public static (IReadOnlyList<byte> Frame, IReadOnlyList<ColorRgba> Palette) PirateBlasterWeaponIcon(HudObject weaponIcon)
+        {
+            return CutWeaponIcon(weaponIcon, _blasterHudMask, colorSlot: 1);
+        }
+
+        // a HUD weapon icon with a new symbol (the mask's '#'), built from the set's Imperialist icon. The new colours go in
+        // the first palette slots no frame uses: +1 the blaster's, +2 the Hyper Beam's (both are always set, so one palette
+        // serves both frames); colorSlot picks which one this icon is in
+        private static (IReadOnlyList<byte> Frame, IReadOnlyList<ColorRgba> Palette) CutWeaponIcon(HudObject weaponIcon,
+            string[] mask, int colorSlot)
         {
             int w = weaponIcon.Width;
             int h = weaponIcon.Height;
@@ -342,8 +381,15 @@ namespace MphRead.Entities
             byte blaster = fill;
             if (top < 15)
             {
-                blaster = (byte)(top + 1);
-                palette[blaster] = new ColorRgba(255, 99, 33, 255); // the blaster's beam colour (RGB555 31,12,4)
+                palette[top + 1] = new ColorRgba(255, 99, 33, 255); // the blaster's beam colour (RGB555 31,12,4)
+            }
+            if (top < 14)
+            {
+                palette[top + 2] = _hyperIconColor;
+            }
+            if (top + colorSlot <= 15)
+            {
+                blaster = (byte)(top + colorSlot);
             }
             var dst = new byte[w, h];
             bool tile = holes >= 8;
@@ -377,15 +423,15 @@ namespace MphRead.Entities
             // the symbol, centred where the Imperialist's sits (the tile's centre, or the bare symbol's); by halfway between its
             // box and its weight (the mean of its pixels): the bolts lean up-right, so a centred box reads up-right (owner
             // 10-10) and a centred weight reads down-left
-            int mw = _blasterHudMask[0].Length;
-            int mh = _blasterHudMask.Length;
+            int mw = mask[0].Length;
+            int mh = mask.Length;
             float sumX = 0, sumY = 0;
             int count = 0;
             for (int my = 0; my < mh; my++)
             {
                 for (int mx = 0; mx < mw; mx++)
                 {
-                    if (_blasterHudMask[my][mx] == '#')
+                    if (mask[my][mx] == '#')
                     {
                         sumX += mx + 0.5f;
                         sumY += my + 0.5f;
@@ -401,7 +447,7 @@ namespace MphRead.Entities
                 {
                     int x = ox + mx;
                     int y = oy + my;
-                    if (_blasterHudMask[my][mx] == '#' && x >= 0 && y >= 0 && x < w && y < h)
+                    if (mask[my][mx] == '#' && x >= 0 && y >= 0 && x < w && y < h)
                     {
                         dst[x, y] = tile ? (byte)0 : blaster;
                     }

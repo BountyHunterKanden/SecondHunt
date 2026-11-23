@@ -170,7 +170,7 @@ namespace MphRecomp.Arenas
         }
 
         // world triangles (9 floats each, already facing out) as MPH entity collision, in place (the entity's Identity)
-        internal static CollisionInstance Shape(float[] t, string name, Terrain terrain = Terrain.Rock)
+        internal static CollisionInstance Shape(float[] t, string name, Terrain terrain = Terrain.Rock, bool players = true)
         {
             var editors = new List<CollisionDataEditor>();
             for (int k = 0; k + 8 < t.Length; k += 9)
@@ -183,7 +183,7 @@ namespace MphRecomp.Arenas
                 n.Normalize();
                 float ax = MathF.Abs(n.X), ay = MathF.Abs(n.Y), az = MathF.Abs(n.Z);
                 int axis = ay > ax && ay >= az ? 1 : az > ax && az > ay ? 2 : 0;
-                var ed = new CollisionDataEditor { Plane = new Vector4(n, Vector3.Dot(n, a)), LayerMask = (ushort)(4 | axis), Terrain = terrain, Beams = true, Players = true };
+                var ed = new CollisionDataEditor { Plane = new Vector4(n, Vector3.Dot(n, a)), LayerMask = (ushort)(4 | axis), Terrain = terrain, Beams = true, Players = players };
                 ed.Points.Add(a); ed.Points.Add(b); ed.Points.Add(c);
                 editors.Add(ed);
             }

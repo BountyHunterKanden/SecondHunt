@@ -98,9 +98,12 @@ namespace SecondHunt.Server
             app.Lifetime.ApplicationStopped.Register(store.Dispose);
             app.Lifetime.ApplicationStopped.Register(relay.Dispose);
             app.Lifetime.ApplicationStopped.Register(hub.Dispose);
+            // (0.10.3, HubDrain.cs: every session hears why before the sockets close; "drain restart ... exit" stops the app)
+            app.Lifetime.ApplicationStopping.Register(hub.ShuttingDown);
+            hub.StopApp = app.Lifetime.StopApplication;
             // (O5b: pings every 5 s and a 10 s timeout notice a dropped host within ~15 s, for host migration)
             app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(5), KeepAliveTimeout = TimeSpan.FromSeconds(10) });
-            app.MapGet("/v1/health", () => FormattableString.Invariant($"ok {Hub.ServerVersion} online {hub.OnlineCount} turn {hub.TurnGbThisMonth:0.00} GB{hub.ServedHealth}"));
+            app.MapGet("/v1/health", () => FormattableString.Invariant($"ok {Hub.ServerVersion} online {hub.OnlineCount} turn {hub.TurnGbThisMonth:0.00} GB{hub.ServedHealth}{hub.DrainHealth}"));
             // shared replays' files (0.9.0, HubReplays.cs): one-use tickets from the WebSocket requests
             app.MapPut("/v1/replays/{id}", async (HttpContext ctx, string id) =>
                 ctx.Response.StatusCode = await hub.PutReplay(id, ctx.Request.Query["t"], ctx.Request.Body, ctx.RequestAborted));

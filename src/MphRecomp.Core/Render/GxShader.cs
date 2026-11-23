@@ -126,6 +126,10 @@ namespace MphRecomp.Render
             // armour toward uTint by brightness, its lights (saturated and bright) toward uTint2; w = -1 multiplies the
             // material by the tint (an Echoes model particle's colour: CCubeMaterial's extra KONST x CPREV stage)
             "uniform vec4 uTint; uniform int uTintUnit; uniform vec4 uTint2;\n" +
+            // the gun's lights colour under a seat tint (uTint then holds the seat's: Beyond Sylux copies and teams, owner
+            // 2026-11-18 "the lights ... only change color on the default skin"): w as uTint's 1 (the whole material) or 2
+            // (texture unit uTintUnit: its stage reads black through the seat recolour, then is added back in this colour)
+            "uniform vec4 uGlowTint;\n" +
             // uTintWarm 1 (Overcharged Dark Samus's skin) and 3 (her phazon): under a seat tint their warm parts, the red
             // veins, keep their own colour, and 3 also keeps the phazon's white/pink sparkle. Neither takes a copy's lights
             // colour: it left a splotch on her forehead, as on the Varia helmets (owner 2026-11-04/05). 4 (the Prime drone,
@@ -311,7 +315,7 @@ namespace MphRecomp.Render
             "  bool anyFs=false;\n" +
             // the first texture's own colour, before lighting: a trooper copy colours only his coloured texels (the lit
             // colour made his black armour's shine bright enough to colour, owner 2026-10-29)
-            "  vec4 gT0=vec4(-1.0);\n" +
+            "  vec4 gT0=vec4(-1.0); vec3 gGl=vec3(0.0);\n" +
             // a trooper's glow layer: his 2nd stage adds a texture (x his KONST colour on Power) onto the lit black body; that
             // is exactly his coloured parts, so a copy swaps only it (owner 2026-10-29 "isolate the colored parts")
             "  vec3 gE=vec3(-1.0), gB=vec3(0.0), gS=vec3(0.0);\n" +
@@ -320,6 +324,7 @@ namespace MphRecomp.Render
             "    int tm=uDst[s].z;\n" +
             "    gTex = tm>=0 ? swz(smp(tm, tc(uDst[s].w)), uSwap[uKsel[s].w]) : vec4(0.0);\n" +
             "    if(uTint.w>1.5 && uTint.w<2.5 && tm==uTintUnit) gTex.rgb=uTint.rgb*max(gTex.r,max(gTex.g,gTex.b));\n" +
+            "    if(uGlowTint.w>1.5 && tm==uTintUnit){ gGl+=uGlowTint.rgb*max(gTex.r,max(gTex.g,gTex.b)); gTex.rgb=vec3(0.0); }\n" +
             "    if(tm>=0 && gT0.a<-0.5) gT0=vec4(gTex.rgb,1.0);\n" +
             "    if(uTintWarm==4 && tm>=0 && uNumStages==4 && (s==0 || s==3)) gTex.rgb = dZone(gTex.rgb);\n" +
             "    if(uTint2.w<-0.5 && uTintWarm!=4 && (s==0 || s==2) && tm>=0 && uTint.w>6.5 && uTint.w<10.5) gTex.rgb=trs(gTex.rgb, clamp(uTint.w>8.5 ? uTint.w-9.0 : uTint.w-7.0, 0.0, 1.0));\n" +
@@ -386,6 +391,8 @@ namespace MphRecomp.Render
             "  if(uTintWarm==1 || uTintWarm==3) fc=mix(fc, fc0, smoothstep(0.04,0.16,fc0.r-fc0.b));\n" +
             "  if(uTintWarm==3) fc=mix(fc, fc0, smoothstep(0.5,0.8,fc0.r));\n" +
             "  if(uTintWarm==4) fc=fc0;\n" +
+            "  if(uGlowTint.w>0.5 && uGlowTint.w<1.5) fc=uGlowTint.rgb*max(fc.r,max(fc.g,fc.b));\n" +
+            "  fc=min(fc+gGl,vec3(1.0));\n" +
             // MPH's double damage (PlayerDraw's binding, emission and texcoord overrides): a lit material shows the pickup's
             // texture as an environment map off the camera-space normal (plus its mesh UV), turning with time, lit with
             // MPH's grey emission (0x35AD) over the lights; no team colour, as in MPH (the damage flash still reddens it)

@@ -62,10 +62,21 @@ namespace MphRead.Entities
             _ragdoll = null;
             _ragdollHost = null;
             NetThrowSet = false;
+            NetDeathPoseSet = false;
+            _netRagdoll = null;
+            _netRest = null;
+            _netRestFor = 0;
             if (HostFirstHunt || IsAltForm || IsMorphing)
             {
                 return;
             }
+            // (online, a client builds from the host's pose at death, PlayerRagdollNet.cs; else this seat's own, as it is)
+            NetDeathPose? sentPose = _netApplyingDamage ? _netDeathPose : null;
+            NetDeathPose pose = sentPose is NetDeathPose given ? given with { HasRest = false } : NetDeathPoseHere();
+            AnimationInfo legs = sentPose != null
+                ? NetDeathClip(_bipedModel1, pose.LegsAnim, pose.LegsFrame) : _bipedModel1.AnimInfo;
+            AnimationInfo torso = sentPose != null
+                ? NetDeathClip(_bipedModel2, pose.TorsoAnim, pose.TorsoFrame) : _bipedModel2.AnimInfo;
             var poses = new Matrix4[2][];
             Matrix4 placement = Matrix4.Identity;
             for (int i = 0; i < 2; i++)
@@ -75,10 +86,10 @@ namespace MphRead.Entities
                 {
                     return;
                 }
-                poses[i] = RagdollPoseNow(_bipedModelLods[i].Model, spine, out placement);
+                poses[i] = RagdollPoseNow(_bipedModelLods[i].Model, spine, pose, legs, torso, out placement);
             }
             PlayerRagdoll? doll = PlayerRagdoll.Create(_bipedModelLods[0].Model, poses[0], _bipedModelLods[1].Model, poses[1],
-                _facingVector);
+                pose.Facing);
             if (doll == null)
             {
                 return;
@@ -152,13 +163,15 @@ namespace MphRead.Entities
             NetThrowSpeed = launchSpeed;
             NetThrowPush = launchPush;
             NetThrowSet = true;
-            if (!HostRagdoll)
+            _netDeathPoseNow = pose;
+            NetDeathPoseSet = true;
+            if (!HostRagdoll && !NetRagdollRest)
             {
                 return; // (worked out for the guests only)
             }
             doll.Launch(launchSpeed, launchPush);
             // (from the launch, the hunter and the body's facing alone, so a client's body varies as the host's)
-            doll.Vary(Hunter, new Vector3(_field70, 0, _field74), launchSpeed, launchPush);
+            doll.Vary(Hunter, pose.Lateral, launchSpeed, launchPush);
             // an electric death twitches before lying still (owner 2026-11-09). (An online client learns a Volt Driver
             // shot was charged from the seat snapshot's charged bit, PlayerNet.cs)
             bool charged = _netApplyingDamage ? _netDamageCharged : beam != null && beam.Flags.TestFlag(BeamFlags.Charged);
@@ -166,7 +179,7 @@ namespace MphRead.Entities
             {
                 // (on foot it stops in its pose and shakes first: owner 2026-11-10. On the ground's flags, which a
                 // client's copy of the seat keeps too)
-                doll.Twitch(onFoot: Flags1.TestFlag(PlayerFlags1.Standing) || Flags1.TestFlag(PlayerFlags1.StandingPrevious));
+                doll.Twitch(onFoot: pose.OnFoot);
             }
             // a Judicator death freezes stiff, then topples (owner 2026-11-09, step 3 batch B). (A burn no longer writhes,
             // Writhe: owner 2026-11-10, "im not sure i like magmauls effect at all"; a burn's last tick falls as any kill.)
@@ -185,21 +198,29 @@ namespace MphRead.Entities
                 doll.HeadSnap(launchPush);
             }
             doll.Placement = placement;
+            if (!HostRagdoll)
+            {
+                _netRagdoll = doll; // (the host's undrawn body, run for its rest alone)
+                return;
+            }
             _ragdoll = doll;
             _ragdollIceShown = false;
             if (_hostBody != null && _hostSpineNode != null)
             {
                 Model host = _hostBody.Model;
-                _ragdollHost = new PlayerRagdoll.HostPose(doll, host, RagdollPoseNow(host, _hostSpineNode, out _));
+                _ragdollHost = new PlayerRagdoll.HostPose(doll, host,
+                    RagdollPoseNow(host, _hostSpineNode, pose, legs, torso, out _));
             }
         }
 
         // the biped's world pose as the draw makes it (PlayerDraw: legs on layer 1, the upper body on layer 2 turned by
-        // the aim's pitch, then the seat's transform), without the host's float/cling/grapple poses
-        private Matrix4[] RagdollPoseNow(Model model, Node spineNode, out Matrix4 transform)
+        // the aim's pitch, then the seat's transform), without the host's float/cling/grapple poses. From a pose at death
+        // (this seat's own, or online the host's: PlayerRagdollNet.cs) and its two layers' clips
+        private Matrix4[] RagdollPoseNow(Model model, Node spineNode, NetDeathPose at, AnimationInfo legs,
+            AnimationInfo torso, out Matrix4 transform)
         {
             spineNode.AnimIgnoreChild = true;
-            Vector3 facing = _facingVector;
+            Vector3 facing = at.Facing;
             float limit = Fixed.ToFloat(2896);
             float cos = MathF.Sqrt(1 - facing.Y * facing.Y);
             float sin = facing.Y;
@@ -210,18 +231,19 @@ namespace MphRead.Entities
             }
             float angle = MathF.Atan2(sin, cos);
             spineNode.AfterTransform = DetMatrix.CreateRotationZ(angle);
-            model.AnimateNodes(index: 0, false, Matrix4.Identity, Vector3.One, _bipedModel1.AnimInfo);
+            model.AnimateNodes(index: 0, false, Matrix4.Identity, Vector3.One, legs);
             spineNode.AnimIgnoreChild = false;
-            model.AnimateNodes(spineNode.ChildIndex, false, Matrix4.Identity, Vector3.One, _bipedModel2.AnimInfo);
+            model.AnimateNodes(spineNode.ChildIndex, false, Matrix4.Identity, Vector3.One, torso);
             spineNode.AfterTransform = null;
             float scale = Metadata.HunterScales[Hunter];
             float bottom = Fixed.ToFloat(Values.MinPickupHeight);
-            var lateral = new Vector3(_field70, 0, _field74);
+            Vector3 lateral = at.Lateral;
+            Vector3 gun = at.Gun;
             transform = Matrix4.Identity;
-            transform.Row0.Xyz = -_gunVec2;
-            transform.Row1.Xyz = Vector3.Cross(lateral, _gunVec2);
+            transform.Row0.Xyz = -gun;
+            transform.Row1.Xyz = Vector3.Cross(lateral, gun);
             transform.Row2.Xyz = -lateral;
-            transform.Row3.Xyz = Position;
+            transform.Row3.Xyz = at.Position;
             transform.Row3.Y += bottom + bottom * (1 - scale);
             transform.Row0.Xyz *= scale;
             transform.Row1.Xyz *= scale;
@@ -237,7 +259,7 @@ namespace MphRead.Entities
         // each 60 Hz step while dead (ProcessPlayer)
         private void RagdollStep()
         {
-            if (_ragdoll == null)
+            if (_ragdoll == null && _netRagdoll == null)
             {
                 return;
             }
@@ -245,17 +267,25 @@ namespace MphRead.Entities
             {
                 _ragdoll = null;
                 _ragdollHost = null;
+                _netRagdoll = null;
+                _netRest = null;
+                _netRestFor = 0;
                 return;
             }
-            _ragdoll.Step(_scene);
-            // (a frozen body's ice breaks as it lands: vanilla's thaw, its sound and shards, once; only a body that showed
-            // the ice, and as cosmetic as the thaw's: Rng1 and sound, nothing a peer or a replay keeps)
-            if (_ragdoll.IceBrokeNow && _ragdollIceShown)
+            _netRagdoll?.Step(_scene);
+            if (_ragdoll != null)
             {
-                _ragdollIceShown = false;
-                _soundSource.PlaySfx(SfxId.SHOTGUN_BREAK_FREEZE);
-                CreateIceBreakEffectBiped(_bipedIceModel.Model);
+                _ragdoll.Step(_scene);
+                // (a frozen body's ice breaks as it lands: vanilla's thaw, its sound and shards, once; only a body that
+                // showed the ice, and as cosmetic as the thaw's: Rng1 and sound, nothing a peer or a replay keeps)
+                if (_ragdoll.IceBrokeNow && _ragdollIceShown)
+                {
+                    _ragdollIceShown = false;
+                    _soundSource.PlaySfx(SfxId.SHOTGUN_BREAK_FREEZE);
+                    CreateIceBreakEffectBiped(_bipedIceModel.Model);
+                }
             }
+            NetRagdollStep(); // (online: the host's rest, a client's ease onto it)
         }
 
         // the ragdoll is drawn: shown, and it has a pose for the body the draw uses (a host body whose bones it couldn't
@@ -300,7 +330,7 @@ namespace MphRead.Entities
         }
     }
 
-    public class PlayerRagdoll
+    public partial class PlayerRagdoll
     {
         public const int Pelvis = 0;
         public const int Chest = 1;
@@ -384,6 +414,14 @@ namespace MphRead.Entities
         private const float StillMove = 0.002f;
         private const int StillTicks = 30;
         private const int MaxTicks = 360;
+        // (in the air: this many steps with no point on a floor. It doesn't settle or sleep there, owner 2026-11-12: "with
+        // ragdoll you can fall slowly through the air like a feather instead of falling with gravity")
+        private const int AirTicks = 6;
+        private const int MaxAirTicks = 1200; // (20 s: one falling for good sleeps anyway)
+        private const int LandSettle = 60;
+        private const int LandMax = 240;
+        private const float SupportReach = 0.3f; // (a hold's floor check: this far under any point. A standing body's
+        // lowest points are ~0.11 up at death)
 
         public sealed class HostPose
         {
@@ -465,6 +503,25 @@ namespace MphRead.Entities
         public bool IceBroken { get; private set; }
         public bool IceBrokeNow { get; private set; }
         private bool _landed;
+        // the steps since a point was last on a floor (a contact facing up past LandFloor), and whether one is this step:
+        // a body in the air falls as gravity has it, whatever its death (owner 2026-11-12)
+        private int _airTicks;
+        private bool _footing;
+        // (the step it last came down after AirTicks or more in the air: the settle and the time limit wait for
+        // LandSettle and LandMax after it, so a long fall's landing tumbles and settles instead of stopping dead)
+        private int _landedAt;
+        // a freeze with nothing under it: no hold in mid-air, the statue falls as it froze until it lands
+        private bool _freezeFall;
+        // a freeze's topple, each point's share of it (taken off again when it froze in the air: with nothing to go over
+        // on it falls as one piece, owner 2026-11-12)
+        private Vector3[]? _topple;
+        // an iced body's turn at its last step (radians a step): off a floor it never turns faster than this, or than
+        // IceTurn when it hit something that step
+        private float _iceTurn;
+        // whether any point hit a face this step
+        private bool _hitNow;
+        // a headshot's tilt: the share of the launch it took off each point, given back if the tilt turns out to be in the air
+        private Vector3[]? _tiltLaunch;
         // the hunter's looseness (Vary): how far the spine's and head's range sticks give, times their limits' give
         private float _loose = 1;
 
@@ -523,6 +580,13 @@ namespace MphRead.Entities
             copy.IceBroken = IceBroken;
             copy.IceBrokeNow = IceBrokeNow;
             copy._landed = _landed;
+            copy._airTicks = _airTicks;
+            copy._footing = _footing;
+            copy._landedAt = _landedAt;
+            copy._freezeFall = _freezeFall;
+            copy._topple = _topple; // (never changed once set)
+            copy._iceTurn = _iceTurn;
+            copy._tiltLaunch = _tiltLaunch; // (never changed once set)
             copy._snapEnd = _snapEnd;
             copy._nodNow = _nodNow;
             copy._snapNow = _snapNow;
@@ -550,6 +614,18 @@ namespace MphRead.Entities
                 }
             }
             return worst;
+        }
+
+        // the whole body moved as it is, before its first step (the Tools check's mid-air deaths, -ragdollair)
+        public void Shift(Vector3 by)
+        {
+            for (int i = 0; i < PointCount; i++)
+            {
+                Pos[i] += by;
+                Prev[i] += by;
+                Start[i] += by;
+                _clear[i] += by;
+            }
         }
 
         // null when the rig lacks a joint or its shape can't make frames (that death keeps the collapse clip)
@@ -1098,6 +1174,7 @@ namespace MphRead.Entities
             _freezeEnd = FreezeTicks;
             _stiffEnd = FreezeTicks + StiffTicks;
             _stiffHold = StiffHold;
+            _iceTurn = 0;
             if (!TryFrame(Pos[RHip] - Pos[LHip], Pos[Chest] - Pos[Pelvis], out Matrix3 frame))
             {
                 _stiffEnd = _freezeEnd; // (no frame: held, then loose)
@@ -1128,9 +1205,11 @@ namespace MphRead.Entities
             // (the launch as one move, the whole body's: Vary's twist and tumble differ point to point, and let go under
             // the held shape they spun the frozen body fast as it fell, owner 2026-11-10)
             went /= PointCount;
+            _topple = new Vector3[PointCount];
             for (int i = 0; i < PointCount; i++)
             {
-                Prev[i] = Pos[i] - went - way * (ToppleSpeed * (Pos[i].Y - low));
+                _topple[i] = way * (ToppleSpeed * (Pos[i].Y - low));
+                Prev[i] = Pos[i] - went - _topple[i];
             }
         }
 
@@ -1141,6 +1220,10 @@ namespace MphRead.Entities
         private const float LandFloor = 0.5f; // (a contact's normal this far up: a floor, for the ice's break)
         private const int IceStill = 6;
         private const int IceCap = 90;
+        // (an iced body off a floor that hits something turns no faster than this, radians a step (~120 degrees a second),
+        // unless it was already turning faster: a ledge or overhang it clips on the way down tips it, it doesn't spin it up.
+        // In the open it turns no faster than it was: the held shape's pull against the sticks spun it up to this cap)
+        private const float IceTurn = 0.035f;
 
         // a headshot kill: the head snaps back on the neck, the way the shot went, ahead of the body. The neck gives more
         // than its nod for a moment, then firms up again (from the launch's push alone, so online and replays agree)
@@ -1170,8 +1253,10 @@ namespace MphRead.Entities
                 }
                 // (the shot's throw goes into the head: the body keeps only some of it, or it is flat in a quarter second
                 // whatever holds it)
+                _tiltLaunch = new Vector3[PointCount];
                 for (int i = 0; i < PointCount; i++)
                 {
+                    _tiltLaunch[i] = (Pos[i] - Prev[i]) * (1 - TiltCarry);
                     Prev[i] = Pos[i] - (Pos[i] - Prev[i]) * TiltCarry - way * (TiltSpeed * (Pos[i].Y - low));
                 }
                 _stiffEnd = TiltTicks;
@@ -1355,6 +1440,78 @@ namespace MphRead.Entities
             }
         }
 
+        // an iced body's motion after a step. Off a floor it moves as one piece: each point's move made the whole body's,
+        // its going and its turn kept, so a bump on a wall or the held shape's pull can't set it flailing. And whatever it
+        // hits, it never comes out with more motion than it had and its drop gave it, so a push out of a face can't throw
+        // it or spin it up (owner 2026-11-12: frozen and killed in the air, "the really fast spinny thing", then "flipped
+        // around and tossed through the air wildly")
+        private void MoveIce(float motion, bool rigid)
+        {
+            Vector3 middle = Vector3.Zero;
+            Vector3 went = Vector3.Zero;
+            for (int i = 0; i < PointCount; i++)
+            {
+                middle += Pos[i];
+                went += Pos[i] - Prev[i];
+            }
+            middle /= PointCount;
+            went /= PointCount;
+            // (the turn: the inertia's inverse on the turning, by Cramer's rule)
+            Vector3 l = Vector3.Zero;
+            float xx = 0, yy = 0, zz = 0, xy = 0, xz = 0, yz = 0;
+            for (int i = 0; i < PointCount; i++)
+            {
+                Vector3 r = Pos[i] - middle;
+                l += Vector3.Cross(r, Pos[i] - Prev[i] - went);
+                xx += r.Y * r.Y + r.Z * r.Z;
+                yy += r.X * r.X + r.Z * r.Z;
+                zz += r.X * r.X + r.Y * r.Y;
+                xy -= r.X * r.Y;
+                xz -= r.X * r.Z;
+                yz -= r.Y * r.Z;
+            }
+            float det = xx * (yy * zz - yz * yz) - xy * (xy * zz - yz * xz) + xz * (xy * yz - yy * xz);
+            Vector3 w = Vector3.Zero;
+            if (MathF.Abs(det) > 1e-6f)
+            {
+                w.X = (l.X * (yy * zz - yz * yz) - xy * (l.Y * zz - yz * l.Z) + xz * (l.Y * yz - yy * l.Z)) / det;
+                w.Y = (xx * (l.Y * zz - yz * l.Z) - l.X * (xy * zz - yz * xz) + xz * (xy * l.Z - l.Y * xz)) / det;
+                w.Z = (xx * (yy * l.Z - l.Y * yz) - xy * (xy * l.Z - l.Y * xz) + l.X * (xy * yz - yy * xz)) / det;
+            }
+            float turn = w.Length;
+            if (rigid)
+            {
+                // (no faster a turn than it had, or IceTurn when it hit something: a clip on a ledge or an overhang on the
+                // way down took the fall's speed into a spin of 600-1200 degrees a second)
+                float cap = _hitNow ? MathF.Max(IceTurn, _iceTurn) : _iceTurn;
+                if (turn > cap)
+                {
+                    w *= cap / turn;
+                    turn = cap;
+                }
+                for (int i = 0; i < PointCount; i++)
+                {
+                    Prev[i] = Pos[i] - went - Vector3.Cross(w, Pos[i] - middle);
+                }
+            }
+            _iceTurn = turn;
+            float now = 0;
+            float most = motion;
+            for (int i = 0; i < PointCount; i++)
+            {
+                now += 0.5f * (Pos[i] - Prev[i]).LengthSquared;
+                most += Gravity * (_start[i].Y - Pos[i].Y);
+            }
+            if (now > most)
+            {
+                float keep = most > 0 ? MathF.Sqrt(most / now) : 0;
+                for (int i = 0; i < PointCount; i++)
+                {
+                    Prev[i] = Pos[i] - (Pos[i] - Prev[i]) * keep;
+                }
+            }
+        }
+
         public void Step(Scene scene)
         {
             IceBrokeNow = false;
@@ -1362,13 +1519,44 @@ namespace MphRead.Entities
             {
                 return;
             }
-            if (Ticks < _freezeEnd)
+            if (Ticks < _freezeEnd && !_freezeFall)
             {
-                // (held where it froze, the launch waiting in Prev)
-                Ticks++;
-                Moved = 0;
-                StillCount = 0;
-                return;
+                if (Supported(scene))
+                {
+                    // (held where it froze, the launch waiting in Prev)
+                    Ticks++;
+                    Moved = 0;
+                    StillCount = 0;
+                    return;
+                }
+                // (nothing under it, frozen in the air: no hold hanging there, the statue falls as it froze, with its
+                // launch, and the hold's time waits for it to land. Not its topple: nothing under it to go over on, and
+                // let go in the air the topple was only a spin, owner 2026-11-12: "nothing inherent about the freeze death
+                // that makes the hunter spin around")
+                _freezeFall = true;
+                if (_topple != null)
+                {
+                    for (int i = 0; i < PointCount; i++)
+                    {
+                        Prev[i] += _topple[i];
+                    }
+                }
+            }
+            if (Ticks < _shockEnd && !Supported(scene))
+            {
+                // (nothing under it, whatever the ground flags said, a jump's first steps or a ledge: no shaking stop in
+                // mid-air, it falls twitching as a death in the air does, with its launch)
+                if (Ticks > 0)
+                {
+                    for (int i = 0; i < PointCount; i++)
+                    {
+                        Pos[i] = _shockPose![i];
+                        Prev[i] = Pos[i] - _shockWent;
+                    }
+                }
+                _shockEnd = Ticks;
+                _twitchFrom = Ticks + TwitchStart;
+                _twitchEnd = _twitchFrom + TwitchTicks;
             }
             if (Ticks < _shockEnd)
             {
@@ -1389,14 +1577,24 @@ namespace MphRead.Entities
                 Moved = 0;
                 return;
             }
-            _stiffNow = Ticks < _stiffEnd ? _stiffHold * (1 - (Ticks - _freezeEnd) / (float)(_stiffEnd - _freezeEnd)) : 0;
+            if (_freezeFall && _airTicks == Ticks && Ticks + 1 >= _freezeEnd)
+            {
+                // (a statue still falling, not yet on a floor since it froze: still frozen)
+                _freezeEnd = Ticks + 1;
+                _stiffEnd = _freezeEnd + StiffTicks;
+            }
+            _stiffNow = Ticks >= _stiffEnd ? 0 : Ticks < _freezeEnd ? _stiffHold
+                : _stiffHold * (1 - (Ticks - _freezeEnd) / (float)(_stiffEnd - _freezeEnd));
             _nodNow = Ticks < _snapEnd ? SnapGive * (1 - Ticks / (float)SnapTicks) : 0;
             _snapNow = Ticks < _snapEnd ? SnapPull * MathF.Min(1, (_snapEnd - Ticks) / (float)(SnapTicks - SnapHold)) : 0;
             TwitchKicks();
             WritheKicks();
             _landed = false;
-            // (once the fall is over, more damping so a body caught on an edge settles instead of trembling)
-            float damping = Ticks < SettleTicks ? Damping : SettleDamping;
+            _footing = false;
+            // (once the fall is over, more damping so a body caught on an edge settles instead of trembling; not in the
+            // air, where it held a long fall to a slow sink)
+            float damping = Ticks < Math.Max(SettleTicks, _landedAt + LandSettle) || _airTicks >= AirTicks ? Damping
+                : SettleDamping;
             float slow = 1;
             if (_snapEnd > 0 && Ticks < _stiffEnd)
             {
@@ -1406,6 +1604,22 @@ namespace MphRead.Entities
                 float t = Ticks / (float)_stiffEnd;
                 slow = MathF.Min(1, TiltRate * (TiltSlow + (1 - TiltSlow) * t * t));
                 _stiffNow = _stiffHold * (1 - t);
+                if (slow < 1 && !Supported(scene))
+                {
+                    // (nothing under it, a headshot in the air, or the tilt took it off a ledge: no slow tilt hanging in
+                    // mid-air. It falls limp from here as gravity has it, the head still snapped back; shot in the air, with
+                    // the launch the tilt took off. Owner 2026-11-12)
+                    slow = 1;
+                    _stiffEnd = Ticks;
+                    _stiffNow = 0;
+                    if (Ticks == 0 && _tiltLaunch != null)
+                    {
+                        for (int i = 0; i < PointCount; i++)
+                        {
+                            Prev[i] -= _tiltLaunch[i];
+                        }
+                    }
+                }
             }
             if (Iced || Ticks < _stiffEnd)
             {
@@ -1430,12 +1644,15 @@ namespace MphRead.Entities
             // moves the size of an ordinary death's: the turret and Omega Cannon throws, owner 2026-11-08; up to 4 since their
         // 11-09 ramp, 2 capped them at ~1 a step)
             float fastest = 0;
+            float motion = 0;
             for (int i = 0; i < PointCount; i++)
             {
                 _start[i] = Pos[i];
                 fastest = MathF.Max(fastest, (Pos[i] - Prev[i]).Length * damping);
+                motion += 0.5f * (Pos[i] - Prev[i]).LengthSquared;
             }
             int steps = Math.Clamp((int)MathF.Ceiling(fastest / MaxStep), 1, MaxSubsteps);
+            _hitNow = false;
             if (steps == 1)
             {
                 SubStep(scene, damping, gravity);
@@ -1455,6 +1672,17 @@ namespace MphRead.Entities
                     Prev[i] = Pos[i] - (Pos[i] - Prev[i]) * steps;
                 }
             }
+            if (Iced)
+            {
+                MoveIce(motion, rigid: !_footing);
+            }
+            // (a statue come down on a floor from the air, frozen there or toppled off an edge: it shatters there)
+            bool fell = Iced && _footing && (_freezeFall || _airTicks >= AirTicks);
+            if (_footing && _airTicks >= AirTicks)
+            {
+                _landedAt = Ticks;
+            }
+            _airTicks = _footing ? 0 : _airTicks + 1;
             float moved = 0;
             for (int i = 0; i < PointCount; i++)
             {
@@ -1465,7 +1693,7 @@ namespace MphRead.Entities
             LetGo += Iced ? 0 : _stiffHold > 0 ? 1 - _stiffNow / _stiffHold : 1;
             StillCount = moved < StillMove ? StillCount + 1 : 0;
             // (or, when it never lands on its top half, once the topple's over and it's come to rest)
-            if (Iced && (_landed || Ticks >= _stiffEnd && StillCount >= IceStill || Ticks >= _stiffEnd + IceCap))
+            if (Iced && (_landed || fell || Ticks >= _stiffEnd && StillCount >= IceStill || Ticks >= _stiffEnd + IceCap))
             {
                 IceBroken = true;
                 IceBrokeNow = true;
@@ -1477,15 +1705,46 @@ namespace MphRead.Entities
                     went += Pos[i] - Prev[i];
                 }
                 went /= PointCount;
+                if (fell || _freezeFall)
+                {
+                    // (shattered where it came down: limp from here, so it tumbles only as its fall has it. The held
+                    // shape's pull after the break turned the fall into a fling, flipping the body over and up)
+                    _stiffEnd = Ticks;
+                }
+                if (_freezeFall)
+                {
+                    // (and the floor takes a fall from the air: a statue lands upright at the full speed of its fall, where
+                    // a limp body has crumpled on the way down, so the speed into the floor went into the collapse as a
+                    // flail and a spin. Not one toppled off an edge: it went over first, and comes down already turning)
+                    went.Y = MathF.Max(went.Y, 0);
+                }
                 for (int i = 0; i < PointCount; i++)
                 {
                     Prev[i] = Pos[i] - went;
                 }
             }
-            if ((StillCount >= StillTicks || Ticks >= MaxTicks) && !Twitching)
+            // (not in the air for running out of time: it would hang there. MaxAirTicks for one that never lands)
+            if ((StillCount >= StillTicks || Ticks >= Math.Max(MaxTicks, _landedAt + LandMax) && _airTicks < AirTicks)
+                && !Twitching || Ticks >= MaxAirTicks)
             {
                 Asleep = true;
             }
+        }
+
+        // whether a floor is under the body: within SupportReach under any point. A freeze's or an electric death's hold
+        // and a headshot's slow tilt only stand a body on its feet; one killed in the air falls (owner 2026-11-12)
+        private bool Supported(Scene scene)
+        {
+            for (int i = 0; i < PointCount; i++)
+            {
+                var result = new CollisionResult();
+                if (CollisionDetection.CheckBetweenPoints(Pos[i], Pos[i] - Vector3.UnitY * SupportReach, TestFlags.None, scene,
+                    ref result) && result.Plane.Y > LandFloor)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void SubStep(Scene scene, float damping, float gravity)
@@ -1541,24 +1800,33 @@ namespace MphRead.Entities
                 Vector3 n = _contact[i];
                 if (n != Vector3.Zero)
                 {
+                    _hitNow = true;
                     n.Normalize();
-                    if (n.Y > LandFloor && (i == Chest || i == Neck || i == HeadTop || i == LShoulder || i == RShoulder))
+                    if (n.Y > LandFloor)
                     {
-                        _landed = true;
+                        _footing = true;
+                        if (i == Chest || i == Neck || i == HeadTop || i == LShoulder || i == RShoulder)
+                        {
+                            _landed = true;
+                        }
                     }
                     Vector3 v = Pos[i] - Prev[i];
                     float dot = Vector3.Dot(v, n);
                     Vector3 tangent = v - n * dot;
                     // (a slow slide sticks where it was, so a body on a gentle slope comes to rest instead of creeping)
-                    // (not while writhing: its slow squirm would stick fast)
-                    if (tangent.Length < StaticSlip && Ticks >= _writheEnd)
+                    // (not while writhing: its slow squirm would stick fast) (in the air, on a floor only, and the rub less
+                    // the steeper the face: against a wall with nothing under it, it slides down as it falls instead of
+                    // sticking there or sinking slowly, owner 2026-11-12. On its feet it rubs as before)
+                    bool air = _airTicks >= AirTicks;
+                    if (tangent.Length < StaticSlip && Ticks >= _writheEnd && (n.Y > LandFloor || !air))
                     {
                         Pos[i] -= tangent;
                         Prev[i] = Pos[i];
                     }
                     else
                     {
-                        Prev[i] = Pos[i] - tangent * Friction;
+                        float grip = air ? Math.Clamp(n.Y / LandFloor, 0, 1) : 1;
+                        Prev[i] = Pos[i] - tangent * (1 - (1 - Friction) * grip);
                     }
                 }
             }

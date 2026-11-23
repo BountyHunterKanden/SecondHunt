@@ -166,7 +166,7 @@ internal sealed partial class CampaignRenderer
             {
                 if (moves) carry = move * phase;
                 Vector3 pos = _sfPos1 + carry, fwd = _sfFwd1, up = _sfUp1;
-                if (turns)
+                if (turns && !TurnLevel(_sfFwd0, _sfFwd1, phase, ref fwd, ref up)) // level, no roll (TurnLevel)
                 {
                     axis /= sin;
                     fwd = Rotate(fwd, axis, angle * phase);
@@ -205,6 +205,32 @@ internal sealed partial class CampaignRenderer
     {
         float c = MathF.Cos(angle), s = MathF.Sin(angle);
         return v * c + Vector3.Cross(axis, v) * s + axis * (Vector3.Dot(axis, v) * (1 - c));
+    }
+
+    // Turns a view (fwd, up) by share of the turn that takes direction from to direction to, as the game turns: a pitch
+    // about from's own level side axis, then a yaw about the world's up. The shortest-arc turn (about from x to) tips
+    // that axis when the view looks up or down, so a left-right turn also rolled the picture, by about the yaw times
+    // the sine of the pitch (looking 45 degrees down, a 10 degree lead rolled it 7 degrees): the "rocking camera when
+    // turning, worse when looking low" a player reported on 2026-11-22. False (nothing turned) when from or to is
+    // too near straight up or down to have a heading; the caller keeps the step's view then.
+    static bool TurnLevel(Vector3 from, Vector3 to, float share, ref Vector3 fwd, ref Vector3 up)
+    {
+        Vector3 fh = new(from.X, 0, from.Z), th = new(to.X, 0, to.Z);
+        if (fh.LengthSquared < 1e-6f || th.LengthSquared < 1e-6f) return false;
+        float pitch = MathF.Asin(Math.Clamp(to.Y, -1f, 1f)) - MathF.Asin(Math.Clamp(from.Y, -1f, 1f));
+        float yaw = MathF.Atan2(Vector3.Cross(fh, th).Y, Vector3.Dot(fh, th));
+        if (pitch != 0)
+        {
+            Vector3 side = Vector3.Cross(from, Vector3.UnitY).Normalized();
+            fwd = Rotate(fwd, side, pitch * share);
+            up = Rotate(up, side, pitch * share);
+        }
+        if (yaw != 0)
+        {
+            fwd = Rotate(fwd, Vector3.UnitY, yaw * share);
+            up = Rotate(up, Vector3.UnitY, yaw * share);
+        }
+        return true;
     }
 
     // the entity the camera follows: drawn from the step's view, so it holds its place in the picture (a replay watching

@@ -258,6 +258,7 @@ namespace MphRecomp.Frontend
                         _friendsOn = new List<PlayerCard>();
                         _found = null;
                         s_licenseSent = null;
+                        HoldLicense(false); // (a new hunter: nothing online to keep)
                         Import.Popup?.Close();
                         menu.GoTo(MultiplayerMenu.TypePage); // (out of ONLINE PLAY: no new profile until the next visit)
                         Import.Popup?.Inform("your online profile is deleted.\n\nnext time you go online, you start as a new hunter.");
@@ -299,6 +300,7 @@ namespace MphRecomp.Frontend
                 _recent = new List<PlayerCard>();
                 _friendsOn = new List<PlayerCard>();
                 s_licenseSent = null;
+                HoldLicense(true); // (this device's license waits for the hunter's online card: OnlineMenus.License.cs)
                 _stCodeText = FriendCodes.Format(id.FriendCode);
                 StreamerPrivacy.SetOwnCode(id.FriendCode);
                 if (_stepMenu?.Page is { } now && IsOnline(now.Index)) RefreshOnline(lists: true); // (not from the ONLINE tab)

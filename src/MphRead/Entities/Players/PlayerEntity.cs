@@ -257,6 +257,8 @@ namespace MphRead.Entities
         private readonly AvailableArray _availableCharges = new AvailableArray();
         private AbilityFlags _abilities;
         private readonly BeamProjectileEntity[] _beams;
+        // recomp: MphRead's 16 shot slots, then the charged Hyper Beam's own (HyperBeam.StreamPool; ChooseBeamSlot)
+        public const int BeamPool = 16;
         public EquipInfo EquipInfo { get; } = new EquipInfo();
         private WeaponInfo EquipWeapon => EquipInfo.Weapon;
         public BeamType CurrentWeapon { get; private set; }
@@ -486,7 +488,7 @@ namespace MphRead.Entities
         private PlayerEntity(int slotIndex, Scene scene) : base(EntityType.Player, scene)
         {
             SlotIndex = slotIndex;
-            _beams = SceneSetup.CreateBeamList(16, scene); // in-game: 5
+            _beams = SceneSetup.CreateBeamList(BeamPool + HyperBeam.StreamPool, scene); // in-game: 5
             AiData = new PlayerAiData(this);
         }
 
@@ -579,6 +581,7 @@ namespace MphRead.Entities
             ShieldWallInit(); // recomp: the Trooper's Shield Wall (PlayerShield.cs); nothing unless HostShieldWall
             WallClingInit(); // recomp: the Trooper's Wall Cling (PlayerWallCling.cs)
             ScoutDroneInit(); // recomp: the Trooper's Scout Drone alt form (PlayerScoutDrone.cs)
+            CrawlInit(); // recomp: Brawl Zero Suit Samus's army crawl alt form (PlayerCrawl.cs); nothing unless HostCrawl
             _trailModel = Read.GetModelInstance("trail");
             Material material = _trailModel.Model.Materials[0];
             _trailBindingId1 = _scene.BindGetTexture(_trailModel.Model, material.TextureId, material.PaletteId, 0);
@@ -593,6 +596,7 @@ namespace MphRead.Entities
             {
                 Values = GameFilters.PatchValues(SlotIndex, Hunter.ToString(), Values);
             }
+            CrawlValues(); // recomp: her crawl strafes as Trace's alt form (PlayerCrawl.cs)
             _hudObjects = HudElements.HunterObjects[(int)Hunter];
             if (IsMainPlayer)
             {
@@ -728,11 +732,13 @@ namespace MphRead.Entities
         public void Spawn(Vector3 pos, Vector3 facing, Vector3 up, NodeRef nodeRef, bool respawn)
         {
             NetAimEpoch++; // network play: the game re-aims the player (PlayerNet.cs)
+            NetLifeId = (ushort)(NetLifeId == UInt16.MaxValue ? 1 : NetLifeId + 1); // (a new life: Fruity P4, PlayerNet.cs)
+            NetShotEventsSpawn(); // (and fires none of the old life's shot events: Fruity P2, PlayerNetShotEvents.cs)
             LoadFlags |= LoadFlags.Spawned;
             UpdateDoubleDamageSfx(index: 0, play: false); // recomp: every seat (a replay may watch it; MphRead: IsMainPlayer)
             UpdateCloakSfx(index: 0, play: false);
             _abilities = AbilityFlags.AltForm;
-            if (Hunter == Hunter.Samus)
+            if (Hunter == Hunter.Samus && !HostCrawl) // recomp: her army crawl has neither (PlayerCrawl.cs)
             {
                 _abilities |= AbilityFlags.Bombs;
                 _abilities |= AbilityFlags.Boost;
@@ -2079,7 +2085,7 @@ namespace MphRead.Entities
                         else
                         {
                             _sfxStopTimer = 10 / 30f;
-                            // todo: rumble
+                            Rumble.Death(); // recomp: 1P death rumble (0x2017f3c: 15, 110)
                             _soundSource.PlayFreeSfx(SfxId.SAMUS_DEATH);
                         }
                     }
@@ -2380,10 +2386,13 @@ namespace MphRead.Entities
                             }
                             else
                             {
+                                // recomp: the Scout Drone's blaster shots count as the Trooper's alt-form kills (SCOUT DRONE), as
+                                // its laser's do, not as Power Beam kills (its shots borrow the Power Beam; PlayerScoutDrone.cs)
+                                bool droneShot = droneKill && !flags.TestFlag(DamageFlags.FromAlt);
                                 if (attacker == Main)
                                 {
                                     // todo: update license info
-                                    HostLicenseKill?.Invoke(flags, beamType);
+                                    HostLicenseKill?.Invoke(droneShot ? flags | DamageFlags.FromAlt : flags, droneShot ? BeamType.Platform : beamType);
                                 }
                                 if (attacker.HudViewer) // recomp: HudViewer (was the same attacker == Main block)
                                 {
@@ -2402,7 +2411,11 @@ namespace MphRead.Entities
                                 {
                                     GameState.KillsAsPrime[attacker.SlotIndex]++;
                                 }
-                                if (beamType <= BeamType.OmegaCannon)
+                                if (droneShot)
+                                {
+                                    GameState.AltDamageCount[attacker.SlotIndex]++; // recomp (above)
+                                }
+                                else if (beamType <= BeamType.OmegaCannon)
                                 {
                                     GameState.BeamKills[attacker.SlotIndex, (int)beamType]++;
                                     // todo: update license info
@@ -2737,9 +2750,9 @@ namespace MphRead.Entities
                 }
                 CameraInfo.SetShake(shake);
             }
-            if (IsMainPlayer)
+            if (HudViewer) // recomp: was IsMainPlayer; a replay rumbles for the watched seat, never in free cam (PlayerHud.cs)
             {
-                // todo: rumble
+                Rumble.Damage(damage); // recomp: host-only, no game state
             }
         }
 

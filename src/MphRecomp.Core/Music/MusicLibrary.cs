@@ -111,7 +111,7 @@ namespace MphRecomp.PrimeMusic
             {
                 // the mode's music changes (Capture, Defender: tracks 1 and 2) keep the song playing
                 if (roomId == _room && _playing != null) return true;
-                Track? song = MusicLibrary.Resolve(Choice, ImportRoot, Hidden, s_last, s_rng);
+                Track? song = MusicLibrary.Resolve(Choice, ImportRoot, Hidden, s_last, s_rng) ?? RoomSong(roomId);
                 if (song != null && Play(song))
                 {
                     _room = roomId;
@@ -121,6 +121,16 @@ namespace MphRecomp.PrimeMusic
             }
             if (_playing != null) Stop(0);
             return _inner?.PlayRoom(roomId, track) == true;
+        }
+
+        // with the arena's own music chosen: a room that brings its own song (EchoesArena.Def.Music, the Main Quarry's
+        // Mines track) plays it when it's imported, else the room's host as before
+        static Track? RoomSong(int roomId)
+        {
+            if (!String.IsNullOrEmpty(Choice) || ImportRoot == null || !MusicLibrary.On) return null;
+            if (MphRecomp.Arenas.EchoesArena.All.FirstOrDefault(d => d.Id == roomId)?.Music is not string id) return null;
+            Track? t = MusicLibrary.Find(id);
+            return t != null && TrackCatalog.Usable(ImportRoot, t) ? t : null;
         }
 
         bool Play(Track song)

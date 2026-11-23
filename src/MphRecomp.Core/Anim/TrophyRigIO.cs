@@ -44,6 +44,9 @@ namespace MphRecomp.Anim
             // Brawl Zero Suit on her OWN skeleton (bodies/SSBBZeroSuit, Core Campaign/BrawlZeroSuitBody.cs): no HD rig; listed
             // so a seat can wear her (Characters.Normalize) as Samus, the hunter she plays as
             ["SSBBZeroSuit"] = Hunter.Samus,
+            // her Brawl costumes 01-05 (-zsbrawl skins: the same body, each costume's model file and textures)
+            ["SSBBZeroSuit01"] = Hunter.Samus, ["SSBBZeroSuit02"] = Hunter.Samus, ["SSBBZeroSuit03"] = Hunter.Samus,
+            ["SSBBZeroSuit04"] = Hunter.Samus, ["SSBBZeroSuit05"] = Hunter.Samus,
         };
         // the Space Pirates fire one-handed (gun arm only): their off (blade) arm keeps the legs layer's clip while firing
         public static bool OffHandStaysDown(string trophy) =>

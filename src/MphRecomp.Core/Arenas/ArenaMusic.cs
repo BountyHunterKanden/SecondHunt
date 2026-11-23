@@ -131,6 +131,7 @@ namespace MphRecomp.Arenas
         void Play(Track t, float delay, float oldFadeOut)
         {
             RetroStream? stream = Open(t.File);
+            Holiday.HolidayBells.Tag(stream, t.File); // HOLIDAY MODE's sleigh bells for this song, if it has any
             if (stream == null)
             {
                 _out.Stop(oldFadeOut);

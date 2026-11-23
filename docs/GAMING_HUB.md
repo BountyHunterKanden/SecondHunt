@@ -25,9 +25,16 @@ protocol or server change:
 
 - **hunter:** the picked character's name when it isn't a vanilla hunter (`trooper`, `dark_samus`...), else the hunter.
   Characters.cs ids that differ from the registry key map to it (`darksamus` -> `dark_samus`, `zerosuit` ->
-  `zero_suit_samus`); `-hubselftest` checks every picked character lands on a known key.
+  `zero_suit_samus`); `-hubselftest` checks every picked character lands on a known key. A served match host has no
+  looks layer, so it takes the character from the match settings' seat (MatchResults.Capture's `settings`); before
+  2026-11-11 served matches counted Dark Samus as `samus` and Trooper as `weavel`.
 - **weapon:** by BeamType index (`power_beam`..`omega_cannon`, 11 `pirate_blaster`, 12 `hyper_beam`, 13 `paralyzer`),
-  plus `alt_form`. Beam 14+ shows up as `beam_14` until it gets a name.
+  plus the seat's own alt form (`morph_ball`, `stinglarva`, `triskelion`, `lockjaw`, `vhoscythe`, `dialanche`,
+  `halfturret`, Trooper's `scout_drone`; ContentKeys.AltFormKey). The Scout Drone's blaster shots and laser both
+  count as `scout_drone`, not `power_beam` (since 2026-11-12; PlayerEntity `droneShot`). Weavel's Halfturret shots count
+  as both `halfturret` and `battlehammer`, as the game's own counters do. Before 2026-11-11 every alt form counted as one
+  `alt_form` key, which older rows still show. Beam 14+ shows up as `beam_14` until it gets a name.
+  `-hubresulttest` plays a headless match with a Dark Samus and a Trooper seat and checks what the hub is sent.
 - **mode:** HunterLicense.ModeIndex's 7 groups (a team mode counts with its solo mode).
 - **arena:** the room name through `Key()` (`MP1 SANCTORUS` -> `mp1_sanctorus`).
 

@@ -15,6 +15,7 @@ namespace SecondHunt.MatchHost
     // match the lobby's owner starts (NetMatchOwner.cs), until the server says stop or goes away.
     //   server -> here (stdin, one per line):  owner <slot>   the lobby's owner is now this relay slot (-1 = none)
     //                                          left <slot>    that relay slot's player is gone (its BYE may never come)
+    //                                          seats <n>      the owner changed PLAYERS: up to n people (bots on top)
     //                                          stop           the game is closed: leave
     //   here -> server (stdout, lines starting with '!'; any other line is a log line):
     //                                          !ready <version>   on the relay, hosting (the game version it plays)
@@ -40,6 +41,7 @@ namespace SecondHunt.MatchHost
             using NetMatchSession net = NetMatchSession.Host(relay, template, romKey, o.Seats);
             Program.Netcode(net); // (the snapshot rate the server set: Program.Netcode.cs)
             net.OwnerSlot = o.Owner;
+            net.SetSeats(null, o.Seats); // (the people cap; joiners see it in LOBBY)
             using var stop = new CancellationTokenSource();
             var reader = new Thread(() => ReadServer(net, stop)) { IsBackground = true, Name = "control" };
             reader.Start();
@@ -123,7 +125,7 @@ namespace SecondHunt.MatchHost
         // and team as RESULTS shows them (a team mode: the team's best place)
         private static string Result(NetMatchSession net)
         {
-            MatchResults r = MatchResults.Capture(0, net.Settings?.Arena);
+            MatchResults r = MatchResults.Capture(0, net.Settings?.Arena, net.Settings); // (the settings: each seat's picked character)
             var rows = new List<object>();
             foreach (MatchResults.Player p in r.Rows)
             {
@@ -158,6 +160,11 @@ namespace SecondHunt.MatchHost
                     {
                         net.OwnerSlot = slot;
                         Program.Log($"owner: slot {slot}");
+                    }
+                    if (parts[0] == "seats" && parts.Length == 2 && Int32.TryParse(parts[1], out int seats))
+                    {
+                        net.SetSeats(null, seats);
+                        Program.Log($"seats: {seats}");
                     }
                 }
             }

@@ -26,6 +26,8 @@ internal sealed partial class CampaignRenderer
     //   match / arena / bots / botlevel / time / points, or net host|client: a multiplayer match (MatchSession.cs)
     public static CampaignRenderer Create(string filesDir, string dataDir, LaunchArgs args)
     {
+        MenuArenaBackdrop.DropEarly(); // (an arena background begun for the menus that never took it: this game's now)
+        MenuArenaBackdrop.DropAhead();
         string room = args.Get("room") ?? "UNIT2_LAND";
         var layout = args.Get("layout") == "reference" ? ControlLayout.Reference : ControlLayout.Prime;
         Hunter hunter = Enum.TryParse(args.Get("hunter"), out Hunter h) ? h : Hunter.Samus;
@@ -54,8 +56,12 @@ internal sealed partial class CampaignRenderer
         renderer.SettingsPath = settingsPath; // CampaignAudio.cs: RecompSettings.Music
         renderer.ReloadAimFromSettings();
         renderer.PauseMenu.Resumed += () => { renderer.ReloadGunFromSettings(); renderer.ReloadTrooperFromSettings(); renderer.ReloadSyluxFromSettings(); renderer.ReloadAimFromSettings(); };
+        renderer.PauseMenu.PhotoModeRequested += renderer.OpenPhotoMode; // PAUSED > PHOTO MODE (CampaignRenderer.PhotoMode.cs)
         renderer.PauseMenu.ControlsClosed += renderer.ReloadAimFromSettings; // the customizer from the ship's OPTIONS
         renderer.PauseMenu.QuitToMenu += () => renderer.ExitSink?.Invoke();
+        renderer.PauseMenu.QuitPressed += renderer.LeaveForMenusPressed; // (CampaignRenderer.LeaveForMenus.cs)
+        renderer.PauseMenu.Opened += renderer.LeaveAhead; // the menus' next arena background read ahead (the same file)
+        renderer.PauseMenu.Resumed += MenuArenaBackdrop.DropAhead;
         // the gunship between planets (save, star map, travel): CampaignShip.cs
         // hardmode 1: the HARD MODE campaign (docs/ENEMY_IMPORT.md H1): its own saves (<data>/saves/hardmode) and the enemy
         // placements of <data>/campaigns/hardmode (Core Campaign/EnemyPlacement.cs); enemyplace 1 (dev) also turns on the
@@ -64,6 +70,7 @@ internal sealed partial class CampaignRenderer
         bool hardMode = enemyPlace || args.Get("hardmode") == "1";
         // (First Hunt's enemies come from its import: registered here, when there is one, for the catalogue)
         if (hardMode && MphRecomp.FirstHunt.FirstHuntGame.Register(dataDir)) MphRecomp.Campaign.EnemyCatalogue.Reset();
+        MphRecomp.Campaign.Retro.RetroEnemies.Root = Path.Combine(dataDir, "enemies");   // E1: imported Retro enemies Hard Mode can place
         MphRecomp.Campaign.EnemyPlacement.Install(hardMode ? Path.Combine(dataDir, "campaigns", "hardmode") : null);
         renderer.ConfigureShip(hardMode ? Path.Combine(dataDir, "saves", "hardmode") : Path.Combine(dataDir, "saves"), args);
         // (the pause's CAMPAIGN TROOPER TYPE shows with a Trooper file: the front end's saves, and this campaign's own)
@@ -104,13 +111,15 @@ internal sealed partial class CampaignRenderer
         // view framing: WIDE (CampaignView.cs; dev only: view wide|ds|prime|panini)
         ConfigureView(args);
         renderer.ConfigureDevStartAt(args); // dev: startat x,y,z[,yaw] (CampaignDevStartAt.cs)
+        renderer.ConfigureRoomWarm(args); // room pre-warm; dev: roomwarm 0, doorwalk (CampaignRenderer.RoomWarm.cs)
         // the player's enabled mods (Core Mods/LiveMods.cs, docs/MOD_API.md): offline games only, so an online or LAN game
         // and a replay being played back run without them; CampaignRenderer.Shutdown takes them down
         string? noMods = !string.IsNullOrEmpty(args.Get("replay")) ? "replay"
             : !string.IsNullOrEmpty(args.Get("net")) || MphRecomp.Multiplayer.Net.OnlineMatch.Current != null
-                || MphRecomp.Multiplayer.Net.LanSession.Current != null ? "network game" : null;
+                || (!t_leadInBuild && MphRecomp.Multiplayer.Net.LanSession.Current != null) ? "network game" : null;
         // (a match's gameplay mods start with each match instead: MatchReplay.StartMatchReplayed, so its replay records them)
         MphRecomp.Mods.LiveMods.Attach(dataDir, noMods, line => Log.Info("MPHMods", line), match: renderer._matchSettings != null);
+        renderer.CountAsGame(); // (until its Shutdown: the menus' arena background waits for it, FrontendRenderer)
         return renderer;
     }
 }

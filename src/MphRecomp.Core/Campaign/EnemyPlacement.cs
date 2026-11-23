@@ -443,6 +443,17 @@ namespace MphRecomp.Campaign
                 LastError = "unknown enemy " + p.Id;
                 return null;
             }
+            if (entry.Retro != null)
+            {
+                Retro.RetroEnemyConfig? cfg = Retro.RetroEnemies.Config(entry.Retro);
+                if (cfg?.Fsm == null)
+                {
+                    LastError = entry.Id + " is not imported";
+                    return null;
+                }
+                return new Retro.PlacedRetroSpawner(id, entry.Retro, cfg, V(p.Pos), p.Facing, p.Total, p.Limit, p.Count,
+                    p.Trigger, p.Radius, scene);
+            }
             if (entry.FirstHunt)
             {
                 FhEnemySpawnEntityData data = PlacedFhData(entry.Fh, id, V(p.Pos), FacingVector(p.Facing), p.Total, p.Limit, p.Count);
@@ -492,6 +503,11 @@ namespace MphRecomp.Campaign
                 {
                     continue;
                 }
+                if (enemy is Retro.EchoesSplinter retro)
+                {
+                    retro.ScaleHealth(t.HealthMul);
+                    continue;
+                }
                 int health = (int)MathF.Round(enemy.Health * t.HealthMul);
                 enemy.SetHealth((ushort)Math.Clamp(health, 1, UInt16.MaxValue));
             }
@@ -505,6 +521,10 @@ namespace MphRecomp.Campaign
                     if (t.Spawner is PlacedFhEnemySpawner fh)
                     {
                         fh.Held = false;
+                    }
+                    else if (t.Spawner is Retro.PlacedRetroSpawner rs)
+                    {
+                        rs.Held = false;
                     }
                     else
                     {
@@ -562,6 +582,10 @@ namespace MphRecomp.Campaign
             {
                 return fh.Finished || fh.Data.SpawnTotal == 0 && fh.SpawnedCount > 0 && fh.AliveCount == 0;
             }
+            if (t.Spawner is Retro.PlacedRetroSpawner rs)
+            {
+                return rs.Finished || rs.Total == 0 && rs.SpawnedCount > 0 && rs.AliveCount == 0;
+            }
             var s = (EnemySpawnEntity)t.Spawner;
             if (s.ActiveCount > 0)
             {
@@ -581,6 +605,7 @@ namespace MphRecomp.Campaign
             {
                 FhEnemySpawnEntity fh => fh.AliveCount > 0,
                 EnemySpawnEntity s => s.ActiveCount > 0,
+                Retro.PlacedRetroSpawner rs => rs.AliveCount > 0,
                 _ => false,
             };
         }
@@ -639,6 +664,13 @@ namespace MphRecomp.Campaign
                 if (_bySpawner.ContainsKey(s))
                 {
                     yield return MakeTarget(s, from);
+                }
+            }
+            foreach (Tracked t in _tracked)
+            {
+                if (t.Spawner is Retro.PlacedRetroSpawner rs && InScene(rs))
+                {
+                    yield return MakeTarget(rs, from);
                 }
             }
         }

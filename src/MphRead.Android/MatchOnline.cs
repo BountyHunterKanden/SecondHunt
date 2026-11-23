@@ -55,7 +55,7 @@ internal static class MatchOnline
         OnlineClient client;
         try
         {
-            client = await OnlineClient.ConnectAsync(uri, id, Build.Model ?? "Player", "android", timeout.Token);
+            client = await OnlineClient.ConnectAsync(uri, id, Build.Model ?? "Player", MphRecomp.Frontend.RecompMenus.GameApp, timeout.Token);
         }
         catch (System.OperationCanceledException) when (timeout.IsCancellationRequested)
         {

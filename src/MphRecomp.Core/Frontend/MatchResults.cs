@@ -21,7 +21,7 @@ namespace MphRecomp.Frontend
             int AltFormKills, int FriendKills, int Interceptions, int Field260, int Field268, int Efficiency, int BestWeapon,
             string? Character = null, // the picked character's name (D7: TROOPER, DARK SAMUS), null = the hunter
             int BestStreak = 0, // the longest run of kills (Gaming Hub)
-            IReadOnlyDictionary<string, int>? WeaponKills = null, // kills per ContentKeys weapon key, alt_form included
+            IReadOnlyDictionary<string, int>? WeaponKills = null, // kills per ContentKeys weapon key, the alt form's included
             int Shots = 0); // shots fired (Gaming Hub)
 
         // best weapon: the beam index (MphRead BeamType order, 0-8), AltForm when the alt-form kills are the most, None
@@ -52,8 +52,10 @@ namespace MphRecomp.Frontend
             }
         }
 
-        // MphRead's match state as it stands (call once the match is over)
-        public static MatchResults Capture(int localSeat, string? arena = null)
+        // MphRead's match state as it stands (call once the match is over). settings: the match's seats, for a picked
+        // character where no shell set PlayerEntity.HostCharacterName (the served match host draws nothing, so its Dark
+        // Samus counted as Samus on the Hunter Hub until 2026-11-11)
+        public static MatchResults Capture(int localSeat, string? arena = null, MatchSettings? settings = null)
         {
             // the order and places from the points as they stand now: a match client takes the host's last points from a
             // snapshot that can come after its frame's own UpdateState (the Samsung read "tied for 1st place" in seat order
@@ -69,11 +71,11 @@ namespace MphRecomp.Frontend
             {
                 int s = GameState.ResultSlots[r];
                 if (!seats.Contains(s) || rows.Exists(p => p.Seat == s)) continue;
-                rows.Add(Read(s));
+                rows.Add(Read(s, settings));
             }
             foreach (int s in seats)
             {
-                if (!rows.Exists(p => p.Seat == s)) rows.Add(Read(s)); // (an incomplete result order: the rest in seat order)
+                if (!rows.Exists(p => p.Seat == s)) rows.Add(Read(s, settings)); // (an incomplete result order: the rest in seat order)
             }
             return new MatchResults
             {
@@ -103,9 +105,11 @@ namespace MphRecomp.Frontend
             Weapons = p.WeaponKills == null ? new() : new Dictionary<string, int>(p.WeaponKills),
         };
 
-        private static Player Read(int s)
+        private static Player Read(int s, MatchSettings? settings)
         {
             PlayerEntity p = PlayerEntity.Players[s];
+            string? character = p.HostCharacterName
+                ?? (settings != null && s < settings.Players.Count ? LookAlikes.CharacterName(settings.Players[s]) : null);
             // efficiency: beam damage dealt per beam damage fired, in percent (integer division; 0 without shots)
             int max = GameState.BeamDamageMax[s];
             int efficiency = max == 0 ? 0 : (int)(100L * GameState.BeamDamageDealt[s] / max);
@@ -122,7 +126,11 @@ namespace MphRecomp.Frontend
             }
             if (best == 0) weapon = None;
             var weaponKills = new Dictionary<string, int>();
-            if (GameState.AltDamageCount[s] > 0) weaponKills[ContentKeys.AltForm] = GameState.AltDamageCount[s];
+            // (the seat's own alt form: MORPH BALL, STINGLARVA...; one key for all of them before 2026-11-11)
+            if (GameState.AltDamageCount[s] > 0)
+            {
+                weaponKills[ContentKeys.AltFormKey(ContentKeys.HunterKey(character, p.Hunter.ToString()))] = GameState.AltDamageCount[s];
+            }
             for (int b = 0; b < GameState.ExtraBeamSlots; b++)
             {
                 int kills = b < 9 ? GameState.BeamKills[s, b] : GameState.ExtraBeamKills[s, b];
@@ -145,7 +153,7 @@ namespace MphRecomp.Frontend
             return new Player(s, p.Hunter, GameState.Nicknames[s] ?? "", p.IsBot, p.TeamIndex, GameState.Standings[s],
                 GameState.Points[s], GameState.Time[s], GameState.Kills[s], GameState.Deaths[s], GameState.Suicides[s],
                 GameState.DamageCount[s], GameState.HeadshotKills[s], GameState.AltDamageCount[s], GameState.FriendlyKills[s],
-                GameState.OctolithStops[s], field260, field268, efficiency, weapon, p.HostCharacterName,
+                GameState.OctolithStops[s], field260, field268, efficiency, weapon, character,
                 GameState.BestKillStreak[s], weaponKills, GameState.ShotsFired[s]);
         }
     }

@@ -176,7 +176,9 @@ namespace MphRead.Entities
             }
             CameraInfo.Target.X = Volume.SpherePosition.X;
             CameraInfo.Target.Y -= v7;
-            CameraInfo.Target.Y += (Volume.SpherePosition.Y - CameraInfo.Target.Y) / 2;
+            // recomp: vanilla closes half the height gap per 30 Hz tick (BizHawk, Spire rolling, target bob ~0.5x the ball's);
+            // half per 60 Hz frame followed ~1.5x as stiffly, the "sickeningly" bouncy Dialanche camera. docs/ACCURACY.md A3
+            CameraInfo.Target.Y += (Volume.SpherePosition.Y - CameraInfo.Target.Y) * (1 - MathF.Sqrt(0.5f));
             CameraInfo.Target.Z = Volume.SpherePosition.Z;
             if (MorphCamera != null)
             {
@@ -909,6 +911,21 @@ namespace MphRead.Entities
         private bool _shake = true;
         public bool SteadyAim; // recomp: the shake moves only the view (PlayerEntity.HostBotSteadyAim)
 
+        // recomp: draw-only views (the sim keeps ViewMatrix). Vanilla rolls the shake each 30 Hz frame and shows it for the
+        // whole frame; at 60 Hz ViewMatrix has it on one step and is back on centre the next, so it read as a harder,
+        // faster shake (owner 2026-11-20). HostDrawView holds the rolled offset over the in-between step, as the DS shows
+        // it; HostSteadyView is the same view without the shake, which the third-person camera is placed from, so the
+        // shake only turns the view there, as in first person, instead of swinging the camera round her head
+        public Matrix4 HostDrawView;
+        public Matrix4 HostSteadyView;
+        public bool HostShakeViews; // false: both are ViewMatrix
+        public static bool HostHoldShake = true; // false: never (the host turns the held shake off: the view shakes as it did)
+        public Matrix4 DrawView => HostShakeViews ? HostDrawView : ViewMatrix;
+        public Matrix4 SteadyView => HostShakeViews ? HostSteadyView : ViewMatrix;
+        private Vector3 _heldShake;
+        private Vector3 _heldTarget;
+        private bool _holdShake;
+
         public void Reset()
         {
             PrevPosition = Vector3.UnitZ;
@@ -924,8 +941,10 @@ namespace MphRead.Entities
             var camUp = Vector3.Cross(toTarget, Vector3.Cross(UpVector, toTarget));
             // todo: FPS stuff
             Vector3 aimTarget = Target;
+            bool rolled = false;
             if (Shake > 0 && _shake)
             {
+                rolled = true;
                 Target.X += Fixed.ToFloat(Rng.GetRandomInt2(Fixed.ToInt(Shake))) - Shake / 2;
                 Target.Y += Fixed.ToFloat(Rng.GetRandomInt2(Fixed.ToInt(Shake))) - Shake / 2;
                 Target.Z += Fixed.ToFloat(Rng.GetRandomInt2(Fixed.ToInt(Shake))) - Shake / 2;
@@ -957,6 +976,23 @@ namespace MphRead.Entities
             Field54 = -Field48;
             ViewMatrix = Matrix4.LookAt(Position, viewTarget, camUp);
             TrueUp = camUp;
+            HostShakeViews = (rolled || _holdShake) && HostHoldShake;
+            if (rolled)
+            {
+                _heldShake = viewTarget - aimTarget;
+                _heldTarget = viewTarget;
+                _holdShake = true;
+                HostDrawView = ViewMatrix;
+                HostSteadyView = Matrix4.LookAt(Position, aimTarget, camUp);
+            }
+            else if (_holdShake)
+            {
+                // (a camera that didn't set a new target since still has the shaken one: that's the held view already)
+                _holdShake = false;
+                Vector3 steady = aimTarget == _heldTarget ? aimTarget - _heldShake : aimTarget;
+                HostDrawView = Matrix4.LookAt(Position, steady + _heldShake, camUp);
+                HostSteadyView = Matrix4.LookAt(Position, steady, camUp);
+            }
             // todo?: set transposes and stuff
         }
 

@@ -18,9 +18,10 @@ against it before each public build.
 | MoonSharp | 2.0.0 | BSD 3-clause (parts MIT) | `MoonSharp.Interpreter.dll` |
 | Concentus (C# port of the Opus codec), Logan Stromberg and the Opus authors | 2.2.2 | BSD 3-clause (the Opus licence) | `Concentus.dll` (online voice chat, milestone O8: `MphRecomp.Core/Online/Voice/`) |
 | SixLabors.ImageSharp | 3.1.12 | Six Labors Split License 1.0 (Apache 2.0 for open-source use) | `SixLabors.ImageSharp.dll` |
+| SixLabors.ImageSharp.Drawing, SixLabors.Fonts | 2.1.7, 2.1.3 | Six Labors Split License 1.0 (Apache 2.0 for open-source use) | `SixLabors.ImageSharp.Drawing.dll`, `SixLabors.Fonts.dll` (Linux test build only: its menu text and shapes) |
 | SoundFlow | 1.4.1 | MIT | `SoundFlow.dll` |
-| miniaudio (bundled by SoundFlow) | (SoundFlow 1.4.1) | MIT or Unlicense (used under MIT) | `libminiaudio.so` (Android), `miniaudio.dll` (Windows) |
-| GLFW (bundled by OpenTK as OpenTK.redist.glfw) | 3.4 | zlib | `glfw3.dll` (Windows only: the window, input and GL context) |
+| miniaudio (bundled by SoundFlow) | (SoundFlow 1.4.1) | MIT or Unlicense (used under MIT) | `libminiaudio.so` (Android, Linux), `miniaudio.dll` (Windows) |
+| GLFW (bundled by OpenTK as OpenTK.redist.glfw) | 3.4 | zlib | `glfw3.dll` (Windows), `libglfw.so.3` (Linux test build): the window, input and GL context |
 | SDL (Simple DirectMedia Layer), Sam Lantinga and the SDL contributors | 3.4.14 | zlib | `SDL3.dll` (Windows only: gamepads and their gyro) |
 | CommunityToolkit.HighPerformance | 8.4.2 | MIT | `CommunityToolkit.HighPerformance.dll` |
 | lzokay, Jack Andersen (AxioDL) | 2018 (ported to C#) | MIT | ported into `MphRecomp.Core.dll` (`Import/Retro/Lzo1x.cs`: LZO1X decompression for the Echoes / Prime 3 imports) |
@@ -47,7 +48,7 @@ Format references (no code shipped from them unless the entry says so):
 |---|---|---|
 | PrimeWorldEditor (Aruki, AxioDL Team) | MIT | the Retro file layouts the `MphRecomp.Core/Import/Retro*` readers follow (via this project's own Python reference scripts). **Code translated from it: `Import/Retro/Anim.cs` only** (CAnimationLoader, LibCommon CBitStreamInWrapper, CBone::UpdateTransform; board S11), so its notice below applies; the other readers are this project's own parsers of the layouts it reads |
 | metaforce (Metaforce Contributors, AxioDL; a reverse-engineered re-implementation of Metroid Prime's engine) | MIT | Prime 1 behaviour re-implemented in this project's own code from reading metaforce's source: particle effects (`Campaign/RetroParticles.cs`: CElementGen, CUVEAnimTexture), swooshes (`Campaign/RetroSwoosh.cs`: CParticleSwoosh), the PART / SWHC readers (`Import/Retro/Part.cs`: CParticleDataFactory), the animation event layout (`Import/Effects/BodyFx.cs`: CAnimPOIData, CPOINode), the sound id lookup (`Import/Retro/MusyX.cs`: CSfxManager::TranslateSFXID), the Scout Drone laser's look and sweep (`App/Campaign/CampaignRenderer.DroneFx.cs`: CDroneLaser; `MphRead/Entities/Players/PlayerDroneLaser.cs`: CDrone::UpdateLaser); and layouts only: the Prime 3 ANIM (`Import/Retro3/Anim3.cs`, a clean re-implementation) and the CMDL material flag names (`Import/Retro/Cmdl.cs`). Its notice is below |
-| Fruity Prime (liveteklol; another MphRead fork) | MIT | the netcode of served online matches, ported from its C++ `src/MphRead.Native/Mods/Network` (master 610dc5b, 2026-10-20) into this project's C#: owner-reported positions and the correction rule, the latest-wins intent channel, remote player smoothing, shooter-side hit claims with a 45-frame rewind, client hit and death prediction, and packet fencing (`MphRecomp.Core/Multiplayer/Net/`: `FruitySync.cs`, `ClientPosition.cs`, `ClientPrediction.cs`, `HitClaims.cs`, `RemoteSmoothing.cs`, `NetMatchSession.cs`; `MphRead/Entities/Players/`: `PlayerHitClaims.cs`, `PlayerNetPosition.cs`, `PlayerNetPredict.cs`; `SecondHunt.MatchHost/Program.Netcode.cs`; `SecondHunt.Server/HubServed.cs`). Map: `docs/FRUITY_PORT.md`. Its notice is below |
+| Fruity Prime (liveteklol; another MphRead fork) | MIT | the netcode of served online matches, ported from its C++ `src/MphRead.Native/Mods/Network` (master 610dc5b, 2026-10-20) into this project's C#: owner-reported positions and the correction rule, the latest-wins intent channel, remote player smoothing, shooter-side hit claims with a 45-frame rewind, client hit and death prediction, pickup claims judged by the match host (reach and passed-near window), one taker for an item two players reach in the same step, life ids, slot generations and match ids that drop a seat's inputs made for an earlier life, and packet fencing (`MphRecomp.Core/Multiplayer/Net/`: `FruitySync.cs`, `ClientPosition.cs`, `ClientPrediction.cs`, `HitClaims.cs`, `PickupClaims.cs`, `RemoteSmoothing.cs`, `NetMatchSession.cs`, `NetMatchSession.Lives.cs`, `Snapshot.cs` (lives block); `MphRecomp.Core/Multiplayer/MatchPickupClaims.cs`; `MphRead/Entities/Players/`: `PlayerHitClaims.cs`, `PlayerNetPosition.cs`, `PlayerNetPredict.cs`, `PlayerProcess.cs` (PickUpItems), `PlayerNet.cs` (NetLifeId); `SecondHunt.MatchHost/Program.Netcode.cs`; `SecondHunt.Server/HubServed.cs`). Map: `docs/FRUITY_PORT.md`. Its notice is below |
 | amuse (Antidote / Jackoalan, AxioDL) | MIT | the MusyX SoundMacro command layout `Import/Retro/MusyX.cs` reads (the decoder and `DspAdpcm.cs` are this project's own; every sound and its coefficients come from the user's disc). Its notice is below |
 | Dolphin's `docs/WiaAndRvz.md` | GPL-2.0-or-later (the Dolphin repository's default) | the RVZ/WIA format's facts; no Dolphin code or text was taken (`Import/Disc/WiaReader.cs`) |
 | Retro Modding Wiki (wiki.axiodl.com), WiiBrew | CC BY 4.0 / wiki | file-layout facts (`Import/Retro/Ancs.cs`, `Mrea.cs`, `Retro3/Anim3.cs`; `Import/Disc/WiiDisc.cs`); no text taken |
@@ -347,6 +348,8 @@ redistributed to you under the same terms of the general Opus license dictated a
 
 ## SixLabors.ImageSharp
 
+(The same licence and grant cover SixLabors.ImageSharp.Drawing and SixLabors.Fonts in the Linux test build.)
+
 Licensed to this project under the **Apache License, Version 2.0**: the Six Labors Split License (below) grants Apache
 2.0 when the Work is consumed "in software licensed under an Open Source or **Source Available** license" (section 2,
 first bullet), which is exactly this project's posture. The grant also holds independently under section 2's third
@@ -642,7 +645,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## GLFW (bundled by OpenTK as `glfw3.dll`, Windows only)
+## GLFW (bundled by OpenTK as `glfw3.dll` on Windows, `libglfw.so.3` on Linux)
 
 ```text
 Copyright (c) 2002-2006 Marcus Geelnard

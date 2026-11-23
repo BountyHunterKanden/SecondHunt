@@ -146,7 +146,7 @@ namespace MphRead.Entities
                 if ((GameState.Mode == GameMode.Survival || GameState.Mode == GameMode.SurvivalTeams)
                     && GameState.TeamDeaths[SlotIndex] > GameState.TeamLives(SlotIndex))
                 {
-                    if (IsMainPlayer)
+                    if (HudViewer) // recomp: HudViewer, was IsMainPlayer (a replay's watched seat: the message queue is every player's, bug report 2026-11-22)
                     {
                         QueueHudMessage(128, 152, 1 / 1000f, 0, 243); // you lost all your lives! you're out of the game
                     }
@@ -305,7 +305,7 @@ namespace MphRead.Entities
                 {
                     if (GameState.RadarPlayers)
                     {
-                        if (IsMainPlayer)
+                        if (HudViewer) // recomp: HudViewer, was IsMainPlayer (as above)
                         {
                             QueueHudMessage(128, 170, 1 / 1000f, 0, 247); // FACE OFF!
                         }
@@ -332,7 +332,7 @@ namespace MphRead.Entities
                         if (_hidingTimer >= revealTime)
                         {
                             Flags2 |= PlayerFlags2.RadarReveal;
-                            if (IsMainPlayer && (_scene.FrameCount & (8 * 2)) == 0) // todo: FPS stuff
+                            if (HudViewer && (_scene.FrameCount & (8 * 2)) == 0) // todo: FPS stuff (recomp: HudViewer, was IsMainPlayer)
                             {
                                 QueueHudMessage(128, 150, 1 / 1000f, 0, 248); // position revealed!
                                 QueueHudMessage(128, 160, 1 / 1000f, 0, 249); // RETURN TO BATTLE!
@@ -545,10 +545,10 @@ namespace MphRead.Entities
                 }
             }
             int ammo = EquipInfo.Ammo;
-            // recomp: a Pirate Blaster burst already paid for finishes before the empty switch
+            // recomp: a Pirate Blaster burst (or a Hyper Beam stream) already paid for finishes before the empty switch
             // recomp: not on a network client: its ammo is the host's last snapshot (stale right after a pickup), the host
             // makes the empty switch with real ammo and its snapshot brings the weapon (0.2.0 guest AMMO DEPLETED bug)
-            if (ammo >= 0 && ammo < EquipInfo.Weapon.AmmoCost && _burstShots == 0 && !NetClient)
+            if (ammo >= 0 && ammo < EquipInfo.Weapon.AmmoCost && _burstShots == 0 && !HyperBeamStreaming && !NetClient)
             {
                 int slot = 0;
                 int priority = 0;
@@ -571,9 +571,9 @@ namespace MphRead.Entities
                 }
                 TryEquipWeapon(_weaponSlots[slot]);
             }
-            ProcessInput();
+            if (SideViewOn) SideViewInput(); else ProcessInput(); // recomp: side-view mode (PlayerSideView.cs)
             UpdatePirateBlasterBurst(); // recomp: the Pirate Blaster's bolts 2 and 3 (PlayerPirateBlaster.cs)
-            UpdateHyperBeamRapid(); // recomp: Dark Samus's Hyper Mode rapid fire (PlayerHyperBeam.cs)
+            UpdateHyperBeamStream(); // recomp: the Hyper Beam's charged stream (PlayerHyperBeam.cs)
             if (Flags1.TestFlag(PlayerFlags1.Boosting) && _hSpeedMag <= Fixed.ToFloat(Values.AltMinHSpeed))
             {
                 Flags1 &= ~PlayerFlags1.Boosting;
@@ -1302,9 +1302,19 @@ namespace MphRead.Entities
             distSqr *= distSqr;
             foreach (ItemInstanceEntity item in _scene.GetItemInstanceEntities())
             {
-                // recomp: network play: the local player takes only what the host took for it (PlayerNetConfirm.cs)
-                bool confirmed = NetClient && NetConfirmedPickups.Contains(item);
-                if (NetClient && !confirmed)
+                // recomp (HostPickupOneTaker, MatchSettings.PickupOneTaker): an item another seat took this step stays listed
+                // (DespawnTimer 0) until its own process removes it, and the game took it again for a second seat in reach
+                // (a health that spawned under two players healed both); a device takes what the host says (NetConfirmedPickups)
+                if (HostPickupOneTaker && !NetClient && item.DespawnTimer == 0)
+                {
+                    continue;
+                }
+                // recomp: network play: the local player takes only what the host took for it (PlayerNetConfirm.cs); a served
+                // match's host also takes what it judged this seat's device touched (HostClaimedPickups: Fruity P3 pickups)
+                bool confirmed = NetClient ? NetConfirmedPickups.Contains(item)
+                    : HostClaimedPickups.Count > 0 && item.DespawnTimer != 0
+                        && HostClaimedPickups.TryGetValue(item, out int claimedBy) && claimedBy == SlotIndex;
+                if (NetClient && !confirmed && !NetPickupClaims)
                 {
                     continue;
                 }
@@ -1328,6 +1338,21 @@ namespace MphRead.Entities
                         inRange = true;
                     }
                 }
+                if (NetClient && !confirmed)
+                {
+                    // a served match: this device claims what its own player touched and would take (a Prime hunter takes no
+                    // health); the host decides (Net/PickupClaims.cs)
+                    if (inRange && item.DespawnTimer != 0 && !(IsPrimeHunter && item.ItemType is ItemType.HealthSmall
+                        or ItemType.HealthMedium or ItemType.HealthBig))
+                    {
+                        NetPickupTouches.Add(new NetPickupTouch(item, Position));
+                        if (NetPickupPredict && item.NetPredictedTaken == 0)
+                        {
+                            NetPredictPickup(item); // (its sound now, the gain with the host's word: PlayerNetConfirm.cs)
+                        }
+                    }
+                    continue;
+                }
                 if (!inRange && !confirmed)
                 {
                     continue;
@@ -1335,7 +1360,7 @@ namespace MphRead.Entities
 
                 void PlaySfx(SfxId sfx)
                 {
-                    if (SoundViewer && Sfx.TimedSfxMute == 0) // recomp: SoundViewer (MphRead: IsMainPlayer)
+                    if (SoundViewer && Sfx.TimedSfxMute == 0 && !_netPickupQuiet) // recomp: SoundViewer (MphRead: IsMainPlayer)
                     {
                         _soundSource.PlayFreeSfx(sfx);
                     }
@@ -1346,6 +1371,7 @@ namespace MphRead.Entities
                     continue; // mph-recomp: a gameplay mod's pickup filter refused it (GameFilters.cs)
                 }
                 bool pickedUp = false;
+                _netPickupQuiet = confirmed && NetClient && item.NetPredictedTaken > 0; // recomp: its sound played (NetPredictPickup)
                 switch (item.ItemType)
                 {
                 case ItemType.HealthMedium:
@@ -1414,7 +1440,7 @@ namespace MphRead.Entities
                     _timeSincePickup = 0;
                     _doubleDmgTimer = 900 * 2; // todo: FPS stuff
                     // recomp: the sound for SoundViewer; the loop stage and HUD speed for every seat (MphRead: IsMainPlayer)
-                    if (SoundViewer)
+                    if (SoundViewer && !_netPickupQuiet)
                     {
                         _soundSource.PlayFreeSfx(SfxId.DOUBLE_DAMAGE_POWER_UP);
                     }
@@ -1427,7 +1453,7 @@ namespace MphRead.Entities
                     _cloakTimer = 900 * 2; // todo: FPS stuff
                     Flags2 |= PlayerFlags2.Cloaking;
                     // recomp: the sound for SoundViewer; the loop stage for every seat (MphRead: IsMainPlayer)
-                    if (SoundViewer)
+                    if (SoundViewer && !_netPickupQuiet)
                     {
                         _soundSource.PlayFreeSfx(SfxId.CLOAK_POWER_UP);
                     }
@@ -1441,7 +1467,7 @@ namespace MphRead.Entities
                     {
                         TrySwitchForms(force: true);
                     }
-                    if (SoundViewer) // recomp: SoundViewer (MphRead: IsMainPlayer)
+                    if (SoundViewer && !_netPickupQuiet) // recomp: SoundViewer (MphRead: IsMainPlayer)
                     {
                         _soundSource.PlayFreeSfx(SfxId.DOUBLE_DAMAGE_POWER_UP);
                     }
@@ -1502,8 +1528,10 @@ namespace MphRead.Entities
                     pickedUp = true;
                     break;
                 }
+                _netPickupQuiet = false;
                 if (pickedUp)
                 {
+                    item.PickedUpBy = SlotIndex; // recomp: (network play: the host names the picker, ItemSync)
                     item.OnPickedUp();
                     if (GameEvents.Any) GameEvents.Raise("pickup", SlotIndex, item.ItemType.ToString()); // recomp: mod event (GameEvents.cs)
                 }
@@ -1514,6 +1542,10 @@ namespace MphRead.Entities
         // weapon pickup the rules equip switches to it while the gun is rising or lowered too (Discord report 2026-11-12: an
         // Omega Cannon picked up just after leaving the ball stayed in the ring with the Power Beam out)
         public static bool HostPickupEquipRaise { get; set; }
+
+        // recomp (MatchSettings.PickupOneTaker, set per match by MatchStart; replays before format 94 play without it): an item
+        // one seat took this step isn't taken again by another (PickUpItems)
+        public static bool HostPickupOneTaker { get; set; }
 
         private void PickUpWeapon(ItemType itemType)
         {
@@ -1527,7 +1559,7 @@ namespace MphRead.Entities
                     {
                         _ammo[1] = Math.Min(_ammo[1] + 50, _ammoMax[1]);
                     }
-                    if (SoundViewer && Sfx.TimedSfxMute == 0) // recomp: SoundViewer (MphRead: IsMainPlayer)
+                    if (SoundViewer && Sfx.TimedSfxMute == 0 && !_netPickupQuiet) // recomp: SoundViewer (MphRead: IsMainPlayer)
                     {
                         _soundSource.PlayFreeSfx(SfxId.AMMO_POWER_UP1);
                     }
@@ -1605,12 +1637,12 @@ namespace MphRead.Entities
                         UpdateAffinityWeaponSlot(weapon, slot: 2);
                     }
                 }
-                if (SoundViewer && Sfx.TimedSfxMute == 0) // recomp: SoundViewer (MphRead: IsMainPlayer)
+                if (SoundViewer && Sfx.TimedSfxMute == 0 && !_netPickupQuiet) // recomp: SoundViewer (MphRead: IsMainPlayer)
                 {
                     _soundSource.PlayFreeSfx(SfxId.WEAPON_POWER_UP);
                 }
             }
-            else if (SoundViewer && Sfx.TimedSfxMute == 0)
+            else if (SoundViewer && Sfx.TimedSfxMute == 0 && !_netPickupQuiet)
             {
                 _soundSource.PlayFreeSfx(SfxId.AMMO_POWER_UP1);
             }
@@ -1709,6 +1741,7 @@ namespace MphRead.Entities
 
         private void UpdateAimVecs()
         {
+            HostAimFromCamera(); // recomp: the campaign's third-person true aim (PlayerHostAim.cs)
             Vector3 facing = _facingVector;
             Vector3 up = _upVector;
             _gunDrawPos = Fixed.ToFloat(Values.FieldB8) * facing

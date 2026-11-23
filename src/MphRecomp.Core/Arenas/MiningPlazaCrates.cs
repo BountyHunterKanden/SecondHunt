@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using MphRead;
 using MphRead.Entities;
@@ -47,6 +48,13 @@ namespace MphRecomp.Arenas
             public int DebrisSlots { get; set; }
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             public float[]? DebrisAxes { get; set; }
+            // its collision's terrain (footsteps, hit sparks): sand, or metal for Main Quarry's crates
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+            public bool Metal { get; set; }
+            // the crates resting on this one (Prime 1: its Dead sends them Deactivate): they break with it and don't regrow
+            // while it is down (owner 2026-11-20: no floating crates)
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public uint[]? Above { get; set; }
         }
 
         public const int Health = 6 * EchoesBreakables.Unit;
@@ -100,12 +108,54 @@ namespace MphRecomp.Arenas
                 list.Add(e);
                 mine.Add(e);
             }
+            foreach (MiningPlazaCrateEntity e in mine.Cast<MiningPlazaCrateEntity>())
+            {
+                if (e.Spot.Above == null) continue;
+                foreach (uint up in e.Spot.Above)
+                {
+                    if (mine.FirstOrDefault(m => ((MiningPlazaCrateEntity)m).Spot.Id == up) is not MiningPlazaCrateEntity top) continue;
+                    e.AboveMe.Add(top);
+                    top.UnderMe.Add(e);
+                }
+            }
             PlayerEntity.HostCrateList = (PlayerEntity.HostCrateList ?? Array.Empty<EnemyInstanceEntity>()).Concat(mine).ToArray();
             foreach (ItemType t in Drops) scene.LoadModel(Metadata.Items[(int)t]);
             return list;
         }
 
         // ---- Echoes' drop rules on a player's needs ----
+
+        // (11-20) the health crates dropped for a player and still lying there counts as theirs when the next crate rolls
+        // (owner 2026-11-20: at low health, breaking crate after crate without picking anything up made every one a 100
+        // health). MatchSettings.CrateHealthPending, set per match by MatchStart; replays before format 98 play without it
+        public static bool PendingHealth { get; set; }
+        static readonly ConditionalWeakTable<PlayerEntity, List<ItemInstanceEntity>> _pending = new();
+
+        internal static void Dropped(PlayerEntity p, ItemInstanceEntity item)
+        {
+            if (Heals(item.ItemType) > 0) _pending.GetOrCreateValue(p).Add(item);
+        }
+
+        // what a health pickup heals in a match (PlayerProcess.cs _healthPickupAmounts)
+        static int Heals(ItemType t) => t switch
+        {
+            ItemType.HealthMedium => 30,
+            ItemType.HealthSmall => 60,
+            ItemType.HealthBig => 100,
+            _ => 0,
+        };
+
+        // the player's health with their uncollected crate health in it (taken or gone: DespawnTimer 0)
+        static int WithPending(PlayerEntity p)
+        {
+            int hp = p.Health;
+            if (_pending.TryGetValue(p, out List<ItemInstanceEntity>? list))
+            {
+                list.RemoveAll(i => i.DespawnTimer == 0);
+                foreach (ItemInstanceEntity i in list) hp += Heals(i.ItemType);
+            }
+            return Math.Min(hp, p.HealthMax);
+        }
 
         // RULE 1bb549fb (health and missiles): the first condition that holds rolls its chance; RULE ec6568a0 (the beams'
         // ammo, our UA) by the UA share: each line rolls its own chance and count
@@ -115,10 +165,11 @@ namespace MphRecomp.Arenas
             bool Roll(int pct) => Rng.GetRandomInt2(100) < (uint)pct;
             int Count(int lo, int hi) => lo + (int)Rng.GetRandomInt2((uint)(hi - lo + 1));
             if (p == null) return got;
-            float hp = p.HealthMax > 0 ? 100f * p.Health / p.HealthMax : 100;
+            int health = PendingHealth ? WithPending(p) : p.Health;
+            float hp = p.HealthMax > 0 ? 100f * health / p.HealthMax : 100;
             int cap = Math.Max(1, (int)p.Values.MpAmmoCap);
             int missiles = p.HostAmmo(1), ua = p.HostAmmo(0);
-            bool needMsl = missiles < cap, needHlt = p.Health < p.HealthMax;
+            bool needMsl = missiles < cap, needHlt = health < p.HealthMax;
             if (hp < 20) { if (Roll(75)) got.Add(ItemType.HealthBig); }
             else if (needMsl && missiles == 0) { if (Roll(80)) got.Add(ItemType.MissileBig); }
             else if (hp < 50) { if (Roll(50)) got.Add(ItemType.HealthMedium); }
@@ -166,6 +217,8 @@ namespace MphRecomp.Arenas
 
         public bool Up { get; private set; } = true;
         public int Breaks { get; private set; }
+        // the crates resting on this one and the ones it rests on (CrateSpot.Above)
+        internal readonly List<MiningPlazaCrateEntity> AboveMe = new(), UnderMe = new();
         public bool Flash => Up && _sinceHit < MiningPlazaCrates.FlashFrames;
         public bool Hit => _sinceHit == 0;
 
@@ -187,7 +240,7 @@ namespace MphRecomp.Arenas
             Flags = EnemyFlags.NoMaxDistance | EnemyFlags.Static | EnemyFlags.Invincible;
             _hurtVolumeInit = _hurtVolume = new CollisionVolume(Position.AddY(-10000), 0);
             Transform = Matrix4.Identity;
-            SetCollision(MiningPlazaPillars.Shape(Spot.Tris, $"plaza_crate{Spot.Id:x8}", Terrain.Sand), 0);
+            SetCollision(MiningPlazaPillars.Shape(Spot.Tris, $"plaza_crate{Spot.Id:x8}", Spot.Metal ? Terrain.Metal : Terrain.Sand), 0);
             UpdateCollisionTransform(0, Matrix4.Identity);
             UpdateLinkedInverse(0);
         }
@@ -226,7 +279,7 @@ namespace MphRecomp.Arenas
             if (!Up)
             {
                 if (_timer > 0) _timer--;
-                if (Occupied()) _timer = Math.Max(_timer, 1);
+                if (Occupied() || UnderMe.Any(u => !u.Up)) _timer = Math.Max(_timer, 1);
                 if (_timer == 0) Restore();
             }
             return base.Process();
@@ -290,7 +343,13 @@ namespace MphRecomp.Arenas
                     float a = MathF.Tau * i / drops.Count;
                     at += new Vector3(MathF.Cos(a), 0, MathF.Sin(a)) * 0.6f;
                 }
-                ItemSpawnEntity.SpawnItem(drops[i], at, NodeRef, EchoesCrateEntity.DropFrames, _scene);
+                ItemInstanceEntity? item = ItemSpawnEntity.SpawnItem(drops[i], at, NodeRef, EchoesCrateEntity.DropFrames, _scene);
+                if (item != null && need != null && MiningPlazaCrates.PendingHealth) MiningPlazaCrates.Dropped(need, item);
+            }
+            // the crates resting on it go too (their own break: debris, sound, drops)
+            foreach (MiningPlazaCrateEntity top in AboveMe)
+            {
+                if (top.Up) top.Break(by);
             }
         }
 

@@ -579,16 +579,104 @@ namespace MphRead
                 LoadBeamEffectResources(scene);
                 LoadBeamProjectileResources(scene);
                 LoadRoomResources(scene);
-                LoadHunterResources(Hunter.Samus, scene);
-                LoadHunterResources(Hunter.Kanden, scene);
-                LoadHunterResources(Hunter.Trace, scene);
-                LoadHunterResources(Hunter.Sylux, scene);
-                LoadHunterResources(Hunter.Noxus, scene);
-                LoadHunterResources(Hunter.Spire, scene);
-                LoadHunterResources(Hunter.Weavel, scene);
-                LoadHunterResources(Hunter.Guardian, scene);
-                LoadCommonHunterResources(scene);
+                if (HostNoHunterResources)
+                {
+                    return;
+                }
+                long hunterStart = System.Diagnostics.Stopwatch.GetTimestamp(); // recomp: HostHunterResourceMs
+                Read.HostKeepLoads = true; // recomp: the hunters' models and effects outlive the scene (Read.ClearCache)
+                try
+                {
+                    LoadHunterResources(Hunter.Samus, scene);
+                    LoadHunterResources(Hunter.Kanden, scene);
+                    LoadHunterResources(Hunter.Trace, scene);
+                    LoadHunterResources(Hunter.Sylux, scene);
+                    LoadHunterResources(Hunter.Noxus, scene);
+                    LoadHunterResources(Hunter.Spire, scene);
+                    LoadHunterResources(Hunter.Weavel, scene);
+                    LoadHunterResources(Hunter.Guardian, scene);
+                    LoadCommonHunterResources(scene);
+                }
+                finally { Read.HostKeepLoads = false; }
+                HostHunterResourceMs = System.Diagnostics.Stopwatch.GetElapsedTime(hunterStart).TotalMilliseconds;
             }
+        }
+
+        // recomp: how long the last room load spent on the eight hunters' models and effects (match load timing, logged by
+        // the App's "MPHCampaign started" line and -matchloadtime)
+        public static double HostHunterResourceMs { get; private set; }
+
+        // recomp: a scene with no players (the menus' arena backdrop, MphRecomp CampaignHost.StartMenuBackdrop) skips the
+        // eight hunters' models and effects, most of a room load's time (2026-11-21: ~375 of ~460 ms on a desktop CPU);
+        // default off
+        public static bool HostNoHunterResources { get; set; }
+
+        // recomp: the hunter window's models and effects (the same lists as LoadHunterResources and
+        // LoadCommonHunterResources) parsed and their textures decoded with no scene, so the next match's room load finds
+        // them kept (Read.HostKeepLoads) and the first match after app start loads as fast as a later one. Caches only:
+        // a kept model comes back in its parsed state. MphRead is one scene at a time: the caller makes sure nothing else
+        // uses it meanwhile (the App's menus run it on a worker during the startup screens, FrontendRenderer.StepPrewarm).
+        // Cancelled, it stops before its next model or effect (the ones loaded so far stay kept)
+        public static void HostPrewarmHunterResources(System.Threading.CancellationToken cancel = default)
+        {
+            if (!Read.HostKeepAcrossScenes)
+            {
+                return;
+            }
+            void Model(string name)
+            {
+                cancel.ThrowIfCancellationRequested();
+                Scene.HostDecodeKeptTextures(Read.GetModelInstance(name).Model);
+            }
+            void Effect(int id)
+            {
+                cancel.ThrowIfCancellationRequested();
+                foreach (EffectElement element in Read.LoadEffect(id, persistent: true).Elements)
+                {
+                    Model(element.ModelName);
+                }
+            }
+            Read.HostKeepLoads = true;
+            try
+            {
+                foreach (Hunter hunter in new[] { Hunter.Samus, Hunter.Kanden, Hunter.Trace, Hunter.Sylux, Hunter.Noxus,
+                    Hunter.Spire, Hunter.Weavel, Hunter.Guardian })
+                {
+                    Model(hunter == Hunter.Noxus || hunter == Hunter.Trace ? "nox_ice" : "samus_ice");
+                    foreach (string modelName in Metadata.HunterModels[hunter])
+                    {
+                        Model(modelName);
+                    }
+                    if (hunter == Hunter.Samus)
+                    {
+                        Effect(30);
+                        Effect(136);
+                    }
+                    else if (hunter == Hunter.Spire)
+                    {
+                        Effect(37);
+                    }
+                    else if (hunter == Hunter.Noxus)
+                    {
+                        Effect(235);
+                    }
+                }
+                foreach (string name in new[] { "doubleDamage_img", "alt_ice", "gunSmoke", "trail", "octolith_simple", "Octolith" })
+                {
+                    Model(name);
+                }
+                foreach (int id in new[] { 10, 216, 187, 188, 189 })
+                {
+                    Effect(id);
+                }
+                for (int i = 0; i < 9; i++)
+                {
+                    Effect(Metadata.MuzzleEffectIds[i]);
+                    Effect(Metadata.ChargeEffectIds[i]);
+                    Effect(Metadata.ChargeLoopEffectIds[i]);
+                }
+            }
+            finally { Read.HostKeepLoads = false; }
         }
 
         public static void LoadCommonHunterResources(Scene scene)

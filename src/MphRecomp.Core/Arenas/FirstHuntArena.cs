@@ -74,7 +74,11 @@ namespace MphRecomp.Arenas
         public static bool IsFirstHuntRoom(string? roomName) => roomName != null && All.Any(d => d.Room == roomName);
 
         // a dev-menu room: in MatchArenas.All (so a match can start there) but not offered in the arena lists
-        public static bool IsDevRoom(string? roomName) => roomName != null && All.Any(d => d.Dev && d.Room == roomName);
+        public static bool IsDevRoom(string? roomName)
+        {
+            if (roomName == null) return false;
+            return All.Any(d => d.Dev && d.Room == roomName);
+        }
 
         // the cartridges this reads (First Hunt US; the European demo would be AMFP, not seen yet)
         public static bool IsFirstHunt(NdsRom rom) => rom.GameCode is "AMFE" or "AMFP";
@@ -512,7 +516,13 @@ namespace MphRecomp.Arenas
             }
         }
 
+        // under the host room lock: the replay list's warm-up thread and the menus both get here at load (owner 2026-11-20)
         public static void EnsureRegistered()
+        {
+            lock (Metadata.HostRoomLock) RegisterIfChanged();
+        }
+
+        static void RegisterIfChanged()
         {
             string? imports = EchoesArena.ImportRoot;
             string stamp = imports ?? "";

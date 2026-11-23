@@ -733,7 +733,7 @@ owner judges the results when back (look checks by eye, Odin installs as usual).
 | # | Work | Unblocks | Output | Done when |
 |---|---|---|---|---|
 | 1 | **DONE 10-30** (11.3). **AFSM/FSM2 reader** (Prime 1 AFSM, Echoes FSM2): states, triggers, conditions, parameter names | Echoes Dark Samus and every "needs AFSM/FSM2" row; Thardus | `Import/Retro/Fsm.cs` + a `-fsmdump` Tools switch | every AFSM/FSM2 asset on the Prime 1 and Echoes discs parses and dumps readably |
-| 2 | **DONE 10-30** (10.6; reader in `Import/Retro/Scly1.cs`, not `Mrea.cs`, which belongs to the Echoes arenas). **Prime 1 script layers (SCLY)** | E2; section 10.6 health and damage columns | catalogue rows filled from the disc | every MP1 enemy type in 10.6 has health + damage values |
+| 2 | **DONE 10-30** (10.6; reader in `Import/Retro/Scly1.cs`, not `Mrea.cs`, which belongs to the Echoes arenas; per-room enemy list and a full property dump 11-16, 11.6). **Prime 1 script layers (SCLY)** | E2; section 10.6 health and damage columns | catalogue rows filled from the disc | every MP1 enemy type in 10.6 has health + damage values |
 | 3 | **DONE 2026-10-30.** **Corruption DOL + MREA3 script data**: pull the DOL out of the Wii image with our disc readers, read MREA3 script instances | E3; 10.5 health/damage; resolves Korakk and SamusForm | catalogue rows filled | every 10.5 row has values and a module |
 | 4 | **RSO/REL part DONE 10-30** (11.4, docs/ENEMY_MODULES.md); Prime 1 DOL entry points open. **Module symbol index**: export/import names of every REL/RSO (Echoes, Trilogy MP2/MP3), the DOL entry point per Prime 1 enemy (Metaforce names checked against the DOL, D3) | every port's "where is the logic" step | appendix per enemy and hunter | every catalogue row points at its code |
 | 5 | **K1 kit, pilot-free parts**: enemy clip driver on NativeBody, EVNT runtime dispatch (sounds, particles, locators on frames), Retro physics actor on MPH collision, damage table from `enemies/damage_map.json` (8.3 rows) | every Retro enemy | Core + MphRead host hooks, each with a PC test | tests pass on an Echoes body dropped into an MPH room |
@@ -860,3 +860,322 @@ What this changes in the plan:
   use the normal block and scale like MPH's own enemies.
 - D4 per hunter is above; grapple (3 of 4 Corruption hunters) is the main ability gap, then Hypermode.
 
+
+### 11.6 Prime 1 enemies per room (owner pick list, 2026-11-16)
+
+Read from `mp1.iso` with `-mp1scly rooms` (Tools, `Mp1SclyTool.cs`): all 276 MREAs, 54,670 script objects, 0 rooms
+failed. An "enemy" here is any script object with a PatternedAI block (Core `Scly1.FindPatterned`), so boss parts
+(Flaahgra's tentacles, Omega Pirate's healing nodules, Thardus' rock, Metroid Prime stage 1) count too. Type names are
+the internal script names; the instance names (the designers' labels, e.g. "Platform Zoomer", "SpacePirate-WAVE
+TROOPER") often tell the in-game kind. Room and world names come from the world MLVL's STRG. Nothing is imported yet:
+this is the list the owner picks from.
+
+How to read: health is the PatternedAI health value (most common first; "..." = more values); layers are the room's
+script layers the objects sit on (layer 0 is always loaded, the others switch on with story state, e.g. Main Quarry's
+pirates on layers 0, 3 and 6). Odd health values to know about: 1000000 (SpankWeed, Geemer, PuddleSpore) marks an
+enemy that is not killed by damage; 5 on Thardus and Metroid Prime stage 1 means the damage goes through parts; the
+Frigate's 8-health pirates are the "Injured" scripted ones.
+
+The tool, for any room (the owner's PC; `disc=` and `templates=` default to `brawl_extract/prime/`):
+- `-mp1scly rooms`: this list. `-mp1scly areas`: every room id with its pak, object and enemy count.
+- `-mp1scly dump <area id> [type=SpacePirate]`: every script object of one room, every property named and typed
+  (position, rotation, scale, PatternedAI, damage vulnerabilities, actor parameters...) and its connections
+  ("on Dead send SetToZero to PickupGenerator"). Main Quarry `dump 643d038f` reads 613 objects, 0 mismatches.
+- `-mp1scly check`: how many objects the templates read to the exact end: 54,544 of 54,670. The 126 that don't are
+  all Water (a conditional property set the reader doesn't handle; not an enemy).
+
+Property names and types come from the MIT-licensed retro-script-object-templates (PrimeDecomp; (c) Aruki / AxioDL,
+the PrimeWorldEditor templates), read at run time from `brawl_extract/prime/script-templates/MP1` (outside the repo,
+1.2 MB; `Mp1ScriptTemplates.cs`). Without that folder the tool still runs and prints type ids only. Nothing from the
+templates is copied into the repo or ships.
+
+Per enemy type over the whole disc (276 rooms, 956 enemy objects, 42 types):
+
+| Type | Objects | Rooms | Worlds | Health (most common first) | Instance names (top 3) |
+|---|---|---|---|---|---|
+| SpacePirate (0x24) | 168 | 32 | Space Pirate Frigate, Phazon Mines, Tallon Overworld, Phendrana Drifts | 60 x67, 70 x35, 100 x17 (+6) | SpacePirate-component, SpacePirate-MELEE-component, SpacePirate-WAVE TROOPER |
+| Parasite (0x3D) | 98 | 27 | Space Pirate Frigate, Tallon Overworld, Magmoor Caverns, Phendrana Drifts, Chozo Ruins | 5 x63, 6 x25, 2 x7 (+1) | Platform Zoomer-component-component-component, Parasite-Ice, Platform Zoomer |
+| MetareeAlpha (0x37) | 92 | 9 | Tallon Overworld, Magmoor Caverns, Phendrana Drifts, Chozo Ruins | 1 | Metaree_ALPHA-02, Metaree_ALPHA-03, Metaree_ALPHA-04 |
+| Puffer (0x79) | 71 | 9 | Phazon Mines, Magmoor Caverns, Chozo Ruins | 2 | 07/06/02 Alpha Puffer MMT, 07/31/02 Beta Puffer MMT |
+| MetroidAlpha (0x44) | 61 | 13 | Impact Crater, Phazon Mines, Phendrana Drifts | 1 x56, 5 x5 | Metroid Alpha, Beta Metroid-component, Metroid |
+| Beetle (0x16) | 49 | 12 | Tallon Overworld, Phendrana Drifts, Chozo Ruins | 10 x42, 30 x4, 40 x3 | 04/16/02 Alpha Beetle MMT-component, 06/01/02 ICE Beetle MWW-component, GarBeetle |
+| SpankWeed (0x3B) | 47 | 11 | Tallon Overworld, Phendrana Drifts, Chozo Ruins | 2 x40, 1000000 x7 | Spank Weed-component, 07/15/02 Water Tentacle MAP |
+| FlyingPirate (0x25) | 40 | 14 | Tallon Overworld, Magmoor Caverns, Phendrana Drifts | 90 x35, 120 x5 | FlyingPirate-component |
+| AtomicAlpha (0x72) | 28 | 13 | Phazon Mines, Phendrana Drifts, Chozo Ruins | 18 x26, 10 x2 | 06/15/02 Atomic Alpha MMT, 09/09/02 Atomic Alpha Invisible MMT |
+| Burrower (0x7F) | 23 | 7 | Impact Crater, Phazon Mines, Magmoor Caverns, Phendrana Drifts | 2 | Ice Burrower, Burrower |
+| ChozoGhost (0x28) | 23 | 8 | Tallon Overworld, Chozo Ruins | 200 | ChozoGhost-component |
+| JellyZap (0x54) | 22 | 9 | Tallon Overworld, Phendrana Drifts | 30 | JellyZap-component |
+| AtomicBeta (0x77) | 19 | 9 | Phazon Mines, Phendrana Drifts | 18 | 07/03/02 Atomic Beta MMT-component, 07/03/02 Atomic Beta MMT |
+| FlickerBat (0x2E) | 17 | 4 | Phendrana Drifts | 4 | FlickerBat-component-component, FlickerBat |
+| Drone (0x43) | 16 | 9 | Phazon Mines, Tallon Overworld, Phendrana Drifts | 40 x15, 120 x1 | Drone-component, Drone-component-component |
+| WarWasp (0x21) | 15 | 7 | Chozo Ruins | 4 x14, 2 x1 | Beta Warwasp-component, 2nd Pass Beta Warwasp Right , Left Wasp |
+| Babygoth (0x66) | 14 | 7 | Phendrana Drifts | 6 | Babygoth-component |
+| Eyeball (0x67) | 14 | 3 | Chozo Ruins | 10 | 05/03/02 EyeBall JRG, EyeBall-component Right, EyeBall-component Left |
+| Oculus (0x6F) | 14 | 2 | Chozo Ruins | 5 | 06/12/02 Oculus MMT |
+| Seedling (0x7C) | 13 | 5 | Tallon Overworld | 5 | Seedling |
+| EnergyBall (0x8B) | 12 | 3 | Impact Crater | 30 | 10/10/02 Ice EnergyBall MMT, 10/10/02 Plasma EnergyBall MMT, 10/10/02 Power EnergyBall MMT |
+| Tryclops (0x7A) | 12 | 4 | Magmoor Caverns | 5 | 07/15/02 Tryclops MAP |
+| MetroidBeta (0x27) | 10 | 5 | Impact Crater, Phazon Mines, Phendrana Drifts | 1 | MetroidBeta |
+| PhazonHealingNodule (0x88) | 9 | 1 | Phazon Mines | 75 | PhazonHealingNodule - R_Palm_LCTR, PhazonHealingNodule - L_Palm_LCTR, PhazonHealingNodule - lockon_target_LCTR |
+| Magdolite (0x6B) | 9 | 6 | Magmoor Caverns | 100 | Magdolite-component |
+| FireFlea (0x36) | 8 | 3 | Chozo Ruins | 4 | Fire Flea-component, Fire Flea-Respawn 01, Fire Flea-Respawn 02 |
+| ElitePirate (0x26) | 7 | 7 | Phazon Mines, Phendrana Drifts | 300 x6, 700 x1 | ElitePirate |
+| PuddleToadGamma (0x34) | 6 | 2 | Chozo Ruins | 1 x5, 10 x1 | PuddleToadGamma, PuddleToadGamma-component |
+| Ripper (0x3F) | 5 | 4 | Phazon Mines, Phendrana Drifts | 5 | 08/01/02 Beta Ripper MMT, Ripper |
+| Geemer (0x70) | 5 | 3 | Tallon Overworld | 1000000 | 06/12/02 Geemer MMT |
+| PuddleSpore (0x31) | 5 | 3 | Magmoor Caverns, Chozo Ruins | 50000 x3, 1000000 x2 | PuddleSpore-component, PuddleSpore |
+| IceSheegoth (0x4B) | 5 | 5 | Phendrana Drifts | 400 x2, 250 x2, 500 x1 | IceSheegoth-component |
+| MetroidPrimeStage1 (0x84) | 4 | 4 | Impact Crater | 5 |  |
+| BloodFlower (0x2D) | 4 | 3 | Tallon Overworld | 100 | Blood Flower-component-component |
+| FlaahgraTentacle (0x5C) | 4 | 1 | Chozo Ruins | 10000 | FlaahgraTentacle 1, FlaahgraTentacle 2, FlaahgraTentacle 4 |
+| NewIntroBoss (0x0E) | 1 | 1 | Space Pirate Frigate | 480 | NewIntroBoss |
+| MetroidPrimeStage2 (0x83) | 1 | 1 | Impact Crater | 36667 | Metroid Prime - Stage 2 |
+| OmegaPirate (0x86) | 1 | 1 | Phazon Mines | 600 | OmegaPirate |
+| Ridley (0x7B) | 1 | 1 | Tallon Overworld | 2000 | Ridley |
+| Thardus (0x58) | 1 | 1 | Phendrana Drifts | 5 | Thardus |
+| ThardusRockProjectile (0x5F) | 1 | 1 | Phendrana Drifts | 6 | ThardusRockProjectile |
+| Flaahgra (0x4D) | 1 | 1 | Chozo Ruins | 2000 | Flaahgra |
+
+**Space Pirate Frigate** (Metroid1.pak): 28 rooms, 25 enemy objects, 3 types
+
+| Room | Area id | Enemies: type xcount (health; layers if not only 0) |
+|---|---|---|
+| Deck Alpha Access Hall | 624f493a | Parasite x3 (10) |
+| Emergency Evacuation Area | 20e48216 | Parasite x3 (2), SpacePirate x1 (8) |
+| Map Facility | cde604f0 | Parasite x2 (2) |
+| Biotech Research Area 1 | 85578e54 | SpacePirate x8 (50/8; layers 0,1) |
+| Biohazard Containment | d16b26d0 | SpacePirate x4 (8/60 ...) |
+| Reactor Core | 87452dc1 | NewIntroBoss x1 (480) |
+| Cargo Freight Lift to Deck Gamma | 6ff0fd62 | Parasite x2 (2), SpacePirate x1 (60) |
+
+**Impact Crater** (Metroid7.pak): 12 rooms, 25 enemy objects, 6 types
+
+| Room | Area id | Enemies: type xcount (health; layers if not only 0) |
+|---|---|---|
+| Phazon Core | bd946ac3 | MetroidAlpha x4 (5) |
+| Crater Tunnel B | 32d5a180 | Burrower x1 (2; layers 1) |
+| Subchamber One | dadf06c3 | MetroidPrimeStage1 x1 (5) |
+| Subchamber Two | 0749df46 | EnergyBall x4 (30), MetroidPrimeStage1 x1 (5) |
+| Subchamber Three | 7a3ad91e | EnergyBall x4 (30), MetroidPrimeStage1 x1 (5) |
+| Subchamber Four | a7ac009b | EnergyBall x4 (30), MetroidPrimeStage1 x1 (5) |
+| Metroid Prime Lair | 1a666c55 | MetroidAlpha x2 (5/1), MetroidBeta x1 (1), MetroidPrimeStage2 x1 (36667) |
+
+**Phazon Mines** (metroid5.pak): 42 rooms, 196 enemy objects, 12 types
+
+| Room | Area id | Enemies: type xcount (health; layers if not only 0) |
+|---|---|---|
+| Main Quarry | 643d038f | SpacePirate x8 (60; layers 0,3,6) |
+| Security Access A | c7653a92 | SpacePirate x3 (70; layers 2), Drone x1 (40; layers 3) |
+| Ore Processing | 97d2b2f6 | MetroidAlpha x4 (1; layers 3), SpacePirate x3 (125/100; layers 2) |
+| Mine Security Station | 956f1552 | SpacePirate x17 (100/150 ...; layers 1,2,4), MetroidAlpha x6 (1; layers 4) |
+| Elevator Access A | 26219c01 | AtomicBeta x4 (18) |
+| Security Access B | a20201d4 | SpacePirate x2 (70; layers 1) |
+| Elite Research | 8a97bb54 | SpacePirate x9 (70/60 ...; layers 2,3), MetroidAlpha x4 (1; layers 4), ElitePirate x1 (700; layers 1) |
+| Elite Control Access | 8988d1cb | SpacePirate x2 (60), Puffer x2 (2; layers 1) |
+| Elite Control | c50af17a | SpacePirate x8 (70/150; layers 1,3), MetroidBeta x2 (1; layers 2), ElitePirate x1 (300; layers 1) |
+| Ventilation Shaft | 90709aac | Puffer x8 (2) |
+| Phazon Processing Center | ad2e7eb9 | SpacePirate x7 (60/125 ...; layers 1,2) |
+| Omega Research | 3f375ecc | SpacePirate x11 (60/125 ...; layers 1,4), MetroidAlpha x2 (1; layers 3), ElitePirate x1 (300; layers 2) |
+| Processing Center Access | ed6de73b | AtomicAlpha x3 (18; layers 3) |
+| Dynamo Access | f517a1ea | ElitePirate x1 (300; layers 3) |
+| Elite Quarters | 3953c353 | PhazonHealingNodule x9 (75; layers 1,5), SpacePirate x8 (150/250 ...; layers 5), OmegaPirate x1 (600; layers 5) |
+| Central Dynamo | fea372e2 | SpacePirate x4 (150; layers 2), Drone x2 (120/40; layers 1), MetroidBeta x2 (1; layers 4) |
+| Elite Quarters Access | 71343c3f | SpacePirate x1 (250; layers 1) |
+| Metroid Quarantine B | bb3afc4e | MetroidAlpha x10 (1; layers 1,3,4,5), SpacePirate x8 (250/100 ...; layers 2,4) |
+| Metroid Quarantine A | fb051f5a | MetroidAlpha x11 (1; layers 0,2,3,5), SpacePirate x2 (60; layers 1) |
+| Quarantine Access B | 14530779 | AtomicAlpha x3 (18) |
+| Elevator Access B | 3fd9d766 | Burrower x3 (2) |
+| Fungal Hall B | ec47c242 | MetroidAlpha x8 (1; layers 0,1), Ripper x2 (5; layers 0,1) |
+| Fungal Hall Access | de9d71f5 | AtomicAlpha x3 (18), SpacePirate x2 (60; layers 0,1) |
+| Fungal Hall A | 0f5277d1 | MetroidBeta x4 (1), MetroidAlpha x2 (1; layers 1), Ripper x1 (5) |
+
+**Tallon Overworld** (Metroid4.pak): 44 rooms, 128 enemy objects, 13 types
+
+| Room | Area id | Enemies: type xcount (health; layers if not only 0) |
+|---|---|---|
+| Gully | 7b143499 | Parasite x3 (5) |
+| Canyon Cavern | ee209548 | Beetle x3 (10) |
+| Temple Hall | 5b4e38f5 | Seedling x3 (5; layers 2) |
+| Tallon Canyon | 2043c96e | Parasite x4 (5), Beetle x2 (10), Geemer x1 (1000000) |
+| Frigate Crash Site | b9abcd56 | SpacePirate x6 (8/60; layers 2,3), FlyingPirate x4 (90; layers 2,4), Beetle x3 (10; layers 1), JellyZap x2 (30; layers 1) |
+| Transport Tunnel A | 13d96d3d | Parasite x2 (5) |
+| Root Tunnel | 404804d9 | BloodFlower x1 (100) |
+| Temple Lobby | 234762be | MetareeAlpha x4 (1; layers 1) |
+| Root Cave | bd8c8625 | Beetle x6 (10; layers 1), Parasite x3 (5), Geemer x2 (1000000), BloodFlower x1 (100) |
+| Artifact Temple | 2398e906 | Ridley x1 (2000; layers 1) |
+| Transport Tunnel C | 85ca08ab | Parasite x2 (5), Geemer x2 (1000000) |
+| Transport Tunnel B | c7e821ba | Parasite x4 (5) |
+| Reactor Core | ee09629a | SpankWeed x5 (2; layers 2), JellyZap x3 (30; layers 2), FlyingPirate x2 (120; layers 1) |
+| Reactor Access | fb427580 | SpacePirate x1 (60; layers 3) |
+| Cargo Freight Lift to Deck Gamma | 37b3afe6 | SpankWeed x2 (2), SpacePirate x1 (60; layers 1) |
+| Biohazard Containment | ac2c58fe | SpacePirate x4 (60; layers 2,3), SpankWeed x3 (1000000; layers 3), Drone x2 (40; layers 1) |
+| Deck Beta Security Hall | 76f6e356 | SpankWeed x5 (2) |
+| Biotech Research Area 1 | 5f2eb7b6 | JellyZap x4 (30; layers 2), FlyingPirate x3 (120; layers 1), Drone x2 (40; layers 3) |
+| Deck Beta Conduit Hall | c3d44a6e | SpankWeed x6 (2) |
+| Connection Elevator to Deck Beta | e47228ef | SpacePirate x1 (60) |
+| Great Tree Hall | f47dbe5b | Seedling x4 (5), JellyZap x2 (30), BloodFlower x2 (100) |
+| Transport Tunnel D | 1a932f64 | Seedling x2 (5) |
+| Transport Tunnel E | 9d330a07 | Seedling x3 (5) |
+| Life Grove | 86eb2e02 | SpankWeed x8 (2; layers 2), ChozoGhost x3 (200; layers 1), Seedling x1 (5; layers 1) |
+
+**Magmoor Caverns** (Metroid6.pak): 29 rooms, 119 enemy objects, 8 types
+
+| Room | Area id | Enemies: type xcount (health; layers if not only 0) |
+|---|---|---|
+| Burning Trail | 6d434f4e | MetareeAlpha x16 (1), Parasite x1 (5) |
+| Lake Tunnel | 79784d3d | Parasite x2 (5), Burrower x1 (2) |
+| Lava Lake | a4719c6a | Puffer x12 (2; layers 0,3), Parasite x2 (5; layers 1), FlyingPirate x2 (90; layers 2), Magdolite x2 (100; layers 3) |
+| Pit Tunnel | da2ecb94 | Tryclops x3 (5) |
+| Triclops Pit | bad9edbf | Puffer x9 (2; layers 2), Tryclops x5 (5), FlyingPirate x2 (90; layers 1), Parasite x1 (5; layers 3) |
+| Monitor Tunnel | 0dcc4bcc | Puffer x5 (2) |
+| Monitor Station | 0c57a641 | Puffer x5 (2; layers 1), FlyingPirate x2 (90; layers 2), Magdolite x2 (100; layers 3) |
+| Fiery Shores | f5ef1862 | Tryclops x2 (5), Magdolite x1 (100) |
+| Transport Tunnel B | 3346c676 | Magdolite x1 (100) |
+| Twin Fires | 4c784bea | Puffer x15 (2), Magdolite x2 (100; layers 1,2) |
+| North Core Tunnel | a73bd0e0 | Magdolite x1 (100; layers 1) |
+| Geothermal Core | c0498676 | Parasite x9 (6; layers 2), Puffer x3 (2; layers 6), PuddleSpore x2 (50000; layers 1) |
+| South Core Tunnel | 70d950b8 | Burrower x2 (2), PuddleSpore x1 (50000) |
+| Magmoor Workstation | 8abeb3c3 | FlyingPirate x3 (90; layers 1), Tryclops x2 (5; layers 1) |
+| Workstation Tunnel | 046d5649 | Parasite x3 (5) |
+
+**Phendrana Drifts** (Metroid3.pak): 56 rooms, 247 enemy objects, 20 types
+
+| Room | Area id | Enemies: type xcount (health; layers if not only 0) |
+|---|---|---|
+| Phendrana Shorelines | f7285979 | Parasite x4 (5), FlickerBat x3 (4; layers 2), Babygoth x2 (6; layers 1) |
+| Temple Entryway | 85d9f399 | Parasite x3 (5; layers 2), AtomicAlpha x2 (18; layers 1), AtomicBeta x1 (18; layers 1) |
+| Ruins Entryway | 3c13643a | Burrower x6 (2; layers 1), AtomicAlpha x3 (18; layers 4), Babygoth x2 (6; layers 2), IceSheegoth x1 (400; layers 3) |
+| Plaza Walkway | c8115292 | Burrower x7 (2; layers 2), Drone x2 (40; layers 1) |
+| Ice Ruins Access | 4e85203c | Parasite x3 (5; layers 3), AtomicBeta x2 (18) |
+| Chozo Ice Temple | 6655f51e | Parasite x8 (5/6; layers 2), AtomicAlpha x3 (18; layers 3), Babygoth x1 (6; layers 2) |
+| Ice Ruins West | b33a0620 | Parasite x7 (5; layers 2), MetareeAlpha x4 (1; layers 2), Babygoth x2 (6; layers 2), IceSheegoth x1 (250; layers 1) |
+| Ice Ruins East | dafcc26f | Parasite x4 (5), Babygoth x2 (6; layers 1), IceSheegoth x1 (250; layers 2) |
+| Courtyard Entryway | cfb8abd1 | AtomicAlpha x1 (18) |
+| Canyon Entryway | 034d8137 | AtomicBeta x2 (18), Parasite x2 (5; layers 3) |
+| Chapel of the Elders | 40c548e9 | Babygoth x4 (6), IceSheegoth x1 (500) |
+| Ruined Courtyard | 1921876d | FlyingPirate x3 (90; layers 1), FlickerBat x3 (4; layers 2) |
+| Phendrana Canyon | a20a7455 | Parasite x7 (5), Babygoth x1 (6) |
+| Specimen Storage | d341d2db | SpacePirate x1 (70; layers 1) |
+| Quarantine Access | eab320cf | AtomicAlpha x2 (10; layers 1), Drone x2 (40; layers 2) |
+| Research Entrance | b51fce29 | SpacePirate x9 (70/60; layers 2,3), ElitePirate x1 (300; layers 5) |
+| North Quarantine Tunnel | 05e1962e | AtomicAlpha x2 (18) |
+| Hydra Lab Entryway | 3947e047 | AtomicBeta x2 (18) |
+| Quarantine Cave | 70181194 | IceSheegoth x1 (400; layers 1), Thardus x1 (5; layers 3), ThardusRockProjectile x1 (6; layers 3) |
+| Research Lab Hydra | 43e4cc25 | SpacePirate x14 (60/70; layers 1,2), MetroidAlpha x2 (1; layers 2), ElitePirate x1 (300; layers 4) |
+| South Quarantine Tunnel | 0035fdad | AtomicAlpha x2 (18) |
+| Observatory Access | 37bbb33c | Drone x2 (40; layers 2) |
+| Observatory | 3fb4a34e | SpacePirate x7 (60; layers 1,2) |
+| Transport Access | d695b958 | AtomicAlpha x1 (18) |
+| West Tower Entrance | 1e48b18f | AtomicBeta x2 (18; layers 2), Parasite x2 (5; layers 2) |
+| Frozen Pike | d79ee805 | FlickerBat x8 (4; layers 1), Parasite x4 (6; layers 1), FlyingPirate x2 (90; layers 2), JellyZap x1 (30) |
+| Frost Cave Access | 39c70fb9 | Burrower x3 (2; layers 1), Beetle x2 (30) |
+| Hunter Cave Access | 20ea1d30 | JellyZap x3 (30) |
+| Control Tower | b3c33249 | FlyingPirate x9 (90; layers 1,2), SpacePirate x3 (60; layers 1), ElitePirate x1 (300; layers 3) |
+| Research Core | a49b2544 | MetroidAlpha x3 (1), SpacePirate x3 (70/60; layers 1), FlyingPirate x2 (90; layers 1) |
+| Frost Cave | 4c6f7773 | FlyingPirate x2 (90; layers 1), Ripper x1 (5), MetroidBeta x1 (1; layers 2) |
+| Hunter Cave | 1ec7951a | JellyZap x3 (30; layers 1), FlickerBat x3 (4; layers 1), FlyingPirate x2 (90; layers 2) |
+| Research Core Access | d8e905dd | Beetle x2 (30; layers 1), Drone x2 (40; layers 2) |
+| Lower Edge Tunnel | 53801084 | AtomicBeta x2 (18) |
+| Chamber Access | ca6cc052 | Drone x1 (40) |
+| Lake Tunnel | 89d7a0a6 | AtomicBeta x1 (18) |
+| Aether Lab Entryway | 98dcc321 | AtomicBeta x3 (18) |
+| Research Lab Aether | 21b4bff6 | SpacePirate x9 (60/70; layers 1,2,5), MetroidAlpha x3 (1; layers 0,2,5) |
+| Phendrana's Edge | 54def128 | JellyZap x2 (30), FlyingPirate x2 (90), Ripper x1 (5) |
+| Gravity Chamber | 49175472 | SpankWeed x6 (2), JellyZap x2 (30), AtomicAlpha x2 (18; layers 3) |
+
+**Chozo Ruins** (Metroid2.pak): 64 rooms, 216 enemy objects, 15 types
+
+| Room | Area id | Enemies: type xcount (health; layers if not only 0) |
+|---|---|---|
+| Ruins Entrance | b7f1952a | Beetle x2 (10) |
+| Main Plaza | d5cdb809 | Beetle x10 (10/40; layers 0,1,2), WarWasp x3 (4/2; layers 4) |
+| Plaza Access | 53359457 | Beetle x3 (10) |
+| Ruined Fountain | 165a4de9 | FireFlea x4 (4) |
+| Ruined Shrine | 3c785450 | Beetle x9 (10/40; layers 0,1,4), ChozoGhost x2 (200; layers 3) |
+| Eyon Tunnel | cb1e8a0b | Eyeball x5 (10) |
+| Training Chamber | 3f04f304 | ChozoGhost x2 (200; layers 1) |
+| Arboretum Access | 870b0525 | MetareeAlpha x8 (1) |
+| Ruined Nursery | c2576e4d | WarWasp x2 (4), Beetle x2 (10) |
+| Arboretum | 18ab6106 | SpankWeed x4 (1000000; layers 1), ChozoGhost x3 (200; layers 2), WarWasp x2 (4; layers 1) |
+| Tower of Light | 0d72f1f7 | Puffer x12 (2), Oculus x6 (5), PuddleSpore x2 (1000000; layers 1) |
+| Sunchamber Lobby | 3d238fcd | SpankWeed x2 (2) |
+| Ruined Gallery | e34fd92b | MetareeAlpha x8 (1; layers 2), WarWasp x1 (4; layers 1) |
+| Sun Tower | de161372 | Oculus x8 (5), WarWasp x1 (4) |
+| Sunchamber Access | 54c40995 | SpankWeed x3 (2) |
+| Gathering Hall | 47e73bc5 | MetareeAlpha x20 (1) |
+| Totem Access | ea8a4073 | FireFlea x3 (4) |
+| Sun Tower Access | 41cc90ec | ChozoGhost x4 (200; layers 1), AtomicAlpha x1 (18; layers 2) |
+| Hive Totem | c8309df6 | WarWasp x5 (4; layers 0,2) |
+| Sunchamber | 9a0a03eb | FlaahgraTentacle x4 (10000; layers 1), ChozoGhost x3 (200; layers 2), Flaahgra x1 (2000; layers 1) |
+| Watery Hall Access | eeec837d | MetareeAlpha x12 (1) |
+| East Atrium | 713600e3 | MetareeAlpha x8 (1) |
+| Watery Hall | 492cbf4a | Eyeball x6 (10), SpankWeed x3 (2) |
+| Energy Core Access | 463d0d2e | Eyeball x3 (10) |
+| Energy Core | c9d52bbc | MetareeAlpha x12 (1), PuddleToadGamma x1 (10) |
+| Dynamo | 04d6c285 | FireFlea x1 (4) |
+| Burn Dome | 4148f7b0 | WarWasp x1 (4) |
+| Furnace | 2e318473 | Parasite x8 (6), Beetle x5 (10; layers 1), ChozoGhost x2 (200; layers 2) |
+| Hall of the Elders | fb54a0cb | ChozoGhost x4 (200; layers 1,2) |
+| Reflecting Pool | 361ecaac | PuddleToadGamma x5 (1; layers 3) |
+
+## 12. E1 pilot: Splinter (2026-11-17)
+
+Splinter was picked over Grenchler (RSO 88 KB / 136 functions vs 137 KB / 191; CPatterned only; 61 placements; a small
+body that fits any room). The RSO logic map is `docs/enemies/SPLINTER_RSO.md`.
+
+**Import** (kind "enemies", `Core/Import/Enemies/EnemyImportKind.cs`, recipe `recipes/enemies/MP2Splinter.json`):
+`<imports>/enemies/MP2Splinter/` gets `enemy.cfg` (every leaf property of the reference SPTR instance, ids only),
+`state.fsm2` (FSM2 6f7f09cd, 47 states) and `body/` (model, skeleton, clips, inline EVNT, fx). Nothing ships.
+
+**Runtime** (`Core/Campaign/Retro/`): `RetroEnemyConfig` reads the numbers, `Fsm2Runner` runs the disc's state machine
+(our reading of the FSM2 links: see the file header), `EchoesSplinter` supplies the triggers and states from the RSO
+map, `RetroEnemies` + `PlacedRetroSpawner` place it from Hard Mode (`mp2:Splinter`). App draw:
+`App/Campaign/CampaignRetroBody.Enemy.cs`, `MatchRetroEnemies.cs`.
+
+**Our own choices** (not in the game, or not translatable 1:1):
+- Health x3 (Echoes Power Beam does 2 uncharged / 50 charged in `Standard.ntwk`, MPH's does 6 / 36), so shots-to-kill
+  match; Splinter: 6 -> 18.
+- Every MPH beam counts as Power for now (section 8 families come with the first enemy that has a non-Power weakness).
+- Straight-line pathing toward the player with a line-of-sight ray (no Echoes path mesh in MPH rooms); gravity and a
+  floor ray, since MPH walkers keep to paths.
+- It stops at the player's side (Echoes bodies collide; MPH's don't push the player) with the hurt volume still
+  overlapping, so contact damage lands.
+- Hit pause and red flash on damage; placed-spawner cooldown 2 s; alt-form contact doesn't hurt it.
+- Taunt / step-aside clips mapped from the FSM's Taunt and Sidestep states.
+
+**Test:** `-splintertest import|parts|spawn|render` (spawn = UNIT1_RM1: sees the player, pounces, reaches and hurts
+them, takes Power Beam damage, hit reaction, dies, is removed; render = a pose sheet of the imported body).
+
+## 13. Second Echoes enemy: Grenchler (2026-11-17, PC only)
+
+The RSO logic map is `docs/enemies/GRENCHLER_RSO.md`. It is not placeable yet: Splinter's device check comes first.
+
+**Import:** recipe `recipes/enemies/MP2Grenchler.json` writes `<imports>/enemies/MP2Grenchler/`:
+- `enemy.cfg`: 439 properties, type GRCH.
+- `state.fsm2`: FSM2 0e17fe4b, 43 states. State 0 is Dead, so the runner starts at Start.
+- `body/`: 40 clips. The 2 ELSM effects are skipped.
+
+**Runtime:**
+- `Core/Campaign/Retro/EchoesGrenchler.cs` is its own class beside EchoesSplinter.
+- `Fsm2Runner` now follows action links (SetLastActionAsBeam and the like) as well as trigger links.
+- The beam route is the disc's own: Pursue → Maneuver → BeamAttack.
+
+**Our own choices:**
+- Health x3, as Splinter: 200 → 600.
+- The Maneuver side goal is ours: the player's position plus the current offset rotated ±0.6 rad.
+- Bite and beam damage land at 40% of their clips.
+- The tail knock-off point is ours: TailHealth (80) takes the hit's damage × the tail vulnerability.
+- Two spheres:
+  - Its radius (1.6 × 0.593) is over half its height (2.5 × 0.593), so one centred sphere dips under the floor and
+    gets wedged under overhangs.
+  - The hit sphere sits on its feet.
+  - Walls are pushed with a smaller sphere inside the body, 0.35 above the feet, so floor bumps don't stop it.
+- Water, burst, grapple, jumps, patrol paths and backstep's teammate test are not ported. Their triggers never hold.
+
+**Test:** `-splintertest import name=MP2Grenchler`, then `-splintertest grenchler [trace|links|geo]`.
+- It runs in UNIT1_RM1 with the player standing 16 units off.
+- Checks: the config numbers, Turn → Pursue, a charge then bites with pauses, it keeps to the floor, it reaches the
+  player's side and hurts them, the tail comes off, it dies and is removed.
+- `trace` prints the state and position every 0.5 s. `links` dumps the FSM links. `geo` probes the floor and walls
+  between the spawn and the player.
+- The beam is not seen in this run, because the charge closes the gap first.

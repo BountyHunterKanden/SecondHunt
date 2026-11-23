@@ -37,9 +37,10 @@ namespace MphRecomp.Arenas
 
         public const int ScrollFrames = 240;   // one scroll loop: 240 animation steps at 30 per second
 
-        // corners: 3 per triangle, in MPH units. Returns (model file, animation file).
-        public static (byte[] Model, byte[] Anim) Write(string name, IReadOnlyList<Corner> corners, IReadOnlyList<TexMaterial>? texMaterials = null)
+        public static (byte[] Model, byte[] Anim) Write(string name, IReadOnlyList<Corner> corners, IReadOnlyList<TexMaterial>? texMaterials = null,
+            IReadOnlyList<int>? parts = null, int partCount = 1)
         {
+            if (parts == null) partCount = 1;
             texMaterials ??= Array.Empty<TexMaterial>();
             float maxAbs = 1;
             foreach (Corner c in corners)
@@ -85,18 +86,22 @@ namespace MphRecomp.Arenas
                 if (tm.ScrollS != 0 || tm.ScrollT != 0) scrolling.Add((tm.Name, tm.ScrollS, tm.ScrollT));
             }
 
-            // triangles grouped by material, a mesh per 1024
-            var byMaterial = new SortedDictionary<int, List<int>>();
+            // triangles grouped by part, then material, a mesh per 1024
+            var byMaterial = new SortedDictionary<(int Part, int Material), List<int>>();
             for (int t = 0; t < triCount; t++)
             {
                 int m = corners[t * 3].Material;
-                if (!byMaterial.TryGetValue(m, out List<int>? tl)) byMaterial[m] = tl = new List<int>();
+                int part = parts == null ? 0 : Math.Clamp(parts[t], 0, partCount - 1);
+                if (!byMaterial.TryGetValue((part, m), out List<int>? tl)) byMaterial[(part, m)] = tl = new List<int>();
                 tl.Add(t);
             }
             var renders = new List<IReadOnlyList<RenderInstruction>>();
             var meshes = new List<Mesh>();
-            foreach ((int m, List<int> tris) in byMaterial)
+            var partFirst = new int[partCount];
+            var partMeshes = new int[partCount];
+            foreach (((int part, int m), List<int> tris) in byMaterial)
             {
+                if (partMeshes[part] == 0) partFirst[part] = meshes.Count;
                 int width = 1, height = 1;
                 if (m >= 0)
                 {
@@ -140,13 +145,26 @@ namespace MphRecomp.Arenas
                     while (list.Count % 4 != 0) list.Add(new RenderInstruction(InstructionCode.NOP));   // 4 commands per packed word
                     meshes.Add(new Mesh(MeshRaw(material: materialIndex[m], dlist: renders.Count)));
                     renders.Add(list);
+                    partMeshes[part]++;
                 }
             }
-            var nodes = new List<Node>
+            var nodes = new List<Node>();
+            if (partCount == 1)
             {
-                new(NodeRaw(RoomNode, parent: -1, child: 1, next: -1, meshCount: 0, meshId: 0)),
-                new(NodeRaw("geo_arena", parent: 0, child: -1, next: -1, meshCount: meshes.Count, meshId: 0)),
-            };
+                nodes.Add(new(NodeRaw(RoomNode, parent: -1, child: 1, next: -1, meshCount: 0, meshId: 0)));
+                nodes.Add(new(NodeRaw("geo_arena", parent: 0, child: -1, next: -1, meshCount: meshes.Count, meshId: 0)));
+            }
+            else
+            {
+                for (int k = 0; k < partCount; k++)
+                {
+                    short room = (short)(k * 2);
+                    nodes.Add(new(NodeRaw(k == 0 ? RoomNode : $"rmPart{k}", parent: -1, child: (short)(room + 1),
+                        next: (short)(k + 1 < partCount ? room + 2 : -1), meshCount: 0, meshId: 0)));
+                    nodes.Add(new(NodeRaw(k == 0 ? "geo_arena" : $"geo_part{k}", parent: room, child: -1, next: -1,
+                        meshCount: partMeshes[k], meshId: partFirst[k] * 2)));   // the format's mesh id is twice the index (Node.MeshId / 2)
+                }
+            }
             var dlists = new List<DisplayList>();
             for (int i = 0; i < renders.Count; i++) dlists.Add(default);
             var options = new Repack.RepackOptions

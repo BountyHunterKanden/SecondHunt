@@ -40,6 +40,9 @@ namespace MphRecomp.App;
 // connected (follows a controller connecting / disconnecting live), on = always, aim only = always but only the aim finger (no
 // buttons, no move stick: the whole screen aims, for a controller player aiming by touch), off = never; re-read when the pause
 // menu resumes. A match's --es touch auto|on|off overrides the setting. CampaignActivity.OnCreate calls Attach.
+// CONTROLS > TOUCH > EDIT TOUCH LAYOUT (owner 2026-11-15, wave 2; TouchLayoutEditor.cs): the player's own place, size,
+// opacity and hide per button (RecompSettings.TouchLayouts, by layout and label) and the ALL BUTTONS opacity
+// (TouchOpacity) apply on top of the layouts below; a button with no edit is where it ships.
 internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListener
 {
     readonly CampaignRenderer _renderer;
@@ -79,8 +82,46 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         public bool OmegaOnly; // shown only while the Omega Cannon waits in the third slot (T4 N15: vanilla's touch icon)
         public bool ZoomOnly; // shown only with a weapon that zooms in hand (the Imperialist; owner 2026-11-02)
         public bool SpiderOnly; // shown only in alt form on an Echoes spider-track arena (the spider ball's on/off toggle)
+        public MphRecomp.Config.LayoutEdit? Edit; // the player's (EDIT TOUCH LAYOUT); null = as shipped
     }
     readonly TouchButton[] _buttons;
+    float _opacity = 1; // ALL BUTTONS (TouchOpacity)
+
+    // the layout editor's view of a layout (TouchLayoutEditor): each button's label, shipped place and size, and when it
+    // shows if not always (null)
+    internal readonly record struct Spot(string Label, float X, float Y, float R, string? When);
+
+    internal static Spot[] Spots(bool campaign)
+    {
+        var spots = new System.Collections.Generic.List<Spot>();
+        foreach (TouchButton b in campaign ? CampaignLayout() : MatchLayout())
+        {
+            string? when = b.DroneOnly ? "SCOUT DRONE" : b.VoiceOnly ? "PUSH TO TALK" : b.ChatOnly ? "ONLINE"
+                : b.OmegaOnly ? "OMEGA CANNON" : b.ZoomOnly ? "IMPERIALIST" : b.SpiderOnly ? "SPIDER TRACKS" : null;
+            spots.Add(new Spot(b.Label, b.X, b.Y, b.R, when));
+        }
+        return spots.ToArray();
+    }
+
+    internal static string LayoutKey(bool campaign) => campaign ? "campaign" : "match";
+
+    internal bool Campaign => _campaign; // (the pause menu's layout editor edits this layout)
+
+    // a button's centre and radius in pixels on a w x h view: as shipped, or as the player moved / sized it
+    internal static (float cx, float cy, float r) Place(float x, float y, float r, MphRecomp.Config.LayoutEdit? edit, float w, float h)
+    {
+        if (edit == null)
+        {
+            return (x * w, y * h, r * h);
+        }
+        (float cx, float cy) = edit.Moved ? MphRecomp.Config.LayoutEdit.Place(edit.Anchor, edit.X!.Value, edit.Y!.Value, w, h) : (x * w, y * h);
+        return (cx, cy, r * h * MphRecomp.Config.LayoutEdit.ClampScale(edit.Scale));
+    }
+
+    (float cx, float cy, float r) Place(TouchButton b) => Place(b.X, b.Y, b.R, b.Edit, Width, Height);
+
+    // a button's opacity, 0.1-1 (its own times ALL BUTTONS)
+    internal static float Alpha(MphRecomp.Config.LayoutEdit? edit, float all) => (edit == null ? 1 : Math.Clamp(edit.Opacity, 0.1f, 1f)) * all;
 
     static TouchButton[] MatchLayout() => new TouchButton[]
     {
@@ -164,6 +205,15 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         _mode = mode is "on" or "aim only" or "off" ? mode : "auto";
         _stylusAimSetting = string.Equals(settings?.TouchAim, "stylus", StringComparison.OrdinalIgnoreCase);
         _fireAimSetting = settings?.TouchFireAim ?? true;
+        // EDIT TOUCH LAYOUT's edits (by label: unique in each layout)
+        _opacity = Math.Clamp(settings?.TouchOpacity ?? 100, 10, 100) / 100f;
+        System.Collections.Generic.Dictionary<string, MphRecomp.Config.LayoutEdit>? edits = null;
+        settings?.TouchLayouts?.TryGetValue(LayoutKey(_campaign), out edits);
+        foreach (TouchButton b in _buttons)
+        {
+            b.Edit = edits != null && edits.TryGetValue(b.Label, out MphRecomp.Config.LayoutEdit? edit) && edit != null && !edit.IsDefault ? edit : null;
+        }
+        Invalidate();
         StylusOnly(); // (a change re-centres the aim stick under a finger that is down)
         ApplyMode();
     }
@@ -276,7 +326,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     bool AimOnly => _mode == "aim only";
 
     // the pause menu, the pause map and the in-ship menus (menu, briefing, planet select) take their own taps
-    bool MenuUp => _renderer.PauseMenuOpen || _renderer.ShipMenuOpen || _renderer.MapOpen;
+    bool MenuUp => _renderer.PauseMenuOpen || _renderer.ShipMenuOpen || _renderer.MapOpen || _renderer.PhotoOpen; // (photo mode: CampaignActivity)
 
     public override bool OnTouchEvent(MotionEvent? e)
     {
@@ -290,6 +340,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         if (MenuUp)
         {
             ReleaseAll();
+            if (_renderer.PhotoOpen) return false; // photo mode takes every finger (two at once: move + look)
             return e.ActionMasked != MotionEventActions.Down;
         }
         if (_renderer.MatchOver)
@@ -414,12 +465,14 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
     bool Hits(TouchButton b, float x, float y, bool drone)
     {
         if (AimOnly || b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
-            || b.OmegaOnly && !_renderer.TouchOmega || b.ZoomOnly && !_renderer.TouchCanZoom || b.SpiderOnly && !_renderer.TouchSpiderShown)
+            || b.OmegaOnly && !_renderer.TouchOmega || b.ZoomOnly && !_renderer.TouchCanZoom || b.SpiderOnly && !_renderer.TouchSpiderShown
+            || b.Edit is { Hidden: true })
         {
             return false;
         }
-        float r = b.R * Height * 1.15f;
-        return Sq(x - b.X * Width) + Sq(y - b.Y * Height) <= r * r;
+        (float cx, float cy, float r) = Place(b);
+        r *= 1.15f;
+        return Sq(x - cx) + Sq(y - cy) <= r * r;
     }
 
     long _moveNs; // the Move event's time (uptime, ns)
@@ -567,7 +620,7 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
             return;
         }
         int dialog = _campaign ? _renderer.TouchDialog : 0;
-        bool missile = _renderer.TouchMissileSelected;
+        bool missile = _renderer.TouchMissileTogglesToPower;
         bool drone = _renderer.TouchDrone;
         bool zoom = _renderer.TouchCanZoom; // the Imperialist in hand: the ZOOM button shows
         bool spider = _renderer.TouchSpiderShown, spiderOn = _renderer.TouchSpiderOn;
@@ -575,27 +628,30 @@ internal sealed class MatchTouchOverlay : View, InputManager.IInputDeviceListene
         foreach (TouchButton b in _buttons)
         {
             if ((AimOnly || b.DroneOnly && !drone || b.HunterOnly && drone || b.VoiceOnly && !VoiceTalk || b.ChatOnly && !_renderer.TouchChat
-                || b.OmegaOnly && !_renderer.TouchOmega || b.ZoomOnly && !zoom || b.SpiderOnly && !spider) && b.Pointer == -1)
+                || b.OmegaOnly && !_renderer.TouchOmega || b.ZoomOnly && !zoom || b.SpiderOnly && !spider) && b.Pointer == -1
+                || b.Edit is { Hidden: true })
             {
                 continue;
             }
             bool down = b.Pointer != -1 || b.Kind == Press.Spider && spiderOn; // (the toggle stays lit while on)
-            float cx = b.X * Width, cy = b.Y * Height, r = b.R * Height;
-            _fill.Color = Color.Argb(down ? 110 : 55, 255, 255, 255);
+            (float cx, float cy, float r) = Place(b);
+            float alpha = Alpha(b.Edit, _opacity);
+            _fill.Color = Color.Argb((int)((down ? 110 : 55) * alpha), 255, 255, 255);
             canvas.DrawCircle(cx, cy, r, _fill);
-            _ring.Color = Color.Argb(150, 255, 255, 255);
+            _ring.Color = Color.Argb((int)(150 * alpha), 255, 255, 255);
             canvas.DrawCircle(cx, cy, r, _ring);
+            _text.Color = Color.Argb((int)(255 * alpha), 255, 255, 255);
             string label = (dialog == 2 ? b.YesNoLabel : dialog == 1 ? b.OkLabel : null)
                 ?? (b.Key == PadButton.R1 && missile ? "POWER\nBEAM" // what R1 switches to
                     : b.Kind == Press.Spider && spiderOn ? "SPIDER\nON"
                     : drone && b.DroneLabel != null ? b.DroneLabel : b.Label); // the drone's: BURST, RISE, RECALL
             string[] lines = label.Split('\n');
-            _text.TextSize = textSize;
+            _text.TextSize = textSize * (b.Edit == null ? 1 : MphRecomp.Config.LayoutEdit.ClampScale(b.Edit.Scale)); // (a bigger button, bigger words)
             float w = 0;
             foreach (string line in lines) w = MathF.Max(w, _text.MeasureText(line));
             if (w > r * 1.7f)
             {
-                _text.TextSize = textSize * r * 1.7f / w; // long labels shrink to fit their circle
+                _text.TextSize = _text.TextSize * r * 1.7f / w; // long labels shrink to fit their circle
             }
             float lineHeight = _text.TextSize * 1.05f;
             float top = cy + _text.TextSize / 3 - lineHeight * (lines.Length - 1) / 2;

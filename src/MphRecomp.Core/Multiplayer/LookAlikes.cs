@@ -433,36 +433,101 @@ namespace MphRecomp.Multiplayer
             return result;
         }
 
-        // the colours a seat may pick in the lobby: those no other seat of its look (default) or family (copies) has
-        // picked and holds, plus its own (CopyIndices with this seat's pick taken out, so it doesn't hold one while
-        // choosing). An automatic seat holds nothing here: a pick moves it on to its next free colour (owner 2026-10-29:
-        // "if someone confirms the same hunter on another color that color is immediately not available")
+        // the colours a seat may pick in the lobby: those no other seat of its look (default) or family (copies) wears
+        // (CopyIndices as the lobby has it), plus its own. Automatic seats count too (owner 2026-11-13: "the color picker
+        // needs to be a live presentation of colors available. no one should be able to picka color someone else has and
+        // boot them from it"; before, only a pick held its colour, so picking an automatic seat's moved it on)
         public static List<int> FreeColours(IReadOnlyList<MatchPlayer> players, int seat, bool perSkin = true)
         {
             var free = new List<int>();
             if (seat < 0 || seat >= players.Count) return free;
-            int own = players[seat].ColourPick;
-            players[seat].ColourPick = -1;
-            try
+            int[] worn = CopyIndices(players, perSkin);
+            string look = SameLookKey(players[seat], perSkin), family = SameLookKey(players[seat], perSkin, true);
+            for (int c = 0; c < Colours; c++)
             {
-                int[] held = CopyIndices(players, perSkin);
-                string look = SameLookKey(players[seat], perSkin), family = SameLookKey(players[seat], perSkin, true);
-                for (int c = 0; c < Colours; c++)
+                bool taken = false;
+                for (int j = 0; j < players.Count && !taken; j++)
                 {
-                    bool taken = false;
-                    for (int j = 0; j < players.Count && !taken; j++)
-                    {
-                        if (j == seat || held[j] != c || players[j].ColourPick != c) continue;
-                        taken = c == 0 ? SameLookKey(players[j], perSkin) == look : SameLookKey(players[j], perSkin, true) == family;
-                    }
-                    if (!taken) free.Add(c);
+                    if (j == seat || worn[j] != c) continue;
+                    taken = c == 0 ? SameLookKey(players[j], perSkin) == look : SameLookKey(players[j], perSkin, true) == family;
                 }
-            }
-            finally
-            {
-                players[seat].ColourPick = own;
+                if (!taken) free.Add(c);
             }
             return free;
+        }
+
+        // an online lobby host's colours (NetMatchSession.Build, owner 2026-11-13, FreeColours): what a seat wears stays its
+        // own while it keeps its look, so a pick (a lagging one, or an older app's) can't move it on. In seat order, the
+        // seats it saw before with the same look and family keep their colour; then a new seat (or a new look) gets its pick
+        // if nobody of its look (default) or family (copies) wears it, else its default, else the lowest free copy; then a
+        // seat asking for another colour moves to it if that's free (else it stays). Each seat's ColourPick is set to what
+        // it wears, so CopyIndices gives every device and the replay exactly that
+        public sealed class ColourBook
+        {
+            private sealed class Seat
+            {
+                public string Look = "", Family = "";
+                public int Ask, Worn;
+            }
+
+            private readonly Dictionary<MatchPlayer, Seat> _seats = new(ReferenceEqualityComparer.Instance);
+
+            // askOf: a seat's pick where it's kept apart from ColourPick (a joiner's last LOOK), null = its ColourPick (a
+            // change of it since the last settle is a new pick)
+            public void Settle(IReadOnlyList<MatchPlayer> players, Func<MatchPlayer, int?>? askOf = null)
+            {
+                int n = players.Count;
+                var looks = new string[n];
+                var families = new string[n];
+                var asks = new int[n];
+                var worn = new int[n];
+                var known = new Seat?[n];
+                var defaults = new HashSet<string>(StringComparer.Ordinal);
+                var copies = new HashSet<(string, int)>();
+                bool Claim(int i, int c) => c == 0 ? defaults.Add(looks[i]) : c > 0 && c < Colours && copies.Add((families[i], c));
+                for (int i = 0; i < n; i++)
+                {
+                    MatchPlayer p = players[i];
+                    looks[i] = SameLookKey(p);
+                    families[i] = SameLookKey(p, family: true);
+                    _seats.TryGetValue(p, out Seat? rec);
+                    asks[i] = askOf?.Invoke(p) ?? (rec != null && p.ColourPick == rec.Worn ? rec.Ask : p.ColourPick);
+                    worn[i] = -1;
+                    if (rec != null && rec.Look == looks[i] && rec.Family == families[i] && Claim(i, rec.Worn))
+                    {
+                        known[i] = rec;
+                        worn[i] = rec.Worn;
+                    }
+                }
+                for (int i = 0; i < n; i++)
+                {
+                    if (known[i] != null) continue;
+                    if (Claim(i, asks[i])) worn[i] = asks[i];
+                    else if (Claim(i, 0)) worn[i] = 0;
+                    else
+                    {
+                        int c = 1;
+                        while (!Claim(i, c) && c < 64) c++;
+                        worn[i] = c;
+                    }
+                }
+                for (int i = 0; i < n; i++)
+                {
+                    if (known[i] == null || asks[i] < 0 || asks[i] >= Colours || asks[i] == worn[i] || !Claim(i, asks[i])) continue;
+                    if (worn[i] == 0) defaults.Remove(looks[i]);
+                    else copies.Remove((families[i], worn[i]));
+                    worn[i] = asks[i];
+                }
+                var seen = new HashSet<MatchPlayer>(ReferenceEqualityComparer.Instance);
+                for (int i = 0; i < n; i++)
+                {
+                    MatchPlayer p = players[i];
+                    p.ColourPick = worn[i] < Colours ? worn[i] : -1;
+                    _seats[p] = new Seat { Look = looks[i], Family = families[i], Ask = asks[i], Worn = worn[i] };
+                    seen.Add(p);
+                }
+                foreach (MatchPlayer gone in _seats.Keys.Where(k => !seen.Contains(k)).ToList()) _seats.Remove(gone);
+            }
         }
 
         static (float R, float G, float B) Scale((float R, float G, float B) c, float k) => (c.R * k, c.G * k, c.B * k);

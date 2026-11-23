@@ -49,6 +49,8 @@ namespace MphRead
             else if (cmd == "tree" && args.Length >= 4) Tree(Path.Combine(args[2], "bodies", args[3]));
             else if (cmd == "torso" && args.Length >= 5 && (BrawlZeroSuitRig.Hair = !args.Contains("nohair")) is var _ && (Probe = args.FirstOrDefault(a => a.StartsWith("probe=")) is string pr ? float.Parse(pr[6..]) : 0) >= 0
                 && (TileKeys = args.FirstOrDefault(a => a.StartsWith("keys=")) is string ks ? int.Parse(ks[5..]) : 12) > 0) Torso(Path.Combine(args[2], "bodies", args[3]), args[4], args.Skip(5).FirstOrDefault(a => a.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) ?? "");
+            // skins: her costume recolours, each a copy of the base body with that costume's model file and textures
+            else if (cmd == "skins" && args.Length >= 5) Skins(args[2], args[3], args[4]);
             else Console.WriteLine("usage: -zsbrawl dsbones | proto <dump dir> <fighter pac> <out dir> | pose <data root> <body> <clips> <png> | legs <data root> <body> <clips> [raw] [png]");
         }
 
@@ -607,6 +609,113 @@ namespace MphRead
                 img.SaveAsPng(Path.Combine(outDir, name + ".png"));
                 Console.WriteLine($"texture {name} {img.Width}x{img.Height} format {(formats.TryGetValue(name, out int f2) ? f2 : -1)}");
             }
+        }
+
+        // Her costumes (FitSZerosuit01-05.pac, FitSZerosuitSpy.pac in <pac dir>), each written as <out root>/SSBBZeroSuit<nn>:
+        // the base body's mesh, rig, clips and faces as they are, with the costume's own model file (its materials'
+        // colours) as body.brres and its textures, decoded with our Brawl readers, in place of the base's same-named ones
+        static void Skins(string pacDir, string baseDir, string outRoot)
+        {
+            string baseBrres = Path.Combine(baseDir, "body.brres");
+            var baseMats = Mdl0Gx.Read(baseBrres).Select(m => m.Name).ToList();
+            var baseFormats = Mdl0Gx.TextureFormats(baseBrres);
+            string tmp = Path.Combine(outRoot, "_tmp.brres");
+            Directory.CreateDirectory(outRoot);
+            foreach (string pac in Directory.GetFiles(pacDir, "FitSZerosuit*.pac").OrderBy(p => p))
+            {
+                string tag = Path.GetFileNameWithoutExtension(pac)["FitSZerosuit".Length..];
+                if (tag is "" or "00" or "Final" or "MotionEtc" or "Spy") continue;   // Spy: her Subspace cloak, not a costume
+                BrawlArchive arc = BrawlArchive.Read(File.ReadAllBytes(pac));
+                byte[]? model = null;
+                var textures = new List<BrawlTexture>();
+                foreach (BrawlArchiveEntry e in arc.Entries)
+                {
+                    byte[] data = arc.DataOf(e).ToArray();
+                    if (data.Length < 4 || data[0] != 'b' || data[1] != 'r' || data[2] != 'e' || data[3] != 's') continue;
+                    BrawlResFile res = BrawlResFile.Read(data);
+                    textures.AddRange(BrawlTextures.ReadResources(res, out var skipped));
+                    foreach (var sk in skipped)
+                    {
+                        BrawlTexture? c = ColourTableTexture(res, sk.Name);
+                        if (c != null) textures.Add(c);
+                        else Console.WriteLine($"  {tag}: skipped texture {sk.Name} format {sk.Format}");
+                    }
+                    if (res.Folder(BrawlResFile.Models).Count > 0 && !Has(data, "WpnSZerosuitParalyzer") && model == null) model = data;
+                }
+                if (model == null) { Console.WriteLine($"{tag}: no body model, skipped"); continue; }
+                File.WriteAllBytes(tmp, model);
+                var mats = Mdl0Gx.Read(tmp).Select(m => m.Name).ToList();
+                var formats = Mdl0Gx.TextureFormats(tmp);
+                bool same = mats.SequenceEqual(baseMats);
+                string outDir = Path.Combine(outRoot, "SSBBZeroSuit" + tag);
+                Directory.CreateDirectory(outDir);
+                foreach (string f in Directory.GetFiles(baseDir)) File.Copy(f, Path.Combine(outDir, Path.GetFileName(f)), true);
+                if (same) File.Copy(tmp, Path.Combine(outDir, "body.brres"), true);
+                int swapped = 0;
+                foreach (BrawlTexture t in textures)
+                {
+                    string dst = Path.Combine(outDir, t.Name + ".png");
+                    if (!File.Exists(dst)) { Console.WriteLine($"  {tag}: texture {t.Name} not in the base body, left out"); continue; }
+                    using var img = Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Rgba32>(t.Rgba, t.Width, t.Height);
+                    if (Mdl0Gx.IsIntensity(t.Format))
+                    {
+                        img.ProcessPixelRows(a =>
+                        {
+                            for (int y = 0; y < a.Height; y++)
+                            {
+                                Span<SixLabors.ImageSharp.PixelFormats.Rgba32> row = a.GetRowSpan(y);
+                                for (int x = 0; x < row.Length; x++) row[x].A = row[x].R;
+                            }
+                        });
+                    }
+                    img.Mutate(c => c.Flip(FlipMode.Vertical));
+                    img.SaveAsPng(dst);
+                    swapped++;
+                }
+                Console.WriteLine($"{tag}: {mats.Count} materials ({(same ? "same as the base, model file used" : "DIFFER from the base, base model kept: " + string.Join(",", mats))}), "
+                    + $"{swapped} of {textures.Count} textures swapped -> {outDir}");
+            }
+            File.Delete(tmp);
+        }
+
+        // a C4 / C8 texture (GX: C4 in 8x8 tiles of 4-bit indices, high nibble first; C8 in 8x4 tiles of bytes) through
+        // its same-named PLT0 colour table (entries IA8 / RGB565 / RGB5A3, big-endian), as RGBA rows, top row first
+        static BrawlTexture? ColourTableTexture(BrawlResFile file, string name)
+        {
+            byte[] d = file.Data.ToArray();
+            int tex = file.Folder(BrawlResFile.Textures).FirstOrDefault(i => i.Name == name).Position;
+            int plt = file.Folder("Palettes(NW4R)").FirstOrDefault(i => i.Name == name).Position;
+            if (tex <= 0 || plt <= 0) return null;
+            int U16(int o) => (d[o] << 8) | d[o + 1];
+            int U32(int o) => (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3];
+            int w = U16(tex + 0x1C), h = U16(tex + 0x1E), fmt = U32(tex + 0x20), px = tex + U32(tex + 0x10);
+            int pfmt = U32(plt + 0x18), count = U16(plt + 0x1C), pal = plt + U32(plt + 0x10);
+            if (fmt is not (BrawlPixels.C4 or BrawlPixels.C8)) return null;
+            var colours = new byte[count * 4];
+            for (int i = 0; i < count; i++)
+            {
+                int v = U16(pal + i * 2);
+                byte r, g, b, a;
+                if (pfmt == 0) { a = (byte)(v >> 8); r = g = b = (byte)v; }
+                else if (pfmt == 1) { r = (byte)((v >> 11) * 255 / 31); g = (byte)(((v >> 5) & 63) * 255 / 63); b = (byte)((v & 31) * 255 / 31); a = 255; }
+                else if ((v & 0x8000) != 0) { r = (byte)(((v >> 10) & 31) * 255 / 31); g = (byte)(((v >> 5) & 31) * 255 / 31); b = (byte)((v & 31) * 255 / 31); a = 255; }
+                else { a = (byte)(((v >> 12) & 7) * 255 / 7); r = (byte)(((v >> 8) & 15) * 17); g = (byte)(((v >> 4) & 15) * 17); b = (byte)((v & 15) * 17); }
+                colours[i * 4] = r; colours[i * 4 + 1] = g; colours[i * 4 + 2] = b; colours[i * 4 + 3] = a;
+            }
+            bool c4 = fmt == BrawlPixels.C4;
+            int bw = 8, bh = c4 ? 8 : 4, pos = 0;
+            var rgba = new byte[w * h * 4];
+            for (int ty = 0; ty < h; ty += bh)
+            for (int tx = 0; tx < w; tx += bw)
+            for (int y = 0; y < bh; y++)
+            for (int x = 0; x < bw; x++, pos++)
+            {
+                int idx = c4 ? (d[px + pos / 2] >> ((pos & 1) == 0 ? 4 : 0)) & 15 : d[px + pos];
+                int X = tx + x, Y = ty + y;
+                if (X >= w || Y >= h || idx >= count) continue;
+                Array.Copy(colours, idx * 4, rgba, (Y * w + X) * 4, 4);
+            }
+            return new BrawlTexture(name, w, h, fmt, rgba);
         }
 
         // LBreastN / RBreastN under BustN: each at its side's front-most chest point pulled back in toward the sternum's

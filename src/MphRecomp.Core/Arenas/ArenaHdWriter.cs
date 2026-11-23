@@ -129,7 +129,10 @@ namespace MphRecomp.Arenas
             int Emit(Cmdl g, int matBase, int? onePass, float posScale = 1, float[]? place = null, uint? bone = null, Vector3 origin = default,
                 Dictionary<uint, Matrix4>? pose = null)
             {
-                var order = Enumerable.Range(0, g.TriangleCount).Where(t => bone == null || TriangleBone(g, t) == bone)
+                // Prime 1's occluders are visibility helpers the game never draws (Monitor Station's teal panels round its
+                // pillar); Echoes' flags differ (its 0x200 is on drawn walls)
+                var order = Enumerable.Range(0, g.TriangleCount).Where(t => (bone == null || TriangleBone(g, t) == bone)
+                        && !(area.Prime1 && (g.Materials[g.TriangleMaterial[t]].Flags & Cmdl.Occluder) != 0))
                     .OrderBy(t => Pass(g.Materials[g.TriangleMaterial[t]])).ThenBy(t => g.TriangleMaterial[t]).ToList();
                 foreach (int t in order)
                 {
@@ -338,7 +341,7 @@ namespace MphRecomp.Arenas
             }
             File.WriteAllText(Path.Combine(outDir, Materials), JsonSerializer.Serialize(new Dictionary<string, object>
             {
-                ["source"] = "Metroid Prime 2: Echoes, Metroid6.pak (the owner's disc; never shipped)",
+                ["source"] = "Metroid Prime 1/2 area pak (the owner's disc; never shipped)",
                 ["materials"] = mats,
                 ["mips"] = mips,
             }));

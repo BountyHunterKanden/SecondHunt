@@ -133,6 +133,12 @@ namespace MphRecomp.Input
             lock (_lock) return _paced.TakePaced(nowNs, behindNs);
         }
 
+        // Degrees turned and not yet taken, left in place (the app's aim preview between steps)
+        public Vector2 PeekDegrees()
+        {
+            lock (_lock) return _paced.Pending;
+        }
+
         // Degrees turned since the last call (X = turn left +, Y = look up +), and starts over.
         public Vector2 TakeDegrees()
         {

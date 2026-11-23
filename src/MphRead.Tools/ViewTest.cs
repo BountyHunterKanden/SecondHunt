@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using MphRead.Entities;
 using MphRead.Formats;
@@ -189,6 +190,24 @@ namespace MphRead
             float fovTall = ReticleTall();
             Check("reticle: a wider FOV setting keeps its size on screen", Near(fovTall, dsTall, 0.002f),
                 $"{fovTall * 1080:0.0} px");
+            // MPH's own gun (and its smoke and muzzle effects) keeps the default FOV's framing: its items are tagged
+            // for the host's gun projection (RenderItem.HostViewmodel, CampaignRenderer.DrawItem), the room's are not
+            int vmItems = 0, vmOther = 0, roomItems = 0;
+            foreach (IReadOnlyList<RenderItem> list in new[] { scene.OpaqueItems, scene.DecalItems, scene.TranslucentItems })
+            {
+                foreach (RenderItem it in list)
+                {
+                    if (!it.HostViewmodel) roomItems++;
+                    else if (it.HostOwner == p) vmItems++;
+                    else vmOther++;
+                }
+            }
+            Check("FOV setting: the first-person gun's items are tagged for the gun projection, the room's are not",
+                vmItems > 0 && vmOther == 0 && roomItems > 0, $"{vmItems} gun, {vmOther} other tagged, {roomItems} room");
+            Matrix4 fovGun = ViewFraming.VanillaProjection(scene.PerspectiveMatrix, p.CameraInfo.Fov, 1920f / 1080);
+            float fovGunErr = 0;
+            for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) fovGunErr = MathF.Max(fovGunErr, MathF.Abs(fovGun[r, c] - wideProj[r, c]));
+            Check("FOV setting: the gun's own projection = the default FOV's", fovGunErr < 1e-5f, $"max diff {fovGunErr:0.0e0}");
             Scene.HostFovScale = 1;
 
             // DS framing

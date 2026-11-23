@@ -18,6 +18,10 @@ public static class AppPlatform
     // A PNG file from RGBA8 bytes (rows top first), or false if it couldn't be written. Worker threads.
     public static Func<string, byte[], int, int, bool> EncodePng { get; set; } = (_, _, _, _) => false;
 
+    // A screenshot (RGBA8, rows top first) saved as a PNG under the given file name where the player finds pictures
+    // (Windows <data>/Screenshots, Android Pictures/SecondHunt): where it went, or null. Worker threads.
+    public static Func<byte[], int, int, string, string?> SaveScreenshot { get; set; } = (_, _, _, _) => null;
+
     // the runtime's own counters for the perf log (Android: ART's "art.gc.gc-count" / "art.gc.gc-time"); 0 if none
     public static Func<string, long> RuntimeStat { get; set; } = _ => 0;
 }
@@ -34,4 +38,10 @@ public static class Log
     public static void Info(string tag, string message) => Sink?.Invoke(Level.Info, tag, message);
     public static void Warn(string tag, string message) => Sink?.Invoke(Level.Warn, tag, message);
     public static void Error(string tag, string message) => Sink?.Invoke(Level.Error, tag, message);
+
+    // A line with its own tags as well as its area (Edngravy's ask: one line grouped by several things, e.g. [weapon,omega]):
+    // written "MPHPlay[weapon,omega]: ..." (LogFormat.Line), so a log can be searched by any of them when it's read.
+    public static void Debug(string tag, string[] tags, string message) => Sink?.Invoke(Level.Debug, LogFormat.Tagged(tag, tags), message);
+    public static void Info(string tag, string[] tags, string message) => Sink?.Invoke(Level.Info, LogFormat.Tagged(tag, tags), message);
+    public static void Warn(string tag, string[] tags, string message) => Sink?.Invoke(Level.Warn, LogFormat.Tagged(tag, tags), message);
 }

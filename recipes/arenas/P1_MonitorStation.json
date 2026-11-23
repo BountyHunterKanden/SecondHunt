@@ -1,0 +1,11 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "pak": "Metroid6.pak",
+  "nav": "2026-11-21: the bots' graph is built with ArenaNav's human scan (fine floor scan, footing, long on-foot jumps); re-import to get it",
+  "pakSha1": "bbda19d6ddecd04ef20ac2b10dcbd95bfd70bc38",
+  "scale": 0.5925926,
+  "stacks": "stacked crates break with the one below (Prime's Dead>Deactivate links: 0009016f>00090172, 00090198>0009019b, 0009026f>00090271)",
+  "crates": [],
+  "pads": []
+}

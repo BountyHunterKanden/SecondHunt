@@ -27,8 +27,6 @@ namespace MphRead.Entities
         private NodeData? _nodeData;
         public NodeData? NodeData => _nodeData;
         private readonly List<ModelInstance> _connectorModels = new List<ModelInstance>();
-        private ModelInstance? _skyInst;
-        private readonly List<Node> _skyNodes = new List<Node>();
         private readonly float[] _emptyMatrixStack = Array.Empty<float>();
 
         protected override bool UseNodeTransform => false; // default -- will use transform if setting is enabled
@@ -100,7 +98,6 @@ namespace MphRead.Entities
                 _morphCameraExcludeNodes.Add(Nodes[16]);
             }
             _meta = meta;
-            SetUpHostSky(meta);
             Model model = inst.Model;
             // portals are already filtered by layer mask
             _portals.AddRange(collision.Info.Portals);
@@ -540,6 +537,9 @@ namespace MphRead.Entities
         // of a 100-190 ms room-arrival hitch). null / true = MphRead's own behavior.
         public static Action<string>? HostTransitionTrace { get; set; }
         public static bool HostTransitionGc { get; set; } = true;
+        // recomp: a host's own model in room space drawn with the room, after it (HOLIDAY MODE's snow on the ground,
+        // MphRecomp.Core Holiday/HolidayGround.cs); draw only, never in the room's collision. null = nothing extra.
+        public static Func<RoomEntity, ModelInstance?>? HostOverlay { get; set; }
 
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
 
@@ -890,6 +890,49 @@ namespace MphRead.Entities
         private readonly bool[] _hostStepParts = new bool[_roomPartMax]; // the step's own parts while the widened walk runs
         private readonly bool[] _hostStepAudible = new bool[_roomPartMax];
 
+        // recomp: a third-person camera (Scene.HostCameraOffset) behind the eye can be in another room part than the eye:
+        // the doorway walk from the eye's part skipped the doorways behind it, so the part the camera was in (and what it
+        // sees through that part's other doorways) wasn't drawn (owner 2026-11-12). The draw-only walks start from the
+        // camera's own part instead; the step's walk, which the game's logic reads, is unchanged
+        private NodeRef _hostDrawStart = NodeRef.None;
+        private bool _hostCamWalkOn;
+
+        private NodeRef HostCameraNodeRef()
+        {
+            Vector3 offset = _scene.HostCameraOffset;
+            if (offset == Vector3.Zero || _scene.HostView != null || PlayerEntity.SideViewOn || PlayerEntity.HostNoViewer)
+            {
+                return NodeRef.None;
+            }
+            CameraInfo camera = PlayerEntity.Main.CameraInfo;
+            NodeRef nodeRef = camera.NodeRef;
+            if (nodeRef.PartIndex == -1)
+            {
+                return NodeRef.None;
+            }
+            Vector3 eye = camera.Position;
+            Vector3 camPos = eye + offset;
+            // the eye-to-camera line through each doorway it crosses (a few, near a corner)
+            for (int i = 0; i < 4; i++)
+            {
+                NodeRef next = UpdateNodeRef(nodeRef, eye, camPos);
+                if (next == nodeRef)
+                {
+                    break;
+                }
+                nodeRef = next;
+            }
+            return nodeRef == camera.NodeRef ? NodeRef.None : nodeRef;
+        }
+
+        // recomp: in a match, a far force-field ("pmag") doorway: the step's walk stops at one once the camera is 8 or more
+        // units from it, which hid a player you could see through it, all but his shadow (owner 2026-11-11, Harvester's
+        // doorways). The players' draws (Scene.HostDrawPlayerVisibility) read a walk that keeps those doorways open; the
+        // step's own walk, which the game's logic reads, is unchanged
+        private readonly bool[] _hostPlayerParts = new bool[_roomPartMax];
+        private bool _hostPlayerPartsOn;
+        private bool _hostOpenForceFields;
+
         private void ClearRoomPartState()
         {
             for (int i = 0; i < _roomPartMax; i++)
@@ -907,9 +950,13 @@ namespace MphRead.Entities
         private void UpdateRoomParts()
         {
             NodeRef curNodeRef = PlayerEntity.Main.CameraInfo.NodeRef;
+            if (_hostDrawStart.PartIndex != -1) // recomp: the third-person camera's own part (HostCameraNodeRef), draw walks only
+            {
+                curNodeRef = _hostDrawStart;
+            }
             // recomp: a HostView (replay spectator camera) sees from the room part it's in (the frustum is already its own)
-            if (_scene.HostView is { } hostView && curNodeRef.PartIndex != -1
-                && HostViewNodeRef(hostView.Position) is { PartIndex: not -1 } viewNodeRef)
+            if (_scene.HostView is { } hostView && curNodeRef.PartIndex != -1 // recomp: side view culls from the stage's middle (PlayerEntity.SideViewCullAt)
+                && HostViewNodeRef(PlayerEntity.SideViewOn ? PlayerEntity.SideViewCullAt : hostView.Position) is { PartIndex: not -1 } viewNodeRef)
             {
                 curNodeRef = viewNodeRef;
             }
@@ -979,7 +1026,11 @@ namespace MphRead.Entities
                     continue;
                 }
                 // todo?: link this portal into the draw list
-                if (portal.IsForceField && GetPortalAlpha(portal.Position, _scene.CameraPosition) == 1)
+                if (portal.IsForceField && !_hostOpenForceFields && GetPortalAlpha(portal.Position, _scene.CameraPosition) == 1)
+                {
+                    continue;
+                }
+                if (_roomFrustumIndex >= _roomPartMax) // recomp: the frustum pool is full (more doorways open: _hostOpenForceFields)
                 {
                     continue;
                 }
@@ -1329,6 +1380,13 @@ namespace MphRead.Entities
                     }
                 }
             }
+            if (best.PartIndex == -1 && planes.PartIndex == -1 && _portals.Count == 0 && _nextRoomPartId == 1)
+            {
+                // a one-part room without portals: every spot is in that part, even above or beside its geometry's box
+                // (an open map with no ceiling put a standing camera above it, part -1, and culled every other player)
+                Node? only = model.Nodes.FirstOrDefault(n => n.RoomPartId == 0 && n.ChildIndex != -1);
+                if (only != null) return new NodeRef(0, only.ChildIndex, modelIndex: 0);
+            }
             return best.PartIndex != -1 ? best : planes;
         }
 
@@ -1405,6 +1463,31 @@ namespace MphRead.Entities
             return false;
         }
 
+        // recomp: whether a spot is in part partIndex by both lookups' tests: the part has geometry around it
+        // (PartHasGeometryAt) and it is on the part's side of every one of the part's portals (GetNodeRefByPosition's
+        // planes). Either alone passes wrong parts where parts overlap: Harvester's parts 0/1/2 all have geometry boxes over
+        // each spawn, Council Chamber's planes run on to far parts. PlayerEntity.NetSnapNodeRef
+        public bool PartHoldsSpot(int partIndex, Vector3 position, float slack = 0)
+        {
+            if (!PartHasGeometryAt(partIndex, position))
+            {
+                return false;
+            }
+            if (partIndex >= _portalSides.Count)
+            {
+                return true;
+            }
+            foreach ((Portal portal, bool otherSide) in _portalSides[partIndex])
+            {
+                float dist = Vector3.Dot(position, portal.Plane.Xyz) - portal.Plane.W;
+                if (otherSide ? dist > slack : dist < -slack)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         public NodeRef UpdateNodeRef(NodeRef current, Vector3 prevPos, Vector3 curPos)
         {
             Debug.Assert(current.PartIndex != -1);
@@ -1449,9 +1532,23 @@ namespace MphRead.Entities
             {
                 return false;
             }
+            // recomp: a replay's free cam (HostNoViewer) draws everyone and everything, wherever they are (GetDrawInfo)
+            if (!step && PlayerEntity.HostNoViewer && (_scene.HostDrawVisibility || _scene.HostDrawPlayerVisibility))
+            {
+                return true;
+            }
+            if (!step && PlayerEntity.SideViewOn && _scene.HostDrawPlayerVisibility) return true; // recomp: side view draws every player (its bubbles)
+            if (!step && _hostPlayerPartsOn && _scene.HostDrawPlayerVisibility) // recomp: _hostPlayerParts
+            {
+                return _hostPlayerParts[nodeRef.PartIndex];
+            }
             if (!step && _hostDrawPartsOn && _scene.HostDrawVisibility) // recomp: HostDrawCullWiden
             {
                 return _hostDrawParts[nodeRef.PartIndex];
+            }
+            if (!step && _hostCamWalkOn && _scene.HostDrawPlayerVisibility) // recomp: _hostDrawStart (and the eye's own walk)
+            {
+                return _hostDrawParts[nodeRef.PartIndex] || _activeRoomParts[nodeRef.PartIndex];
             }
             return _activeRoomParts[nodeRef.PartIndex];
         }
@@ -1481,7 +1578,8 @@ namespace MphRead.Entities
                         continue;
                     }
                     _scene.UpdateMaterials(conInst.Model, recolorId: 0);
-                    if (GameState.InRoomTransition || _partVisInfoHead == null || _scene.ShowAllNodes)
+                    if (GameState.InRoomTransition || _partVisInfoHead == null || _scene.ShowAllNodes
+                        || PlayerEntity.HostNoViewer) // recomp: (below)
                     {
                         var transform = Matrix4.CreateScale(conInst.Model.Scale);
                         transform.Row3.Xyz = _roomCollision[i + 1].Translation;
@@ -1504,24 +1602,55 @@ namespace MphRead.Entities
                     if (_scene.ProcessFrame)
                     {
                         FrustumInfo? hostFrustum = _scene.HostDrawFrustum(out _hostCullPerspective);
+                        NodeRef camNodeRef = HostCameraNodeRef(); // recomp: _hostDrawStart
+                        _hostCamWalkOn = camNodeRef.PartIndex != -1;
+                        // recomp: _hostPlayerParts first (the walks share one set of state: the last one run is what's drawn)
+                        _hostPlayerPartsOn = GameState.Multiplayer && _forceFields.Count > 0;
+                        if (_hostPlayerPartsOn)
+                        {
+                            ClearRoomPartState();
+                            _hostOpenForceFields = true;
+                            _hostDrawStart = camNodeRef;
+                            UpdateRoomParts();
+                            _hostDrawStart = NodeRef.None;
+                            _hostOpenForceFields = false;
+                            Array.Copy(_activeRoomParts, _hostPlayerParts, _roomPartMax);
+                        }
                         ClearRoomPartState();
                         UpdateRoomParts();
-                        _hostDrawPartsOn = hostFrustum != null;
-                        if (hostFrustum != null)
+                        if (_hostPlayerPartsOn)
+                        {
+                            for (int i = 0; i < _roomPartMax; i++)
+                            {
+                                _hostPlayerParts[i] |= _activeRoomParts[i];
+                            }
+                        }
+                        _hostDrawPartsOn = hostFrustum != null || _hostCamWalkOn;
+                        if (_hostDrawPartsOn)
                         {
                             Array.Copy(_activeRoomParts, _hostStepParts, _roomPartMax);
                             Array.Copy(_audibleRoomParts, _hostStepAudible, _roomPartMax);
                             ClearRoomPartState();
                             _hostCullFrustum = hostFrustum;
+                            _hostDrawStart = camNodeRef;
                             UpdateRoomParts();
+                            _hostDrawStart = NodeRef.None;
                             _hostCullFrustum = null;
                             Array.Copy(_activeRoomParts, _hostDrawParts, _roomPartMax);
+                            if (_hostPlayerPartsOn)
+                            {
+                                for (int i = 0; i < _roomPartMax; i++)
+                                {
+                                    _hostPlayerParts[i] |= _hostDrawParts[i];
+                                }
+                            }
                             Array.Copy(_hostStepParts, _activeRoomParts, _roomPartMax);
                             Array.Copy(_hostStepAudible, _audibleRoomParts, _roomPartMax);
                         }
                     }
-                    DrawHostSky();
-                    if (_partVisInfoHead == null || _scene.ShowAllNodes)
+                    // recomp: a replay's free cam (HostNoViewer) is nobody's eyes: every room part drawn, not just the ones the
+                    // doorway walk from a seat's room part reaches (rooms blinked as it went past doorways, owner 2026-11-11)
+                    if (_partVisInfoHead == null || _scene.ShowAllNodes || PlayerEntity.HostNoViewer)
                     {
                         DrawAllNodes(inst);
                     }
@@ -1529,12 +1658,23 @@ namespace MphRead.Entities
                     {
                         DrawRoomParts(inst);
                     }
+                    if (HostOverlay?.Invoke(this) is ModelInstance overlay) // recomp: (above)
+                    {
+                        UpdateTransforms(overlay, Matrix4.CreateScale(overlay.Model.Scale), recolor: 0);
+                        GetItems(overlay, overlay.Model.Nodes[0]);
+                    }
                 }
             }
             else if (_scene.ProcessFrame) // skdebug
             {
                 ClearRoomPartState();
                 UpdateRoomParts();
+            }
+            // recomp: an imported arena hides this stand-in room behind its HD mesh; the overlay still draws over that
+            if (Hidden && !GameState.InRoomTransition && HostOverlay?.Invoke(this) is ModelInstance hiddenOverlay)
+            {
+                UpdateTransforms(hiddenOverlay, Matrix4.CreateScale(hiddenOverlay.Model.Scale), recolor: 0);
+                GetItems(hiddenOverlay, hiddenOverlay.Model.Nodes[0]);
             }
             if (_scene.ShowCollision && (_scene.ColEntDisplay == EntityType.All || _scene.ColEntDisplay == Type))
             {
@@ -1766,62 +1906,6 @@ namespace MphRead.Entities
             }
         }
 
-        private void SetUpHostSky(RoomMetadata meta)
-        {
-            _skyInst = null;
-            _skyNodes.Clear();
-            if (meta.HostSkyRoom == null || meta.HostSkyNodes == null || meta.HostSkyNodes.Count == 0)
-            {
-                return;
-            }
-            try
-            {
-                ModelInstance sky = Read.GetRoomModelInstance(meta.HostSkyRoom);
-                IReadOnlyList<Node> nodes = sky.Model.Nodes;
-                for (int i = 0; i < nodes.Count; i++)
-                {
-                    if (meta.HostSkyNodes.Contains(nodes[i].Name))
-                    {
-                        nodes[i].Enabled = true;
-                        _skyNodes.Add(nodes[i]);
-                    }
-                }
-                if (_skyNodes.Count == 0)
-                {
-                    return;
-                }
-                _scene.LoadModel(sky.Model, isRoom: true);
-                sky.SetAnimation(0);
-                _skyInst = sky;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Host sky {meta.HostSkyRoom}: {ex.Message}");
-            }
-        }
-
-        private void DrawHostSky()
-        {
-            if (_skyInst == null)
-            {
-                return;
-            }
-            UpdateTransforms(_skyInst, Matrix4.CreateScale(_skyInst.Model.Scale) * Matrix4.CreateTranslation(_meta.HostSkyOffset), recolor: 0);
-            for (int i = 0; i < _skyNodes.Count; i++)
-            {
-                DrawSkyNode(_skyNodes[i]);
-            }
-        }
-
-        private void DrawSkyNode(Node node)
-        {
-            GetItems(_skyInst!, node);
-            IReadOnlyList<Node> nodes = _skyInst!.Model.Nodes;
-            for (int i = node.ChildIndex; i != -1; i = nodes[i].NextIndex)
-            {
-                DrawSkyNode(nodes[i]);
-            }
-        }
 
         private void GetItems(ModelInstance inst, Node node, Portal? portal = null)
         {

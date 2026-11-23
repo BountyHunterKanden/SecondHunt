@@ -106,8 +106,8 @@ namespace MphRead.Entities
         public BeamProjectileEntity[]? DroneBeams => _droneBeams;
 
         // the kill message for the drone's blaster shots and its laser (owner 2026-10-17: "change the killed
-        // by player (power beam) message to say (sentry drone)"). Text only: the shots still count as Power Beam kills in
-        // the stats, as before. A match client gets it from the host's snapshot (PlayerNet NetLastDrone).
+        // by player (power beam) message to say (sentry drone)"). In the stats its shots and laser count as the alt form's
+        // kills (SCOUT DRONE), not the Power Beam's (2026-11-12, PlayerEntity droneShot). A match client gets it from the host's snapshot (PlayerNet NetLastDrone).
         public const string DroneKillName = "SENTRY DRONE";
 
         private static bool DroneHit(PlayerEntity? attacker, BeamProjectileEntity? beam)

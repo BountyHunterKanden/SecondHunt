@@ -41,6 +41,11 @@ namespace MphRecomp.Online
             FriendCode = FriendCodes.FromKey(PublicKey);
         }
 
+        // a 32-byte key for one use, derived from the seed (HKDF-SHA256, the label as its info), so the seed itself never
+        // leaves this class (CLOUD SAVE's seal: Online/CloudSave.cs)
+        public byte[] DeriveKey(string label)
+            => HKDF.DeriveKey(HashAlgorithmName.SHA256, _seed, 32, info: System.Text.Encoding.UTF8.GetBytes(label));
+
         public static OnlineIdentity Create() => new OnlineIdentity(RandomNumberGenerator.GetBytes(SeedBytes));
 
         public static OnlineIdentity? FromBackupCode(string? code)

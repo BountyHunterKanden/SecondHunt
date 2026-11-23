@@ -27,9 +27,9 @@ namespace SecondHunt.Server
         // (rows already checked: codes known, distinct, places in range)
         private void CountHubStats(List<ResultRow> rows, bool teams, string? mode, string? arena, int seconds, DateTime started)
         {
-            if (rows.Count < 2)
+            if (rows.Count < 2 || rows.Any(x => _store.HubHidden(x.Code)))
             {
-                return;
+                return; // (0.10.1: nor with a dev build or test tool in it, Store.HideFromHub)
             }
             int maxKills = MatchKillCap((DateTime.UtcNow - started).TotalMinutes);
             var lines = rows.Select(x => new Store.StatsLine(x.Code, x.Place, x.Team, Clean(x.Stats, maxKills))).ToList();
@@ -102,7 +102,7 @@ namespace SecondHunt.Server
             // online lately: logged in in the last 15 minutes or still here; findable players only, shuffled
             long since = Store.UnixNow - HubRecentMinutes * 60;
             var recent = _online.Keys.Concat(_store.SeenSince(since, 200)).Distinct()
-                .Where(c => c != me && !_store.Blocked(me, c)).ToList();
+                .Where(c => c != me && !_store.Blocked(me, c) && !_store.HubHidden(c)).ToList();
             foreach (string c in recent.OrderBy(_ => _hubRandom.Next()))
             {
                 Store.Player? p = _store.Get(c);

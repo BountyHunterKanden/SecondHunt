@@ -124,6 +124,14 @@ namespace MphRecomp.Multiplayer
         public static bool IsZeroSuit(MatchPlayer seat) =>
             seat.Hunter == ZeroSuit.Base && string.Equals(seat.Character, ZeroSuit.Id, StringComparison.OrdinalIgnoreCase);
 
+        // her Brawl body and its recolours (bodies/SSBBZeroSuit, SSBBZeroSuit01-05)
+        public static bool IsBrawlZeroSuit(string? skin) =>
+            skin != null && skin.StartsWith("SSBBZeroSuit", StringComparison.OrdinalIgnoreCase);
+
+        // her army crawl alt form (MphRead PlayerCrawl.cs): Brawl body only, the Prime 3 one has no crawl clips (section 7)
+        public static bool CrawlFor(MatchSettings settings, MatchPlayer seat) =>
+            settings.ZeroSuitCrawl != false && settings.Paralyzer != false && IsZeroSuit(seat) && IsBrawlZeroSuit(seat.Skin);
+
         static bool IsTrooper(MatchPlayer seat) =>
             seat.Hunter == Trooper.Base && string.Equals(seat.Character, Trooper.Id, StringComparison.OrdinalIgnoreCase);
 
@@ -279,6 +287,8 @@ namespace MphRecomp.Multiplayer
             ["MP2DarkSamus"] = "ECHOES DARK SAMUS", ["MP3DarkSamus"] = "CORRUPTION DARK SAMUS", ["MP2DarkSamusFinal"] = "OVERCHARGED DARK SAMUS",
             [DarkSamusStandinSkin] = "LOW-POLY DARK SAMUS",
             ["MP3ZeroSuit"] = "CORRUPTION ZERO SUIT",
+            ["SSBBZeroSuit"] = "BRAWL ZERO SUIT", ["SSBBZeroSuit01"] = "BRAWL PINK", ["SSBBZeroSuit02"] = "BRAWL GREEN",
+            ["SSBBZeroSuit03"] = "BRAWL BLUE", ["SSBBZeroSuit04"] = "BRAWL WHITE", ["SSBBZeroSuit05"] = "BRAWL BLACK",
             ["MP4Sylux"] = "BEYOND SYLUX",
         };
     }

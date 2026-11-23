@@ -103,6 +103,8 @@ namespace MphRecomp.Multiplayer.Net
         {
             public int Slot;
             public MatchPlayer Player = new();
+            // its LOOK's colour pick; Player.ColourPick is the colour it wears (LookAlikes.ColourBook, Build)
+            public int AskedColour = -1;
             public HashSet<string>? Arenas; // its extra arenas (ExtraArenas: JOIN's last field; null = an older joiner, none)
             public Dictionary<int, uint>? Prints; // its arenas' play data (ExtraArenas.Prints.cs, after Arenas; null = not sent)
             public int Seat;
@@ -143,7 +145,7 @@ namespace MphRecomp.Multiplayer.Net
             public string OversizeNote = ""; // (P8: the first oversize packet's blocks)
             // (P8: whole snapshots sent without extras + handoff because they didn't fit: the base this joiner really has)
             public readonly Dictionary<uint, SnapshotDelta.Encoded> Trimmed = new();
-            public int TrimmedSends;
+            public int TrimmedSends, DeferredSends; // (Fruity P2: deltas sent with the base's extras + handoff)
             // arrival jitter: each packet's arrival time less its input's due time (seq at 60 Hz), spread per window
             public double TransitMin = Double.MaxValue, TransitMax = Double.MinValue;
             public int JitterFrames, JitterFramesBefore;
@@ -154,6 +156,18 @@ namespace MphRecomp.Multiplayer.Net
             public bool Choosing;
             public bool Back = true;
             public int TeamAsk = -1; // (the last team ask applied: LOOK's tail)
+            // Fruity P4 lives (NetMatchSession.Lives.cs): its slot's generation, its seat's life as the snapshots last gave
+            // it, whether its inputs carry the life stamp, a neutral input owed after a life change, stale packets dropped
+            public ushort Generation = 1, Life;
+            public bool Stamping, LifeReset;
+            public int LifeDrops;
+            // Fruity P2 shot events (NetMatchSession.Shots.cs): its inputs carry them, the numbers seen (unwrapped, by the
+            // low bits) and the newest, the new ones for the match, events received
+            public bool ShotsDriven;
+            public readonly int[] ShotSeen = new int[64];
+            public int ShotNewest = -1;
+            public readonly List<NetShotEvent> ShotsPending = new();
+            public int ShotEvents;
         }
 
         private MatchSettings? _template;
@@ -228,13 +242,64 @@ namespace MphRecomp.Multiplayer.Net
         public IReadOnlyList<int> RemoteSeats => _remoteSeats;
 
         // host: how many seats this match has (the game's 4, up to 8: P8); joiners past it are refused and the template's
-        // last bots give way to joiners. A template with more seats than this raises it
+        // last bots give way to joiners. A template with more seats than this raises it, and so do People and the bots
         public int SeatLimit
         {
-            get => Math.Clamp(Math.Max(_seatLimit, _template?.Players.Count ?? 0), PlayerEntity.VanillaMaxPlayers, MatchSettings.MaxSeats);
+            get => Math.Clamp(Math.Max(Math.Max(_seatLimit, _template?.Players.Count ?? 0), People > 0 ? People + (_template?.Players.Count(p => p.Bot) ?? 0) : 0),
+                PlayerEntity.VanillaMaxPlayers, MatchSettings.MaxSeats);
             set => _seatLimit = value;
         }
         private int _seatLimit = PlayerEntity.VanillaMaxPlayers;
+
+        // the people this match takes: its game card's PLAYERS less the bots (the server turns away the rest), 0 = not
+        // known (an older host's LOBBY). The host sets it (SetSeats); joiners hear it with each LOBBY
+        public int People { get; private set; }
+
+        // host: the lobby's seats as the host's edit of WHO CAN JOIN (or the server, for a served game) set them: bots (null =
+        // the lobby's stay) are the template's bots from now on, in this order (a new one's team -1: the smaller team), and
+        // people the people it takes. The joiners hear it with the lobby
+        public void SetSeats(IReadOnlyList<MatchPlayer>? bots, int people)
+        {
+            lock (_lock)
+            {
+                if (!IsHost || _hostStarted || _template == null)
+                {
+                    return;
+                }
+                if (bots != null)
+                {
+                    _template.Players.RemoveAll(p => p.Bot);
+                    foreach (MatchPlayer bot in bots.Take(MatchSettings.MaxSeats - _template.Players.Count))
+                    {
+                        bot.Bot = true;
+                        _template.Players.Add(bot);
+                    }
+                }
+                People = Math.Clamp(people, 1, MatchSettings.MaxSeats);
+                _seatLimit = People + _template.Players.Count(p => p.Bot);
+                if (Settings != null)
+                {
+                    Settings = Build();
+                }
+            }
+            BroadcastLobby();
+            PlayersChanged?.Invoke();
+        }
+
+        // host: the server let an invited player into a full game, which takes this many people now (MemberEvent.MaxPlayers:
+        // OnlineMatch). The bots stay; when the match is at 8 the last one makes way for the joiner (Build). Never fewer
+        public void GrowPeople(int people)
+        {
+            bool grow;
+            lock (_lock)
+            {
+                grow = IsHost && !_hostStarted && _template != null && people > People && people <= MatchSettings.MaxSeats;
+            }
+            if (grow)
+            {
+                SetSeats(null, people);
+            }
+        }
 
         public int Joined
         {
@@ -282,8 +347,12 @@ namespace MphRecomp.Multiplayer.Net
             }
             _remoteSeats = _joiners.Where(j => !j.Left).Select(j => j.Seat).ToArray();
             Characters.ApplyExtraRules(s); // (a joiner's TROOPER / DARK SAMUS plays its base hunter when the host bans them)
+            // the colours: what a seat wears stays its own, a pick gets only a free one (owner 2026-11-13)
+            _colours.Settle(s.Players, p => _joiners.FirstOrDefault(j => !j.Left && ReferenceEquals(j.Player, p))?.AskedColour);
             return s;
         }
+
+        private readonly LookAlikes.ColourBook _colours = new();
 
         private int Humans => _template!.Players.Count(p => !p.Bot) + _joiners.Count(j => !j.Left);
 
@@ -301,6 +370,7 @@ namespace MphRecomp.Multiplayer.Net
                 _hostStarted = true;
                 _hostChoosing = false;
                 MatchOver = false;
+                LivesStart();
                 foreach (Joiner j in _joiners.Where(j => !j.Left))
                 {
                     j.Choosing = false;
@@ -344,6 +414,7 @@ namespace MphRecomp.Multiplayer.Net
             j.JitterFrames = j.JitterFramesBefore = 0;
             j.TransitMin = Double.MaxValue;
             j.TransitMax = Double.MinValue;
+            ShotsReset(j);
             _sent.Clear();
             _sentOrder.Clear();
         }
@@ -424,6 +495,7 @@ namespace MphRecomp.Multiplayer.Net
                 j.Merged += folded;
                 j.Applied = target;
                 j.Held = 0;
+                LivesInputTaken(j);
                 return true;
             }
         }
@@ -577,9 +649,10 @@ namespace MphRecomp.Multiplayer.Net
             {
                 return;
             }
-            SnapshotDelta.Encoded? cur = null;
+            SnapshotDelta.Encoded? cur = null, noShots = null;
             lock (_lock)
             {
+                LivesStamp(snap); // (Fruity P4: before it's encoded)
                 foreach (Joiner j in _joiners)
                 {
                     if (j.Left || j.Slot < 0 || !(j.LastSentTick == 0 || snap.Tick < j.LastSentTick
@@ -604,11 +677,43 @@ namespace MphRecomp.Multiplayer.Net
                         baseSnap = j.Trimmed.TryGetValue(j.AckedTick, out SnapshotDelta.Encoded? t) ? t
                             : _sent.TryGetValue(j.AckedTick, out SnapshotDelta.Encoded? b) ? b : null;
                     }
+                    if (baseSnap != null && baseSnap.SeatCount != cur.SeatCount)
+                    {
+                        baseSnap = null; // (SnapshotDelta.Write sends it whole)
+                    }
                     byte[] packet = new byte[1 + SnapshotDelta.MaxSize(cur)];
                     packet[0] = MsgSnapshot;
-                    int size = 1 + SnapshotDelta.Write(packet.AsSpan(1), cur, baseSnap, j.Applied < 0 ? -1 : j.Applied & 0xFFFF,
-                        j.Held, PaceByte(j));
-                    if (size > _net.MaxPayload && baseSnap == null && (cur.Extras.Length > 0 || cur.Handoff.Length > 0))
+                    int ack = j.Applied < 0 ? -1 : j.Applied & 0xFFFF;
+                    int size = 1 + SnapshotDelta.Write(packet.AsSpan(1), cur, baseSnap, ack, j.Held, PaceByte(j));
+                    SnapshotDelta.Encoded sentAs = cur;
+                    if (size > _net.MaxPayload && baseSnap != null)
+                    {
+                        // Fruity P2: a delta can pass MaxPayload too (8 seats: a mode block whose length changed goes literal, ~850 B
+                        // with the shot slots, as when a seat comes back). Dropping it left the joiner on that base, so each next delta
+                        // was as big (2026-11-13: an 8-seat rejoin cut every joiner off). Send it with the base's extras + handoff (the
+                        // client keeps its own a frame longer) and remember that copy as the base; still over: whole, trimmed below
+                        if (!cur.Extras.AsSpan().SequenceEqual(baseSnap.Extras) || !cur.Handoff.AsSpan().SequenceEqual(baseSnap.Handoff))
+                        {
+                            var deferred = new SnapshotDelta.Encoded
+                            {
+                                Tick = cur.Tick, Bytes = cur.Bytes, SeatCount = cur.SeatCount, ItemsStart = cur.ItemsStart,
+                                ObjectiveStart = cur.ObjectiveStart, SentAt = cur.SentAt, Extras = baseSnap.Extras, Handoff = baseSnap.Handoff
+                            };
+                            size = 1 + SnapshotDelta.Write(packet.AsSpan(1), deferred, baseSnap, ack, j.Held, PaceByte(j));
+                            if (size <= _net.MaxPayload)
+                            {
+                                sentAs = deferred;
+                                j.DeferredSends++;
+                            }
+                        }
+                        if (sentAs == cur)
+                        {
+                            baseSnap = null;
+                            size = 1 + SnapshotDelta.Write(packet.AsSpan(1), cur, null, ack, j.Held, PaceByte(j));
+                        }
+                    }
+                    if (size > _net.MaxPayload && baseSnap == null
+                        && (cur.Extras.Length > 0 || cur.Handoff.Length > 0 || snap.Shots?.Events.Length > 0))
                     {
                         // P8: a whole 8-seat snapshot can pass MaxPayload (Capture: ~1.5 KB). Send it without the online
                         // extras + handoff (the client reads empty blocks as none) and remember that copy as this joiner's
@@ -618,20 +723,33 @@ namespace MphRecomp.Multiplayer.Net
                             Tick = cur.Tick, Bytes = cur.Bytes, SeatCount = cur.SeatCount, ItemsStart = cur.ItemsStart,
                             ObjectiveStart = cur.ObjectiveStart, SentAt = cur.SentAt
                         };
-                        size = 1 + SnapshotDelta.Write(packet.AsSpan(1), trimmed, null, j.Applied < 0 ? -1 : j.Applied & 0xFFFF,
-                            j.Held, PaceByte(j));
+                        size = 1 + SnapshotDelta.Write(packet.AsSpan(1), trimmed, null, ack, j.Held, PaceByte(j));
+                        if (size > _net.MaxPayload && snap.Shots?.Events.Length > 0)
+                        {
+                            // Fruity P2: the shot slots (up to 612 B with 8 seats) too: an empty Shots block in this one, so
+                            // the joiner's puppets fire nothing from it, and the next deltas bring the slots (the mode block
+                            // literal, the extras a frame later, above; a puppet fires what it hasn't seen from the last
+                            // HostShotWindow frames, so no shot is lost)
+                            noShots ??= EncodeWithoutShots(snap, cur);
+                            trimmed = noShots;
+                            size = 1 + SnapshotDelta.Write(packet.AsSpan(1), trimmed, null, ack, j.Held, PaceByte(j));
+                        }
                         if (size <= _net.MaxPayload)
                         {
-                            j.Trimmed[cur.Tick] = trimmed;
+                            sentAs = trimmed;
                             j.TrimmedSends++;
+                        }
+                    }
+                    if (size <= _net.MaxPayload)
+                    {
+                        if (sentAs != cur)
+                        {
+                            j.Trimmed[cur.Tick] = sentAs; // (what the client rebuilds: its base for the next delta)
                             foreach (uint old in j.Trimmed.Keys.Where(k => cur.Tick - k > SnapshotDelta.History * 4).ToList())
                             {
                                 j.Trimmed.Remove(old);
                             }
                         }
-                    }
-                    if (size <= _net.MaxPayload)
-                    {
                         _net.Send(j.Slot, packet.AsSpan(0, size));
                         j.BytesSent += size;
                         j.MaxSnapshot = Math.Max(j.MaxSnapshot, size);
@@ -650,6 +768,19 @@ namespace MphRecomp.Multiplayer.Net
             }
         }
 
+        // a whole snapshot as SendSnapshot trims it last: no extras, no handoff, and a Shots block with its frame and no slots
+        private static SnapshotDelta.Encoded EncodeWithoutShots(Snapshot snap, SnapshotDelta.Encoded cur)
+        {
+            NetHostShotBlock shots = snap.Shots!;
+            snap.Shots = new NetHostShotBlock(shots.Frame, Array.Empty<(byte, NetShotEvent)>());
+            SnapshotDelta.Encoded e = SnapshotDelta.Encode(snap);
+            snap.Shots = shots;
+            e.Extras = Array.Empty<byte>();
+            e.Handoff = Array.Empty<byte>();
+            e.SentAt = cur.SentAt;
+            return e;
+        }
+
         // the link to each joiner (host) or the host (client), for status lines and the tests
         public string NetStats()
         {
@@ -662,7 +793,9 @@ namespace MphRecomp.Multiplayer.Net
                 return string.Join("; ", _joiners.Where(j => !j.Left).Select(j => $"seat {j.Seat}: {60 / j.Interval} Hz, rtt "
                     + $"{j.RttMs} ms, loss {j.Loss * 100:0}%, jitter {j.JitterFrames} frames, queue {Math.Max(0, j.NewestSeq - j.Applied)}/{j.MaxBacklog}, {j.BytesSent / 1024.0:0.0} KB out, "
                     + $"inputs merged {j.Merged}, starved {j.Starved}, paced skip {j.PaceSlowed} double {j.PaceHurried}{(j.PaceKeep > 0 ? $" keep {j.PaceKeep}" : "")}, biggest snapshot {j.MaxSnapshot} B, oversize {j.Oversize}{j.OversizeNote}"
-                    + (j.TrimmedSends > 0 ? $", whole without extras {j.TrimmedSends}" : "")));
+                    + (j.TrimmedSends > 0 ? $", whole without extras {j.TrimmedSends}" : "")
+                    + (j.DeferredSends > 0 ? $", deltas with the base's extras {j.DeferredSends}" : "")
+                    + (j.LifeDrops > 0 ? $", stale-life packets dropped {j.LifeDrops}" : "")));
             }
         }
 
@@ -993,6 +1126,7 @@ namespace MphRecomp.Multiplayer.Net
                         w.Write(seat.Back);
                         w.Write(seat.Bot);
                     }
+                    w.Write((byte)People); // (the optional tail: an older joiner stops before it)
                     _net.Send(j.Slot, ms.ToArray());
                 }
             }
@@ -1063,6 +1197,11 @@ namespace MphRecomp.Multiplayer.Net
                 snap = _latestSnap!;
                 bool had = _latestSnap != null;
                 _latestSnap = null;
+                if (had)
+                {
+                    LivesSeen(snap); // (Fruity P4: the life this device's inputs are stamped with from now)
+                    ShotsSeen(snap); // (Fruity P2: the shot events the host has, NetMatchSession.Shots.cs)
+                }
                 return had;
             }
         }
@@ -1080,6 +1219,7 @@ namespace MphRecomp.Multiplayer.Net
         public event Action<int, byte[]>? SideReceived;
 
         private static int SideSeatOf(Joiner j) => j.SideSeat >= 0 ? j.SideSeat : j.Seat;
+
 
         public void SendSide(int seat, ReadOnlySpan<byte> payload)
         {
@@ -1109,7 +1249,8 @@ namespace MphRecomp.Multiplayer.Net
             Array.Copy(_recentInputs, 0, _recentInputs, 1, _recentInputs.Length - 1);
             _recentInputs[0] = input;
             _recentCount = Math.Min(_recentCount + 1, _recentInputs.Length);
-            Span<byte> packet = stackalloc byte[6 + 4 * NetInput.RecordSize + ClientPosition.TrailerMax];
+            Span<byte> packet = stackalloc byte[6 + 4 * NetInput.RecordSize + ClientPosition.TrailerMax + LivesTrailerSize
+                + ShotsTrailerMax];
             packet[0] = MsgInput;
             System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(packet[1..], Volatile.Read(ref _ackTick));
             packet[5] = (byte)_recentCount;
@@ -1119,6 +1260,8 @@ namespace MphRecomp.Multiplayer.Net
             }
             int size = 6 + _recentCount * NetInput.RecordSize;
             size += ClientPosition.WriteTrailer(packet[size..], input); // (0.3.6: the newest input's own position, Net/ClientPosition.cs)
+            size += WriteLives(packet[size..]); // (Fruity P4: the life these inputs were made for, NetMatchSession.Lives.cs)
+            size += WriteShots(packet[size..], input.Seq); // (Fruity P2: the shots this device fired, NetMatchSession.Shots.cs)
             _net.Send(_hostSlot, packet[..size]);
             string? netLine;
             lock (_lock)
@@ -1216,6 +1359,8 @@ namespace MphRecomp.Multiplayer.Net
                         j.RttMs = j.RttMs < 0 ? rtt : (j.RttMs * 7 + rtt) / 8;
                         j.AckedTick = ack;
                     }
+                    // (Fruity P4) a packet stamped with a life the seat no longer has: counted for loss, its inputs dropped
+                    bool stale = LivesStale(j, data[(6 + count * NetInput.RecordSize)..]);
                     for (int i = 0; i < count; i++)
                     {
                         NetInput input = NetInput.ReadRecord(data[(6 + i * NetInput.RecordSize)..]);
@@ -1225,6 +1370,10 @@ namespace MphRecomp.Multiplayer.Net
                         if (i == 0)
                         {
                             CountPacket(j, seq, now);
+                        }
+                        if (stale)
+                        {
+                            break;
                         }
                         if (seq <= j.Applied || j.Queue.ContainsKey(seq))
                         {
@@ -1238,6 +1387,8 @@ namespace MphRecomp.Multiplayer.Net
                             j.Latest = input;
                         }
                     }
+                    // (Fruity P2) the shots its device fired, kept once each
+                    ShotsReceive(j, data[(6 + count * NetInput.RecordSize)..], stale);
                     // a queue far behind (a long stall): only the newest few matter
                     while (j.Queue.Count > 32)
                     {
@@ -1307,9 +1458,9 @@ namespace MphRecomp.Multiplayer.Net
                 j.PingMs = ping;
                 j.Player.RankLevel = rank; // (the match's ranking points use it: the next LOBBY carries it)
                 if (j.Player.Hunter != hunter || j.Player.Character != character || j.Player.Skin != skin
-                    || j.Player.ColourPick != colourPick)
+                    || j.AskedColour != colourPick)
                 {
-                    j.Player.ColourPick = colourPick;
+                    j.AskedColour = colourPick; // (Build settles the colour it wears)
                     j.Player.Hunter = hunter;
                     j.Player.Character = character;
                     j.Player.Skin = skin;
@@ -1417,6 +1568,7 @@ namespace MphRecomp.Multiplayer.Net
                         if (known.LastSeq >= 0)
                         {
                             known.Rejoins++;
+                            LivesRejoin(known);
                             SetStatus($"{known.Player.Nickname} rejoined from slot {from}");
                         }
                         known.LastSeq = -1;
@@ -1456,6 +1608,7 @@ namespace MphRecomp.Multiplayer.Net
                         Hunter = hunter, Remote = true, Nickname = nickname, RankLevel = rankLevel, Character = character, Skin = skin,
                         ColourPick = colourPick,
                     },
+                    AskedColour = colourPick,
                     Arenas = arenas,
                     Prints = prints,
                 };
@@ -1549,6 +1702,10 @@ namespace MphRecomp.Multiplayer.Net
                 for (int i = 0; i < seats.Length; i++)
                 {
                     seats[i] = new LobbySeat(r.ReadInt16(), r.ReadBoolean(), r.ReadBoolean(), r.ReadBoolean());
+                }
+                if (r.BaseStream.Position < r.BaseStream.Length)
+                {
+                    People = r.ReadByte(); // (an older host sends none: People stays 0)
                 }
                 _welcomeSeat = seat;
                 _betweenMatches = false; // (the host is in its lobby: what comes next is the next match's)
@@ -1737,6 +1894,8 @@ namespace MphRecomp.Multiplayer.Net
             _receiver.Reset();
             _ackTick = 0;
             _recentCount = 0;
+            LivesClientReset();
+            ShotsClientReset();
         }
 
         // a joiner's input packets per 2 s window: the share of its sequence numbers that never came = loss; a lossy or
@@ -1776,7 +1935,13 @@ namespace MphRecomp.Multiplayer.Net
             Header(w, type);
             w.Write((byte)seat);
             LanSession.WriteSettings(w, settings);
-            if (settings.FruitySync) w.Write(FruitySync.Mark); // (after the settings: older clients stop reading before it)
+            if (settings.FruitySync) // (after the settings: older clients stop reading before it)
+            {
+                w.Write(FruitySync.Mark);
+                w.Write(FruitySync.PickupsMark); // this host honours pickup claims (Net/PickupClaims.cs)
+                w.Write(FruitySync.LivesMark); // and stamps lives, dropping stale-life inputs (NetMatchSession.Lives.cs)
+                w.Write(FruitySync.ShotsMark); // and fires a device's seat from its shot events (NetMatchSession.Shots.cs)
+            }
             return ms.ToArray();
         }
 

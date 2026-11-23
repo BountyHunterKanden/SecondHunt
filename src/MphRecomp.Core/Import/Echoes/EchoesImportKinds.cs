@@ -32,6 +32,7 @@ namespace MphRecomp.Import.Echoes
         public string HudPak = "", HudPakSha1 = "";
         public string GunFxPak = "", GunFxPakSha1 = "";
         public string SpiderFxPak = "", SpiderFxPakSha1 = "";
+        public string MiscPak = "", MiscPakSha1 = "";   // Prime 1: MiscData.pak, the snow (Prime1Fx)
         public string Jingle = "", JingleSha1 = "";
         public float Scale = EchoesArena.DefaultScale;
         public readonly List<ArenaCannons.Cannon> Pads = new();
@@ -65,6 +66,11 @@ namespace MphRecomp.Import.Echoes
             {
                 a.SpiderFxPak = sp.GetString() ?? "";
                 a.SpiderFxPakSha1 = r.Str("spiderFxPakSha1");
+            }
+            if (r.Root.TryGetProperty("miscPak", out JsonElement mp))
+            {
+                a.MiscPak = mp.GetString() ?? "";
+                a.MiscPakSha1 = r.Str("miscPakSha1");
             }
             if (r.Root.TryGetProperty("jingle", out JsonElement jp))
             {
@@ -124,16 +130,19 @@ namespace MphRecomp.Import.Echoes
             if (a.HudPak != "") yield return (a.HudPak, a.HudPakSha1);
             if (a.GunFxPak != "") yield return (a.GunFxPak, a.GunFxPakSha1);
             if (a.SpiderFxPak != "") yield return (a.SpiderFxPak, a.SpiderFxPakSha1);
+            if (a.MiscPak != "") yield return (a.MiscPak, a.MiscPakSha1);
             if (a.Jingle != "") yield return (a.Jingle, a.JingleSha1);
         }
 
         public void Run(ImportContext ctx, ImportRecipe recipe, string outDir, Action<float, string> progress, CancellationToken ct)
         {
             ArenaRecipe a = ArenaRecipe.From(recipe);
-            if (recipe.Game != "mp2") throw new NotSupportedException($"{recipe.Id}: arenas from game '{recipe.Game}' are not importable");
+            // (Echoes' arenas, and a Prime 1 room as an arena: the Main Quarry, MainQuarry.cs)
+            if (recipe.Game != a.Def.Game) throw new NotSupportedException($"{recipe.Id}: arenas from game '{recipe.Game}' are not importable");
             EchoesArena.Import(ctx.Pak(a.Pak), a.Def, EchoesArena.Layout.Folder(outDir), a.Scale, a.Pads, progress: progress, ct: ct, crates: a.Crates,
                 audio: a.AudioPak != "" ? ctx.Pak(a.AudioPak) : null, hud: a.HudPak != "" ? ctx.Pak(a.HudPak) : null,
-                gunFx: a.GunFxPak != "" ? ctx.Pak(a.GunFxPak) : null, spiderFx: a.SpiderFxPak != "" ? ctx.Pak(a.SpiderFxPak) : null, jingle: a.Jingle != "" ? ctx.File(a.Jingle) : null);
+                gunFx: a.GunFxPak != "" ? ctx.Pak(a.GunFxPak) : null, spiderFx: a.SpiderFxPak != "" ? ctx.Pak(a.SpiderFxPak) : null, jingle: a.Jingle != "" ? ctx.File(a.Jingle) : null,
+                misc: a.MiscPak != "" ? ctx.Pak(a.MiscPak) : null);
         }
     }
 

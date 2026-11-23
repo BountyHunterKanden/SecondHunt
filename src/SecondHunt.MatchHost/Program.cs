@@ -263,6 +263,8 @@ namespace SecondHunt.MatchHost
             // so MatchStart would turn it on (settings.HyperBall ?? !PublicBuild) while the players' public apps have bombs
             settings.HyperBall = false;
             settings.HyperBeam = false; // ...nor her Hyper Beam (owner 2026-10-24: dev only)
+            settings.CrateHealthPending = false; // ...nor the crates' pending-health rule (off in public apps for now: MatchStart)
+            MphRecomp.Arenas.EchoesMovement.CeilingPushCap = false; // ...nor the capped ceiling push (off in public apps until the owner tests it, 11-22)
 
             Netcode(settings); // (client-reported positions on or off, as the server set it: Program.Netcode.cs)
             Log("seats " + string.Join(", ", settings.Players.Select((p, i) => $"{i}:{p.Hunter}{(p.Character != null ? "/" + p.Character : "")}{(p.Bot ? " bot" : $" {p.Nickname}")}")));
@@ -332,6 +334,7 @@ namespace SecondHunt.MatchHost
                     Log("shots " + ShotReport.HostLine(settings.Players.Count));
                     Log("shotcheck " + ShotCheck.HostLine());
                     Log("claims " + HitClaims.HostLine());
+                    Log("pickup claims " + PickupClaims.HostLine());
                     Log("positions " + ClientPosition.HostLine());
                     statFrames = 0;
                     statMs = statMax = 0;
@@ -347,6 +350,7 @@ namespace SecondHunt.MatchHost
             Log("shots " + ShotReport.HostLine(settings.Players.Count)); // (the whole match's)
             Log("shotcheck " + ShotCheck.HostLine());
             Log("claims " + HitClaims.HostLine());
+            Log($"pickup claims ({host.PickupsApplied} handed over) " + PickupClaims.HostLine());
             Log($"positions ({host.PositionsApplied} taken, client-run pushes: {host.PushSpeedsTaken} speeds taken, {host.PushHeldFrames} held frames kept) " + ClientPosition.HostLine());
             Log($"match over: {frames} frames, step mean {allMs / Math.Max(frames, 1):0.000} ms, {Memory()}, {driver.StatusLine()}");
             Log("scores " + string.Join(", ", Enumerable.Range(0, settings.Players.Count).Select(i =>

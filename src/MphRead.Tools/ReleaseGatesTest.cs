@@ -51,7 +51,8 @@ namespace MphRead
                         Check($"{b}, import offers hd/{pirate} (no player character)", ImportGames.Offered(Item("hd", pirate)), !pub);
                     Check($"{b}, import offers hd/SamusBall (Brawl Samus)", ImportGames.Offered(Item("hd", "SamusBall")), !pub);
                     Check($"{b}, import offers brawl/Paralyzer", ImportGames.Offered(Item("brawl", "Paralyzer")), !pub);
-                    Check($"{b}, import offers bodies/MP1AlphaDrone", ImportGames.Offered(Item("bodies", "MP1AlphaDrone")), true);
+                    Check($"{b}, import offers enemies/MP1Beetle (enemy import)", ImportGames.Offered(Item("enemies", "MP1Beetle")), !pub);
+                    Check($"{b}, import offers bodies/MP1AlphaDrone",ImportGames.Offered(Item("bodies", "MP1AlphaDrone")), true);
 
                     // #14: Zero Suit's skins (picker, TRY CONTROLS, look-alikes) and a seat a dev joiner sends
                     Check($"{b}, Zero Suit has skins", Characters.Skins(Characters.ZeroSuit, null).Count > 0, !pub);
@@ -123,6 +124,8 @@ namespace MphRead
                     Check($"{b}, settings has the frame rate row", labels.Contains("frame\nrate"), false);
                     // DEATH: RAGDOLL every build, First Hunt's collapse dev only (owner 2026-11-09 "ragdoll in next release
                     // without first hunt at all"); FIRST HUNT is never offered in public (RecompMenus.FirstHuntOffered)
+                    // RUMBLE: OPTIONS > RUMBLE PAK's copy, every build (owner 2026-11-17)
+                    Check($"{b}, settings has the rumble row", labels.Contains("rumble"), true);
                     Check($"{b}, settings has the death row", labels.Contains("death"), true);
                     Check($"{b}, settings has the vanilla orbs row (DEATH on RAGDOLL)", labels.Contains("vanilla\norbs"), true);
                     Check($"{b}, settings has no follow cam row (RAGDOLL's own, owner 2026-11-09)", labels.Contains("follow\ncam"), false);
@@ -135,7 +138,37 @@ namespace MphRead
                     MphRecomp.Anim.DeathCollapse.Set(null, Environment.CurrentDirectory);
                     Check($"{b}, settings has Prime song rows", labels.Count(l => l.Contains("song", StringComparison.OrdinalIgnoreCase)
                         || l.StartsWith("match\nmusic", StringComparison.Ordinal) || l.StartsWith("menu\nmusic", StringComparison.Ordinal)) > 0, true);
+                    // the fixes-only release (owner 2026-11-17): the features that come right after have no row in a
+                    // public build (some of these rows are conditional in dev builds too, so only public is checked)
+                    if (pub)
+                    {
+                        foreach (string held in new[] { "arena\nbackground", "holiday\nmode", "camera\nside", "export\nprofile",
+                            "import\nprofile", "cloud save", "arena\nsongs", "menu\nsongs", "menu\nshot", "customize\nhud" })
+                        {
+                            Check($"{b}, settings has the {held.Replace('\n', ' ')} row", labels.Contains(held), false);
+                        }
+                    }
                     Console.WriteLine($"  {b} rows: " + String.Join(", ", labels.Select(l => l.Replace('\n', ' '))));
+
+                    // the signed hunter license: a public build takes a hand-edited file as it is (no check yet), dev sets it aside
+                    string licDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sh-gatetest-" + Guid.NewGuid().ToString("N"));
+                    try
+                    {
+                        System.IO.Directory.CreateDirectory(licDir);
+                        new HunterLicense().Save(licDir);
+                        string licFile = System.IO.Directory.GetFiles(licDir).First(f => f.EndsWith(".json"));
+                        string text = System.IO.File.ReadAllText(licFile);
+                        System.IO.File.WriteAllText(licFile, text.Insert(text.IndexOf('{') + 1, "\"HandEdit\": 1,"));
+                        Check($"{b}, an edited license file reads as edited", HunterLicense.Check(System.IO.File.ReadAllText(licFile)) == HunterLicense.FileCheck.Edited, true);
+                        int before = System.IO.Directory.GetFiles(licDir).Length;
+                        HunterLicense.Load(licDir);
+                        bool aside = System.IO.Directory.GetFiles(licDir).Any(f => System.IO.Path.GetFileName(f).Contains("edited"));
+                        Check($"{b}, an edited license file is set aside on load", aside, !pub);
+                    }
+                    finally
+                    {
+                        try { System.IO.Directory.Delete(licDir, recursive: true); } catch (Exception) { }
+                    }
                 }
             }
             finally

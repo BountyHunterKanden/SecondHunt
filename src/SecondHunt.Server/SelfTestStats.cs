@@ -113,6 +113,19 @@ namespace SecondHunt.Server
             await s.RequestAsync<OkMsg>(lan);
             Check((await s.RequestAsync<StatsMsg>(new StatsReq())).Totals.Count == 0, "hub: a LAN match isn't counted");
 
+            // 0.10.1: a dev build or test tool's profile is off the hub, and a match with it in isn't counted for anyone
+            OnlineClient dev = await Connect(uri, OnlineIdentity.Create(), "DevBuild", app: "android-dev");
+            string devGame = (await s.RequestAsync<GameMsg>(new HostGameReq { Info = info })).Game.Id;
+            await dev.RequestAsync<GameMsg>(new JoinGameReq { GameId = devGame, Version = "rom1/sim3" });
+            await s.RequestAsync<OkMsg>(new StartGameReq { Started = true });
+            await s.RequestAsync<OkMsg>(Result(devGame, (s, 0), (dev, 1)));
+            HubMsg hidden = await h.RequestAsync<HubMsg>(new HubReq());
+            Check((await s.RequestAsync<StatsMsg>(new StatsReq())).Totals.Count == 0
+                && (await dev.RequestAsync<StatsMsg>(new StatsReq())).Totals.Count == 0
+                && hidden.Matches == 10 && hidden.Recent.All(x => x.Code != dev.Me.Code) && hidden.Recent.Any(x => x.Code == s.Me.Code),
+                "hub: a dev build's profile and its matches stay off the hub");
+            await dev.DisposeAsync();
+
             // a deleted profile leaves the boards and the hunter count
             await g1.RequestAsync<OkMsg>(new DeleteProfileReq());
             LeadersMsg after = await s.RequestAsync<LeadersMsg>(new LeadersReq { Category = HubCategory.Games });

@@ -7,10 +7,19 @@ namespace MphRecomp.App;
 // frame the map shows (the paused game is drawn again each frame anyway; eight small blits). GL thread only.
 internal sealed class PrimeMapBlur
 {
-    const int Levels = 5; // the deepest level: 1/2^Levels of the screen (the blur's strength)
-    const int Shown = 2; // the level drawn: 1/8 of the screen
-    readonly int[] _fbo = new int[Levels], _tex = new int[Levels];
+    readonly int Levels; // the deepest level: 1/2^Levels of the screen (the blur's strength; the map's 5)
+    readonly int Shown; // the level drawn: the map's 2, 1/8 of the screen
+    readonly int[] _fbo, _tex;
     int _w, _h;
+
+    // (the arena menu background, MenuArenaBackdrop, asks for a lighter blur: owner 11-20 "far too intense")
+    public PrimeMapBlur(int levels = 5, int shown = 2)
+    {
+        Levels = levels;
+        Shown = Math.Min(shown, levels - 1);
+        _fbo = new int[levels];
+        _tex = new int[levels];
+    }
 
     // the GL objects belonged to the old context
     public void Reset()

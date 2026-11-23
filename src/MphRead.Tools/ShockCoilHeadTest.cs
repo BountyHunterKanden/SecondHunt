@@ -223,6 +223,53 @@ namespace MphRead
                 Fail("a match client showed no HEADSHOT! for a real headshot");
             }
 
+            // the life drain (owner 2026-11-13, a Combat Hall served match): the host heals the Shock Coil user by the damage
+            // done; a match client doesn't heal a coil user, since its health is the host's (a drain of its own ran it ahead
+            // and each snapshot then read as a hit on the coil user: hurt flash and sound, uneven heal). Seat 0 stays the
+            // client's main player (the HUD needs it), so Sylux here is a puppet; the coil user's own client takes the same line
+            WeaponInfo syluxCoil = Weapons.Current.First(w => w.Beam == BeamType.ShockCoil && w.Flags.TestFlag(WeaponFlags.LifeDrainUncharged));
+            var drainEquip = new EquipInfo
+            {
+                Weapon = syluxCoil,
+                InfiniteAmmo = true,
+                Beams = SceneSetup.CreateBeamList(8, host.Scene)
+            };
+            (int Lost, int Gained) Drain(bool client)
+            {
+                Step(default, 10);
+                me.Health = 900;
+                shooter.Health = 99;
+                try
+                {
+                    PlayerEntity.NetClient = client;
+                    for (int f = 0; f < 60 && !host.Ended; f++)
+                    {
+                        me.GetPosition(out Vector3 middle);
+                        Vector3 start = middle + side * 4;
+                        BeamProjectileEntity.Spawn(shooter, drainEquip, start, (middle - start).Normalized(), BeamSpawnFlags.None,
+                            me.NodeRef, host.Scene);
+                        Step(default);
+                    }
+                }
+                finally
+                {
+                    PlayerEntity.NetClient = false;
+                }
+                return (900 - me.Health, shooter.Health - 99);
+            }
+            var hostDrain = Drain(client: false);
+            var clientDrain = Drain(client: true);
+            Console.WriteLine($"life drain ({syluxCoil.Description}), 60 frames: host {hostDrain.Lost} damage, Sylux +{hostDrain.Gained};"
+                + $" client {clientDrain.Lost} damage (the host's to do), Sylux +{clientDrain.Gained}");
+            if (hostDrain.Lost == 0 || hostDrain.Gained != Math.Min(hostDrain.Lost, 100))
+            {
+                Fail($"the host healed Sylux {hostDrain.Gained} for {hostDrain.Lost} damage (should be the same)");
+            }
+            if (clientDrain.Gained != 0)
+            {
+                Fail($"a match client healed its own Sylux {clientDrain.Gained} (its health is the host's)");
+            }
+
             foreach (string e in errors)
             {
                 Console.WriteLine("  " + e);

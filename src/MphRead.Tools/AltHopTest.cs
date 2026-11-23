@@ -138,10 +138,27 @@ namespace MphRead
                 using CampaignHost host = CampaignHost.Start(_room, hunter: hunter, arriving: false);
                 PlayerEntity me = Settle(host);
                 Morph(host, me);
-                (float peak, int start) = Rise(host, me, CampaignButtons.Jump, 150);
+                (float peak, int start) = Rise(host, me, CampaignButtons.AltHop, 150);
                 bool ok = me.IsAltForm && me.AltHops == 1 && start >= 0 && start <= 1
                     && Math.Abs(peak - bombPeak) <= bombPeak * 0.15f;
                 Console.WriteLine($"[campaign] {hunter}: alt {me.IsAltForm}, hops {me.AltHops}, peak {peak:0.000} after {start} frames {(ok ? "ok" : "FAIL")}");
+                pass &= ok;
+            }
+            // ALT HOP is its own button (owner 2026-11-12): jump (which boosts Samus's ball) doesn't hop, and ALT HOP held
+            // hops once, not again on each landing
+            foreach (Hunter hunter in new[] { Hunter.Samus, Hunter.Kanden })
+            {
+                using CampaignHost host = CampaignHost.Start(_room, hunter: hunter, arriving: false);
+                PlayerEntity me = Settle(host);
+                Morph(host, me);
+                (float jumpPeak, _) = Rise(host, me, CampaignButtons.Jump | CampaignButtons.Boost, 90);
+                int jumpHops = me.AltHops;
+                for (int f = 0; f < 200; f++)
+                {
+                    host.Step(new CampaignInput { Buttons = CampaignButtons.AltHop });
+                }
+                bool ok = me.IsAltForm && jumpHops == 0 && jumpPeak < 0.05f && me.AltHops == 1;
+                Console.WriteLine($"[button] {hunter}: jump press hops {jumpHops} rise {jumpPeak:0.000}, alt hop held 200 frames hops {me.AltHops} {(ok ? "ok" : "FAIL")}");
                 pass &= ok;
             }
             {
@@ -155,7 +172,7 @@ namespace MphRead
                     host.Step(default);
                 }
                 Morph(host, me);
-                (float peak, _) = Rise(host, me, CampaignButtons.Jump, 60);
+                (float peak, _) = Rise(host, me, CampaignButtons.Jump | CampaignButtons.AltHop, 60);
                 bool ok = !me.HostAltHop && me.AltHops == 0 && peak < 0.05f;
                 Console.WriteLine($"[match] Kanden: hop flag {me.HostAltHop}, hops {me.AltHops}, rise {peak:0.000} {(ok ? "ok" : "FAIL")}");
                 pass &= ok;
@@ -375,7 +392,7 @@ namespace MphRead
                     for (int f = 0; f < 240; f++)
                     {
                         int hopAt = int.TryParse(Environment.GetEnvironmentVariable("ALTHOP_HOPAT"), out int ha) ? ha : -1;
-                        host.Step(new CampaignInput { Move = new System.Numerics.Vector2(0, push), Buttons = f == hopAt ? CampaignButtons.Jump : CampaignButtons.None });
+                        host.Step(new CampaignInput { Move = new System.Numerics.Vector2(0, push), Buttons = f == hopAt ? CampaignButtons.AltHop : CampaignButtons.None });
                         if (Environment.GetEnvironmentVariable("ALTHOP_DEBUG") == "2" && h == 4 && mode == 1)
                         {
                             Console.WriteLine($"[edges-trace] f{f} pos {me.Position} speed {me.Speed}");
@@ -1096,7 +1113,7 @@ namespace MphRead
             {
                 for (int f = 0; f < 30; f++) host.Step(default);
                 OpenTK.Mathematics.Vector3 rest = me.Position;
-                (float peak, int start) = Rise(host, me, press == "bomb" ? CampaignButtons.AltAttack : CampaignButtons.Jump, 150);
+                (float peak, int start) = Rise(host, me, press == "bomb" ? CampaignButtons.AltAttack : CampaignButtons.AltHop, 150);
                 Console.WriteLine($"[climb] {hunter} {press} at {rest.X:0.00},{rest.Y:0.00},{rest.Z:0.00}: rise {peak:0.00} from f{start}");
                 SceneSetup.CampaignAltHop = true;
                 return;
@@ -1335,7 +1352,7 @@ namespace MphRead
                         if (f < 3) Console.WriteLine($"[jump]   f{f} dialog {host.Dialog} up; camseq {cs?.SequenceId} {cs?.Name} {cs?.Flags} menuPause {GameState.MenuPause} pos {me.Position}");
                         CloseDialogs();
                     }
-                    host.Step(press ? new CampaignInput { Buttons = CampaignButtons.Jump } : default);
+                    host.Step(press ? new CampaignInput { Buttons = CampaignButtons.Jump | CampaignButtons.AltHop } : default);
                     Watch($"f{f}");
                     if (Environment.GetEnvironmentVariable("ALTHOP_TRACE") == "1" && (f < 40 || (f >= 295 && f < 340)))
                         Console.WriteLine($"[jump]   f{f} y {me.Position.Y:0.000} vy {me.Speed.Y:0.0000} standing {me.Flags1.TestFlag(PlayerFlags1.Standing)} press {press} flags2 {me.Flags2}");
@@ -1354,7 +1371,7 @@ namespace MphRead
                     if (!now.IsAltForm) Morph(host, now);
                     for (int f = 0; f < 120; f++) host.Step(default);
                     int hops = now.AltHops;
-                    (float peak, int s) = Rise(host, now, CampaignButtons.Jump, 90);
+                    (float peak, int s) = Rise(host, now, CampaignButtons.AltHop, 90);
                     Console.WriteLine($"[after] alt {now.IsAltForm} standing {now.Flags1.TestFlag(PlayerFlags1.Standing)}/{now.Flags1.TestFlag(PlayerFlags1.StandingPrevious)} hops +{now.AltHops - hops} peak {peak:0.000} start f{s} pos {now.Position}");
                 }
             }

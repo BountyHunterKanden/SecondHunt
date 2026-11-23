@@ -43,6 +43,7 @@ public class GameActivity : Activity
             return;
         }
         _renderer = new FrontendRenderer(FilesDir!.AbsolutePath, SettingsPath, ModsDir, System.IO.Path.Combine(ExternalDir, "saves"));
+        MatchPrebuild.Dirs = (FilesDir!.AbsolutePath, ExternalDir); // (START's lead-in builds the match: CampaignActivity takes it)
         PadGyros.Init(this); // the gyro axis row follows a connected controller's gyro (CampaignGyro.cs)
         if (Int32.TryParse(Intent?.GetStringExtra("page"), out int page)) _renderer.StartPage = page;
         // back from a campaign: the launcher now sits under this activity, and the campaign's exit (ClearTop to
@@ -53,8 +54,14 @@ public class GameActivity : Activity
             _renderer.StartPage = FrontendSession.ReturnPage(); // the main menu, or the multiplayer lobby after a match
         }
         if (Intent?.GetStringExtra("fedump") == "1") _renderer.DumpPath = System.IO.Path.Combine(ExternalDir, "frontend_dump.md");
+        if (Intent?.GetStringExtra("allocprobe") == "1") AllocProbeUiTick.Start(); // dev: menu allocations by thread (ThreadAllocProbe.cs)
         _renderer.RequestSink = r => RunOnUiThread(() => OnRequest(r));
+        // CONTROLS > TOUCH > EDIT TOUCH LAYOUT (TouchLayoutEditor.cs): both layouts (MATCH / CAMPAIGN), over the menu
+        _renderer.EditTouchLayout = () => RunOnUiThread(OpenTouchEditor);
         MultiplayerMenu.MulticastLock = () => MenuLan.AcquireMulticast(this); // AVAILABLE GAMES hears LAN beacons (M3)
+        // the last run crashed: "share its crash report?" on the main menu (FrontendSession.TickCrashNotice)
+        FrontendSession.CrashUnseen = CrashLog.HasUnseen;
+        FrontendSession.CrashSeen = CrashLog.MarkSeen;
         _renderer.HdRoot = System.IO.Path.Combine(ExternalDir, "hd");
         _renderer.CacheDir = System.IO.Path.Combine(ExternalDir, "cache");
         // IMPORT GAMES (RECOMP SETTINGS): the system's document picker, and its files read in place (never copied)
@@ -73,6 +80,7 @@ public class GameActivity : Activity
         _status.SetPadding(32, 24, 32, 24);
         root.AddView(_status, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
         _renderer.StatusSink = s => RunOnUiThread(() => { _status.Text = s; _status.Visibility = ViewStates.Visible; });
+        _root = root;
         SetContentView(root);
         HideSystemUi();
     }
@@ -82,7 +90,7 @@ public class GameActivity : Activity
     string SettingsPath => System.IO.Path.Combine(ExternalDir, "recomp_settings.json");
     string ModsDir => System.IO.Path.Combine(ExternalDir, "mods");
 
-    protected override void OnPause() { base.OnPause(); _view?.OnPause(); _renderer?.PauseAudio(); }
+    protected override void OnPause() { base.OnPause(); _view?.OnPause(); _renderer?.PauseAudio(); MphRecomp.Frontend.FrontendSession.CloudFlush("app paused"); }
 
     protected override void OnResume()
     {
@@ -416,6 +424,11 @@ public class GameActivity : Activity
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
     {
         if (_renderer == null) return base.OnKeyDown(keyCode, e);
+        if (_touchEditor != null)
+        {
+            if (e?.RepeatCount == 0 && keyCode is Keycode.Back or Keycode.Escape or Keycode.ButtonB) _touchEditor.Back();
+            return true;
+        }
         // the control customizer waits for a controller button (OPTIONS > CONTROLS): every press and release goes to it (Select
         // and R3 too: customizer functions since 2026-10-11), Back / Start keep the buttons as they are; nothing reaches the
         // menu meanwhile
@@ -467,6 +480,7 @@ public class GameActivity : Activity
 
     public override bool OnKeyUp(Keycode keyCode, KeyEvent? e)
     {
+        if (_touchEditor != null) return true;
         if (keyCode == Keycode.ButtonSelect) _selectHeld = false;
         // a button let go while the customizer waits: the capture commits once every pressed button is up (combos)
         if (_renderer?.CaptureDevice != null
@@ -505,8 +519,28 @@ public class GameActivity : Activity
 
     void MenuPress(MenuKeys k) => _renderer?.Post(s => s.Press(k));
 
+    // the touch layout editor, while it's up: nothing else takes input (Back = its CANCEL)
+    FrameLayout? _root;
+    TouchLayoutEditor? _touchEditor;
+
+    void OpenTouchEditor()
+    {
+        if (_touchEditor != null || _root == null) return;
+        FrameLayout root = _root;
+        TouchLayoutEditor editor = null!;
+        editor = new TouchLayoutEditor(this, campaign: false, SettingsPath, allowSwitch: true, saved =>
+        {
+            root.Post(() => root.RemoveView(editor)); // (not mid its own touch event)
+            _touchEditor = null;
+            if (saved) _renderer?.Post(s => s.Settings.ReloadFrom(SettingsPath)); // the menus' copy of the settings
+        });
+        _touchEditor = editor;
+        root.AddView(editor, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+    }
+
     public override bool OnGenericMotionEvent(MotionEvent? e)
     {
+        if (_touchEditor != null) return true;
         if (e != null && e.Source.HasFlag(InputSourceType.Joystick) && e.Action == MotionEventActions.Move)
         {
             int hx = Step(e.GetAxisValue(Axis.HatX)), hy = Step(e.GetAxisValue(Axis.HatY));

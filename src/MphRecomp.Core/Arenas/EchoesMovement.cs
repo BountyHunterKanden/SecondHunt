@@ -41,6 +41,7 @@ namespace MphRecomp.Arenas
         public static bool IsArena(int roomId) => EchoesArena.All.Any(d => d.Id == roomId);
 
         static readonly Dictionary<int, (Vector3 Min, Vector3 Max)[]> _water = new();
+        static readonly Dictionary<int, (Vector3 Min, Vector3 Max)[]> _hop = new();
 
         // an arena registered (info) or gone (null): its water boxes
         internal static void SetRoom(int roomId, EchoesArena.Info? info)
@@ -51,6 +52,10 @@ namespace MphRecomp.Arenas
                     .Select(f => (new Vector3(f.Min[0], f.Min[1], f.Min[2]), new Vector3(f.Max[0], f.Max[1], f.Max[2]))).ToArray();
                 if (boxes.Length == 0) _water.Remove(roomId);
                 else _water[roomId] = boxes;
+                // the alt-form hop's tunnels (Main Gyro Chamber, PlayerEntity.HostAltHopZones)
+                (Vector3, Vector3)[] hop = (info?.HopZones ?? new()).Select(z => (new Vector3(z[0], z[1], z[2]), new Vector3(z[3], z[4], z[5]))).ToArray();
+                if (hop.Length == 0) _hop.Remove(roomId);
+                else _hop[roomId] = hop;
             }
         }
 
@@ -65,6 +70,9 @@ namespace MphRecomp.Arenas
             }
         }
 
+        // the capped ceiling push for this process (Extra); the served match host turns it off, like a public app
+        public static bool CeilingPushCap = true;
+
         // SceneSetup.HostExtraEntities, on every room load (the campaign's too): MphRead's hooks on for an Echoes arena in a
         // match with it on, off for any other room
         public static IReadOnlyList<EntityBase> Extra(Scene scene, int roomId, IReadOnlyList<EntityBase> entities)
@@ -77,6 +85,9 @@ namespace MphRecomp.Arenas
             // acts with the spider button held (an input bit old replays never set), and only on track faces
             // (wave 2: off in public builds, owner 2026-11-07)
             PlayerEntity.HostSpiderBall = !MphRecomp.Config.RecompSettings.PublicBuild && GameState.Multiplayer && IsArena(roomId);
+            // the capped ceiling push (docs/ACCURACY.md A15, 2026-11-22), any room: off in public builds until the owner has
+            // tried it on a device ("Gate it", 11-22), and wherever CeilingPushCap is off (the match host, Tools' A/B)
+            PlayerEntity.HostCeilingPushCap = CeilingPushCap && !MphRecomp.Config.RecompSettings.PublicBuild;
             PlayerEntity.HostBotUnstick = GameState.Multiplayer && ArenaNav.Unstick(roomId);   // Echoes bots: get unstuck
             // T7: Echoes' moves on the graph's links + items they can't get (BotMoves: old replays off)
             PlayerEntity.HostBotMoves = PlayerEntity.HostBotUnstick && BotMoves;
@@ -84,6 +95,8 @@ namespace MphRecomp.Arenas
             lock (_water)
             {
                 PlayerEntity.HostWater = on && _water.TryGetValue(roomId, out (Vector3, Vector3)[]? boxes) ? boxes : null;
+                // every hunter's alt form hops in the arena's tunnels (in a match only; Echoes moves on or off)
+                PlayerEntity.HostAltHopZones = GameState.Multiplayer && _hop.TryGetValue(roomId, out (Vector3, Vector3)[]? hop) ? hop : null;
                 PlayerEntity.HostSwimWater = false;
                 if (!on && _swim.TryGetValue(roomId, out (Vector3, Vector3)[]? swim))
                 {

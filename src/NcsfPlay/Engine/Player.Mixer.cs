@@ -104,10 +104,17 @@ public sealed partial class Player
         return acc / ksum;
     }
 
-    /// <summary>Spec 8.3: the padded sample copy the sinc reads from.</summary>
+    /// <summary>Spec 8.3: the padded sample copy the sinc reads from. Cached on the sample (it only depends on the
+    /// sample and its loop), so a note start doesn't allocate a copy of the whole sample.</summary>
     static void MakeWindow(Voice v)
     {
         var sample = v.OutSample!;
+        long key = v.OutLoopMode == 1 ? v.OutLoopStart : -1;
+        if (sample.WindowCache is { } cached && cached.Key == key)
+        {
+            v.Window = cached.Window;
+            return;
+        }
         ReadOnlySpan<float> data = sample.Data;
         int n = data.Length;
         float[] window = new float[n + 16];
@@ -118,6 +125,7 @@ public sealed partial class Player
             for (int i = 0; i < 8; i++)
                 window[n + 8 + i] = data[(int)v.OutLoopStart + i];
         v.Window = window;
+        sample.WindowCache = new NCSFCommon.NC.SWAV.SincWindow(window, key);
     }
 
     /// <summary>Spec 8.4.</summary>

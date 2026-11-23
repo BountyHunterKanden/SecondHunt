@@ -213,3 +213,61 @@ new graph.
     on reset) are worth copying.
   - Fruity-Prime-private has no licence grant: borrow nothing from it.
 - **Quake 3 AAS** (GPL, ideas only): typed links checked by predicting the real movement. That is this plan's pattern.
+
+## Status and the rest of the plan (2026-11-16)
+
+Owner, 2026-11-16: "i just want bots that intuitively know any new area like a human would but without changing their
+vanilla difficulty or behavior", and a GO to finish this plan.
+
+**Where it stands.**
+- P1 (solver tool) and P3 (Echoes and First Hunt solve) are done, PC only: `BotProbeLinkSolve.cs`, `BotProbeNavScc.cs`,
+  `BotProbePadSolve.cs`.
+- P2 shipped as general rules rather than stored-move playback: edge jump (`PlayerAiEdgeJump.cs`, BOT EDGE JUMP), pad
+  jump, edge hold, lift guard, up-lifts and arrive tick, each behind its own MatchSettings switch, with difficulty
+  checked in band (Parity48, 10-29). The stored-move player (`BotLinkTick` playing the solver's move) is not built.
+- The pad-throw guard (session df3e13, 11-16) sits unported in worktree `vigilant-kilby-787b58` (19/923 misses vs 37/924;
+  the zero bar is unmet). Its own next idea is a per-pad stick schedule solved offline, which is this plan's pattern.
+
+**The gap the Prime 1 rooms show: the graph, before the solver.** The solver only tries links that `ArenaNav.Build`
+offers, and ArenaNav samples floors 4.5 apart and caps a climb at DoubleRise 3.6. Monitor Station (id 1009) came out
+with no strong component (2 nodes kept, bots idle), so two jump pads were placed by hand
+(`Placements/PRIME_MONITOR_STATION.json`). The owner rejects that: "i didnt want you deciding where pads were". A 1-unit
+probe over the real collision found the pad ledges reachable only with hops up to ~6 per step (4.5/3.5/6.0/3.5 and
+5.8/4.7/5.3), above the measured double jump (4.75). The owner says both ledges can be reached on foot, so the probe
+misses something (narrow platforms, steep slopes, a move). The owner's on-foot replay of the climb is the test case.
+
+**Steps (in order; each is PC first, then the owner's look on the Odin).**
+1. **Scan finds every human route.** Change ArenaNav (or a pass before it) so the candidates cover what a human can do:
+   floor sampled finer where it is narrow (small platforms, walkways; thin the nodes back to MPH spacing after), climbs
+   offered up to what the solver can prove (the measured double jump and run-up arcs, not the 3.6 cap), and the
+   component choice fixed (rank parts by the anchors that can reach them, the parked 10-28 fix). The solver decides
+   which candidates are real. Test: the owner's Monitor Station replay route appears as solved links; then remove the
+   placed pads and the room must still have one strong component. Every tuned Echoes / First Hunt graph is checked
+   unchanged or better (linkall, navscc).
+2. **Bots play the stored moves.** `BotLinkTick` widened to "play the solver's move" (move id, run-up, press frame),
+   behind a new MatchSettings switch (off in campaign; replay format bump), with the backstop from the Pipeline section
+   (step aside, replay, next-best move, mark bad and replan; never drop the link). Vanilla ROM graphs and every combat,
+   aim, target and route choice stay vanilla. Difficulty: head-on and Parity48-style runs on vs off, L0-L2, inside the
+   bands. Stuck and coverage: BotTour-style % nodes visited, stuck = under 1 unit moved in 5 s; the bar is zero stuck
+   on the test arenas (owner rule: eliminate, not reduce). The G3 transfer test runs on an arena nobody tuned.
+4. **On-device solve at import (P5).** The solve runs on the player's device next to ArenaNav at ROM / Echoes / Prime
+   import; no map data ships. Then an Odin install.
+
+**Step 1 results (2026-11-21, PC, pads deleted for good).** The owner's word: Monitor Station has an on-foot route
+(their replay: climb from 1:11, top platform at 1:37, at 1:42 across a walkway and a jump to the far pad ledge), so the
+pads stay out of `PRIME_MONITOR_STATION.json` and the scan must find the route.
+- ArenaNav human mode (Prime 1 rooms only, `EchoesArena.cs` passes `human: p1 != null`): fine scan at 1.5, `Footing`
+  (3 of 4 floor hits around a node), `Thin` back to MPH spacing, then long on-foot jump bridges (`Bridges`: up to 15
+  across and 1.5 up, offered only where walking round costs over 2.5x the straight line).
+- Solver moves `long/ledge` and `long/runup2` (the second press waits until the bot falls back below its take-off).
+- Monitor Station (617 nodes, 5779 links, full solve): the big strong part is 410 nodes (was 322) and holds both old pad
+  bottoms, both pad landings and the spawn floor. The replay route is solved leg by leg, including the climb
+  (105.7,26 -> 110.2,30) and the walkway jump 125 -> 155 (`long/ledge`, 3 of 3). Left out: the y60-66 tops (28/24/11
+  nodes); the scan offers no link to or from them, likely roof.
+- Phendrana Shorelines (397 nodes, 4497 links): 389 nodes in one strong part, every pool-floor node in it. Only 38 of the
+  ~400 pool exits are plain walks; the rest need a solved jump, ledge jump or climb. Today's live AI doesn't play those
+  moves, which is where bots park on the pool floor (WETLOG: ~10 s stands at -40,88 and -49,98; Kanden 17.2 s, Spire
+  20.6 s of 120 under water). That is step 2's job.
+- Echoes and First Hunt graphs: unchanged by construction (the human-scan code only runs for Prime 1 rooms).
+- Live bots on Monitor Station still don't climb to the deck: they follow the graph with vanilla link handling, so the
+  solved climbs wait for step 2's stored-move player.

@@ -27,6 +27,7 @@ namespace MphRead.Entities
         private void ProcessInput()
         {
             TouchTick(); // recomp: the touch controls' stylus (PlayerTouch.cs)
+            NetShotEventsAge(); // recomp: Fruity P2, a host's seat's shot events from its device wait only so long (PlayerNetShotEvents.cs)
             if (_health > 0)
             {
                 if (Flags1.TestFlag(PlayerFlags1.FreeLook))
@@ -92,6 +93,7 @@ namespace MphRead.Entities
             else
             {
                 _showScoreboard = GameState.Multiplayer && Controls.Pause.IsDown;
+                NetFireReady(); // recomp: Fruity P2, shots its device fired before it saw this death still leave the body
             }
             if (HostAnyShieldWall)
             {
@@ -112,9 +114,10 @@ namespace MphRead.Entities
             SlotAfterInput(); // recomp: the turret's bomb slot holds a ball there (PlayerEchoesSeat.cs)
         }
 
-        // recomp: the Pirate Blaster and the Paralyzer after the Shock Coil (9 -> 11 entries; the wrap indexes below follow
-        // the length; a weapon the player doesn't hold is skipped, so matches without them cycle as before)
-        private static readonly BeamType[] _weaponOrder = new BeamType[11]
+        // recomp: the Pirate Blaster, the Paralyzer and the Hyper Beam after the Shock Coil (9 -> 12 entries; the wrap
+        // indexes below follow the length; a weapon the player doesn't hold is skipped, so matches without them cycle as
+        // before)
+        private static readonly BeamType[] _weaponOrder = new BeamType[12]
         {
             /* 0 */ BeamType.PowerBeam,
             /* 1 */ BeamType.Missile,
@@ -126,7 +129,8 @@ namespace MphRead.Entities
             /* 7 */ BeamType.ShockCoil,
             /* 8 */ BeamType.PirateBlaster,
             /* 9 */ BeamType.Paralyzer,
-            /* 10 */ BeamType.OmegaCannon
+            /* 10 */ BeamType.HyperBeam,
+            /* 11 */ BeamType.OmegaCannon
         };
 
         private void ProcessTouchInput()
@@ -486,6 +490,10 @@ namespace MphRead.Entities
             if (HostSevenWeaponSlots)
             {
                 _availableWeapons[BeamType.PirateBlaster] = true;
+            }
+            if (HostEightWeaponSlots)
+            {
+                _availableWeapons[BeamType.HyperBeam] = true;
             }
             _ammo[0] = _ammoMax[0];
             _ammo[1] = _ammoMax[1];
@@ -1067,11 +1075,12 @@ namespace MphRead.Entities
                         }
                     }
                     bool paralyzerPending = ParalyzerPendingShot(); // recomp: a Paralyzer press inside its cooldown (PlayerParalyzer.cs)
-                    if ((Controls.Shoot.IsPressed && EquipInfo.ChargeLevel <= 1 * 2 // todo: FPS stuff
+                    // recomp (11-13): a network client's copy of another seat fires its Omega Cannon when the host's snapshot says it fired (PlayerNetConfirm.cs)
+                    if (NetOmegaPuppetShot() ?? ((Controls.Shoot.IsPressed && EquipInfo.ChargeLevel <= 1 * 2 // todo: FPS stuff
                         || EquipWeapon.Flags.TestFlag(WeaponFlags.RepeatFire) && Flags2.TestFlag(PlayerFlags2.Shooting)
                         && (!EquipWeapon.Flags.TestFlag(WeaponFlags.CanCharge) || EquipInfo.ChargeLevel < EquipWeapon.MinCharge * 2) // todo: FPS stuff
                         || paralyzerPending)
-                        && !BotSightHold()) // recomp: a bot holds its uncharged / repeat shot while its target is behind a wall (PlayerAiSight.cs)
+                        && !BotSightHold())) // recomp: a bot holds its uncharged / repeat shot while its target is behind a wall (PlayerAiSight.cs)
                     {
                         if (TryFireWeapon())
                         {
@@ -1082,6 +1091,17 @@ namespace MphRead.Entities
                             {
                                 SetBiped2Animation(PlayerAnimation.Shoot, Biped2Flags);
                             }
+                        }
+                    }
+                    // recomp: Fruity P2, a match host's seat fires the shots its device fired (its trigger fires none: PlayerNetShotEvents.cs)
+                    if (NetFireReady() > 0)
+                    {
+                        _paralyzerPressPending = false;
+                        anim2 = PlayerAnimation.Shoot;
+                        animFlags2 |= AnimFlags.NoLoop;
+                        if (Biped2Anim == PlayerAnimation.Shoot)
+                        {
+                            SetBiped2Animation(PlayerAnimation.Shoot, Biped2Flags);
                         }
                     }
                     // the game doesn't require pressed here, but presumably the control scheme would have the pressed flag
@@ -1190,7 +1210,13 @@ namespace MphRead.Entities
             {
                 return false;
             }
+            if (NetTriggerHeld())
+            {
+                return false; // recomp: Fruity P2, a match host's seat its device's shot events fire, not its trigger (PlayerNetShotEvents.cs)
+            }
             bool pressed = Controls.Shoot.IsPressed;
+            bool hostShot = NetOmegaPuppetShot() == true; // recomp: a puppet's Omega Cannon shot the host already fired (PlayerNetConfirm.cs)
+            hostShot |= _netFiringEvent != null; // recomp: Fruity P2, a shot its device fired (the device judged the cooldown and gun)
             if (pressed || CurrentWeapon != BeamType.PowerBeam)
             {
                 _autofireCooldown = (ushort)(EquipWeapon.AutofireCooldown * 2); // todo: FPS stuff
@@ -1214,18 +1240,19 @@ namespace MphRead.Entities
             }
             if ((_timeSinceShot < EquipWeapon.ShotCooldown * 2 // todo: FPS stuff
                 || !pressed && _timeSinceShot < _autofireCooldown)
-                && (!IsBot || !AiData.Flags2.TestFlag(AiFlags2.Bit20)))
+                && (!IsBot || !AiData.Flags2.TestFlag(AiFlags2.Bit20)) && !hostShot)
             {
                 NetCountShot(NetShotCooldown, pressed); // recomp: network play's shot report (PlayerNetShots.cs)
                 return false;
             }
-            if (GunAnimation == GunAnimation.UpDown)
+            if (GunAnimation == GunAnimation.UpDown && !hostShot)
             {
                 NetCountShot(NetShotGunLowered, pressed);
                 return false;
             }
+            Vector3 origin = _muzzlePos;
             Vector3 shotVec = _aimPosition - _muzzlePos;
-            if (_disruptedTimer > 0)
+            if (_disruptedTimer > 0 && _netFiringEvent == null) // recomp: + not a device's shot event (its device's aim was disrupted already)
             {
                 // random values between -3 and 3
                 shotVec.X += Fixed.ToFloat((int)Rng.GetRandomInt2(24576) - 12288);
@@ -1233,6 +1260,7 @@ namespace MphRead.Entities
                 shotVec.Z += Fixed.ToFloat((int)Rng.GetRandomInt2(24576) - 12288);
             }
             shotVec = shotVec.Normalized();
+            NetEventShotRay(ref origin, ref shotVec); // recomp: Fruity P2, a device's shot event leaves where and as it left there
             WeaponInfo curWeapon = EquipInfo.Weapon;
             if (IsPrimeHunter)
             {
@@ -1254,7 +1282,7 @@ namespace MphRead.Entities
             }
             ShotLogFire(shotVec); // recomp dev: TRY CONTROLS shot log (PlayerShotLog.cs)
             _hitClaimFiring = true; // recomp: the beams spawned here are this shot's (PlayerHitClaims.cs)
-            BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, _muzzlePos, shotVec, flags, NodeRef, _scene);
+            BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, origin, shotVec, flags, NodeRef, _scene); // recomp: origin, was _muzzlePos
             _hitClaimFiring = false;
             if (result == BeamResultFlags.NoSpawn)
             {
@@ -1263,7 +1291,9 @@ namespace MphRead.Entities
                 NetCountShot(NetShotNoSpawn, pressed);
                 return false;
             }
-            NetCountShot(-1, pressed, _muzzlePos, shotVec);
+            // recomp: Fruity P2, a device's own shot goes to the host as an event; the event's number goes in the shot check's log
+            NetCountShot(-1, pressed, origin, shotVec, _netFiringEvent?.Seq ?? NetLogShotEvent(curWeapon, origin, shotVec));
+            NetLogHostShot(curWeapon, origin, shotVec); // recomp: Fruity P2, a served host's snapshots carry it to the clients' copies
             if (GameEvents.Any) GameEvents.Raise("fire", SlotIndex, curWeapon.Beam.ToString(), EquipInfo.ChargeLevel >= curWeapon.MinCharge * 2); // recomp: mod event (GameEvents.cs)
             // todo: update license stats
             GameState.ShotsFired[SlotIndex]++; // recomp (Gaming Hub): SHOTS FIRED
@@ -1323,8 +1353,9 @@ namespace MphRead.Entities
             EquipInfo.Weapon = curWeapon;
             // recomp: a network client leaves the unequip to the host (PlayerNet.cs NetApply replays it when the host's
             // snapshot drops the cannon): its own switch to the next weapon was pushed with this shot's press and reached
-            // the host first, so the host never fired and kept the cannon (Discord report 11-12: guest's cannon unusable)
-            if (!NetClient)
+            // the host first, so the host never fired and kept the cannon (Discord report 11-12: guest's cannon unusable).
+            // (11-13) A puppet fires it only once the host's snapshot dropped it, and unequips it here
+            if (!NetClient || NetOmegaShotHere())
             {
                 UnequipOmegaCannon(); // todo?: set the flag if wifi
             }
@@ -1782,6 +1813,10 @@ namespace MphRead.Entities
                     {
                         ScoutDroneFire(); // recomp: the Trooper's drone fires its blasters instead (PlayerScoutDrone.cs)
                     }
+                    else if (HostCrawl)
+                    {
+                        CrawlFire(); // recomp: Zero Suit Samus fires her Paralyzer from her army crawl (PlayerCrawl.cs)
+                    }
                     else if (_abilities.TestFlag(AbilityFlags.WeavelAltAttack))
                     {
                         if (Flags2.TestFlag(PlayerFlags2.AltAttack) || _altAttackCooldown > 0)
@@ -2021,6 +2056,13 @@ namespace MphRead.Entities
                 }
                 _bombAmmo--;
                 _bombCooldown = (ushort)(Values.BombCooldown * 2); // todo: FPS stuff
+                // recomp: Sylux's ammo is set from the cooldown before it counts down (PlayerProcess), so his next bomb waits
+                // one step past the cooldown: one tick in the game, one frame here. One more frame keeps his gap at the
+                // game's 4 ticks (8 frames, not 7), so fast taps get dropped like in DS and Lockjaw doesn't hover (owner 11-15)
+                if (Hunter == Hunter.Sylux)
+                {
+                    _bombCooldown++;
+                }
                 if (Hunter == Hunter.Kanden)
                 {
                     _altModel.SetAnimation((int)KandenAltAnim.TailOut, AnimFlags.NoLoop);
@@ -2031,7 +2073,7 @@ namespace MphRead.Entities
                     _bombOveruse += 27 * 2;
                     if (_bombOveruse >= 100 * 2)
                     {
-                        _bombCooldown = 150 * 2;
+                        _bombCooldown = 150 * 2 + 1; // recomp: + 1, the same stale step as above
                     }
                 }
                 bomb.PlaySpawnSfx();
@@ -2198,6 +2240,10 @@ namespace MphRead.Entities
                 if (IsPrimeHunter && !IsAltForm)
                 {
                     _hSpeedCap = 0.4f; // todo: FPS stuff?
+                }
+                if (HostCrawling)
+                {
+                    _hSpeedCap = CrawlSpeedCap; // recomp: her army crawl, a quarter of her walk (PlayerCrawl.cs)
                 }
                 _hSpeedMag = hSpeedMag;
             }

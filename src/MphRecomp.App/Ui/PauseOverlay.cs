@@ -15,7 +15,7 @@ namespace MphRecomp.App;
 //   while open:        _pause.Press(MenuKeys.A) / Navigate(dx, dy) / Touch(x, y) instead of game input
 //   end of OnDrawFrame: if (_pause.IsOpen) _pause.Draw(width, height);
 //   _pause.Resumed / QuitToMenu / DevTools fire on the GL thread; Settings has the (saved) choices.
-internal sealed class PauseOverlay
+internal sealed partial class PauseOverlay
 {
     readonly string _settingsPath, _modsDir;
     readonly UiGlDrawer _drawer = new();
@@ -31,10 +31,22 @@ internal sealed class PauseOverlay
     // an online match (MatchSession.ConfigureMatch): the pause gets CHAT, the lobby's CHAT page on this match's connection
     public MphRecomp.Multiplayer.Net.OnlineMatch? OnlineChat { get; set; }
     public event Action? Resumed, QuitToMenu, QuitToDesktop, DevTools;
+    // QUIT's YES pressed: QuitToMenu follows after its flash (~0.3 s), the menu staying open meanwhile
+    public event Action? QuitPressed;
+    // the pause menu opened (Open, not the ship's OpenControls): the game reads the menus' next arena background ahead
+    public event Action? Opened;
     // RECOMP SETTINGS > CREDITS / CRASH LOG: the host opens the same screens as the front end does (GameActivity)
     public event Action? Credits, ShareCrashLog, ShareLog, SaveLog;
     // the control customizer opened on its own (OpenControls, the ship's OPTIONS) was closed: the host reloads the buttons
     public event Action? ControlsClosed;
+    // CONTROLS > TOUCH > EDIT TOUCH LAYOUT (owner 2026-11-15; Android, MphRead.Android/TouchLayoutEditor.cs): the host
+    // shows its editor over the paused game, then calls EditDone. Only a host that listens gets the row. Meanwhile the menu
+    // stays open (the game stays paused) but draws nothing and takes no input.
+    public event Action? EditTouchLayout;
+    // PAUSED > PHOTO MODE (2026-11-16): the menu closes and the host's photo mode takes over (CampaignRenderer.PhotoMode.cs);
+    // its back opens the menu again
+    public event Action? PhotoModeRequested;
+    public bool Editing { get; private set; }
 
     // the campaign's saves (CampaignLaunch), null elsewhere: SECOND HUNT SETTINGS' CAMPAIGN TROOPER TYPE shows with a
     // Trooper file there
@@ -59,7 +71,11 @@ internal sealed class PauseOverlay
 
     public void OnSurfaceCreated() => _drawer.Init();
 
-    public void Open() => OpenWith(s => s.OpenPause());
+    public void Open()
+    {
+        OpenWith(s => s.OpenPause());
+        if (IsOpen) Opened?.Invoke();
+    }
 
     // the control customizer by itself (the ship's OPTIONS); its back closes it again (ControlsClosed)
     public void OpenControls(bool keys) => OpenWith(s => s.OpenControls(keys));
@@ -89,6 +105,8 @@ internal sealed class PauseOverlay
             _session.Recomp.InNetMatch = NetMatch;
             _session.Recomp.InOnlineMatch = NetMatch && OnlineChat != null; // the camera row greys out (RecompMenus); LAN can switch it
             _session.Recomp.PauseChat = OnlineChat is { Disposed: false } chat ? chat : null; // CHAT (RecompMenus.PausePage)
+            _session.Recomp.EditTouchLayout = EditTouchLayout == null ? null : BeginEditTouchLayout;
+            Editing = false;
             open(_session);
             IsOpen = true;
             _clock.Restart();
@@ -103,14 +121,32 @@ internal sealed class PauseOverlay
 
     // the control customizer is waiting for a button ("pad" / "keys", else null): the host sends its next press to
     // CaptureInput (a ControlBinds name) instead of Press / Navigate
-    public string? CaptureDevice => IsOpen ? _session?.Recomp.CaptureDevice : null;
+    public string? CaptureDevice => IsOpen && !Editing && !HudEditing ? _session?.Recomp.CaptureDevice : null;
     public void CaptureInput(string button) => _session?.Recomp.CaptureInput(button);
     public void CancelCapture() => _session?.Recomp.CancelCapture();
 
     public void Close()
     {
+        EndHudEditor(); // (PauseOverlay.HudEditor.cs)
         _session?.ClosePause();
         IsOpen = false;
+        Editing = false;
+    }
+
+    void BeginEditTouchLayout()
+    {
+        Editing = true;
+        EditTouchLayout?.Invoke();
+    }
+
+    // the touch layout editor closed (saved or not): back to the menu, from the file the editor may have saved, so a
+    // change made here afterwards doesn't put the old layout back
+    public void EditDone()
+    {
+        if (!Editing) return;
+        Editing = false;
+        _session?.Settings.ReloadFrom(_settingsPath);
+        _last = _clock.Elapsed.TotalSeconds; // (no jump in the menu's animations)
     }
 
     void OnRequest(FrontendRequest r)
@@ -120,6 +156,9 @@ internal sealed class PauseOverlay
         case FrontendRequestKind.Resume:
             Close();
             Resumed?.Invoke();
+            break;
+        case FrontendRequestKind.QuitPressed:
+            QuitPressed?.Invoke();
             break;
         case FrontendRequestKind.QuitToMenu:
             Close();
@@ -148,16 +187,24 @@ internal sealed class PauseOverlay
             Close();
             ControlsClosed?.Invoke();
             break;
+        case FrontendRequestKind.HudEditor: // LOOK > HUD > CUSTOMIZE HUD (PauseOverlay.HudEditor.cs)
+            OpenHudEditor();
+            break;
+        case FrontendRequestKind.PhotoMode:
+            Close();
+            PhotoModeRequested?.Invoke();
+            break;
         }
     }
 
-    public void Press(MenuKeys keys) => HoldSounds(() => _session?.Press(keys));
-    public void Navigate(int dx, int dy) => _session?.Navigate(dx, dy);
-    public void Touch(float x, float y) => HoldSounds(() => _session?.TouchCanvas(x, y));
+    // (none of them while the touch layout editor is up: Editing; the HUD editor takes them while it is up: HudEditing)
+    public void Press(MenuKeys keys) => HoldSounds(() => { if (HudEditing) { _hudEditor!.Press(keys); return; } if (!Editing) _session?.Press(keys); });
+    public void Navigate(int dx, int dy) { if (HudEditing) { _hudEditor!.Navigate(dx, dy); return; } if (!Editing) _session?.Navigate(dx, dy); }
+    public void Touch(float x, float y) => HoldSounds(() => { if (HudEditing) { _hudEditor!.Touch(x, y); return; } if (!Editing) _session?.TouchCanvas(x, y); });
     // a touch's down / move / up / cancel (0-3): settings and CONTROLS scroll by a drag (FrontendSession.TouchCanvas)
-    public void Touch(float x, float y, int kind) => HoldSounds(() => _session?.TouchCanvas(x, y, kind));
-    public void ScrollWheel(float notches) => _session?.ScrollWheel(notches);
-    public void ScrollStick(float y) => _session?.ScrollStick(y);
+    public void Touch(float x, float y, int kind) => HoldSounds(() => { if (HudEditing) { _hudEditor!.Touch(x, y, kind); return; } if (!Editing) _session?.TouchCanvas(x, y, kind); });
+    public void ScrollWheel(float notches) { if (HudEditing) { _hudEditor!.ScrollWheel(notches); return; } if (!Editing) _session?.ScrollWheel(notches); }
+    public void ScrollStick(float y) { if (HudEditing) { _hudEditor!.ScrollStick(y); return; } if (!Editing) _session?.ScrollStick(y); }
 
     // The menu's click for a press sounds before the press acts, so it's held until we know what the press did: one that
     // closed the menu (resume, quit) is silent -- no unpause noise (owner 2026-10-04) -- any other plays as before.
@@ -185,7 +232,12 @@ internal sealed class PauseOverlay
 
     public void Draw(int width, int height)
     {
-        if (!IsOpen || _session == null) return;
+        if (IsOpen && HudEditing)
+        {
+            DrawHudEditor(width, height);
+            return;
+        }
+        if (!IsOpen || _session == null || Editing) return;
         double now = _clock.Elapsed.TotalSeconds;
         _session.Update(now - _last);
         _last = now;

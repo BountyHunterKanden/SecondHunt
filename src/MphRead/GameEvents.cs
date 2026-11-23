@@ -23,10 +23,16 @@ namespace MphRead
         // (event name, args). One listener: the app's mod host. Never called while Any is false.
         public static Action<string, object[]>? Listener;
 
+        // recomp: the play log's listener (MphRecomp.App PlayLog.cs: gameplay lines in the app log), beside the mods'. Set
+        // once for the whole run; LiveMods keeps Any on while it is set, whatever the mods do. Only reports, like Listener.
+        public static Action<string, object[]>? LogListener;
+
         public static void Raise(string name, params object[] args)
         {
             try { Listener?.Invoke(name, args); }
             catch { } // a listener must never be able to break a frame
+            try { LogListener?.Invoke(name, args); }
+            catch { }
         }
 
         // mod.on_message (docs/MOD_API.md §4.4): set only while a mod watches the level-scripting messages. Scene's

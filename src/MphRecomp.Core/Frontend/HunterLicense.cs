@@ -11,8 +11,9 @@ namespace MphRecomp.Frontend
     // The player's profile (Vanilla multiplayer menu M6, decision 5): the nickname other players see, "HUNTER" until the
     // player types one (never the device's or the OS user's name), vanilla's multiplayer unlocks and its Hunter License
     // (rank, stats, hunter of choice; the card on page 60), in its own file beside recomp_settings.json. The friends and
-    // rivals roster comes later. No folder (the PC tools): kept in memory only.
-    public sealed class HunterLicense
+    // rivals roster comes later. No folder (the PC tools): kept in memory only. The file is signed against hand edits
+    // (HunterLicense.Signature.cs).
+    public sealed partial class HunterLicense
     {
         public const string FileName = "hunter_license.json";
         // the longest name the keyboard takes (vanilla's limit: see MultiplayerMenu's keyboard)
@@ -67,7 +68,8 @@ namespace MphRecomp.Frontend
         // The card's hunter of choice can be a character too (owner 2026-11-07: Trooper or Dark Samus, picked the same way
         // as a hunter). CharacterMatches counts a character's matches by id; they're in its base hunter's HunterMatches as
         // well, so the vanilla fields above stay vanilla (cart import, the license check). A hunter's own count is its
-        // HunterMatches less its characters'. ChoiceHunter -1 = no character played yet: the card shows FavoriteHunter.
+        // HunterMatches less its characters', and everything picked or shown uses own counts only, FavoriteHunter included
+        // (owner 2026-11-18). ChoiceHunter -1 = no character played yet: the card shows FavoriteHunter.
         public Dictionary<string, int> CharacterMatches { get; set; } = new();
         public int ChoiceHunter { get; set; } = -1;       // the base hunter shown
         public string? ChoiceCharacter { get; set; }      // its character id, null = the hunter itself
@@ -253,7 +255,7 @@ namespace MphRecomp.Frontend
             if (r.AddedCompleted) Completed = false;
             Arenas &= ~r.AddedArenas;
             Hunters &= ~r.AddedHunters;
-            FavoriteHunter = Array.IndexOf(HunterMatches, HunterMatches.Max());
+            FavoriteHunter = TopOwnHunter();
             PickChoice(reset: true);
             FavoriteMode = Array.IndexOf(ModeMatches, ModeMatches.Max());
             FavoriteWeapon = Array.IndexOf(WeaponKills, WeaponKills.Max());
@@ -322,7 +324,7 @@ namespace MphRecomp.Frontend
             {
                 // the after-match rules over the summed counts: the hunter and the mode keep a tie, the weapon and the
                 // lucky arena only a strictly better one
-                for (int h = 0; h < 7; h++) if (HunterMatches[h] > HunterMatches[FavoriteHunter]) FavoriteHunter = h;
+                for (int h = 0; h < 7; h++) if (OwnMatches(h, null) > OwnMatches(FavoriteHunter, null)) FavoriteHunter = h;
                 PickChoice(reset: false);
                 for (int m = 0; m < 7; m++) if (ModeMatches[m] > ModeMatches[FavoriteMode]) FavoriteMode = m;
                 for (int b = 0; b < 9; b++) if (WeaponKills[b] > WeaponKills[FavoriteWeapon]) FavoriteWeapon = b;
@@ -424,6 +426,15 @@ namespace MphRecomp.Frontend
             return Math.Max(0, n);
         }
 
+        // the hunter with the most own matches (the first of a tie): FavoriteHunter never counts a character's matches as its
+        // base hunter's (owner 2026-11-18: "no hunters, custom or otherwise, should EVER affect other hunters stats")
+        private int TopOwnHunter()
+        {
+            int top = 0;
+            for (int h = 1; h < 7; h++) if (OwnMatches(h, null) > OwnMatches(top, null)) top = h;
+            return top;
+        }
+
         // the hunter of choice over every hunter and character (after an import): the most own matches, the shown one
         // keeping a tie unless reset; no character played = the vanilla FavoriteHunter (ChoiceHunter -1)
         private void PickChoice(bool reset)
@@ -523,11 +534,12 @@ namespace MphRecomp.Frontend
             {
                 (int choiceHunter, string? choiceCharacter) = HunterOfChoice();
                 HunterMatches[h] = Add(HunterMatches[h]);
-                if (HunterMatches[h] >= HunterMatches[FavoriteHunter]) FavoriteHunter = h;
-                // the hunter of choice: the same rule over own counts (the one just played keeps a tie)
                 string? played = MphRecomp.Multiplayer.Characters.All
                     .FirstOrDefault(c => !c.HasOriginal && (int)c.Base == h && c.Name == m.Character)?.Id;
                 if (played != null) CharacterMatches[played] = Add(CharacterMatches.GetValueOrDefault(played));
+                // FavoriteHunter and the hunter of choice: the most own matches, the one just played keeping a tie (a
+                // character's match isn't its base hunter's: the hunter's own count doesn't move)
+                if (played == null && OwnMatches(h, null) >= OwnMatches(FavoriteHunter, null)) FavoriteHunter = h;
                 // the skin worn (its character's: the played one, else the hunter's own with its skins)
                 MphRecomp.Multiplayer.Character? worn = played != null ? MphRecomp.Multiplayer.Characters.All.First(c => c.Id == played)
                     : MphRecomp.Multiplayer.Characters.Of(m.Hunter, m.Skin);
@@ -609,19 +621,83 @@ namespace MphRecomp.Frontend
             return lost;
         }
 
+        // after RESTORE (OnlineMenus.License.cs AskRestoredLicense): the restored hunter's online card (what the server
+        // keeps: OnlineMenus LicenseJson's numbers) taken onto this device's license, each number the higher of the two, so
+        // nothing on either side goes down (docs/PROFILE_SYNC.md, Phase 0). The favourites come with it only onto a
+        // license that has played nothing yet. false = the card has nothing ahead of this license (`apply` false: only
+        // asks)
+        public bool TakeOnlineCard(HunterLicense card, bool apply = true)
+        {
+            bool fresh = LocalMatches == 0 && OnlineMatches == 0;
+            bool ahead = false;
+            int I(int mine, int theirs)
+            {
+                if (theirs <= mine) return mine;
+                ahead = true;
+                return theirs;
+            }
+            double D(double mine, double theirs)
+            {
+                if (!double.IsFinite(theirs) || theirs <= mine) return mine;
+                ahead = true;
+                return theirs;
+            }
+            bool B(bool mine, bool theirs)
+            {
+                if (!theirs || mine) return mine;
+                ahead = true;
+                return true;
+            }
+            int points = Math.Clamp(I(RankPoints, card.RankPoints), 0, RankThresholds[4] - 1);
+            (int wifiWins, int wirelessWins, int online, int local) = (I(WifiWins, card.WifiWins), I(WirelessWins, card.WirelessWins),
+                I(OnlineMatches, card.OnlineMatches), I(LocalMatches, card.LocalMatches));
+            (int biped, int alt, int head, int drops) = (I(BipedKills, card.BipedKills), I(AltFormKills, card.AltFormKills),
+                I(HeadshotKills, card.HeadshotKills), I(Disconnects, card.Disconnects));
+            (double wireless, double wifi, double total) = (D(WirelessSeconds, card.WirelessSeconds), D(WifiSeconds, card.WifiSeconds),
+                D(TotalSeconds, card.TotalSeconds));
+            (int wifiWin, int wifiKill) = (I(WifiBestWinStreak, card.WifiBestWinStreak), I(WifiBestKillStreak, card.WifiBestKillStreak));
+            (int wirelessWin, int wirelessKill) = (I(WirelessBestWinStreak, card.WirelessBestWinStreak),
+                I(WirelessBestKillStreak, card.WirelessBestKillStreak));
+            (bool beat, bool completed) = (B(BeatGame, card.BeatGame), B(Completed, card.Completed));
+            if (!ahead || !apply) return ahead;
+            RankPoints = points;
+            RankLevel = RankThresholds.Count(t => points >= t);
+            (WifiWins, WirelessWins, OnlineMatches, LocalMatches) = (wifiWins, wirelessWins, online, local);
+            (BipedKills, AltFormKills, HeadshotKills, Disconnects) = (biped, alt, head, drops);
+            (WirelessSeconds, WifiSeconds, TotalSeconds) = (wireless, wifi, total);
+            (WifiBestWinStreak, WifiBestKillStreak, WirelessBestWinStreak, WirelessBestKillStreak) = (wifiWin, wifiKill, wirelessWin, wirelessKill);
+            (BeatGame, Completed) = (beat, completed);
+            if (fresh)
+            {
+                FavoriteHunter = Math.Clamp(card.FavoriteHunter, 0, 6);
+                FavoriteWeapon = Math.Clamp(card.FavoriteWeapon, 0, 8);
+                FavoriteMode = Math.Clamp(card.FavoriteMode, 0, 6);
+                LuckyArena = Math.Clamp(card.LuckyArena, FirstArenaRoom, LastArenaRoom);
+            }
+            return true;
+        }
+
         static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
         public static HunterLicense Load(string? dir)
         {
-            string? path = dir == null ? null : Path.Combine(dir, FileName);
             HunterLicense license = new();
-            try
+            bool save = false;
+            if (dir != null)
             {
-                if (path != null && File.Exists(path)) license = JsonSerializer.Deserialize<HunterLicense>(File.ReadAllText(path)) ?? new();
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"hunter license: {path}: {ex.Message}");
+                lock (FileLock)
+                {
+                    try
+                    {
+                        license = LoadFile(dir, out save);
+                    }
+                    catch (Exception ex)
+                    {
+                        // (not expected: LoadFile handles a bad file) never saved over what's there
+                        Console.Error.WriteLine($"hunter license: {Path.Combine(dir, FileName)}: {ex.Message}");
+                        license = new() { _keepOff = true };
+                    }
+                }
             }
             license.Name = Clean(license.Name);
             license.LastAddress ??= "";
@@ -633,12 +709,18 @@ namespace MphRecomp.Frontend
             license.PendingLosses = (license.PendingLosses ?? Array.Empty<int>()).Where(l => l is >= 0 and <= 4).Take(7).ToArray();
             license.FavoriteHunter = Math.Clamp(license.FavoriteHunter, 0, 6);
             license.CharacterMatches ??= new();
+            // a file from before 2026-11-18 may have a favourite that only led with its characters' matches
+            if (license.OwnMatches(license.FavoriteHunter, null) < license.OwnMatches(license.TopOwnHunter(), null))
+            {
+                license.FavoriteHunter = license.TopOwnHunter();
+            }
             license.SkinMatches ??= new();
             license.ClampChoice();
             license.FavoriteWeapon = Math.Clamp(license.FavoriteWeapon, 0, 8);
             license.FavoriteMode = Math.Clamp(license.FavoriteMode, 0, 6);
             license.RankPoints = Math.Clamp(license.RankPoints, 0, RankThresholds[4] - 1);
             license.RankLevel = RankThresholds.Count(t => license.RankPoints >= t);
+            if (save) license.Save(dir); // an unsigned file signed, or a good copy put back
             return license;
 
             static int[] Sized(int[]? a, int n) => a?.Length == n ? a : (a ?? Array.Empty<int>()).Concat(new int[n]).Take(n).ToArray();
@@ -661,10 +743,19 @@ namespace MphRecomp.Frontend
         public void Save(string? dir)
         {
             if (dir == null) return;
+            // a profile pack's tie-break (HunterLicense.Profile.cs): moved on only when something else changed
+            string path = Path.Combine(dir, FileName);
             try
             {
-                Directory.CreateDirectory(dir);
-                File.WriteAllText(Path.Combine(dir, FileName), JsonSerializer.Serialize(this, Options));
+                if (!(File.Exists(path) && File.ReadAllText(path) == SignedJson())) SavedAt = DateTime.UtcNow;
+            }
+            catch (Exception)
+            {
+                SavedAt = DateTime.UtcNow;
+            }
+            try
+            {
+                lock (FileLock) WriteSigned(dir);
             }
             catch (Exception ex)
             {

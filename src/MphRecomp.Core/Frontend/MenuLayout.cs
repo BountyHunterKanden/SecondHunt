@@ -29,6 +29,14 @@ namespace MphRecomp.Frontend
         public float Scale { get; init; } = 1;
         // only texts (true) or only widgets (false) go to this region; null: both
         public bool? Texts { get; init; }
+        // a bottom band (the description band) that narrows and moves sideways to fit between the bottom corners' contents
+        // on narrow canvases instead of running under them (a user's ~1.41:1 tablet, 2026-11-14: the file select's band
+        // ran under SAVE DATA and MOVIES)
+        public bool FitBetweenCorners { get; init; }
+        // the menu x range this region's items actually draw in, when it's much narrower than the region (the band fit's
+        // bounds); null: X0..X1
+        public float? ContentX0 { get; init; }
+        public float? ContentX1 { get; init; }
 
         public bool Contains(float x, float y) => x >= X0 && x <= X1 && y >= Y0 && y <= Y1;
     }
@@ -155,19 +163,19 @@ namespace MphRecomp.Frontend
         // takes both, so the arrow stays beside its label (it fell in the footer's middle before)
         public static MenuLayout MainFamily(bool actionsAboveRight = false, bool pagingLeft = false) => new(LayoutKind.MainFamily, Present(new[]
         {
-            new LayoutRegion { Name = "footer-left", X0 = 0, Y0 = -192, X1 = 64, Y1 = -160, AnchorX = 0, AnchorY = 1, PivotX = 0, PivotY = 1, OffsetX = 6, OffsetY = -4, Scale = 0.9f },
+            new LayoutRegion { Name = "footer-left", X0 = 0, Y0 = -192, X1 = 64, Y1 = -160, AnchorX = 0, AnchorY = 1, PivotX = 0, PivotY = 1, OffsetX = 6, OffsetY = -4, Scale = 0.9f, ContentX1 = 40 },
             new LayoutRegion { Name = "footer-right", X0 = pagingLeft ? 140 : actionsAboveRight ? 166 : 176, Y0 = -192, X1 = 256, Y1 = -160, AnchorX = 1, AnchorY = 1, PivotX = 1, PivotY = 1, OffsetX = -6, OffsetY = -4, Scale = 0.9f },
             actionsAboveRight
                 // x 161 (DELETE) lands where footer-right puts x 228 (MOVIES): 13 menu pixels further in than its right edge
                 ? new LayoutRegion { Name = "footer-mid", X0 = 64, Y0 = -192, X1 = 176, Y1 = -160, AnchorX = 1, AnchorY = 1, PivotX = 1, PivotY = 1, OffsetX = -6 - 13 * 0.9f, OffsetY = -4 - 40 * 0.9f, Scale = 0.9f }
                 : new LayoutRegion { Name = "footer-mid", X0 = 64, Y0 = -192, X1 = 176, Y1 = -160, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -4, Scale = 0.9f },
             actionsAboveRight
-                ? new LayoutRegion { Name = "footer-saves", X0 = 0, Y0 = -192 - FileSelect.TransferDrop, X1 = 512, Y1 = -160 - FileSelect.TransferDrop, AnchorX = 1, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetX = -6 - FileSelect.TransferShift * 0.9f, OffsetY = -4, Scale = 0.9f }
+                ? new LayoutRegion { Name = "footer-saves", X0 = 0, Y0 = -192 - FileSelect.TransferDrop, X1 = 512, Y1 = -160 - FileSelect.TransferDrop, AnchorX = 1, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetX = -6 - FileSelect.TransferShift * 0.9f, OffsetY = -4, Scale = 0.9f, ContentX0 = FileSelect.TransferContentX0, ContentX1 = FileSelect.TransferContentX1 }
                 : null,
             new LayoutRegion { Name = "extra", X0 = 256, Y0 = -160, X1 = 332, Y1 = 0, AnchorX = 1, AnchorY = 0, PivotX = 1, PivotY = 0, OffsetX = -8, OffsetY = 64, Scale = 0.76f },
             new LayoutRegion { Name = "controls", X0 = 0, Y0 = -160, X1 = 256, Y1 = 0, AnchorX = 0.5f, AnchorY = 0, PivotX = 0.5f, PivotY = 0, OffsetY = 64, Scale = 0.76f },
             new LayoutRegion { Name = "logo", X0 = 0, Y0 = 60, X1 = 256, Y1 = 192, AnchorX = 0.5f, AnchorY = 0, PivotX = 0.5f, PivotY = 0, Scale = 0.5f },
-            new LayoutRegion { Name = "info", X0 = 0, Y0 = 0, X1 = 256, Y1 = 60, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -2, Scale = 0.86f },
+            new LayoutRegion { Name = "info", X0 = 0, Y0 = 0, X1 = 256, Y1 = 60, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -2, Scale = 0.86f, FitBetweenCorners = true },
         }));
 
         // a layout's regions without the ones it leaves out (null)
@@ -294,7 +302,7 @@ namespace MphRecomp.Frontend
                 new LayoutRegion { Name = "footer-mid", X0 = 64, Y0 = -192, X1 = 176, Y1 = -160, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -4, Scale = 0.9f },
                 new LayoutRegion { Name = "controls", X0 = OptionsX0, Y0 = -160, X1 = OptionsX1, Y1 = 0, AnchorX = 0.5f, AnchorY = 0, PivotX = 0.5f, PivotY = 0, OffsetY = 64, Scale = controls },
                 new LayoutRegion { Name = "logo", X0 = 0, Y0 = 60, X1 = 256, Y1 = 192, AnchorX = 0.5f, AnchorY = 0, PivotX = 0.5f, PivotY = 0, Scale = 0.5f },
-                new LayoutRegion { Name = "info", X0 = 0, Y0 = 0, X1 = 256, Y1 = 60, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -2, Scale = 0.86f },
+                new LayoutRegion { Name = "info", X0 = 0, Y0 = 0, X1 = 256, Y1 = 60, AnchorX = 0.5f, AnchorY = 1, PivotX = 0.5f, PivotY = 1, OffsetY = -2, Scale = 0.86f, FitBetweenCorners = true },
             }, needWidth: width * controls + 2 * margin);
         }
 
@@ -398,7 +406,41 @@ namespace MphRecomp.Frontend
                 float dstY = r.AnchorY * height + r.OffsetY * unit * fit;
                 result[i] = new Placement(srcX, srcY, scale, dstX, dstY);
             }
+            for (int i = 0; i < Regions.Count; i++)
+            {
+                if (Regions[i].FitBetweenCorners) result[i] = FitBand(i, result, width, unit * fit);
+            }
             return result;
+        }
+
+        // A band's placement narrowed (and moved sideways) to fit between the contents of the bottom-left and bottom-right
+        // corner regions it would otherwise run under. Only shrinks: where it fits, it stays as placed.
+        private Placement FitBand(int index, Placement[] placed, float width, float unit)
+        {
+            LayoutRegion band = Regions[index];
+            Placement p = placed[index];
+            (float bx0, float top) = p.ToCanvas(band.X0, band.Y1);
+            (float bx1, float bottom) = p.ToCanvas(band.X1, band.Y0);
+            float left = 0, right = width;
+            for (int j = 0; j < Regions.Count; j++)
+            {
+                LayoutRegion r = Regions[j];
+                if (j == index || r.AnchorY != 1 || r.AnchorX == 0.5f) continue;
+                (float x0, float y0) = placed[j].ToCanvas(r.ContentX0 ?? r.X0, r.Y1);
+                (float x1, float y1) = placed[j].ToCanvas(r.ContentX1 ?? r.X1, r.Y0);
+                if (y1 <= top || y0 >= bottom) continue; // not level with the band
+                if (r.AnchorX < 0.5f) left = MathF.Max(left, x1);
+                else right = MathF.Min(right, x0);
+            }
+            float gap = 4 * unit;
+            float room = right - left - 2 * gap, w = bx1 - bx0;
+            if (room <= 0 || (bx0 >= left + gap && bx1 <= right - gap)) return p;
+            float scale = w > room ? p.Scale * room / w : p.Scale;
+            float half = (band.X1 - band.X0) * scale / 2;
+            float lo = left + gap + half, hi = right - gap - half;
+            // (when shrunk to fit exactly, lo and hi can cross by a rounding error)
+            float centre = lo >= hi ? (left + right) / 2 : Math.Clamp((bx0 + bx1) / 2, lo, hi);
+            return new Placement(p.SrcX, p.SrcY, scale, centre + (p.SrcX - (band.X0 + band.X1) / 2) * scale, p.DstY);
         }
 
         public int RegionOf(float x, float y) => RegionOf(x, y, text: null);

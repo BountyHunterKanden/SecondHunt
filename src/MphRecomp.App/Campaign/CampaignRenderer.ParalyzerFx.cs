@@ -70,7 +70,7 @@ internal sealed partial class CampaignRenderer
     readonly Dictionary<BrawlFxDraw, int> _paraMuzzleVerts = new(); // per draw: its first n vertices are the cannon's
     readonly Dictionary<string, int> _paraTex = new();
     float[] _paraVerts = new float[13 * 1024];
-    int _paraProg, _paraVao, _paraVbo, _paraWhite;
+    int _paraProg, _paraVao, _paraVbo, _paraWhite, _paraIa;
 
     // brawl/Paralyzer, read once the imports' folder is known; false without it (or in a public build without its import)
     bool ParalyzerFxReady()
@@ -340,8 +340,6 @@ internal sealed partial class CampaignRenderer
         GLES30.GlBindVertexArray(_paraVao);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _paraVbo);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
-        GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_paraProg, "uTex"), 0);
-        int ia = GLES30.GlGetUniformLocation(_paraProg, "uIa");
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(false);
@@ -373,7 +371,7 @@ internal sealed partial class CampaignRenderer
                     o += 13;
                 }
                 GLES30.GlBindTexture(GLES30.GlTexture2d, tex);
-                GLES30.GlUniform1f(ia, intensity ? 1 : 0);
+                GLES30.GlUniform1f(_paraIa, intensity ? 1 : 0);
                 GLES30.GlBlendFunc(GLES30.GlSrcAlpha, d.Additive ? GLES30.GlOne : GLES30.GlOneMinusSrcAlpha);
                 GLES30.GlBufferData(GLES30.GlArrayBuffer, d.Verts.Count * 13 * 4, _paraVerts, GLES30.GlDynamicDraw);
                 GLES30.GlDrawArrays(GLES30.GlTriangles, 0, d.Verts.Count);
@@ -445,6 +443,7 @@ internal sealed partial class CampaignRenderer
         {
             _paraProg = CampaignGlCache.Program(ParaVert, ParaFrag, "Brawl effects (Paralyzer)");
             if (_paraProg == 0) return false;
+            _paraIa = GLES30.GlGetUniformLocation(_paraProg, "uIa"); // looked up once: a per-frame lookup stalls
             var ids = new int[1];
             GLES30.GlGenVertexArrays(1, ids, 0); _paraVao = ids[0];
             GLES30.GlGenBuffers(1, ids, 0); _paraVbo = ids[0];

@@ -417,6 +417,82 @@ namespace MphRead
             Scale = new Vector3(scale, scale, scale);
         }
 
+        // recomp: the per-scene state a scene writes on a cached model (node transforms and switches, mesh display lists,
+        // material colours and texture bindings, the matrix stack), as parsed. Read keeps the hunters' models across
+        // scenes (Read.ClearCache) and puts this back at each new scene, so a kept model starts where a fresh parse would
+        private object[]? _parsedState;
+
+        // a kept model's decoded textures (texture, palette, recolor), shared by the scenes that draw it headless
+        // (Scene.BindTexture with CollectDrawItems: decoding them was the rest of the hunters' load); null = not kept
+        public System.Collections.Concurrent.ConcurrentDictionary<(int, int, int), (ColorRgba[] Pixels, bool Opaque)>? HostPixels
+            { get; private set; }
+
+        public void SaveParsedState()
+        {
+            var state = new object[Nodes.Count + Meshes.Count + Materials.Count + 1];
+            int i = 0;
+            foreach (Node n in Nodes)
+            {
+                state[i++] = (n.Enabled, n.AnimIgnoreParent, n.AnimIgnoreChild, n.Scale, n.Angle, n.Position, n.Transform,
+                    n.BeforeTransform, n.AfterTransform, n.Animation, n.RoomPartId, n.RoomPartActive, (float[])n.Bounds.Clone());
+            }
+            foreach (Mesh m in Meshes)
+            {
+                state[i++] = (m.ListId, m.Visible, m.PlaceholderColor, m.Selection);
+            }
+            foreach (Material t in Materials)
+            {
+                state[i++] = new object[] { t.Lighting, t.Alpha, t.CurrentAlpha, t.TextureBindingId, t.CurrentTextureId,
+                    t.CurrentPaletteId, t.Diffuse, t.Ambient, t.CurrentDiffuse, t.CurrentAmbient, t.CurrentSpecular,
+                    t.PolygonMode, t.RenderMode, t.AnimationFlags, t.TexgenMode, t.TexcoordAnimationId, t.MatrixId };
+            }
+            state[i] = _matrixStackValues.Clone();
+            _parsedState = state;
+            HostPixels ??= new();
+        }
+
+        public void RestoreParsedState()
+        {
+            object[]? state = _parsedState;
+            if (state == null) return;
+            int i = 0;
+            foreach (Node n in Nodes)
+            {
+                var s = ((bool, bool, bool, Vector3, Vector3, Vector3, Matrix4, Matrix4?, Matrix4?, Matrix4, int, bool, float[]))state[i++];
+                (n.Enabled, n.AnimIgnoreParent, n.AnimIgnoreChild, n.Scale, n.Angle, n.Position, n.Transform,
+                    n.BeforeTransform, n.AfterTransform, n.Animation, n.RoomPartId, n.RoomPartActive) =
+                    (s.Item1, s.Item2, s.Item3, s.Item4, s.Item5, s.Item6, s.Item7, s.Item8, s.Item9, s.Item10, s.Item11, s.Item12);
+                Array.Copy(s.Item13, n.Bounds, n.Bounds.Length);
+            }
+            foreach (Mesh m in Meshes)
+            {
+                var s = ((int, bool, Vector4?, SelectionType))state[i++];
+                (m.ListId, m.Visible, m.PlaceholderColor, m.Selection) = s;
+            }
+            foreach (Material t in Materials)
+            {
+                var s = (object[])state[i++];
+                t.Lighting = (byte)s[0];
+                t.Alpha = (byte)s[1];
+                t.CurrentAlpha = (float)s[2];
+                t.TextureBindingId = (int)s[3];
+                t.CurrentTextureId = (int)s[4];
+                t.CurrentPaletteId = (int)s[5];
+                t.Diffuse = (ColorRgb)s[6];
+                t.Ambient = (ColorRgb)s[7];
+                t.CurrentDiffuse = (Vector3)s[8];
+                t.CurrentAmbient = (Vector3)s[9];
+                t.CurrentSpecular = (Vector3)s[10];
+                t.PolygonMode = (PolygonMode)s[11];
+                t.RenderMode = (RenderMode)s[12];
+                t.AnimationFlags = (MatAnimFlags)s[13];
+                t.TexgenMode = (TexgenMode)s[14];
+                t.TexcoordAnimationId = (int)s[15];
+                t.MatrixId = (int)s[16];
+            }
+            Array.Copy((float[])state[i], _matrixStackValues, _matrixStackValues.Length);
+        }
+
         public void FilterNodes(int layerMask)
         {
             foreach (Node node in Nodes)

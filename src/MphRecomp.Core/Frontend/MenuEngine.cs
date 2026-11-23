@@ -103,6 +103,7 @@ namespace MphRecomp.Frontend
         private int _focus = -1;
 
         public MenuState ItemState(int item) => _items[item].State;
+        public bool ItemStarted(int item) => _items[item].Started; // (false: still waiting out its delay, Hidden until then)
         public int ItemCode(int item) => _items[item].Code;
         public int ItemCount => _items.Length;
 
@@ -117,6 +118,24 @@ namespace MphRecomp.Frontend
         }
 
         // ---- page flow ----
+
+        // every widget a page can show, read and evaluated once now (its model, meshes and textures), so showing the page
+        // later reads nothing from MphRead: START's lead-in pages while the app builds the match on a worker (one scene
+        // at a time; App FrontendRenderer.LeadIn)
+        public void Preload(int page)
+        {
+            if (page < 0 || page >= File.Pages.Count) return;
+            var scratch = new List<WidgetTri>();
+            foreach (MenuItem item in File.Pages[page].Items)
+            {
+                foreach (MenuItemState state in item.States)
+                {
+                    if (state.WidgetIndex < 0) continue;
+                    Widgets.Evaluate(state.WidgetIndex, 0, loop: true, alpha: 1, scratch);
+                    scratch.Clear();
+                }
+            }
+        }
 
         public void Enter(int page)
         {

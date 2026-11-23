@@ -38,7 +38,7 @@ namespace MphRecomp.Import
             ImportRecipe? r = Store.Value.All.FirstOrDefault(x => x.Kind == kind && x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (r == null) return !RecompSettings.PublicBuild;
             if (!State(Path.Combine(root, "import", r.Game + ".json")).TryGetValue(r.Id, out var s)) return !RecompSettings.PublicBuild;
-            return s.Status == "complete" && s.Sha1 == r.Sha1 && s.Importer == ImporterVersions.For(kind);
+            return s.Status == "complete" && s.Sha1 == r.Sha1 && ImporterVersions.Matches(kind, s.Importer);
         }
 
         // a public build lists only imported items; a dev build everything there

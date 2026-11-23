@@ -1383,6 +1383,19 @@ namespace MphRead
             Arguments = arguments.ToList();
         }
 
+        // recomp: an instruction from data this code wrote and checked itself (MphRecomp's holiday ground snow cache): the
+        // array kept as its arguments, no arity look-up or list copy (most of the time of reading ~1M of them back)
+        public static RenderInstruction HostUnchecked(InstructionCode code, uint[] arguments)
+        {
+            return new RenderInstruction(code, arguments, hostUnchecked: true);
+        }
+
+        private RenderInstruction(InstructionCode code, uint[] arguments, bool hostUnchecked)
+        {
+            Code = code;
+            Arguments = arguments;
+        }
+
         public InstructionCode Code { get; }
         public IReadOnlyList<uint> Arguments { get; }
 

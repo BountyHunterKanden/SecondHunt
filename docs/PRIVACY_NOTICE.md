@@ -5,7 +5,7 @@
 
 Second Hunt is a free fan project run by one person (BountyHunterKanden). This notice covers **online play only**.
 The campaign, bots and local multiplayer send nothing anywhere. Your game files stay on your device and are never
-uploaded.
+uploaded, unless you turn on CLOUD SAVE (below).
 
 Contact for anything in this notice, including deleting your data: secondhuntgame@gmail.com.
 
@@ -20,6 +20,7 @@ Contact for anything in this notice, including deleting your data: secondhuntgam
 | Your **online match count** and any **chat limits** on your profile | A moderator's chat mute | Kept after a profile delete, so a new profile can't wipe a ban or limit |
 | **Reports** you send or that are about you, including, for a chat report, **the last few typed lines** of the reported player and of that game | So the moderator can check the report | Handled reports: 30 days. Unhandled: 90 days. Then deleted |
 | **Bans**: the banned key, name, reason and end date, and a **scrambled ID of each device** the banned profile logged in from (a one-way hash of the device's own ID: Android's app ID or the computer's install ID) | Keeping a banned player out, also after they clear the app's data or reinstall it | Until the ban ends (or forever for a permanent ban) |
+| Only if you turn on **CLOUD SAVE** (SETTINGS > APP > FILES; off by default): an **encrypted copy of your settings and saves** (your Hunter License, settings and campaign files, locked with a key only your device's online identity has: the server can't read it) | Syncing your profile between your devices | Until you delete your online profile, turn CLOUD SAVE off and choose to delete it, or stop playing for a year (no online login in 365 days) |
 | **Nightly backups** of the above | Recovering from a server failure | The last 14 days |
 
 ## What we never keep
@@ -59,4 +60,4 @@ online profile, tell us at secondhuntgame@gmail.com and we'll delete it.
 
 ## Changes
 
-We'll update this notice when what we keep changes, and show the new version in the game. Last changed: 2026-10-09.
+We'll update this notice when what we keep changes, and show the new version in the game. Last changed: 2026-11-17.

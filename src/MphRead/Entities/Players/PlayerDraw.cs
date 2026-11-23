@@ -133,6 +133,7 @@ namespace MphRead.Entities
                 HostMainBipedAlpha = 0;
             }
             HostBipedAlpha = 0;
+            _hostViewmodelDrawn = false; // recomp: PlayerSmoothFx.cs
             // recomp: the turret's occupant isn't drawn (PlayerEchoesSeat.cs): the MPH body poked through the turret's head
             // as it turned, and Echoes shows only the closed turret from outside
             if (IsMainPlayer && HostHideMainPlayer || SlotIndex == HostHideSeat || HostSeated)
@@ -149,6 +150,7 @@ namespace MphRead.Entities
             }
             if (Flags2.TestFlag(PlayerFlags2.HideModel) && !KeptWhileDead) // recomp: (PlayerDeathAnim.cs)
             {
+                VisLogUpdate("HideModel"); // recomp: (PlayerVisLog.cs)
                 return;
             }
             if (Hunter == Hunter.Spire && Flags2.TestFlag(PlayerFlags2.AltAttack) && !_scene.HostDrawFreeSim)
@@ -171,7 +173,7 @@ namespace MphRead.Entities
             // example issue - Kanden visible for one frame before Data Shrine 03 cam seq starts
             // should be culled because the cam seq frustum info has already been loaded, and is facing away from him,
             // even though the player's view is still what's on the screen (at least that seems to be what's happening)
-            if (IsMainPlayer || HostFirstPersonView || IsVisible(NodeRef))
+            if (IsMainPlayer || HostFirstPersonView || VisLogCheck(IsVisible(NodeRef))) // recomp: VisLogCheck logs only (PlayerVisLog.cs)
             {
                 drawBiped = !IsMainPlayer && !HostFirstPersonView || CameraType != CameraType.First || CameraSequence.Current != null
                     || _camSwitchTimer < Values.CamSwitchTime * 2 // todo: FPS stuff
@@ -302,6 +304,9 @@ namespace MphRead.Entities
                         TrackHostNodes(model); // recomp: HostTrackNodes (default none)
                         if (_chargeEffect != null || _muzzleEffect != null)
                         {
+                            // recomp: a weapon the app draws itself (the Paralyzer, the Hyper Beam: its own flash and charge at
+                            // the cannon) keeps MPH's hidden, as spawning them hid them (PlayerInput / PlayerProcess)
+                            bool ownLook = HostOwnBeamLook(CurrentWeapon);
                             Vector3 muzzlePos = HostShootPoint;
                             if (HostFxShootOffset is Vector3 fx && lateral.LengthSquared > 1e-12f)
                             {
@@ -310,12 +315,12 @@ namespace MphRead.Entities
                             }
                             if (_chargeEffect != null)
                             {
-                                _chargeEffect.SetDrawEnabled(true);
+                                _chargeEffect.SetDrawEnabled(!ownLook);
                                 _chargeEffect.Transform(_gunVec2, _gunVec1, muzzlePos);
                             }
                             if (_muzzleEffect != null)
                             {
-                                _muzzleEffect.SetDrawEnabled(true);
+                                _muzzleEffect.SetDrawEnabled(!ownLook);
                                 _muzzleEffect.Transform(_gunVec2, _gunVec1, muzzlePos);
                             }
                         }
@@ -356,6 +361,9 @@ namespace MphRead.Entities
                     // rev 1 measures the gun at 0.85/0.64/0.46/0.27 of opaque for a = 23/15/9/5: about 1.5 layers of that
                     // weight (a/31 in one layer left it far fainter, nearly gone at full cloak)
                     bool cloakGun = _curAlpha < 1 && Hunter == Hunter.Trace;
+                    // recomp: the gun, its smoke and its muzzle effects keep the default FOV's framing (RenderItem.HostViewmodel)
+                    _hostViewmodelDrawn = true;
+                    _scene.HostViewmodelItems = true;
                     GetDrawItems(_gunModel, _gunModel.Model.Nodes[0], cloakGun ? CloakGunAlpha(_curAlpha) : _curAlpha);
                     _scene.HostOneLayerItems = false;
                     if (Flags1.TestFlag(PlayerFlags1.DrawGunSmoke))
@@ -367,6 +375,7 @@ namespace MphRead.Entities
                         UpdateTransforms(_gunSmokeModel, transform, recolor: 0);
                         GetDrawItems(_gunSmokeModel, _gunSmokeModel.Model.Nodes[0], _smokeAlpha, recolor: 0);
                     }
+                    _scene.HostViewmodelItems = false;
                 }
             }
             if (!IsMainPlayer && !drawBiped)

@@ -11,6 +11,8 @@ namespace MphRead.Entities
     // (UpdateWeaponSelect from the host's pointer), so play and replays don't change.
     // With the Pirate Blaster on (WeaponSlotCount 7, owner 2026-10-09) there are seven ~51-degree slots, turned so the
     // blaster and the Volt Driver straddle straight up and the Judicator sits straight down (PlayerPirateBlaster.cs).
+    // With the Hyper Beam too (WeaponSlotCount 8, owner 2026-11-14 "Ring A"): eight 45-degree slots, the Hyper Beam straight
+    // up, then the vanilla six clockwise in their order (the Judicator straight down) and the blaster last, up-left.
     public partial class PlayerEntity
     {
         // set by the app while its sim step runs (CampaignRenderer.SetPlayerHooks); off = MphRead's own corner arc
@@ -24,7 +26,7 @@ namespace MphRead.Entities
             int slots = WeaponSlotCount;
             for (int i = 0; i < slots; i++)
             {
-                float angle = slots == 7 ? (i + 0.5f) * 2 * MathF.PI / 7 : i * MathF.PI / 3;
+                float angle = RingSlotAngle(i, slots);
                 float x = 128 + _weaponRingRadius * MathF.Sin(angle);
                 float y = 96 - _weaponRingRadius * MathF.Cos(angle);
                 DrawRingSlot(_selectBoxInsts[i], x, y);
@@ -34,14 +36,27 @@ namespace MphRead.Entities
             _scene.HostHudDialog(false);
         }
 
+        // a slot's direction on the ring, radians clockwise from straight up (MphRecomp CampaignHost.WheelDirection's)
+        public static float RingSlotAngle(int slot, int slots)
+        {
+            if (slots == 8)
+            {
+                return slot == 7 ? 0 : (slot + 1) * MathF.PI / 4;
+            }
+            return slots == 7 ? (slot + 0.5f) * 2 * MathF.PI / 7 : slot * MathF.PI / 3;
+        }
+
         // recomp (T4 N15, owner 2026-10-10: "How does Omega cannet get selected again"): while the Omega Cannon sits in the
         // third slot (vanilla keeps it there while you use the Power Beam or missiles, and its touch icon brings it back)
         // the ring shows it in its middle; letting go of the ring with no other slot picked equips it (the app's
-        // WeaponRingInput.CentrePick, sent as the Omega Cannon's own key). Lit while no slot is picked. Draw only
+        // WeaponRingInput.CentrePick, sent as the Omega Cannon's own key). Lit while no slot is picked. Draw only.
+        // (11-13 Omega Cannon reports, "it isn't in the ring even though I got the pickup") Shown while it's held, wherever
+        // it is: one picked up firing the third slot's weapon goes in no slot (vanilla), and a network client's third
+        // slot isn't the host's (the snapshot has no slots)
         private HudObjectInstance? _ringOmegaIcon;
         private HudObjectInstance? _ringOmegaBox;
 
-        public bool HostRingOmegaShown => HostThirdSlotWeapon == BeamType.OmegaCannon && _availableWeapons[BeamType.OmegaCannon];
+        public bool HostRingOmegaShown => _availableWeapons[BeamType.OmegaCannon];
 
         private void DrawRingOmega()
         {
@@ -94,12 +109,14 @@ namespace MphRead.Entities
             return true;
         }
 
-        // the corner arc with seven slots (WeaponSlotCount 7, ring off): the DS's six slot spots (PlayerHud's positions,
-        // top-left corners around the radial's anchor 224, 38) as angle + distance, spread evenly from the first to the
-        // last over seven slots, the distance read off the vanilla six at each angle
-        private static readonly (float Angle, float Radius)[] _arcSpots = MakeArcSpots();
+        // the corner arc with seven or eight slots (WeaponSlotCount 7/8, ring off): the DS's six slot spots (PlayerHud's
+        // positions, top-left corners around the radial's anchor 224, 38) as angle + distance, spread evenly from the first
+        // to the last over the slots, the distance read off the vanilla six at each angle (8: the Hyper Beam last, by the
+        // blaster)
+        private static readonly (float Angle, float Radius)[] _arcSpots7 = MakeArcSpots(7);
+        private static readonly (float Angle, float Radius)[] _arcSpots8 = MakeArcSpots(8);
 
-        private static (float, float)[] MakeArcSpots()
+        private static (float, float)[] MakeArcSpots(int count)
         {
             (float X, float Y)[] vanilla = { (201, 156), (161, 152), (122, 142), (90, 109), (81, 70), (77, 32) };
             var polar = new (float A, float R)[6];
@@ -109,10 +126,10 @@ namespace MphRead.Entities
                 float dy = vanilla[i].Y - 38;
                 polar[i] = (MathF.Atan2(dx, dy), MathF.Sqrt(dx * dx + dy * dy));
             }
-            var spots = new (float, float)[7];
-            for (int i = 0; i < 7; i++)
+            var spots = new (float, float)[count];
+            for (int i = 0; i < count; i++)
             {
-                float a = polar[0].A + (polar[5].A - polar[0].A) * i / 6;
+                float a = polar[0].A + (polar[5].A - polar[0].A) * i / (count - 1);
                 int k = 0;
                 while (k < 4 && polar[k + 1].A < a)
                 {
@@ -126,9 +143,10 @@ namespace MphRead.Entities
 
         private void DrawWeaponArc7()
         {
-            for (int i = 0; i < 7; i++)
+            (float Angle, float Radius)[] spots = WeaponSlotCount == 8 ? _arcSpots8 : _arcSpots7;
+            for (int i = 0; i < spots.Length; i++)
             {
-                (float a, float r) = _arcSpots[i];
+                (float a, float r) = spots[i];
                 float x = 224 - r * MathF.Sin(a);
                 float y = 38 + r * MathF.Cos(a);
                 DrawArcSlot(_selectBoxInsts[i], x, y);

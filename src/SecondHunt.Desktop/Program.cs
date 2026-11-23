@@ -20,7 +20,9 @@ internal static class Program
 #if MPH_PUBLIC
         options.Launch = null; // a public build starts at the menus only (the launch shortcuts are for dev builds)
 #endif
+#if !MPH_LINUX
         System.Windows.Forms.Application.EnableVisualStyles(); // (the first start's data folder question: a task dialog)
+#endif
         // a fresh install asks where its files go; a test run or replay prepare never does
         DesktopPaths.Init(options.Data, ask: !options.Background && !args.Contains("--replayprep"));
         // --replayprep <replay> --sidecar <file>: this app as a replay's keyframe prepare, started by the game itself at a
@@ -28,8 +30,9 @@ internal static class Program
         int prep = Array.IndexOf(args, "--replayprep"), side = Array.IndexOf(args, "--sidecar");
         if (prep >= 0 && side >= 0 && prep + 1 < args.Length && side + 1 < args.Length)
         {
-            DesktopLog.Init(DesktopPaths.Logs, "replayprep.txt");
+            DesktopLog.Init(DesktopPaths.Logs, "log-replayprep");
             RecompSettings.DesktopHost = true;
+            DesktopLog.RunInfo();
             return MphRecomp.App.ReplayPrepHost.Run(DesktopPaths.Game, DesktopPaths.Root, args[prep + 1], args[side + 1]) == null ? 0 : 1;
         }
         DesktopLog.Init(DesktopPaths.Logs);
@@ -43,12 +46,18 @@ internal static class Program
         MphRecomp.Frontend.RecompMenus.DataFolderAsk = DesktopPaths.MoveQuestion;
         MphRecomp.Frontend.RecompMenus.DataFolderMove = DesktopPaths.RequestMove;
         RecompSettings.AppId = BuildFlags.AppName;
+        DesktopLog.RunInfo(); // the log's MPHRun lines: run id, build, system, ROM, settings
         // RECOMP SETTINGS > UPDATES (Core Update/): this build's version and its installer; a dev build reads a test
         // server's base URL from update_feed.txt in its data folder
         UpdateHost.AppVersion = BuildFlags.Version;
         UpdateHost.Platform = UpdatePlatform.Windows;
         UpdateHost.DevFeedFile = BuildFlags.Public ? null : Path.Combine(DesktopPaths.Root, "update_feed.txt");
+#if MPH_LINUX
+        // no Linux release yet: a new version offers its download page (Installer null), the PC build's release asset
+        // telling it there is one
+#else
         UpdateHost.Installer = new DesktopUpdater(args); // the game installs updates itself (owner 10-06)
+#endif
         UpdateHost.OpenUrl = url =>
         {
             try
@@ -66,8 +75,12 @@ internal static class Program
         Log.Info("MPHDesktop", $"data folder: {DesktopPaths.Root}");
         if (DesktopPaths.MoveResult is string moved && !options.Background)
         {
+#if MPH_LINUX
+            LinuxDialogs.Message(moved, BuildFlags.AppName);
+#else
             System.Windows.Forms.MessageBox.Show(moved, BuildFlags.AppName, System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Information);
+#endif
         }
         try
         {
@@ -76,6 +89,7 @@ internal static class Program
             {
                 DesktopImport.Install(app.Defer); // IMPORT GAMES' file dialog (between frames, on this STA thread)
                 app.Run();
+                MphRecomp.Frontend.FrontendSession.CloudFlush("app quit", wait: true); // (CLOUD SAVE: a last put)
             }
             DesktopPlatform.Shutdown();
             if (DesktopPaths.RestartPending) Restart(args);
@@ -85,10 +99,15 @@ internal static class Program
         {
             string? report = DesktopCrashLog.Write(ex, "unhandled (main loop)");
             Log.Error("MPHDesktop", ex.ToString());
-            System.Windows.Forms.MessageBox.Show(
-                $"{BuildFlags.AppName} closed because of an error:\n\n{ex.Message}\n\n"
-                + (report != null ? $"A crash report was saved to\n{report}" : "No crash report could be saved."),
+            string crash = $"{BuildFlags.AppName} closed because of an error:\n\n{ex.Message}\n\n"
+                + (report != null ? $"A crash report was saved to\n{report}" : "No crash report could be saved.");
+#if MPH_LINUX
+            if (!options.Background) LinuxDialogs.Message(crash, BuildFlags.AppName, error: true);
+            else Console.Error.WriteLine(crash);
+#else
+            System.Windows.Forms.MessageBox.Show(crash,
                 BuildFlags.AppName, System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+#endif
             return 1;
         }
     }
@@ -102,7 +121,7 @@ internal static class Program
             // out of the data folder first: the new process inherits a handle to this one's current folder, and a folder
             // that's open can't be moved (11-09: "access is denied" moving PORTABLE -> APPDATA)
             Directory.SetCurrentDirectory(AppContext.BaseDirectory);
-            var start = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "SecondHunt.exe"))
+            var start = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "SecondHunt.exe" : "SecondHunt"))
             {
                 UseShellExecute = false,
                 WorkingDirectory = AppContext.BaseDirectory
@@ -122,6 +141,7 @@ internal static class Program
     // (discord://-/invite/CODE = its invite screen); an uninstalled app can leave the key behind, so the exe must exist
     private static bool DiscordAppInstalled()
     {
+        if (!OperatingSystem.IsWindows()) return false; // (Linux: xdg-open finds the Discord app's handler itself)
         try
         {
             using var key = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"discord\shell\open\command");

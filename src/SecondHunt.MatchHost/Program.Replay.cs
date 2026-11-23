@@ -31,10 +31,16 @@ namespace SecondHunt.MatchHost
         // the last match's link: kept past its match (its recording goes out while the session sits in its lobby), closed when
         // the next match starts or the session stops (CloseReplayLink)
         private static ReplayLink? _replayLink;
+        // the recording streamed to each guest as it goes (2026-11-21: its keyframes are prepared during the match, so a
+        // served match's replay seeks instantly from its opening too; ReplayLive.cs)
+        private static ReplayLiveSender? _replayLive;
         // the seats that asked for the recording so far (the link's receive thread adds; Play's loop answers), and those that
         // had a cut-short copy (not sent again at the end)
         private static readonly System.Collections.Concurrent.ConcurrentQueue<int> _replayAsked = new();
         private static readonly HashSet<int> _replayGiven = new();
+        // (11-22, owner: a guest that quit mid-match took its cut-short copy, rejoined, played on and got no replay
+        // of the whole match: it stayed "given". A rejoined guest sends its identity again; its seat comes off the list)
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<int> _replayRejoined = new();
 
         // the recording's Build (information only: playback checks the sim version, settings and arena data, never this)
         internal static string ReplayBuild = "match host";
@@ -54,9 +60,11 @@ namespace SecondHunt.MatchHost
             {
                 _replayAsked.Clear();
                 _replayGiven.Clear();
+                _replayRejoined.Clear();
                 var link = new ReplayLink(net);
                 _replayLink = link;
                 link.ReplayRequested += seat => _replayAsked.Enqueue(seat);
+                link.IdentityReceived += id => _replayRejoined.Enqueue(id.Seat);
                 link.SendFailed += (seat, bytes) => ToMailbox(link, seat, bytes);
                 return new ReplayRecorder(settings, ReplayBuild);
             }
@@ -80,6 +88,7 @@ namespace SecondHunt.MatchHost
                 ShotCheck.Settled = check => file.ShotChecks.Add(check);
                 float seconds = Math.Min(recorder.File.Settings.TimeLimitSeconds ?? 600, 3600);
                 recorder.File.Steps.Capacity = (int)(seconds * 60) + 600;
+                _replayLive = _replayLink != null ? new ReplayLiveSender(file, _replayLink) : null;
             }
             catch (Exception ex)
             {
@@ -95,6 +104,7 @@ namespace SecondHunt.MatchHost
             try
             {
                 recorder.Step(input, host.Scene);
+                _replayLive?.Step();
             }
             catch (Exception ex)
             {
@@ -128,6 +138,14 @@ namespace SecondHunt.MatchHost
                     Log($"replay: seat {seat} left: not sent: " + ex.Message);
                 }
             }
+            // (after the asks: a rejoin comes after its seat's ask)
+            while (_replayRejoined.TryDequeue(out int seat))
+            {
+                if (_replayGiven.Remove(seat))
+                {
+                    Log($"replay: seat {seat} is back: it gets the recording at the end too");
+                }
+            }
         }
 
         // a cut-short recording shorter than this isn't sent (as a player's own: MatchReplay.cs MinIncompleteSteps)
@@ -136,12 +154,15 @@ namespace SecondHunt.MatchHost
         private static void DropReplay(ref ReplayRecorder? recorder, CampaignHost host)
         {
             recorder = null;
+            _replayLive = null;
             ShotCheck.Settled = null;
             host.RemoteInputTap = null;
             host.SeatDropTap = null;
             host.SeatRejoinTap = null;
             host.ClaimedHitTap = null;
             host.ClientPositionTap = null;
+            host.PickupClaimTap = null;
+            host.ShotEventTap = null;
         }
 
         // Play, as the match is over and its seats still the match's (before EndMatch): to every guest that keeps replays, whole
@@ -150,6 +171,12 @@ namespace SecondHunt.MatchHost
         private static void EndReplay(ReplayRecorder? recorder, CampaignHost host, NetMatchSession net)
         {
             AnswerReplayRequests(recorder); // (one that asked as the match ended)
+            if (_replayLive != null)
+            {
+                _replayLive.End(); // (each guest's stream ends; its whole file goes below as before)
+                if (_replayLive.Blobs > 0) Log($"replay: streamed live: {_replayLive.Blobs} blobs, {_replayLive.Bytes / 1024} KB");
+                _replayLive = null;
+            }
             ReplayLink? link = _replayLink;
             ShotCheck.Settled = null;
             if (recorder == null || link == null)

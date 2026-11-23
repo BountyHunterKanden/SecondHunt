@@ -47,16 +47,18 @@ namespace MphRead
         private static void RunServedHub(Options o, Uri uri, List<(Process, List<string>)> joiners)
         {
             string dll = typeof(OnlineMatchTool).Assembly.Location;
+            string? ownerCode = null; // (invite=1: the last joiner befriends the owner by it)
             string Args(int i, string game) => $"\"{dll}\" -onlinejoin server={uri} index={i} hunter={JoinerHunters[(i - 1) % JoinerHunters.Length]} "
                 + $"time={o.Time.ToString(CultureInfo.InvariantCulture)} leave={(i == o.Players ? o.Leave : 0).ToString(CultureInfo.InvariantCulture)}"
                 + (i == 1 ? $" owner={o.Players} bots={o.Bots} level={o.Level} mode=\"{o.Mode}\" arena=\"{o.Arena}\"" : $" game={game}")
                 + (o.Loss > 0 ? $" loss={(o.Loss * 100).ToString(CultureInfo.InvariantCulture)}" : "")
                 + (o.Jitter > 0 ? $" jitter={o.Jitter}" : "")
-                + (o.Replays != false ? " replays=1" : "")
+                + (o.Replays != false ? " replays=1" + (o.Live == false ? " live=0" : "") : "")
                 + (o.Ball ? " ball=1" : "") + (o.AltFixOff ? " altfix=0" : "") + (o.SmoothOff ? " smooth=0" : "") + o.Fwd
                 + (!MphRecomp.Multiplayer.Net.ClientPrediction.ClientPushes ? " clientpush=0" : "")
                 + (o.Duel ? (i == 1 ? " duel=runner" : " duel=shooter") + (o.Push ? " push=1" : "") : "") // (the match host's recording to each joiner, OnlineServedReplay.cs)
                 + (o.Matches > 1 ? $" matches={o.Matches}" + (o.OwnerLeave ? " ownerleave=1" : "") : "")
+                + (o.Invite && i == 1 ? " invite=1" : "") + (o.Invite && i == o.Players ? $" inviter={ownerCode}" : "")
                 // chars=1: joiners 2-5 play the extra characters (Trooper, Dark Samus, Zero Suit, Sylux) on the server's match host
                 + (o.Chars && i >= 2 && i <= Characters.All.Count ? $" hunter={Characters.All[i - 1].Base} character={Characters.All[i - 1].Id}" : "")
                 // rejoin=: the last joiner vanishes mid-match and comes back as a restarted app (a held seat on the server)
@@ -71,6 +73,7 @@ namespace MphRead
                 lock (ownerOut)
                 {
                     game = ownerOut.FirstOrDefault(l => l.StartsWith("OWNERGAME ", StringComparison.Ordinal))?[10..].Trim();
+                    ownerCode = ownerOut.FirstOrDefault(l => l.StartsWith("OWNERCODE ", StringComparison.Ordinal))?[10..].Trim();
                 }
                 Thread.Sleep(50);
             }
@@ -87,14 +90,31 @@ namespace MphRead
             }
         }
 
-        // -onlinejoin owner=: open a served game (the server must serve it) and say its id
+        // -onlinejoin owner=: open a served game (the server must serve it) and say its id; invite=1: one seat short (the last
+        // joiner comes by invite), and a friend request is answered with a friend link and an invite
         private static GameMsg OwnServedGame(Options o, OnlineClient online)
         {
+            if (o.Invite)
+            {
+                online.EventReceived += m =>
+                {
+                    if (m is RequestEvent { Kind: LinkKind.Friend } asked)
+                    {
+                        string code = asked.From.Code;
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            await online.RequestAsync<OkMsg>(new AddReq { Code = code });
+                            await online.RequestAsync<OkMsg>(new InviteReq { Code = code });
+                            Console.WriteLine($"joiner {o.Index}: invited {code}");
+                        });
+                    }
+                };
+            }
             GameMsg game = Wait(online.RequestAsync<GameMsg>(new HostGameReq
             {
                 Info = new GameInfo
                 {
-                    Mode = o.Mode.Replace(" ", ""), Arena = o.Arena, MaxPlayers = o.Owner, Public = true, Version = VersionKey,
+                    Mode = o.Mode.Replace(" ", ""), Arena = o.Arena, MaxPlayers = o.Invite ? o.Owner - 1 : o.Owner, Public = true, Version = VersionKey,
                     Rules = $"{o.Time:0} s", Served = true,
                 },
             }));
@@ -103,6 +123,7 @@ namespace MphRead
             {
                 throw new InvalidOperationException("the server didn't serve the game");
             }
+            Console.WriteLine($"OWNERCODE {online.Me.Code}");
             Console.WriteLine($"OWNERGAME {game.Game.Id}");
             return game;
         }
@@ -123,7 +144,8 @@ namespace MphRead
                     net.OwnerRules(rules, bots: true);
                     sent = true;
                 }
-                if (lobby != null && sent && lobby.Players.Count(p => !p.Bot) >= o.Owner && lobby.Players.Count(p => p.Bot) == o.Bots
+                if (lobby != null && sent && lobby.Players.Count(p => !p.Bot) >= o.Owner
+                    && lobby.Players.Count(p => p.Bot) == Math.Min(o.Bots, MatchSettings.MaxSeats - o.Owner)
                     && lobby.Mode == mode && lobby.TimeLimitSeconds == o.Time)
                 {
                     Console.WriteLine($"joiner {o.Index}: lobby ready ({lobby.Players.Count} seats: "
@@ -227,6 +249,15 @@ namespace MphRead
             {
                 lines.Add($"FAIL the server took {results} result(s) from the match host, {o.Matches} match(es) played");
             }
+            // invite=1: the invited last joiner joined the full game and the match host grew PLAYERS for it (a bot making way at 8)
+            if (o.Invite && o.Server == null && !server.Any(l => l.Contains($"seats: {o.Players}", StringComparison.Ordinal)))
+            {
+                lines.Add($"FAIL invite: the match host never grew to {o.Players} players");
+            }
+            if (o.Invite && !outputs[^1].ToList().Any(l => l.Contains("invited; the game is full", StringComparison.Ordinal)))
+            {
+                lines.Add("FAIL invite: the invited player didn't join a full game");
+            }
             if (o.OwnerLeave && !outputs.Skip(1).Any(output => { lock (output) { return output.Any(l => l.Contains("owns the lobby now")); } }))
             {
                 lines.Add("FAIL nobody heard they own the lobby after the owner left");
@@ -237,15 +268,37 @@ namespace MphRead
             {
                 for (int i = 0; i < outputs.Count; i++)
                 {
-                    if (o.Rejoin > 0 && i == outputs.Count - 1) continue;
+                    bool rejoiner = o.Rejoin > 0 && i == outputs.Count - 1;
+                    if (rejoiner && !o.AskRejoin) continue;
                     string? line;
                     lock (outputs[i])
                     {
-                        line = outputs[i].FirstOrDefault(l => l.StartsWith("REPLAY joiner ", StringComparison.Ordinal));
+                        // askrejoin=1 (11-22): the rejoiner's cut-short copy as it quit, then its restarted app's whole match
+                        var all = outputs[i].Where(l => l.StartsWith("REPLAY joiner ", StringComparison.Ordinal)).ToList();
+                        line = rejoiner ? (all.Count == 2 && all[0].Contains(": exact,", StringComparison.Ordinal) ? all[1]
+                            : $"{all.Count} REPLAY line(s), wanted the cut-short copy then the whole match: "
+                                + string.Join(" / ", all).Replace(": exact,", ": exact;", StringComparison.Ordinal))
+                            : all.FirstOrDefault();
                     }
                     if (line == null || !line.Contains(": exact,", StringComparison.Ordinal))
                     {
                         lines.Add($"FAIL joiner {i + 1}'s replay: {line ?? "no REPLAY line"}");
+                    }
+                    else
+                    {
+                        Console.WriteLine(line);
+                    }
+                    if (o.Live == false) continue;
+                    // live (instant seek always [67c67ed8]): the match host's stream came in whole, under the saved file's key
+                    lock (outputs[i])
+                    {
+                        // (a rejoiner's restarted app's, the last)
+                        line = rejoiner ? outputs[i].LastOrDefault(l => l.StartsWith("LIVE joiner ", StringComparison.Ordinal))
+                            : outputs[i].FirstOrDefault(l => l.StartsWith("LIVE joiner ", StringComparison.Ordinal));
+                    }
+                    if (line == null || !line.Contains(": OK:", StringComparison.Ordinal))
+                    {
+                        lines.Add($"FAIL joiner {i + 1}'s live stream: {line ?? "no LIVE line"}");
                     }
                     else
                     {

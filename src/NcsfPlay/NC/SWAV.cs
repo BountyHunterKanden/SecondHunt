@@ -100,6 +100,13 @@ public class SWAV : IEquatable<SWAV>, IEqualityOperators<SWAV, SWAV, bool>
     public ReadOnlySpan<float> Data => this.data.AsSpan();
 
     /// <summary>
+    /// The padded copy the sinc mixer reads (Player.MakeWindow), built once per loop setting instead of per note.
+    /// </summary>
+    internal SincWindow? WindowCache;
+
+    internal sealed record SincWindow(float[] Window, long Key);
+
+    /// <summary>
     /// The size of this waveform/sample.
     /// </summary>
     /// <remarks>
@@ -178,6 +185,7 @@ public class SWAV : IEquatable<SWAV>, IEqualityOperators<SWAV, SWAV, bool>
 
         // Convert data accordingly.
         this.data.Clear();
+        this.WindowCache = null;
         switch (this.WaveType)
         {
         case 0: // PCM 8-bit

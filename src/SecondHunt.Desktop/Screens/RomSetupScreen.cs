@@ -68,6 +68,9 @@ internal sealed class RomSetupScreen : PageScreen
         _pressed = true;
         Invalidate();
         string? path = null;
+#if MPH_LINUX
+        path = LinuxDialogs.OpenFile("Select your Metroid Prime Hunters ROM", "DS ROM", new[] { ".nds" });
+#else
         using (var dialog = new System.Windows.Forms.OpenFileDialog
         {
             Title = "Select your Metroid Prime Hunters ROM",
@@ -78,6 +81,7 @@ internal sealed class RomSetupScreen : PageScreen
         {
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) path = dialog.FileName;
         }
+#endif
         _pressed = false;
         Invalidate();
         if (path != null) Start(path);

@@ -19,11 +19,13 @@ internal sealed class FrameLimiter : IDisposable
 
     public FrameLimiter()
     {
+#if !MPH_LINUX // Linux: Thread.Sleep(1) sleeps about 1 ms, so the plain sleep + spin below holds any cap
         _timer = CreateWaitableTimerExW(IntPtr.Zero, null, CreateWaitableTimerHighResolution, TimerAllAccess);
         if (_timer == IntPtr.Zero)
         {
             _periodRaised = timeBeginPeriod(1) == 0;
         }
+#endif
     }
 
     // starts the schedule over (the cap changed, or the loop waited for something else: minimized)

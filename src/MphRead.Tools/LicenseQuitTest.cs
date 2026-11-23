@@ -95,6 +95,7 @@ namespace MphRead
                 Check(Disk().RankPoints == 143 && Disk().PendingLosses.Length == 0, $"an internet match left, then LAN: 150 -> {Disk().RankPoints} (want 143)");
 
                 // 8. an old license file (no marks) loads with none; a bad one is cleaned
+                File.Delete(Path.Combine(dir, HunterLicense.FileName + ".bak")); // (signed .bak = this install: an unsigned file is an edit)
                 File.WriteAllText(Path.Combine(dir, HunterLicense.FileName), "{\"RankPoints\":50,\"RankLevel\":1,\"PendingLosses\":[1,9,-1,3]}");
                 Check(Disk().PendingLosses.SequenceEqual(new[] { 1, 3 }), $"bad marks cleaned: [{String.Join(",", Disk().PendingLosses)}]");
             }

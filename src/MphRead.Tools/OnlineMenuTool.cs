@@ -42,7 +42,10 @@ namespace MphRead
     //                               and the joiner's repeating LOOKs don't undo that)
     //                               (rulesedit=1, owner 2026-10-15: the host taps its own seat card, SELECT HUNTER's MODE tab
     //                               opens the mode page (it used to be dead), BOUNTY -> its rules -> SELECT HUNTER -> a pick
-    //                               -> the same lobby; the joiner and the server's card see Bounty, the game still hosted)
+    //                               -> the lobby; then EDIT LOBBY (owner 2026-11-22) -> WHO CAN JOIN PLAYERS + 1 -> back (dropped),
+    //                               EDIT LOBBY -> PLAYERS + 1 -> UPDATE (owner 2026-11-11) -> the same lobby; the joiner and
+    //                               the server's card see Bounty and the extra person's seat, the game still hosted; a served
+    //                               game on a server before OnlineMatch.SeatsSinceServer: UPDATE only)
     //                               (served: a server from 0.8.0 with --matchhost (DEDICATED_SERVERS.md D4) runs the game: the
     //                               menus own its lobby (a joiner with the host's controls); lobbyedit / rulesedit go to the
     //                               server's match host as OWNER messages; START is the server's; the rematch isn't checked)
@@ -305,6 +308,37 @@ namespace MphRead
             s.Recomp.OnlineOpenLicense(s.Menu, Card("BLITZ", 6604));
             Run(s, 30);
             Shot(s, "online_license_stranger");
+            // TROOPER as the hunter of choice: the online card draws its head picture over Weavel's portrait, as the
+            // offline card does (walk 54, 2026-11-21: it kept Weavel's ROM portrait; EmitCard's tris had no Item)
+            // (the head pictures as -mpmenu card's CARD_CHOICE: from brawl_extract/Converted when hd= / pictures= weren't given)
+            (string? hdWas, string? picsWas) = (MultiplayerMenu.CharacterHdRoot, MultiplayerMenu.CharacterPicturesDir);
+            string? tempPics = null;
+            if (picsWas == null && PickerTest.FindUp(AppContext.BaseDirectory, Path.Combine("brawl_extract", "Converted")) is string convHd)
+            {
+                tempPics = Path.Combine(Path.GetTempPath(), $"onlinemenu_card_pictures_{Environment.ProcessId}");
+                Directory.CreateDirectory(tempPics);
+                PickerTest.FillPictures(convHd, tempPics);
+                (MultiplayerMenu.CharacterHdRoot, MultiplayerMenu.CharacterPicturesDir) = (hdWas ?? convHd, tempPics);
+            }
+            bool choiceBefore = HasChoicePicture(s.Menu);
+            PlayerCard trooperCard = Card("SYLUX", 5150);
+            HunterLicense trooperLic = SampleLicense();
+            trooperLic.FavoriteHunter = (int)Hunter.Weavel;
+            trooperLic.CharacterMatches["trooper"] = 42;
+            (trooperLic.ChoiceHunter, trooperLic.ChoiceCharacter) = ((int)Hunter.Weavel, "trooper");
+            trooperCard.License = RecompMenus.OnlineLicenseJson(trooperLic);
+            s.Recomp.OnlineOpenLicense(s.Menu, trooperCard);
+            Run(s, 30);
+            Shot(s, "online_license_trooper");
+            bool choiceAfter = HasChoicePicture(s.Menu);
+            Console.WriteLine(choiceBefore
+                ? $"INFO online license: TROOPER head picture already cached before (by eye: online_license_trooper.png)"
+                : $"{(choiceAfter ? "PASS" : "FAIL")} online license: TROOPER as hunter of choice draws its head picture ({choiceAfter})");
+            if (tempPics != null)
+            {
+                (MultiplayerMenu.CharacterHdRoot, MultiplayerMenu.CharacterPicturesDir) = (hdWas, picsWas);
+                try { Directory.Delete(tempPics, recursive: true); } catch (IOException) { }
+            }
 
             // GAMING HUB, LEADERBOARDS and the license's STATS / FAVOURITES (server 0.10.0; sample answers)
             HubPreview(s);
@@ -457,6 +491,26 @@ namespace MphRead
             Run(s, 10);
             Shot(s, "online_license_mine_nomatches");
             stats.Totals[HubCategory.Games] = games;
+            // your own card has the screen's width: the tabs' taps moved with them (STATS' new spot; CARD's, which was
+            // STATS' in the narrow layout), the card's sits on the card (left of the name and ranking column); FAVOURITES
+            // four across
+            static float TapX(float px) => (px - 72) / 4.933f - 52;
+            static float TapY(float py) => -24.6f - (py - 197) / 4.933f + 192;
+            s.Recomp.OnCall(s.Menu, 2470, inPause: false); // CARD
+            Run(s, 20);
+            bool tookStats = s.Menu.Touch(TapX(960), TapY(244));
+            Run(s, 20);
+            int tapStats = s.Recomp.OnlineHubView.View;
+            bool tookCard = s.Menu.Touch(TapX(615), TapY(244));
+            Run(s, 20);
+            int tapCard = s.Recomp.OnlineHubView.View, tabBefore = s.Recomp.OnlineLicenseTab;
+            bool tookWide = s.Menu.Touch(TapX(1100), TapY(560));
+            Run(s, 20);
+            int tabAfter = s.Recomp.OnlineLicenseTab;
+            Console.WriteLine($"{(tookStats && tapStats == 1 && tookCard && tapCard == 0 && tookWide && tabAfter != tabBefore ? "PASS" : "FAIL")} gaming hub: MY LICENSE's tabs and card take taps where they're drawn, centred (STATS {tookStats}/{tapStats}, CARD {tookCard}/{tapCard}, card's right {tookWide} tab {tabBefore}->{tabAfter})");
+            s.Recomp.OnCall(s.Menu, 2472, inPause: false); // FAVOURITES
+            Run(s, 20);
+            Shot(s, "online_license_mine_favourites");
             s.Recomp.OnCall(s.Menu, 2592, inPause: false); // back
             Run(s, 30);
             bool backOn = s.Menu.Page?.Index == ghub && s.Menu.FocusedItem() == s.Recomp.OnlineHubMine;
@@ -487,6 +541,16 @@ namespace MphRead
             WirelessSeconds = 20500, TotalSeconds = 360000, FavoriteHunter = (int)Hunter.Kanden, FavoriteWeapon = 3, FavoriteMode = 0,
             LuckyArena = 104,
         };
+
+        // a license card's hunter-of-choice head picture was drawn (MultiplayerMenu.AddChoicePicture's texture)
+        private static bool HasChoicePicture(MenuEngine menu)
+        {
+            for (int i = 0; i < menu.Widgets.Textures.Count; i++)
+            {
+                if (menu.Widgets.Textures[i].Key.StartsWith("license choice ", StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
 
         // yes in an Ask box (A focuses YES, A again presses it)
         private static void Yes(FrontendSession s)
@@ -555,7 +619,7 @@ namespace MphRead
                     return;
                 }
                 s.Recomp.OnCall(s.Menu, 2560 + whoRow, inPause: false);
-                for (int i = 0; i < 4; i++) s.Recomp.OnCall(s.Menu, 2565, inPause: false); // PLAYERS down to 2
+                for (int i = 0; i < 6; i++) s.Recomp.OnCall(s.Menu, 2565, inPause: false); // PLAYERS (the people's seats) down to 2
                 for (int i = 2; i < seats; i++) s.Recomp.OnCall(s.Menu, 2566, inPause: false);
                 for (int i = 0; i < bots; i++) s.Recomp.OnCall(s.Menu, 2569, inPause: false);
                 Run(s, 60);
@@ -604,7 +668,12 @@ namespace MphRead
                 Shot(s, "online_live_lobby_joined");
                 if (a.GetValueOrDefault("lobbyedit") == "1")
                 {
-                    fail = LobbyEdit(s, host, joiner, seats - bots, teamPlay);
+                    fail = LobbyEdit(s, host, joiner, teamPlay);
+                    if (fail != null) return;
+                }
+                if (a.GetValueOrDefault("botfill") == "1")
+                {
+                    fail = BotFill(s, host, joiner, lobby);
                     if (fail != null) return;
                 }
                 if (a.GetValueOrDefault("rulesedit") == "1")
@@ -707,9 +776,39 @@ namespace MphRead
             if (!RunUntil(s, () => s.Menu.Page?.Index == MultiplayerMenu.HunterPage && s.Menu.PendingPage == -1, 5))
                 return $"rulesedit: the rules page didn't go on to SELECT HUNTER (page {s.Menu.Page?.Index})";
             Run(s, 30);
+            // (owner 2026-11-22: EDIT RULES = mode, arena, rules, hunter; the pick goes straight back to the lobby, no WHO CAN JOIN)
             s.Multiplayer.OnCall(s.Menu, new MenuAction(), 132, -1); // Samus -> the lobby
             if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1, 5))
                 return $"rulesedit: the pick didn't come back to the lobby (page {s.Menu.Page?.Index})";
+            if (s.Recomp.OnlineRunner != host) return "rulesedit: the hosted game was closed on the way";
+            Run(s, 30);
+            Shot(s, "online_live_lobby_editbuttons");
+            // EDIT LOBBY: WHO CAN JOIN on its own; back drops a change, UPDATE sends it
+            (int whoPage, _) = RecompMenus.OnlineCreatePages;
+            int people = host.Net.People > 0 ? host.Net.People : host.Game.Info.MaxPlayers;
+            s.Recomp.OnCall(s.Menu, 2589, inPause: false); // EDIT LOBBY
+            if (!RunUntil(s, () => s.Menu.Page?.Index == whoPage && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: EDIT LOBBY didn't open WHO CAN JOIN (page {s.Menu.Page?.Index})";
+            if (people < 8) s.Recomp.OnCall(s.Menu, 2566, inPause: false); // PLAYERS + 1, then back: dropped
+            Run(s, 10);
+            s.Recomp.OnCall(s.Menu, 2571, inPause: false); // WHO CAN JOIN's back arrow
+            if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: EDIT LOBBY's back didn't return to the lobby (page {s.Menu.Page?.Index})";
+            if (s.Recomp.OnlineRunner != host) return "rulesedit: EDIT LOBBY's back closed the hosted game";
+            Run(s, 30);
+            int peopleNow = host.Net.People > 0 ? host.Net.People : host.Game.Info.MaxPlayers;
+            if (peopleNow != people) return $"rulesedit: EDIT LOBBY's back still changed PLAYERS ({people} -> {peopleNow})";
+            Console.WriteLine($"  rulesedit: EDIT LOBBY -> PLAYERS + 1 -> back: dropped ({peopleNow} people)");
+            s.Recomp.OnCall(s.Menu, 2589, inPause: false); // EDIT LOBBY again
+            if (!RunUntil(s, () => s.Menu.Page?.Index == whoPage && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: EDIT LOBBY didn't open WHO CAN JOIN again (page {s.Menu.Page?.Index})";
+            bool more = people < 8 && (!host.Served || host.Client.ServerAtLeast(OnlineMatch.SeatsSinceServer));
+            if (more) s.Recomp.OnCall(s.Menu, 2566, inPause: false); // PLAYERS + 1: a person's seat more (the bots stay)
+            Run(s, 30);
+            Shot(s, "online_live_host_whoedit");
+            s.Recomp.OnCall(s.Menu, 2570, inPause: false); // UPDATE -> the lobby
+            if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1, 5))
+                return $"rulesedit: UPDATE didn't come back to the lobby (page {s.Menu.Page?.Index})";
             if (s.Recomp.OnlineRunner != host) return "rulesedit: the hosted game was closed on the way";
             // (a served game: the server's match host takes it and its LOBBY comes back)
             if (!RunUntil(s, () => host.Net.Settings?.Mode == GameMode.Bounty, 5)) return $"rulesedit: the hosted match is {host.Net.Settings?.Mode}, not Bounty";
@@ -718,24 +817,243 @@ namespace MphRead
             GamesMsg list = Wait(jc.RequestAsync<GamesMsg>(new ListGamesReq()));
             string? listed = list.Games.FirstOrDefault(g => g.Id == host.Game.Id)?.Info.Mode;
             Console.WriteLine($"  rulesedit: {before} -> {host.Net.Settings.Mode} (joiner sees it; the server's list says {listed ?? "not listed"})");
+            if (more)
+            {
+                int want = people + 1;
+                if (!RunUntil(s, () => host.Game.Info.MaxPlayers == want, 5)) return $"rulesedit: the server's card says {host.Game.Info.MaxPlayers} people, not {want}";
+                if (!RunUntil(s, () => host.Net.People == want, 5)) return $"rulesedit: the lobby has {host.Net.People} people's seats, not {want}";
+                if (!RunUntil(s, () => joiner.Net.People == want, 5)) return $"rulesedit: the joiner sees {joiner.Net.People} people's seats, not {want}";
+                Console.WriteLine($"  rulesedit: PLAYERS {people} -> {want} people (the card, the lobby and the joiner agree)");
+            }
+            else Console.WriteLine($"  rulesedit: PLAYERS not raised ({people} people, server {host.Client.ServerVersion})");
             Run(s, 60);
             Shot(s, "online_live_lobby_rulesedit");
             return null;
         }
 
-        private static string? LobbyEdit(FrontendSession s, OnlineMatch host, OnlineMatch joiner, int k, bool teams)
+        // the card a bot sits on: the people, their open seats (PLAYERS), then the bots (OnlineMenus.SeatsNow)
+        private static int BotCard(OnlineMatch host, int ordinal)
+        {
+            MatchSettings st = host.Net.Settings!;
+            int people = Enumerable.Range(0, st.Players.Count).Count(i => !(st.Players[i].Bot || i < host.Net.Lobby.Count && host.Net.Lobby[i].Bot));
+            return Math.Max(people, host.Net.People > 0 ? host.Net.People : host.Game.Info.MaxPlayers) + ordinal;
+        }
+
+        // botfill=1 (owner 2026-11-22, Wave 1a: the most bots is 8 minus PLAYERS, ADD BOT never changes PLAYERS; one ADD BOT
+        // over the corner that says why when no bot fits; ADD BOT again after REMOVE; arrows step every hunter in order,
+        // duplicates allowed; the card's tap opens SELECT HUNTER for the bot)
+        private static string? BotFill(FrontendSession s, OnlineMatch host, OnlineMatch joiner, int lobby)
+        {
+            MatchSettings H() => host.Net.IsHost ? host.Net.Settings! : host.Net.OwnerLobby()!; // (served: the match host's lobby)
+            MatchSettings S() => host.Net.Settings!;
+            // (a served game's owner: its own match has no bot flags, the match host's LOBBY says which seats are)
+            int Bots() => Enumerable.Range(0, S().Players.Count).Count(i => S().Players[i].Bot || i < host.Net.Lobby.Count && host.Net.Lobby[i].Bot);
+            MatchPlayer Bot(int ordinal) => H().Players.Where(p => p.Bot).ElementAt(ordinal);
+            int BotIndex(int ordinal) => Enumerable.Range(0, H().Players.Count).Where(i => H().Players[i].Bot).ElementAt(ordinal);
+            bool JoinerSees(Func<MatchSettings, bool> ok) => RunUntil(s, () => joiner.Net.Settings is MatchSettings js && ok(js), 5);
+            string Key(MatchPlayer p) => p.Character ?? p.Hunter.ToString();
+            int start = Bots(), people = S().Players.Count - start;
+            int netPeople = host.Net.People, card = host.Game.Info.MaxPlayers;
+            int cap = Math.Max(people, netPeople > 0 ? netPeople : card), most = MatchSettings.MaxSeats - cap;
+            Console.WriteLine($"  botfill: {people} people, PLAYERS {cap} (lobby {netPeople}, card {card}), {start} bots: room for {most}");
+            // 1. ADD BOT up to 8 - PLAYERS, and not one more
+            while (Bots() < most)
+            {
+                int n = Bots();
+                s.Recomp.OnCall(s.Menu, 2830, inPause: false); // ADD BOT
+                if (!RunUntil(s, () => Bots() == n + 1, 5)) return $"botfill: ADD BOT stopped at {n} bots, room for {most} ({cap} people's seats)";
+                Run(s, 10);
+            }
+            if (host.Net.People != netPeople || host.Game.Info.MaxPlayers != card) return $"botfill: ADD BOT changed PLAYERS ({netPeople}/{card} -> {host.Net.People}/{host.Game.Info.MaxPlayers})";
+            Run(s, 30);
+            Shot(s, "online_live_lobby_botfill");
+            s.Popup?.Close();
+            s.Recomp.OnCall(s.Menu, 2830, inPause: false);
+            Run(s, 90);
+            if (Bots() != most) return $"botfill: ADD BOT went past 8 - PLAYERS ({Bots()} bots, room for {most})";
+            if (host.Net.People != netPeople || host.Game.Info.MaxPlayers != card) return "botfill: the full lobby's ADD BOT changed PLAYERS";
+            if (s.Popup != null && !s.Popup.IsOpen) return "botfill: the full lobby's ADD BOT gave no reason";
+            Console.WriteLine($"  botfill: {Bots()} bots = 8 - {cap}; one more ADD BOT: refused{(s.Popup?.IsOpen == true ? " with its reason" : "")}, PLAYERS still {cap}");
+            Shot(s, "online_live_lobby_botfull_reason");
+            s.Popup?.Close();
+            Run(s, 10);
+            // 1b. EDIT LOBBY with the lobby full of bots (owner's device test 2026-11-22: its PLAYERS counted the bots, and
+            // lowering it took bots and people's seats away): PLAYERS there is the people's seats; an UPDATE with nothing
+            // changed changes nothing; one seat fewer keeps every bot; one more again puts it back
+            {
+                (int whoPage, _) = RecompMenus.OnlineCreatePages;
+                int Cap() => Math.Max(people, host.Net.People > 0 ? host.Net.People : host.Game.Info.MaxPlayers);
+                string? Edit(int press, int want, string what)
+                {
+                    s.Recomp.OnCall(s.Menu, 2589, inPause: false); // EDIT LOBBY
+                    if (!RunUntil(s, () => s.Menu.Page?.Index == whoPage && s.Menu.PendingPage == -1, 5)) return $"botfill: EDIT LOBBY didn't open WHO CAN JOIN (page {s.Menu.Page?.Index})";
+                    Run(s, 10);
+                    if (press != 0) s.Recomp.OnCall(s.Menu, press, inPause: false);
+                    Run(s, 20);
+                    if (press == 0) Shot(s, "online_live_whoedit_botfull");
+                    s.Recomp.OnCall(s.Menu, 2570, inPause: false); // UPDATE
+                    if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1, 5)) return $"botfill: UPDATE didn't come back to the lobby (page {s.Menu.Page?.Index})";
+                    if (!RunUntil(s, () => Cap() == want, 5) || !RunUntil(s, () => Bots() == most, 3)) return $"botfill: EDIT LOBBY {what}: PLAYERS {Cap()} + {Bots()} bots, expected {want} + {most}";
+                    Run(s, 60);
+                    if (Cap() != want || Bots() != most) return $"botfill: EDIT LOBBY {what}: settled on PLAYERS {Cap()} + {Bots()} bots, expected {want} + {most}";
+                    if (!JoinerSees(js => js.Players.Count == people + most)) return $"botfill: EDIT LOBBY {what}: the joiner sees {joiner.Net.Settings?.Players.Count} seats taken";
+                    return null;
+                }
+                if (Edit(0, cap, "with nothing changed") is string e0) return e0;
+                bool fewer = cap > Math.Max(people, 2);
+                if (fewer)
+                {
+                    if (Edit(2565, cap - 1, "PLAYERS - 1") is string e1) return e1;
+                    if (Edit(2566, cap, "PLAYERS + 1") is string e2) return e2;
+                }
+                Console.WriteLine($"  botfill: EDIT LOBBY with {most} bots: UPDATE unchanged keeps PLAYERS {cap} + {most} bots{(fewer ? $"; PLAYERS - 1 -> {cap - 1} + {most} bots, + 1 -> back" : "")}");
+            }
+            if (most > 0)
+            {
+                // 2. the first bot's arrows: every hunter in order, whoever else plays it
+                Hunter[] order = { Hunter.Samus, Hunter.Kanden, Hunter.Spire, Hunter.Trace, Hunter.Noxus, Hunter.Sylux, Hunter.Weavel };
+                int k = BotCard(host, 0);
+                var walked = new List<string> { Key(Bot(0)) };
+                bool twice = false;
+                for (int i = 0; i < 9; i++)
+                {
+                    MatchPlayer was = Bot(0);
+                    s.Recomp.OnCall(s.Menu, 2890 + k, inPause: false); // the right arrow
+                    if (!RunUntil(s, () => Key(Bot(0)) != Key(was), 5)) return $"botfill: the right arrow didn't step the bot's hunter (still {Key(was)})";
+                    MatchPlayer now = Bot(0);
+                    walked.Add(Key(now));
+                    int at = Array.IndexOf(order, was.Hunter);
+                    if (was.Character == null && at < order.Length - 1 && (now.Character != null || now.Hunter != order[at + 1]))
+                    {
+                        return $"botfill: the right arrow went {Key(was)} -> {Key(now)}, not {order[at + 1]}";
+                    }
+                    if (H().Players.Count(p => Key(p) == Key(now)) > 1) twice = true;
+                    if (Key(now) == walked[0]) break;
+                }
+                if (walked[^1] != walked[0]) return "botfill: the right arrow never came back round: " + string.Join(" > ", walked);
+                if (!twice) return "botfill: the arrows never showed a hunter another seat plays: " + string.Join(" > ", walked);
+                s.Recomp.OnCall(s.Menu, 2880 + k, inPause: false); // the left arrow: the one before
+                if (!RunUntil(s, () => Key(Bot(0)) == walked[^2], 5)) return $"botfill: the left arrow didn't step back to {walked[^2]} (on {Key(Bot(0))})";
+                string onLeft = Key(Bot(0));
+                int index = BotIndex(0);
+                if (!JoinerSees(js => js.Players.Count > index && Key(js.Players[index]) == onLeft)) return "botfill: the joiner didn't see the arrows' hunter";
+                Console.WriteLine($"  botfill: arrows {string.Join(" > ", walked)}, left -> {onLeft} (same hunter as another seat allowed; joiner sees it)");
+                Run(s, 30);
+                Shot(s, "online_live_lobby_botarrows");
+                // 3. the card's tap: SELECT HUNTER for the bot; back leaves it, a pick sets it (and not the host's own hunter)
+                int me = host.Net.IsHost ? 0 : S().LocalSeat;
+                string mine = Key(S().Players[me]);
+                s.Recomp.OnCall(s.Menu, 2580 + k, inPause: false);
+                if (!RunUntil(s, () => s.Menu.Page?.Index == MultiplayerMenu.HunterPage && s.Menu.PendingPage == -1, 5)) return $"botfill: the bot card's tap didn't open SELECT HUNTER (page {s.Menu.Page?.Index})";
+                Run(s, 60);
+                Shot(s, "online_live_bot_picker");
+                s.Press(MenuKeys.B);
+                if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1, 5)) return $"botfill: back on the bot's SELECT HUNTER didn't return to the lobby (page {s.Menu.Page?.Index})";
+                Run(s, 60);
+                if (Key(Bot(0)) != onLeft || Bots() != most) return $"botfill: back on the bot's SELECT HUNTER changed the bot ({onLeft} -> {Key(Bot(0))}, {Bots()} bots)";
+                // (Samus: the one hunter a fresh test profile has open; the bot on another hunter first)
+                Hunter want = Hunter.Samus;
+                if (Bot(0).Hunter == want)
+                {
+                    s.Recomp.OnCall(s.Menu, 2890 + k, inPause: false);
+                    if (!RunUntil(s, () => Bot(0).Hunter != want, 5)) return "botfill: the right arrow before the pick did nothing";
+                    onLeft = Key(Bot(0));
+                    Run(s, 30);
+                }
+                s.Recomp.OnCall(s.Menu, 2580 + k, inPause: false);
+                if (!RunUntil(s, () => s.Menu.Page?.Index == MultiplayerMenu.HunterPage && s.Menu.PendingPage == -1, 5)) return "botfill: the bot card's second tap didn't open SELECT HUNTER";
+                Run(s, 30);
+                s.Multiplayer.OnCall(s.Menu, new MenuAction(), 132 + Array.IndexOf(order, want), -1);
+                Run(s, 30);
+                if (s.Menu.Page?.Index == MultiplayerMenu.HunterPage && s.Menu.PendingPage == -1) s.Press(MenuKeys.A); // (its skin chooser: the first)
+                if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1 && Bot(0).Hunter == want, 8)) return $"botfill: the picker's {want} didn't reach the bot (page {s.Menu.Page?.Index}, bot {Key(Bot(0))})";
+                Run(s, 60);
+                if (Key(S().Players[me]) != mine) return $"botfill: the bot's pick changed the host's own hunter ({mine} -> {Key(S().Players[me])})";
+                if (Bots() != most || S().Players.Count != people + most) return "botfill: the bot's pick changed the seats";
+                index = BotIndex(0);
+                if (!JoinerSees(js => js.Players.Count > index && js.Players[index].Hunter == want)) return "botfill: the joiner didn't see the picked hunter";
+                Console.WriteLine($"  botfill: picker: back kept the bot; picked {want} over {onLeft} (host still {mine}; joiner sees it)");
+                // (hd=: this PC has skins: the TROOPER from the picker, a character with a skin)
+                if (MultiplayerMenu.CharacterHdRoot != null)
+                {
+                    s.Recomp.OnCall(s.Menu, 2580 + k, inPause: false);
+                    if (!RunUntil(s, () => s.Menu.Page?.Index == MultiplayerMenu.HunterPage && s.Menu.PendingPage == -1, 5)) return "botfill: the bot card's third tap didn't open SELECT HUNTER";
+                    Run(s, 60);
+                    s.Multiplayer.OnCall(s.Menu, new MenuAction(), 2300 + 7, -1); // the TROOPER's slot
+                    Run(s, 30);
+                    Shot(s, "online_live_bot_picker_skins");
+                    if (s.Menu.Page?.Index == MultiplayerMenu.HunterPage) s.Press(MenuKeys.A); // (its skin chooser: the first skin)
+                    if (!RunUntil(s, () => s.Menu.Page?.Index == lobby && s.Menu.PendingPage == -1 && Bot(0).Character == "trooper", 8)) return $"botfill: the picker's TROOPER didn't reach the bot (page {s.Menu.Page?.Index}, bot {Key(Bot(0))})";
+                    Run(s, 60);
+                    MatchPlayer t = Bot(0);
+                    if (string.IsNullOrEmpty(t.Skin)) return "botfill: the picked TROOPER has no skin";
+                    index = BotIndex(0);
+                    if (!JoinerSees(js => js.Players.Count > index && js.Players[index].Character == "trooper" && js.Players[index].Skin == t.Skin)) return "botfill: the joiner didn't see the TROOPER and its skin";
+                    Console.WriteLine($"  botfill: picker: TROOPER in {t.Skin}, named {t.Nickname} (joiner sees character + skin)");
+                    Shot(s, "online_live_lobby_bottrooper");
+                }
+            }
+            // 4. REMOVE every bot, then ADD BOT by touch where it's drawn (1920x1080: mockup px = canvas px)
+            while (Bots() > 0)
+            {
+                int n = Bots();
+                s.Recomp.OnCall(s.Menu, 2820 + BotCard(host, 0), inPause: false); // REMOVE on the first bot card
+                if (!RunUntil(s, () => Bots() == n - 1, 5)) return $"botfill: REMOVE stopped at {n} bots";
+                Run(s, 10);
+            }
+            if (most > 0)
+            {
+                Run(s, 30);
+                Shot(s, "online_live_lobby_nobots");
+                s.Build(1920, 1080);
+                s.TouchCanvas(1270, 144);
+                if (!RunUntil(s, () => Bots() == 1, 5)) return "botfill: a tap on ADD BOT (1270, 144) after every bot was removed added none";
+                Run(s, 30);
+                // (the right arrow where it's drawn on the new bot's card)
+                int k = BotCard(host, 0), seats = cap + 1;
+                float cx = 100 + k % 2 * 650, cy = 222 + k / 2 * (seats > 4 ? 170 : 352);
+                (float ax, float ay) = seats > 4 ? (cx + 154 + 20, cy + 46 + 30) : (cx + 218 + 24, cy + 128 + 37);
+                string before = Key(Bot(0));
+                s.Build(1920, 1080);
+                s.TouchCanvas(ax, ay);
+                if (!RunUntil(s, () => Key(Bot(0)) != before, 5)) return $"botfill: a tap on the bot card's right arrow ({ax}, {ay}) didn't step its hunter";
+                Console.WriteLine($"  botfill: removed every bot; ADD BOT by touch works again; arrow by touch {before} -> {Key(Bot(0))} ({(seats > 4 ? "half-height" : "2 x 2")} cards)");
+                Run(s, 30);
+                Shot(s, "online_live_lobby_onebot");
+            }
+            // (and back to the bots the game was made with)
+            while (Bots() > start)
+            {
+                int n = Bots();
+                s.Recomp.OnCall(s.Menu, 2820 + BotCard(host, 0), inPause: false);
+                if (!RunUntil(s, () => Bots() == n - 1, 5)) return "botfill: the last REMOVE did nothing";
+            }
+            while (Bots() < start)
+            {
+                int n = Bots();
+                s.Recomp.OnCall(s.Menu, 2830, inPause: false);
+                if (!RunUntil(s, () => Bots() == n + 1, 5)) return "botfill: ADD BOT didn't put the game's bots back";
+            }
+            Run(s, 30);
+            return null;
+        }
+
+        private static string? LobbyEdit(FrontendSession s, OnlineMatch host, OnlineMatch joiner, bool teams)
         {
             MatchSettings H() => host.Net.IsHost ? host.Net.Settings! : host.Net.OwnerLobby()!; // (served: the match host's lobby)
             int BotSeat() => H().Players.FindIndex(p => p.Bot);
             bool JoinerSees(Func<MatchSettings, bool> ok) => RunUntil(s, () => joiner.Net.Settings is MatchSettings js && ok(js), 5);
             int b = BotSeat();
             if (b < 0) return "lobbyedit: no bot in the game";
-            Hunter before = H().Players[b].Hunter;
+            int k = BotCard(host, 0); // (the first bot's card: after the people's seats)
+            // (the TROOPER's base hunter is Weavel: Weavel > TROOPER keeps the Hunter, so the character counts too)
+            string Who(MatchPlayer p) => p.Character ?? p.Hunter.ToString();
+            string before = Who(H().Players[b]);
             int level = H().Players[b].BotLevel, count = H().Players.Count;
-            s.Recomp.OnCall(s.Menu, 2580 + k, inPause: false); // the bot's card: its hunter
-            if (!RunUntil(s, () => H().Players[BotSeat()].Hunter != before, 5)) return "lobbyedit: the bot card's tap didn't change its hunter";
-            Hunter after = H().Players[BotSeat()].Hunter;
-            if (!JoinerSees(js => js.Players.Count > b && js.Players[b].Hunter == after)) return "lobbyedit: the joiner didn't see the bot's new hunter";
+            s.Recomp.OnCall(s.Menu, 2890 + k, inPause: false); // the bot card's right arrow: its hunter
+            if (!RunUntil(s, () => Who(H().Players[BotSeat()]) != before, 5)) return "lobbyedit: the bot card's arrow didn't change its hunter";
+            string after = Who(H().Players[BotSeat()]);
+            if (!JoinerSees(js => js.Players.Count > b && Who(js.Players[b]) == after)) return "lobbyedit: the joiner didn't see the bot's new hunter";
             Console.WriteLine($"  lobbyedit: bot hunter {before} -> {after} (joiner sees it)");
             s.Recomp.OnCall(s.Menu, 2810 + k, inPause: false); // LEVEL
             if (!RunUntil(s, () => H().Players[BotSeat()].BotLevel == (level + 1) % 3, 5)) return "lobbyedit: LEVEL didn't step the bot's level";
@@ -748,8 +1066,8 @@ namespace MphRead
             Console.WriteLine($"  lobbyedit: REMOVE -> {H().Players.Count} seats (joiner sees it)");
             Run(s, 30);
             Shot(s, "online_live_lobby_botremoved");
-            s.Recomp.OnCall(s.Menu, 2830 + k, inPause: false); // ADD BOT on the freed seat
-            if (!RunUntil(s, () => H().Players.Count == count && BotSeat() >= 0, 5)) return "lobbyedit: ADD BOT didn't add a bot on the freed seat";
+            s.Recomp.OnCall(s.Menu, 2830, inPause: false); // ADD BOT (the corner's)
+            if (!RunUntil(s, () => H().Players.Count == count && BotSeat() >= 0, 5)) return "lobbyedit: ADD BOT didn't add a bot after REMOVE";
             if (!JoinerSees(js => js.Players.Count == count)) return "lobbyedit: the joiner didn't see the added bot";
             Console.WriteLine($"  lobbyedit: ADD BOT -> {H().Players.Count} seats, {H().Players[BotSeat()].Hunter} (joiner sees it)");
             if (teams)
@@ -1112,7 +1430,7 @@ namespace MphRead
                 {
                     s.Menu.GoTo(RecompMenus.OnlineSettingsPage);
                     RunUntil(s, () => s.Menu.Page?.Index == RecompMenus.OnlineSettingsPage && s.Menu.PendingPage == -1, 5);
-                    s.Recomp.OnCall(s.Menu, 2711, inPause: false); // DELETE ONLINE PROFILE (row 11)
+                    s.Recomp.OnCall(s.Menu, 2712, inPause: false); // DELETE ONLINE PROFILE (row 12 since DUCK MUSIC)
                     Run(s, 10);
                     Yes(s);
                     Yes(s);
@@ -1313,7 +1631,7 @@ namespace MphRead
             menus.Start(page);
             if (!RunUntil(menus, () => menus.Menu.Page?.Index == MultiplayerMenu.ResultsPage && menus.Menu.PendingPage == -1, 10))
                 return $"the menus didn't open on RESULTS (page {menus.Menu.Page?.Index})";
-            Run(menus, 60);
+            Run(menus, 600);
             Shot(menus, "online_live_results");
             // the host's name on RESULTS (its second row) opens the host's license; back returns to RESULTS
             menus.Recomp.OnCall(menus.Menu, 2694 + 1, inPause: false);
@@ -1325,6 +1643,23 @@ namespace MphRead
             menus.Recomp.OnCall(menus.Menu, 2592, inPause: false); // back
             if (!RunUntil(menus, () => menus.Menu.Page?.Index == MultiplayerMenu.ResultsPage && menus.Menu.PendingPage == -1, 10))
                 return $"back from the license didn't return to RESULTS (page {menus.Menu.Page?.Index})";
+            // ADD FRIEND on RESULTS: the host's row has the button, this device's own row none; pressing it sends the host a
+            // friend request (the host's roster has it incoming) and the button says "request sent"
+            if (!menus.Recomp.ResultsFriendShown(menus.Menu, 1) || menus.Recomp.ResultsFriendShown(menus.Menu, 0))
+                return $"RESULTS' ADD FRIEND buttons aren't on the host's row alone (host {menus.Recomp.ResultsFriendShown(menus.Menu, 1)}, own {menus.Recomp.ResultsFriendShown(menus.Menu, 0)})";
+            menus.Recomp.OnCall(menus.Menu, 2850 + 1, inPause: false);
+            RequestInfo? asked = null;
+            if (!RunUntil(menus, () =>
+            {
+                RosterMsg roster = Wait(host.Client.RequestAsync<RosterMsg>(new RosterReq()));
+                asked = roster.Requests.FirstOrDefault(q => q.Incoming && q.Kind == LinkKind.Friend);
+                return asked != null && menus.Recomp.ResultsFriendLabel(1) == "request sent";
+            }, 10))
+                return $"RESULTS' ADD FRIEND didn't send the host a friend request (host's request {asked?.Player.Name ?? "none"}, button {menus.Recomp.ResultsFriendLabel(1)})";
+            menus.Popup?.Close(); // (its "sent" notice: the shot shows the button's look)
+            Run(menus, 30);
+            Shot(menus, "online_live_results_friend");
+            Console.WriteLine($"  RESULTS: ADD FRIEND -> the host has {asked!.Player.Name}'s request; the button says request sent");
             HunterLicense l = menus.Multiplayer.License;
             if (l.OnlineMatches != 1 || l.WifiWins != 1) return $"RESULTS didn't count a Wi-Fi win ({l.WifiWins} of {l.OnlineMatches} wi-fi, {l.LocalMatches} wireless)";
             // (server 0.7.0+, T3: head to head is the server's, from the host's report; this PC host's faked RESULTS sends none, so
@@ -1400,6 +1735,7 @@ namespace MphRead
             if (!ToolPaths.UseDesktopExtraction()) return;
             Dictionary<string, string> a = Args(args);
             var uri = new Uri(a.GetValueOrDefault("server", RecompMenus.OnlineServer));
+            if (a.ContainsKey("server")) RecompMenus.OnlineServerOverride = uri.ToString(); // (the menus too, not just the PC host)
             Console.WriteLine($"onlinemenutest: {uri}, version {OnlineMatch.VersionKey(RomKey)}");
             // the host: its own key, a 2-player public game
             OnlineIdentity hostId = OnlineIdentity.Create();

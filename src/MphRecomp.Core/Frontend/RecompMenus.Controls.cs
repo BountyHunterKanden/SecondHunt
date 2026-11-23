@@ -298,8 +298,33 @@ namespace MphRecomp.Frontend
                             Step = _ => _settings.ChatToggle = !_settings.ChatToggle
                         });
                     }
+                    // (owner 2026-11-16: hold or toggle for the other held buttons, under each; Input/StickShape.cs HoldToggle)
+                    if (f.Id == ControlBinds.Scoreboard) ModeRow("scoreboard\nmode", "scoreboardmode", () => _settings.ScoreboardToggle, v => _settings.ScoreboardToggle = v);
+                    if (f.Id == ControlBinds.Spider) ModeRow("spider ball\nmode", "spidermode", () => _settings.SpiderToggle, v => _settings.SpiderToggle = v);
+                    if (f.Id == ControlBinds.SlowMove) ModeRow("slow move\nmode", "slowmovemode", () => _settings.SlowMoveToggle, v => _settings.SlowMoveToggle = v);
                 }
             }
+            void ModeRow(string label, string hint, Func<bool> get, Action<bool> set) => Setting(new RowModel
+            {
+                Label = label,
+                Describe = () => ControlHints.For(get() ? hint + ".toggle" : hint + ".hold"),
+                Value = () => get() ? "TOGGLE" : "HOLD",
+                Step = _ => set(!get())
+            });
+            RowModel DeadZoneRow(string label, string hint, Func<int> get, Action<int> set) => new RowModel
+            {
+                Label = label,
+                Describe = () =>
+                {
+                    int v = MphRecomp.Input.StickShape.DeadZonePercent(get());
+                    string key = v == 0 ? ".0" : v == MphRecomp.Input.StickShape.DefaultDeadZone ? ".15" : v < MphRecomp.Input.StickShape.DefaultDeadZone ? ".low" : ".high";
+                    return string.Format(inv, ControlHints.For(hint + key), v);
+                },
+                Value = () => MphRecomp.Input.StickShape.DeadZonePercent(get()) + "%",
+                Step = s => { int[] all = MphRecomp.Input.StickShape.DeadZonePercents; int i = Math.Max(0, Array.IndexOf(all, MphRecomp.Input.StickShape.DeadZonePercent(get()))); set(all[((i + s) % all.Length + all.Length) % all.Length]); },
+                Reset = () => set(MphRecomp.Input.StickShape.DefaultDeadZone),
+                AtDefault = () => MphRecomp.Input.StickShape.DeadZonePercent(get()) == MphRecomp.Input.StickShape.DefaultDeadZone
+            };
 
             // the sub-tabs (thread D 10-24, M8): BUTTONS and AIM, GYRO and TOUCH where the device has them (a PC: GYRO
             // once a controller with a gyroscope has been seen, D6b; no TOUCH), each with its own reset of everything on it
@@ -423,6 +448,22 @@ namespace MphRecomp.Frontend
                         Reset = () => _settings.StickCurve = d.StickCurve,
                         AtDefault = () => StickCurveNow == d.StickCurve
                     });
+                    // each stick's dead zone and the aim stick's curve (owner 2026-11-16; Input/StickShape.cs): applied
+                    // to the pad before the game reads it, 15% and LINEAR are the old fixed numbers
+                    {
+                    Header("STICKS");
+                    Setting(DeadZoneRow("left stick\ndead zone", "leftdeadzone", () => _settings.LeftStickDeadZone, v => _settings.LeftStickDeadZone = v));
+                    Setting(DeadZoneRow("right stick\ndead zone", "rightdeadzone", () => _settings.RightStickDeadZone, v => _settings.RightStickDeadZone = v));
+                    Setting(new RowModel
+                    {
+                        Label = "aim\ncurve",
+                        Describe = () => ControlHints.For("aimcurve." + AimCurveNow),
+                        Value = () => AimCurveNow.ToUpperInvariant(),
+                        Step = s => { string[] all = MphRecomp.Input.StickShape.AimCurves; int i = Math.Max(0, Array.IndexOf(all, AimCurveNow)); _settings.AimCurve = all[((i + s) % all.Length + all.Length) % all.Length]; },
+                        Reset = () => _settings.AimCurve = d.AimCurve,
+                        AtDefault = () => AimCurveNow == d.AimCurve
+                    });
+                    }
                 }
                 else
                 {
@@ -456,6 +497,7 @@ namespace MphRecomp.Frontend
                 // the gyro and the touch controls (owner 2026-10-17: every control setting on CONTROLS; SettingRows has them)
                 Header(sub);
                 foreach (RowModel row in (sub == "GYRO" ? gyroLabels : touchLabels).Select(DeviceRow).OfType<RowModel>()) Setting(row);
+                if (sub == "TOUCH" && EditTouchLayout != null && !RecompSettings.PublicBuild) Setting(TouchLayoutRow()); // (RecompMenus.TouchLayout.cs)
                 if (sub == "GYRO")
                 {
                     // (finRatman via owner 11-07) a button that holds, pauses or toggles gyro aim; its button on the row below
@@ -530,7 +572,7 @@ namespace MphRecomp.Frontend
                     Practice();
                     ResetAll("reset\nbuttons", "resetbuttons",
                     (keys ? "reset every key and mouse button to default?" : "reset every button to default?")
-                    + "\n\nchat mode and the drone dials go back too.", () => ResetButtons(keys), () => ButtonsAtDefault(keys));
+                    + "\n\nchat mode, the other button modes and the drone dials go back too.", () => ResetButtons(keys), () => ButtonsAtDefault(keys));
                 }
                 break;
             }
@@ -554,19 +596,28 @@ namespace MphRecomp.Frontend
             ControlBinds.Reset(_settings, keys, ControlBinds.Gyro); // (the GYRO button is GYRO's)
             _settings.ChatToggle = d.ChatToggle;
             _settings.DroneDialsSwapped = d.DroneDialsSwapped;
+            _settings.ScoreboardToggle = d.ScoreboardToggle;
+            if (keys) _settings.SlowMoveToggle = d.SlowMoveToggle;
+            if (!RecompSettings.PublicBuild) _settings.SpiderToggle = d.SpiderToggle;
             if (!keys && RecompSettings.DesktopHost) _settings.PadLayout = d.PadLayout;
         }
         private bool ButtonsAtDefault(bool keys)
         {
             RecompSettings d = DefaultSettings;
             return ControlBinds.IsDefault(_settings, keys, ControlBinds.Gyro) && _settings.ChatToggle == d.ChatToggle && _settings.DroneDialsSwapped == d.DroneDialsSwapped
+                && _settings.ScoreboardToggle == d.ScoreboardToggle && (!keys || _settings.SlowMoveToggle == d.SlowMoveToggle)
+                && (RecompSettings.PublicBuild || _settings.SpiderToggle == d.SpiderToggle)
                 && (keys || !RecompSettings.DesktopHost || _settings.PadLayout == d.PadLayout);
         }
         private void ResetAim()
         {
             RecompSettings d = DefaultSettings, s = _settings;
             if (_controlsKeys) (s.MouseSens, s.ZoomMouseSens, s.MouseInvertY, s.MouseInvertX, s.MousePitchPercent, s.MouseRoll, s.SlowMovePercent) = (d.MouseSens, d.ZoomMouseSens, d.MouseInvertY, d.MouseInvertX, d.MousePitchPercent, d.MouseRoll, d.SlowMovePercent);
-            else (s.GameSensitivity, s.ZoomSensitivity, s.GameLookInvert, s.GameLookInvertX, s.AimPitchPercent, s.StickCurve) = (d.GameSensitivity, d.ZoomSensitivity, d.GameLookInvert, d.GameLookInvertX, d.AimPitchPercent, d.StickCurve);
+            else
+            {
+                (s.GameSensitivity, s.ZoomSensitivity, s.GameLookInvert, s.GameLookInvertX, s.AimPitchPercent, s.StickCurve) = (d.GameSensitivity, d.ZoomSensitivity, d.GameLookInvert, d.GameLookInvertX, d.AimPitchPercent, d.StickCurve);
+                (s.LeftStickDeadZone, s.RightStickDeadZone, s.AimCurve) = (d.LeftStickDeadZone, d.RightStickDeadZone, d.AimCurve);
+            }
             (s.ZoomSensPaired, s.ZoomStep, s.ZoomReadyIcon) = (d.ZoomSensPaired, d.ZoomStep, d.ZoomReadyIcon);
         }
         private bool AimAtDefault(bool keys)
@@ -575,7 +626,9 @@ namespace MphRecomp.Frontend
             bool own = keys ? s.MouseSens == d.MouseSens && s.ZoomMouseSens == d.ZoomMouseSens && s.MouseInvertY == d.MouseInvertY && s.MouseInvertX == d.MouseInvertX
                     && s.MousePitchPercent == d.MousePitchPercent && s.MouseRoll == d.MouseRoll && SlowMoveNow == d.SlowMovePercent
                 : s.GameSensitivity == d.GameSensitivity && s.ZoomSensitivity == d.ZoomSensitivity && s.GameLookInvert == d.GameLookInvert
-                    && s.GameLookInvertX == d.GameLookInvertX && s.AimPitchPercent == d.AimPitchPercent && StickCurveNow == d.StickCurve;
+                    && s.GameLookInvertX == d.GameLookInvertX && s.AimPitchPercent == d.AimPitchPercent && StickCurveNow == d.StickCurve
+                    && MphRecomp.Input.StickShape.DeadZonePercent(s.LeftStickDeadZone) == d.LeftStickDeadZone
+                    && MphRecomp.Input.StickShape.DeadZonePercent(s.RightStickDeadZone) == d.RightStickDeadZone && AimCurveNow == d.AimCurve;
             return own && s.ZoomSensPaired == d.ZoomSensPaired && s.ZoomStep == d.ZoomStep && s.ZoomReadyIcon == d.ZoomReadyIcon;
         }
         // the AIM tab's look invert: the mouse's (KEYBOARD & MOUSE) or the controller's
@@ -583,6 +636,7 @@ namespace MphRecomp.Frontend
         private bool LookInvertX(bool keys) => keys ? _settings.MouseInvertX : _settings.GameLookInvertX;
         private int AimYPercent(bool keys) => keys ? _settings.MousePitchPercent : _settings.AimPitchPercent;
         private string StickCurveNow => _settings.StickCurve == "classic" ? "classic" : "modern"; // (an unknown stored value plays as modern)
+        private string AimCurveNow => MphRecomp.Input.StickShape.AimCurveName(_settings.AimCurve); // (an unknown stored value plays as linear)
         private int SlowMoveNow => Array.IndexOf(RecompSettings.SlowMovePercents, _settings.SlowMovePercent) >= 0 ? _settings.SlowMovePercent : 40; // (a hand-edited value plays as 40%)
 
         // the gyro axis row's setting: a controller has its own (PadGyroAxis, "player" by default): always on a PC,

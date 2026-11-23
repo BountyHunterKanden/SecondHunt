@@ -57,7 +57,7 @@ namespace MphRead.Entities
             camInfo.PrevPosition += offset;
             camInfo.Target += offset;
             _volume = CollisionVolume.Move(_volumeUnxf, Position);
-            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, position);
+            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, position, ref _netPartMisses);
         }
 
         // ---- knockback handed to the device (0.3.6) ----

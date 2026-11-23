@@ -1624,6 +1624,11 @@ namespace MphRead.Sound
         {
         }
 
+        // recomp: host hook for the game's stream stop (queue emptied, playing stream faded over `fadeFrames` 30 Hz frames)
+        public virtual void StopStreams(int fadeFrames)
+        {
+        }
+
         public virtual void SetPausedFreeSfxScripts(bool paused)
         {
         }

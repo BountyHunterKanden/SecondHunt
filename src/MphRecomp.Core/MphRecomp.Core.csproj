@@ -34,6 +34,9 @@
          (item names + positions), made with the dev placement editor. -->
     <EmbeddedResource Include="Arenas\Placements\*.json" LogicalName="placements/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Frontend\Art\second_hunt_logo.png" LogicalName="second_hunt_logo.png" />
+    <!-- HOLIDAY MODE's sleigh bell (Music/HolidayBells.cs): the owner's private one-shot, XOR-packed, never in git
+         (.gitignore); without it the app makes its own bell. -->
+    <EmbeddedResource Include="Music\Private\bells.bin" LogicalName="holiday/bells.bin" Condition="Exists('Music\Private\bells.bin')" />
   </ItemGroup>
 
   <ItemGroup>

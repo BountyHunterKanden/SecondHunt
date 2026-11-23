@@ -646,6 +646,16 @@ namespace MphRead.Effects
             }
         }
 
+        // recomp: its particles are part of the first-person gun's view (RenderItem.HostViewmodel); set each draw with
+        // SetHostOwner (PlayerSmoothFx.cs); cleared on reuse
+        public void SetHostViewmodel(bool set)
+        {
+            for (int i = 0; i < Elements.Count; i++)
+            {
+                Elements[i].HostViewmodel = set;
+            }
+        }
+
         public void SetDrawEnabled(bool set)
         {
             if (set)
@@ -762,6 +772,10 @@ namespace MphRead.Effects
         public bool HostHidden { get; set; }
         // recomp: RenderItem.HostOwner for its particles (EffectEntry.SetHostOwner); null = none, as before
         public EntityBase? HostOwner { get; set; }
+        // recomp: RenderItem.HostViewmodel for its particles (EffectEntry.SetHostViewmodel); false = none, as before
+        public bool HostViewmodel { get; set; }
+        // recomp: from the host's cosmetic pools (Renderer.HostCosmetic.cs), never the game's
+        public bool HostCosmetic { get; set; }
         public float RoField1 { get; set; }
         public float RoField2 { get; set; }
         public float RoField3 { get; set; }

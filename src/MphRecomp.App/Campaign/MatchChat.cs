@@ -173,10 +173,15 @@ internal sealed partial class CampaignRenderer
     // BuildInput, each step: the scoreboard button held in a match (the controller's Select, a PC's left Alt, unless moved in
     // RECOMP SETTINGS > CONTROLS; never the touch controls' CHAT) = vanilla's live scoreboard (the game's own: START held in
     // multiplayer, PlayerHud.HostScoreboardHeld), not while a chat line is typed. A dev solo run's pickup editor keeps
-    // Select (PickupPlacer.cs)
+    // Select (PickupPlacer.cs). "scoreboard mode" TOGGLE: a press shows it until the next press or the match's end
+    // (CampaignRenderer.StickShape.cs)
     bool MatchScoreboardHeld(PadState pad)
-        => _host?.Match != null && !MatchOver && (_padBinds.Held(ControlBinds.Scoreboard) || KeyboardMouse?.ScoreboardHeld == true)
-            && !(_placing && _solo) && _chatLine == null && !ChatBoxOpen;
+    {
+        bool match = _host?.Match != null && !MatchOver;
+        if (!match) _scoreboardLatch.Clear();
+        bool held = _scoreboardLatch.Next(match && (_padBinds.Held(ControlBinds.Scoreboard) || KeyboardMouse?.ScoreboardHeld == true), _scoreboardToggle);
+        return held && !(_placing && _solo) && _chatLine == null && !ChatBoxOpen;
+    }
 
     void ShowMatchChat(OnlineMatch m, PlayerEntity p)
     {

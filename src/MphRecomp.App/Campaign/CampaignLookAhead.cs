@@ -14,8 +14,13 @@ namespace MphRecomp.App;
 //   view is where the aim is now (the walk's bob and tilt kept); the reticle is placed again for the turned view.
 //   (A STATIC option that also took the walk's nod off the view was dropped the same day: no difference to see.)
 // - CLASSIC: the game's own eased view.
-// With smooth frames on, the aim's own last turn is carried on by the picture's share of the next step (in place of the
-// camera's turn). Draw only, like smooth frames: the gun, the arm cannon and the main hunter keep the step's view
+// With smooth frames on, each picture between steps also turns by the aim the next step will get (the aim preview, owner
+// 2026-11-15 "a full fledged feature ... in our own way"): the mouse's and the gyro's turn waiting for the step, looked at
+// and left in place (PadState.PeekAim, GyroAim.PeekDegrees), and the right stick's push now for the picture's share of the
+// step, put through the game's own turn (PlayerInput UpdateAimY then UpdateAimX: a quarter degree a unit, the zoom's
+// factor, the pitch held to 85 degrees). So a picture shows the aim of the moment, not of the last step, and stops when
+// the hand does (a guess from the last turn ran on past a stop). With no aim coming in (input off) the aim's own last turn
+// is carried on by the picture's share instead, in place of the camera's turn. Draw only, like smooth frames: the gun, the arm cannon and the main hunter keep the step's view
 // (GunView, RidesCamera), the game reads nothing new, and replays and online play are unchanged.
 // Hooks: LookRecordStep (SmoothRecordStep), LookView (SmoothBegin), LookReticleShift (DrawHud), LookCullWiden
 // (Scene.HostDrawCullWiden). The room's portal culling found the walls to draw from the step's view only, so walls at the
@@ -32,6 +37,10 @@ internal sealed partial class CampaignRenderer
     Vector3 _lookGun0, _lookGun1; // the aim after the step before last / the last step
     Vector3 _lookEye, _lookCarry, _lookCarryAxis; // this picture: the step's eye, smooth frames' move, the aim's carried turn
     float _lookCarryAngle;
+    // the aim preview's sources, as the last step took them (BuildInput, GyroAimDelta): its aim came in, the right stick
+    // aimed, the mouse aimed, the gyro's scale (0 = off)
+    bool _lookInput, _lookStick, _lookMouse;
+    float _lookGyroScale;
 
     // after each step (SmoothRecordStep): the aim, for smooth frames' carry
     void LookRecordStep()
@@ -65,7 +74,22 @@ internal sealed partial class CampaignRenderer
         facing.Normalize();
         aim.Normalize();
         _lookCarryAngle = 0;
-        if (phase > 0 && _lookHave0 && _lookHave1)
+        // not while a replay plays: its steps take the recorded aim, so the watcher's live stick, gyro and mouse must not
+        // turn the picture (owner 2026-11-22 "gyro and stick influence aim in replays again"; found 11-21 [d1c1740c]).
+        // Replays keep the recorded aim's own last turn below, as before the preview.
+        if (phase > 0 && _lookInput && !ReplayPlaying)
+        {
+            Vector3 ahead = LookPreviewAim(main, aim, LookPendingAim(phase));
+            Vector3 axis = Vector3.Cross(aim, ahead);
+            float sin = axis.Length;
+            if (sin > 1e-6f)
+            {
+                _lookCarryAxis = axis / sin;
+                _lookCarryAngle = MathF.Atan2(sin, Vector3.Dot(aim, ahead));
+                aim = ahead;
+            }
+        }
+        else if (phase > 0 && _lookHave0 && _lookHave1)
         {
             Vector3 axis = Vector3.Cross(_lookGun0, _lookGun1);
             float sin = axis.Length, angle = MathF.Atan2(sin, Vector3.Dot(_lookGun0, _lookGun1));
@@ -80,9 +104,11 @@ internal sealed partial class CampaignRenderer
         _lookEye = world.Row3.Xyz;
         _lookCarry = carry;
         Vector3 pos = world.Row3.Xyz + carry, fwd = -world.Row2.Xyz.Normalized(), up = world.Row1.Xyz.Normalized();
+        // turned level (pitch, then yaw about the world's up), not along the shortest arc: that rolled the picture when
+        // looking low (owner 2026-11-22, finRatman "the camera is rocking around when turning"; TurnLevel)
         Vector3 turnAxis = Vector3.Cross(facing, aim);
         float turnSin = turnAxis.Length;
-        if (turnSin > 1e-6f)
+        if (turnSin > 1e-6f && !TurnLevel(facing, aim, 1, ref fwd, ref up))
         {
             turnAxis /= turnSin;
             float turn = MathF.Atan2(turnSin, Vector3.Dot(facing, aim));
@@ -92,6 +118,44 @@ internal sealed partial class CampaignRenderer
         view = Matrix4.LookAt(pos, pos + fwd, up);
         _lookOn = true;
         return true;
+    }
+
+    // the aim the next step will get so far, in MphRead's mouse units (BuildInput's sum, looked at, not taken): the stick's
+    // push now for the picture's share of the step, the mouse's and the gyro's waiting turn
+    System.Numerics.Vector2 LookPendingAim(float phase)
+    {
+        var d = System.Numerics.Vector2.Zero;
+        if (_lookStick) d += StickAim(Pad) * phase;
+        if (_lookMouse) d += PointerAim(Pad.PeekAim());
+        IGyroAimSource? g = _gyro;
+        if (_lookGyroScale > 0 && g != null && g.Running) d += MphRecomp.Input.GyroAim.ToMphAim(g.Aim.PeekDegrees() * _lookGyroScale);
+        return float.IsFinite(d.X) && float.IsFinite(d.Y) ? d : default;
+    }
+
+    // the aim turned by mouse units d by the game's own rule (PlayerInput.UpdateAimY, then UpdateAimX)
+    static Vector3 LookPreviewAim(PlayerEntity main, Vector3 aim, System.Numerics.Vector2 d)
+    {
+        if (d == System.Numerics.Vector2.Zero) return aim;
+        float factor = main.ZoomAimFactor();
+        float pitch = -d.Y / 4f * factor * (main.Controls.InvertAimY ? -1 : 1);
+        float yaw = -d.X / 4f * factor * (main.Controls.InvertAimX ? -1 : 1);
+        if (main.HostSeated)
+        {
+            // Shooting Gallery's turret seat: only the turn the seat will take (none until it's under control, none past
+            // the barrel's limits; PlayerEchoesSeat.cs), else the pictures turn and each step puts them back (owner 11-21)
+            Vector2 seat = main.HostSeatPreviewTurn(yaw, pitch);
+            yaw = seat.X;
+            pitch = seat.Y;
+        }
+        else
+        {
+            float now = MathHelper.RadiansToDegrees(MathF.Asin(Math.Clamp(aim.Y, -1f, 1f)));
+            pitch = Math.Clamp(now + pitch, -85, 85) - now;
+        }
+        Vector3 side = Vector3.Cross(aim, Vector3.UnitY);
+        if (pitch != 0 && side.LengthSquared > 1e-8f) aim = Rotate(aim, side.Normalized(), MathHelper.DegreesToRadians(pitch));
+        if (yaw != 0) aim = Rotate(aim, Vector3.UnitY, MathHelper.DegreesToRadians(yaw));
+        return aim.Normalized();
     }
 
     const float LookCullMargin = 0.15f; // radians (~9 degrees): the walk's nod, the eye's carry

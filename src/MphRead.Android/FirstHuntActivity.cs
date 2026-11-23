@@ -82,6 +82,7 @@ public class FirstHuntActivity : Activity
         base.OnPause();
         _view.OnPause();
         _renderer.Pause();
+        MphRecomp.Frontend.FrontendSession.CloudFlush("app paused");
     }
 
     protected override void OnResume()

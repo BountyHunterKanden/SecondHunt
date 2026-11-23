@@ -15,7 +15,13 @@ namespace MphRecomp.Multiplayer
     {
         // an arena only some devices have (by room name; an Echoes room counts even where it isn't imported)
         public static bool IsExtra(string? arena)
-            => arena != null && (EchoesArena.IsEchoesRoom(arena) || FirstHuntArena.IsFirstHuntRoom(arena) || MatchArenas.Find(arena) is { Id: > MatchArenas.LastId });
+            => arena != null && (IsShared(arena) || EchoesArena.IsEchoesRoom(arena) || FirstHuntArena.IsFirstHuntRoom(arena) || MatchArenas.Find(arena) is { Id: > MatchArenas.LastId });
+
+        // an arena the host sends to a joiner that lacks it (no refusal: START waits until the joiner has it)
+        private static bool IsShared(string arena)
+        {
+            return false;
+        }
 
         private static HashSet<string>? s_owned;
         private static long s_ownedAt;
@@ -42,6 +48,8 @@ namespace MphRecomp.Multiplayer
         public static bool AnyOwned => Owned().Count > 0;
 
         public static bool Have(string arena) => !IsExtra(arena) || Owned().Contains(arena);
+        // a game a joiner can go in: Have, or an arena the host sends it (IsShared)
+        public static bool CanJoin(string arena) => IsShared(arena) || Have(arena);
 
         // Retail arenas that became playable after some builds shipped (2026-10-21 hotfix: Stasis Bunker, room 119, table
         // name "E3 FIRST HUNT"; MatchArenas stopped at 118 before it). LAN only compares the sim version, so an older joiner
@@ -57,7 +65,9 @@ namespace MphRecomp.Multiplayer
 
         // the arena's name for messages ("spires")
         public static string Label(string arena)
-            => (MatchArenas.Find(arena)?.InGameName ?? EchoesArena.Find(arena)?.InGameName ?? FirstHuntArena.Find(arena)?.InGameName ?? arena).ToLowerInvariant();
+        {
+            return (MatchArenas.Find(arena)?.InGameName ?? EchoesArena.Find(arena)?.InGameName ?? FirstHuntArena.Find(arena)?.InGameName ?? arena).ToLowerInvariant();
+        }
 
         // the JOIN message's last field: this device's extra arenas. Optional, so it needs no protocol bump: an older host
         // ignores it, and a JOIN without it (an older joiner) reads as null = no extra arenas
@@ -79,7 +89,7 @@ namespace MphRecomp.Multiplayer
 
         // why a joiner with these arenas can't have this arena, or null
         public static string? Refusal(IReadOnlyCollection<string>? owned, string arena)
-            => Has(owned, arena) ? null
+            => Has(owned, arena) || IsShared(arena) ? null
             : IsLate(arena) ? $"this game is in {Label(arena)}, which your version of the game can't play. update the game to play it"
             : $"this game is in {Label(arena)}, an arena you don't have. import {(FirstHuntArena.IsFirstHuntRoom(arena) ? "metroid prime hunters: first hunt" : "metroid prime 2: echoes")} on import games to play it";
     }

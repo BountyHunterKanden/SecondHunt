@@ -1,6 +1,7 @@
 using System.Text;
 using Android.Content;
 using Android.Runtime;
+using LogFormat = MphRecomp.App.Platform.LogFormat;
 
 namespace MphRecomp.App;
 
@@ -26,6 +27,24 @@ public class MphApp : Application
         MphRecomp.Frontend.RecompMenus.PadConnected = MatchTouchOverlay.HasGameController; // (the settings tabs' L1 / R1)
         MphRecomp.Config.RecompSettings.AppId = PackageName ?? MphRecomp.Config.RecompSettings.AppId;
         InstallUpdateHost();
+        // dev builds: `adb push` a one-line test_server.txt (a test hub's ws:// URL) into the external files dir and the
+        // online menus use that hub instead of the public one (the netcode phase tests, 11-13); the public app never reads it
+        if (!BuildFlags.Public) MphRecomp.Frontend.RecompMenus.OnlineServerOverride = TestServer();
+        CrashLog.LogRun(this); // the log's MPHRun lines: run id, build, device, ROM, settings (log parity 11-16)
+    }
+
+    string? TestServer()
+    {
+        try
+        {
+            string path = Path.Combine(GetExternalFilesDir(null)?.AbsolutePath ?? FilesDir!.AbsolutePath, "test_server.txt");
+            if (!File.Exists(path)) return null;
+            string url = File.ReadAllText(path).Trim();
+            if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || (uri.Scheme != "ws" && uri.Scheme != "wss")) return null;
+            Android.Util.Log.Info("MPHOnline", "test server " + url);
+            return url;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
     // RECOMP SETTINGS > UPDATES (Core Update/): this build's version and its installer (AndroidUpdater)
@@ -78,6 +97,8 @@ public static class CrashLog
     const int Keep = 10;
     static string? _dir;
     static string _header = "";
+    static string _app = "(version unknown)", _system = "";
+    static string? _gameDir, _settingsPath;
     static Exception? _last;
     static int _writing;
 
@@ -89,6 +110,9 @@ public static class CrashLog
         {
             _dir = Path.Combine(context.GetExternalFilesDir(null)?.AbsolutePath ?? context.FilesDir!.AbsolutePath, "crash");
             _header = Header(context);
+            string ext = context.GetExternalFilesDir(null)?.AbsolutePath ?? context.FilesDir!.AbsolutePath;
+            _gameDir = context.FilesDir?.AbsolutePath;
+            _settingsPath = Path.Combine(ext, "recomp_settings.json");
         }
         catch (Exception e) { Android.Util.Log.Warn(Tag, "crash log not set up: " + e.Message); }
         // the same exception can arrive through both: the JNI boundary first (a throw inside a Java callback such as
@@ -98,6 +122,20 @@ public static class CrashLog
             Write(e.ExceptionObject as Exception, e.IsTerminating ? "unhandled" : "unhandled, not terminating");
         // not fatal (the runtime ignores these): log only
         TaskScheduler.UnobservedTaskException += (_, e) => Android.Util.Log.Warn(Tag, "unobserved task exception: " + e.Exception);
+    }
+
+    // the run's MPHRun lines in its log (LogFormat: the same lines as Windows), once the app layer's log is up
+    public static void LogRun(Context context)
+    {
+        try { LogFormat.LogRun(_app, _system, _gameDir, _settingsPath); }
+        catch (Exception e) { Android.Util.Log.Warn(Tag, "run lines not written: " + e.Message); }
+    }
+
+    // a report's first lines: what it is, when, the run
+    static void Title(StringBuilder sb, string what)
+    {
+        sb.AppendLine($"MPH Recomp {what}, {LogFormat.Stamp()}");
+        sb.AppendLine($"run: {LogFormat.RunId}, started {LogFormat.Stamp(LogFormat.Started)}");
     }
 
     // the newest report's path, or null
@@ -180,8 +218,16 @@ public static class CrashLog
     public static string LogReport()
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"MPH Recomp log, {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz} (shared by the player, no crash)");
+        Title(sb, "log (shared by the player, no crash)");
         sb.Append(_header);
+        try
+        {
+            foreach (string line in LogFormat.RunLines(_app, _system, _gameDir, _settingsPath).Skip(3))
+            {
+                sb.AppendLine(line); // rom and settings, as they are now
+            }
+        }
+        catch (Exception e) { sb.AppendLine("settings: (unreadable: " + e.Message + ")"); }
         // the whole run from the app's log file (11-04: logcat's shared buffer had dropped the start of a match by the
         // time SHARE LOG was tapped); logcat's last lines when there's no file
         string? whole = AndroidFileLog.ReadAll();
@@ -232,7 +278,7 @@ public static class CrashLog
             _last = ex;
             System.IO.Directory.CreateDirectory(_dir);
             var sb = new StringBuilder();
-            sb.AppendLine($"MPH Recomp crash report, {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz}");
+            Title(sb, "crash report");
             sb.AppendLine($"kind: {kind}; thread: {Thread.CurrentThread.Name ?? "(unnamed)"} #{Environment.CurrentManagedThreadId}");
             sb.Append(_header);
             sb.AppendLine().AppendLine(ex.ToString());
@@ -259,12 +305,16 @@ public static class CrashLog
             Android.Content.PM.PackageInfo info = OperatingSystem.IsAndroidVersionAtLeast(33)
                 ? context.PackageManager!.GetPackageInfo(name, Android.Content.PM.PackageManager.PackageInfoFlags.Of(0L))!
                 : context.PackageManager!.GetPackageInfo(name, 0)!;
-            sb.AppendLine($"app: {name} {info.VersionName} ({info.LongVersionCode})");
+            _app = $"{name} {info.VersionName} (vc {info.LongVersionCode}, {(BuildFlags.Public ? "public" : "dev")} build)";
         }
-        catch { sb.AppendLine("app: (version unknown)"); }
-        sb.AppendLine($"device: {Android.OS.Build.Manufacturer} {Android.OS.Build.Model} ({Android.OS.Build.Device}, {Android.OS.Build.Hardware})");
-        sb.AppendLine($"android: {Android.OS.Build.VERSION.Release} (API {(int)Android.OS.Build.VERSION.SdkInt}), "
-            + $"abis {string.Join(",", Android.OS.Build.SupportedAbis ?? Array.Empty<string>())}");
+        catch { }
+        sb.AppendLine("app: " + _app);
+        string device = $"{Android.OS.Build.Manufacturer} {Android.OS.Build.Model} ({Android.OS.Build.Device}, {Android.OS.Build.Hardware})";
+        string android = $"{Android.OS.Build.VERSION.Release} (API {(int)Android.OS.Build.VERSION.SdkInt}), "
+            + $"abis {string.Join(",", Android.OS.Build.SupportedAbis ?? Array.Empty<string>())}";
+        sb.AppendLine("device: " + device);
+        sb.AppendLine("android: " + android);
+        _system = $"{device}, Android {android}, {Environment.ProcessorCount} CPUs";
         return sb.ToString();
     }
 

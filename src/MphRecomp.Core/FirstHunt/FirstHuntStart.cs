@@ -29,6 +29,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.NetClient = false;
             PlayerEntity.HostAnyShieldWall = false;
             PlayerEntity.HostSevenWeaponSlots = false;
+            PlayerEntity.HostEightWeaponSlots = false;
             PlayerEntity.HostBotTickPace = true;
             PlayerEntity.HostBotDropOff = false;
             PlayerEntity.HostBotSteadyAim = false;
@@ -54,6 +55,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotItemNoGain = false;
             PlayerEntity.HostBotNodeOccupied = false;
             PlayerEntity.HostPickupEquipRaise = false; // (the game's pickup equip: a match's rule, MatchStart)
+            PlayerEntity.HostPickupOneTaker = false; // (the game's pickup check: a match's rule, MatchStart)
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = false;
@@ -79,7 +81,7 @@ namespace MphRecomp.Campaign
             PlayerEntity me = PlayerEntity.Players[0];
             me.IsBot = false;
             me.HostRemote = false;
-            me.HostShieldWall = me.HostWallCling = me.HostHoverWalk = me.HostBallJump = me.HostAltHop = me.HostAltCamMove = me.HostHyperBall = me.HostScoutDrone = false;
+            me.HostShieldWall = me.HostWallCling = me.HostHoverWalk = me.HostBallJump = me.HostAltHop = me.HostAltCamMove = me.HostHyperBall = me.HostScoutDrone = me.HostCrawl = false;
             me.HostSoloUa = false;
             GameState.Nicknames[0] = "Player1";
             // the Regulator is the cart's mode 1, two players: slot 1 an AI Samus (the +0x42c player: 3 tanks, PlayerFirstHunt)
@@ -90,7 +92,7 @@ namespace MphRecomp.Campaign
             {
                 scene.AddPlayer(Hunter.Samus, recolor: 1);
                 PlayerEntity cpu = PlayerEntity.Players[1];
-                cpu.HostShieldWall = cpu.HostWallCling = cpu.HostHoverWalk = cpu.HostBallJump = cpu.HostAltHop = cpu.HostAltCamMove = cpu.HostHyperBall = cpu.HostScoutDrone = false;
+                cpu.HostShieldWall = cpu.HostWallCling = cpu.HostHoverWalk = cpu.HostBallJump = cpu.HostAltHop = cpu.HostAltCamMove = cpu.HostHyperBall = cpu.HostScoutDrone = cpu.HostCrawl = false;
                 cpu.HostHyperBallCorruption = cpu.HostSoloUa = false;
                 cpu.HostAffinityBeam = null;
                 cpu.HostHealthPercent = 100;
@@ -136,6 +138,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.MaxPlayers = PlayerEntity.VanillaMaxPlayers;
             PlayerEntity.HostAnyShieldWall = false;
             PlayerEntity.HostSevenWeaponSlots = false;
+            PlayerEntity.HostEightWeaponSlots = false;
             PlayerEntity.HostBotTickPace = true;
             PlayerEntity.HostBotDropOff = false;
             PlayerEntity.HostBotSteadyAim = false;
@@ -161,6 +164,7 @@ namespace MphRecomp.Campaign
             PlayerEntity.HostBotItemNoGain = false;
             PlayerEntity.HostBotNodeOccupied = false;
             PlayerEntity.HostPickupEquipRaise = false; // (the game's pickup equip: a match's rule, MatchStart)
+            PlayerEntity.HostPickupOneTaker = false; // (the game's pickup check: a match's rule, MatchStart)
             PlayerEntity.HostBotEdgeJump = false;
             PlayerEntity.HostBotEdgePadJump = false;
             PlayerEntity.HostBotReleaseControls = false;
@@ -195,7 +199,7 @@ namespace MphRecomp.Campaign
                 PlayerEntity player = PlayerEntity.Players[i];
                 // (the seats are reused from match to match: none of Second Hunt's extras)
                 player.HostShieldWall = player.HostWallCling = player.HostHoverWalk = player.HostBallJump = player.HostAltHop = player.HostAltCamMove = false;
-                player.HostHyperBall = player.HostHyperBallCorruption = player.HostScoutDrone = player.HostSoloUa = false;
+                player.HostHyperBall = player.HostHyperBallCorruption = player.HostScoutDrone = player.HostCrawl = player.HostSoloUa = false;
                 player.HostWallClingJumpRule = player.HostDronePadArc = player.HostPirateBlasterKey = true;
                 player.HostTeamHitsIgnored = true;
                 player.HostAffinityBeam = null;

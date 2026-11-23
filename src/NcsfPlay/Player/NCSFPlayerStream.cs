@@ -46,6 +46,23 @@ public class NCSFPlayerStream : Stream
     public NCSFCommon.TagList Tags => this.ncsf.Tags;
     public float VolumeModification { get; set; }
 
+    // ncsf-change: an extra sound mixed on top of the finished output, clocked by the song's sequence ticks (Second
+    // Hunt's holiday sleigh bells). genFrames counts every frame generated since Load (a tick takes effect from the
+    // frame after it ran); droppedFrames is the leading silence the start-of-song skip threw away.
+    long genFrames, droppedFrames;
+    IStreamOverlay? overlay;
+
+    /// <summary>ncsf-change: set between Reads, from the thread that reads.</summary>
+    public IStreamOverlay? Overlay
+    {
+        get => this.overlay;
+        set
+        {
+            this.overlay = value;
+            value?.Restart(this.player.SequenceTicks, this.genFrames);
+        }
+    }
+
     // ncsf-change: optional output stage, all off by default (= hardware behaviour).
     /// <summary>
     /// Cutoff of a one-pole high-pass on the output, 0 = off. Some samples carry a DC offset, which the DS's analog
@@ -171,6 +188,7 @@ public class NCSFPlayerStream : Stream
         for (int smpl = 0; smpl < samples; ++smpl)
         {
             ++this.samplesIntoPlayback;
+            ++this.genFrames;
 
             // one output sample from every sounding voice (muted voices still advance)
             (float leftChannel, float rightChannel) = this.player.MixFrame(this.channelMutes);
@@ -195,6 +213,7 @@ public class NCSFPlayerStream : Stream
             if (tick)
             {
                 this.player.RunTick();
+                this.overlay?.Tick(this.player.SequenceTicks, this.genFrames);
                 this.samplesIntoPlayback = 0;
                 if (smoothing)
                     this.player.BeginRamps(this.samplesPerTick);
@@ -222,6 +241,8 @@ public class NCSFPlayerStream : Stream
                 this.player.SetWaveArchive(i, this.sdat.SWARs[j++]);
         // One tick at the start just to skip having a bunch of silent samples before the first player tick.
         this.player.RunTick();
+        this.genFrames = this.droppedFrames = 0;
+        this.overlay?.Restart(this.player.SequenceTicks, 0);
         this.secondsPerSample = 1.0f / this.sampleRate;
         this.samplesPerTick = (int)float.Ceiling(Player.TickSeconds / this.secondsPerSample);
 
@@ -252,6 +273,9 @@ public class NCSFPlayerStream : Stream
         this.tickPhase *= s;
         this.samplesIntoPlayback = (int)Math.Round(this.samplesIntoPlayback * s);
         this.Position = (long)Math.Round((this.Position >> 3) * s) << 3;
+        this.genFrames = (long)Math.Round(this.genFrames * s);
+        this.droppedFrames = (long)Math.Round(this.droppedFrames * s);
+        this.overlay?.Rescale(s);
         this.detectedSilenceSample = (uint)(this.detectedSilenceSample * s);
         this.sampleRate = sampleRate;
         this.interpolation = interpolation;
@@ -391,10 +415,13 @@ public class NCSFPlayerStream : Stream
                     {
                         bufFloat[((pos + skipOffset) << 1)..].CopyTo(bufFloat[pos..]);
                         pos += remain - skipOffset;
+                        this.droppedFrames += skipOffset;
                     }
                     else
                         pos += remain;
                 }
+                else
+                    this.droppedFrames += remain;
             }
             else
                 pos += remain;
@@ -429,6 +456,14 @@ public class NCSFPlayerStream : Stream
                 bufFloat[2 * ofs] = float.Clamp(bufFloat[2 * ofs] * this.VolumeModification, -1, 1);
                 bufFloat[2 * ofs + 1] = float.Clamp(bufFloat[2 * ofs + 1] * this.VolumeModification, -1, 1);
             }
+
+        // ncsf-change: the overlay goes on after the output stage, lined up with the frames the limiter's look-ahead
+        // delay line is letting out now
+        if (this.overlay != null && bufSize > 0)
+        {
+            long delay = this.Limiter && this.limitLength != 0 ? this.limitLength - 1 : 0;
+            this.overlay.Mix(bufFloat[..(bufSize << 1)], currentSample + this.droppedFrames - delay, this.sampleRate);
+        }
 
         // Fading
         if (!this.playForever && this.fadeSample != 0 && currentSample + bufSize >= this.lengthSample)

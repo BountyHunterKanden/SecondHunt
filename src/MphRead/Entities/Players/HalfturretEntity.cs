@@ -293,7 +293,10 @@ namespace MphRead.Entities
             {
                 _timeSinceDamage++;
             }
-            if (Owner == PlayerEntity.Main)
+            // recomp: HudViewer, was Owner == Main. The message queue is every player's (static), so a replay watching another
+            // seat, or any served match's replay (Main = seat 0, PlayerServedHost.cs), showed seat 0's turret energy on every
+            // seat (bug report 2026-11-22). Drawing only
+            if (Owner.HudViewer)
             {
                 string message = Text.Strings.GetHudMessage(233); // turret energy: %d
                 if (Owner.HostScoutDrone)

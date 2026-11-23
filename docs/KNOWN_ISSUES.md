@@ -55,13 +55,13 @@ These were reported and are being compared with the DS game.
 - Flickering lava texture in Processor Core
 - The Fault Line shock barrier is invisible and can be walked through
 - The Docking Bay floating platforms slide you backward
-- Some skybox parts spin at different speeds
-- Council Chamber: what the shot switch triggers, and whether the bounce pad should always be there
-- The small red sniper targets (hit with the Imperialist) don't stay folded
 - Frame drops in Transfer Lock
 - Which sounds play when you arrive through a portal (the Sic Transit escape, Elder Passage)
-- Feel: the Judicator's fire rate, the Imperialist's auto-zoom, Slench's hit box, and whether the Volt Driver's
-  charged shot should distort your visor
+- Feel: the Imperialist's auto-zoom
+
+Checked and the same as the DS game: the Docking Bay skybox layers spinning at different speeds, the Council
+Chamber shot switch (it turns on a bounce pad that starts off), the sniper targets not staying folded, the
+Judicator's fire rate, Slench's hit box, and the Volt Driver's charged shot distorting your visor.
 
 ## Devices
 

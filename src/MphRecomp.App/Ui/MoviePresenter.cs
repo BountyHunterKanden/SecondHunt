@@ -125,7 +125,6 @@ void main() { color = vec4(texture(tex, vUv).rgb, 1.0); }";
         GLES30.GlUseProgram(_program);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
         GLES30.GlBindSampler(0, 0); // a renderer may leave its own sampler object bound on unit 0
-        GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_program, "tex"), 0);
         GLES30.GlBindVertexArray(_vao);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _vbo);
         float aspect = width / (float)Math.Max(1, height);

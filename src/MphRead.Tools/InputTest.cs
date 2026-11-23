@@ -128,6 +128,55 @@ namespace MphRead
             for (float t = 0.16f, last = 0; t <= 1; t += 0.01f) { float pu = StickCurve.Push(t); rising &= pu >= last; last = pu; }
             Check("curve: push rises with the tilt, whole from Edge", rising && StickCurve.Level(StickCurve.Push(StickCurve.Edge)) == 0);
 
+            // CONTROLS > AIM > STICKS (StickShape.cs): the defaults are the old fixed numbers exactly
+            var defaults = new MphRecomp.Config.RecompSettings();
+            StickShape.Load(defaults);
+            Check("sticks: default dead zones are the old 0.15f", StickShape.LeftDeadZone == 0.15f && StickShape.RightDeadZone == 0.15f && StickCurve.DeadZone == 0.15f);
+            bool sameCut = true;
+            for (int i = -1000; i <= 1000; i++)
+            {
+                float v = i / 1000f, old = Math.Abs(v) < 0.15f ? 0f : v;
+                sameCut &= StickShape.Left(v) == old && StickShape.Right(v) == old;
+            }
+            sameCut &= StickShape.Left(0.15f) == 0.15f && StickShape.Left(0.14999999f) == 0 && StickShape.Right(-0.15f) == -0.15f;
+            Check("sticks: default per-axis cut = the hosts' old Dead()", sameCut);
+            Check("sticks: default aim curve is LINEAR, power 1", defaults.AimCurve == StickShape.Linear && StickShape.AimPower == 1);
+            bool same = true;
+            for (float ax = -1; ax <= 1; ax += 0.05f)
+            {
+                for (float ay = -1; ay <= 1; ay += 0.05f) { float x = ax, y = ay; StickShape.ShapeAim(ref x, ref y); same &= x == ax && y == ay; }
+            }
+            Check("sticks: LINEAR leaves the aim stick untouched", same);
+            foreach (string curve in StickShape.AimCurves)
+            {
+                float p = StickShape.Power(curve), lastM = 0;
+                bool mono = true;
+                for (float m = 0.01f; m < 1; m += 0.01f) { float x = m * 0.6f, y = m * 0.8f; StickShape.ShapeAim(ref x, ref y, p); float n = MathF.Sqrt(x * x + y * y); mono &= n >= lastM && Near(x / y, 0.75f); lastM = n; }
+                float fx = 0.6f, fy = 0.8f;
+                StickShape.ShapeAim(ref fx, ref fy, p);
+                Check($"sticks: {curve} rises with the tilt, keeps the direction and full tilt", mono && fx == 0.6f && fy == 0.8f);
+            }
+            var tuned = new MphRecomp.Config.RecompSettings { LeftStickDeadZone = 5, RightStickDeadZone = 25, AimCurve = "precise" };
+            StickShape.Load(tuned);
+            Check("sticks: own dead zones per stick", StickShape.Left(0.1f) == 0.1f && StickShape.Right(0.2f) == 0 && StickShape.Right(0.3f) == 0.3f && StickCurve.DeadZone == 0.05f);
+            StickShape.Load(new MphRecomp.Config.RecompSettings { LeftStickDeadZone = 7, AimCurve = "bogus" });
+            Check("sticks: hand-edited values play as the defaults", StickShape.LeftDeadZone == 0.15f && StickShape.AimPower == 1);
+            StickShape.Load(defaults);
+
+            // the hold-or-toggle rows (HoldToggle): HOLD passes the button through; TOGGLE flips on each press
+            var latch = new HoldToggle();
+            bool[] presses = { false, true, true, false, true, false, false, true, true, false };
+            bool hold = true;
+            foreach (bool down in presses) hold &= latch.Next(down, false) == down;
+            Check("toggle: HOLD = the button as held", hold);
+            latch = new HoldToggle();
+            bool[] want = { false, true, true, true, false, false, false, true, true, true };
+            bool tog = true;
+            for (int i = 0; i < presses.Length; i++) tog &= latch.Next(presses[i], true) == want[i];
+            Check("toggle: TOGGLE flips on each press, stays between", tog);
+            latch.Clear();
+            Check("toggle: cleared = off, a button still down must be pressed again", !latch.Next(true, true) && !latch.Next(false, true) && latch.Next(true, true));
+
             Console.WriteLine($"\nINPUT TESTS: {_pass} passed, {_fail} failed  =>  {(_fail == 0 ? "ALL GREEN" : "FAILURES")}");
             Environment.ExitCode = _fail == 0 ? 0 : 1;
         }

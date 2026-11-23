@@ -26,6 +26,7 @@ namespace MphRecomp.Campaign
             public FhEnemySpawnEntityData Fh { get; init; }
             public string SourceRoom { get; init; } = "";
             public Hunter? Hunter { get; init; }        // a hunter bot (Type is EnemyType.Hunter; H2, 11.2 item 7)
+            public string? Retro { get; init; }         // an imported Retro enemy's folder name (E1, Campaign/Retro/RetroEnemies.cs)
         }
 
         // the hunters H2 can place: a hunter spawner (EnemyType.Hunter) whose bot is that hunter; the template is a story
@@ -58,12 +59,35 @@ namespace MphRecomp.Campaign
         static List<Entry>? _entries;
         public static string? LastError { get; private set; }
 
-        public static IReadOnlyList<Entry> Entries => _entries ??= Build();
+        static List<Entry>? _all;
+
+        // the ROM's templates, then the imported Retro enemies that are usable (E1; rebuilt when RetroEnemies.Root changes)
+        public static IReadOnlyList<Entry> Entries => _all ??= WithRetro(_entries ??= Build());
+
+        public static void ResetRetro() => _all = null;
+
+        static List<Entry> WithRetro(List<Entry> rom)
+        {
+            var list = new List<Entry>(rom);
+            foreach (string name in Retro.RetroEnemies.Known)
+            {
+                if (Retro.RetroEnemies.Usable(name))
+                {
+                    string id = Retro.RetroEnemies.IdOf(name);
+                    list.Add(new Entry { Id = id, Label = "MP2 " + id[4..], Retro = name, SourceRoom = "(imported)" });
+                }
+            }
+            return list;
+        }
 
         public static Entry? Find(string? id) => id == null ? null : Entries.FirstOrDefault(e => e.Id == id);
 
         // forget the templates (a test after an import change)
-        public static void Reset() => _entries = null;
+        public static void Reset()
+        {
+            _entries = null;
+            _all = null;
+        }
 
         public static string SplitWords(string s)
         {
@@ -167,6 +191,16 @@ namespace MphRecomp.Campaign
         public static Vulnerability VulnerabilityOf(Entry entry, EnemyInstanceEntity? live = null)
         {
             var beams = new bool[8];
+            if (entry.Retro != null)
+            {
+                // its own vulnerabilities (EchoesSplinter.Family: every beam counts as Power, missiles as Missile)
+                Retro.RetroEnemyConfig? c = Retro.RetroEnemies.Config(entry.Retro);
+                bool power = c == null || Retro.EchoesSplinter.VulnerabilityOf(c, Retro.EchoesSplinter.VPower) > 0;
+                Array.Fill(beams, power);
+                beams[(int)BeamType.Missile] = c == null || Retro.EchoesSplinter.VulnerabilityOf(c, Retro.EchoesSplinter.VMissile) > 0;
+                bool bomb = c == null || Retro.EchoesSplinter.VulnerabilityOf(c, Retro.EchoesSplinter.VBomb) > 0;
+                return new Vulnerability(beams, bomb, Contact: false);
+            }
             if (entry.FirstHunt || entry.Hunter != null || entry.Type == EnemyType.Hunter)
             {
                 Array.Fill(beams, true);

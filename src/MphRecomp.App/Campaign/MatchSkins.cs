@@ -254,6 +254,7 @@ internal sealed partial class CampaignRenderer
             SuitIce.Reference("Samus_lod0");
             SuitIce.Reference("Nox_lod0");
         }
+        StartRetroEnemyLoads(); // imported Retro enemies Hard Mode can place (MatchRetroEnemies.cs)
         string? hdRoot = HdRoot;
         if (hdRoot == null) return;
         string? bodiesRoot = BodiesRoot;
@@ -444,7 +445,7 @@ internal sealed partial class CampaignRenderer
                 ? new Vector3(sc.R, sc.G, sc.B) : null;
             p.HostCharacterName = p.SlotIndex >= 0 && p.SlotIndex < _seatName.Length ? _seatName[p.SlotIndex] : null;
             p.HostPortrait = SeatPortrait(p);
-            p.HostOwnAlt = s?.HasBall == true || on && (DroneOf(p) != null || LockjawOf(p) != null);
+            p.HostOwnAlt = s?.HasBall == true || on && (DroneOf(p) != null || LockjawOf(p) != null || CrawlOf(p) != null);
             // a native body's own morph ball trail colour; the Dark Samus look-alike / stand-in takes her ball's blue too
             // (trail, morph sphere, boost glow: owner 10-27, it had gone back to MPH's yellow)
             p.HostTrailColor = on ? BodyOf(p)?.Clips.Trail
@@ -467,13 +468,18 @@ internal sealed partial class CampaignRenderer
             if (p != null && BodyOf(p) is CampaignRetroBody b) b.Tick(p);
             if (p != null) TickDrone(p);
             if (p != null) TickLockjaw(p);
+            if (p != null) TickCrawl(p); // Brawl Zero Suit Samus's army crawl (MatchCrawl.cs)
         }
+        TickRetroEnemies(); // imported Retro enemies Hard Mode placed (MatchRetroEnemies.cs)
         TickBlasterFx(); // the Pirate Blaster's shots in Prime 1's look (CampaignRenderer.BlasterFx.cs; its systems step in TickDroneFx)
         TickHyperBeamFx(); // the Hyper Beam's shots in Corruption's look (CampaignRenderer.HyperBeamFx.cs; its systems step in TickDroneFx)
         TickTurretFx(); // Shooting Gallery turret's Echoes effects (CampaignRenderer.TurretFx.cs; its systems step in TickDroneFx)
         TickGrappleFx(); // the grapple beam in Echoes' look and sound (CampaignRenderer.GrappleFx.cs; its systems step in TickDroneFx)
         TickSpiderFx(); // the spider ball's Echoes loop and bolt (CampaignRenderer.SpiderFx.cs)
         TickPillarFx(); // Mining Plaza's collapsing pillars in Echoes' look and sound (CampaignRenderer.PillarFx.cs; its systems step in TickDroneFx)
+        TickPrime1Fx(); // Prime 1 rooms' snow, splashes and visor runoff (CampaignRenderer.Prime1Fx.cs)
+        TickHolidaySnow(); // HOLIDAY MODE's falling snow (CampaignRenderer.HolidaySnow.cs)
+        TickQuarryFx(); // Main Quarry's crane and wall sounds, dust and pieces (CampaignRenderer.QuarryFx.cs)
         TickDroneFx(); // the Scout Drone's Prime 1 effects (CampaignRenderer.DroneFx.cs)
         TickDroneFallback(); // ... or MPH's own where the import has none (CampaignRenderer.DroneFallback.cs)
         ChainHyperBeamImpact(); // the Hyper Beam's hits (after the two above set HostImpact, before the Paralyzer chains in)
@@ -508,15 +514,24 @@ internal sealed partial class CampaignRenderer
     void DrawSkins(Scene scene, SuitPass pass)
     {
         DrawArmCannon(scene, pass); // the main player's first-person arm cannon (MatchArmCannon.cs)
+        PlaceBlasterFx(scene, pass); // the Pirate Blaster bolts' halos placed with their trails (CampaignRenderer.BlasterFx.cs)
+        DrawPrime1Fx(scene, pass); // Prime 1 rooms' snow (CampaignRenderer.Prime1Fx.cs)
+        DrawHolidaySnow(scene, pass); // HOLIDAY MODE's falling snow (CampaignRenderer.HolidaySnow.cs)
         DrawDroneFx(scene, pass); // the Scout Drone's Prime 1 effects (CampaignRenderer.DroneFx.cs)
         DrawBlasterFx(scene, pass); // the Pirate Blaster shots' swooshes (CampaignRenderer.BlasterFx.cs)
         DrawTurretFx(scene, pass); // the turret slot's Echoes arcs (CampaignRenderer.TurretFx.cs)
         DrawParalyzerFx(scene, pass); // the Paralyzer in Brawl's look (CampaignRenderer.ParalyzerFx.cs)
+        // the Hyper Beam's effects and swooshes under Corruption's Hyper Mode grade (CampaignRenderer.HyperGrade.cs)
+        bool graded = HyperGradeBegin(scene, pass);
+        DrawDroneFx(scene, pass, hyper: true);
+        DrawTurretFx(scene, pass, hyper: true); // ... and its PMUS squares, after the core (Corruption's order)
         DrawHyperBeamFx(scene, pass); // the Hyper Beam shots' swooshes (CampaignRenderer.HyperBeamFx.cs)
+        if (graded) HyperGradeEnd();
         DrawHyperFx(scene, pass); // Dark Samus's Hyper Ball in Corruption's look (CampaignRenderer.HyperFx.cs)
         DrawSpiderFx(scene, pass); // the spider ball's bolt to the track (CampaignRenderer.SpiderFx.cs)
         DrawDroneFallback(scene, pass); // ... or the fallbacks without the import (CampaignRenderer.DroneFallback.cs)
         DrawLookAlikeFx(scene, pass); // Dark Samus look-alike's phazon glow (CampaignRenderer.LookAlikeFx.cs)
+        DrawRetroEnemies(scene, pass); // imported Retro enemies Hard Mode placed (MatchRetroEnemies.cs)
         DrawLockjawFx(scene, pass); // Beyond Sylux's Lockjaw orb (CampaignRenderer.LockjawFx.cs)
         if (_skins.Count == 0 && _bodies.Count == 0 || _host == null || scene != _host.Scene) return;
         bool drew = false;
@@ -556,7 +571,7 @@ internal sealed partial class CampaignRenderer
                         t.HostDamageFlash, t.Owner.CurAlpha); // cloaks with its owner
                     drew = true;
                 }
-                if (p.IsAltForm && (DrawDrone(p, scene, pass) || DrawLockjaw(p, scene, pass)))
+                if (p.IsAltForm && (DrawDrone(p, scene, pass) || DrawLockjaw(p, scene, pass) || DrawCrawl(p, scene, pass)))
                 {
                     drew = true;
                     continue;

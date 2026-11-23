@@ -81,6 +81,10 @@ namespace MphRecomp.Multiplayer.Net
             return TrailerMax;
         }
 
+        // the trailer's length at the start of d (0 = none): what follows it is the next trailer (NetMatchSession.Lives.cs)
+        public static int TrailerLength(ReadOnlySpan<byte> d) => d.Length < TrailerSize || d[0] != TrailerMark ? 0
+            : (d[17] & 2) != 0 && d.Length >= TrailerMax ? TrailerMax : TrailerSize;
+
         public static void ReadTrailer(ReadOnlySpan<byte> d, ref NetInput input)
         {
             if (d.Length < TrailerSize || d[0] != TrailerMark)

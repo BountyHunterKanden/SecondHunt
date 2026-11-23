@@ -55,6 +55,18 @@ internal sealed partial class CampaignRenderer
     // view it starts at BlasterOwnStart of its size and grows to full over its first BlasterOwnGrow units
     const float BlasterOwnStart = 0.2f;
     const float BlasterOwnGrow = 3;
+    // first person, the bolt leaving the gun (owner 2026-11-15, Odin: "the bolts trail behind the gun / lag the muzzle as
+    // they leave it", offline too, far more under a shadow): the drawn path is fixed in the world from the tip at the
+    // shot, but the gun is drawn with the camera, at the step's view (aim view INSTANT turns each picture's view to the
+    // aim, CampaignLookAhead.cs; smooth frames carry the camera on between steps), so while the player turned or strafed
+    // the bolt sat off the muzzle, behind the turn, for the steps it spends catching up near the gun; and its halo (the
+    // particles, placed at the step) fell behind its trails (carried with the shot) between steps. The bolt's glow is
+    // unlit and added on: against a dark gun and room under a shadow it shows fully, where on a bright one it washes out.
+    // Now in the player's own view the bolt leaves on the gun: placed in the gun's frame as drawn this picture (the gun's
+    // move since the shot, and the step's view to the picture's), handed over to its path in the world over its catch-up
+    // (BoltSeen), started at the muzzle where the gun is drawn (HyperGunSeen: another field of view or framing draws the
+    // gun with its own projection), and its halo placed with its trails each picture (PlaceBlasterFx). Draw only: the
+    // shot, where it lands, third person and the other players' bolts are as they were.
     // every bolt's flash the same (release 0.2.0 F4, owner: "the size is inconsistent ... can it just be red?"): the
     // bolt's systems run from one fixed seed (their random sizes alike every shot), and the first-person growth goes by
     // how far the drawn bolt has come from where it was first drawn (not from the sim's spawn point, which sits a varying
@@ -69,6 +81,9 @@ internal sealed partial class CampaignRenderer
         public float CatchUp = BlasterCatchUp; // shorter when it lands nearer (BoltPath): caught up by the landing
         public bool ArmPath;       // the arm-cannon thread's own path (HostDrawShift/HostDrawHide) is set: use it
         public bool OwnView;       // the main player's own shot seen in first person (BlasterOwnStart)
+        public PlayerEntity? Shooter; // own view: whose gun it leaves on (BoltSeen)
+        public Matrix4 Gun0;       // own view: the world to that gun's frame when the shot was first drawn
+        public int Logged;         // dev: pictures logged (DevBoltGap)
         public float Age;
         public Vector3 First;      // where it was first drawn (BoltScale)
         public bool HasFirst;
@@ -226,12 +241,17 @@ internal sealed partial class CampaignRenderer
     // dev only (PC pictures of the shot: SecondHunt.exe with MPH_DEV_BLASTER=1 in its environment, never set on a
     // device, ignored in public builds): every seat is handed the blaster once, at the start (the bots then fire it)
     readonly HashSet<PlayerEntity> _devBlasterGiven = new();
-    int _devBlasterFrame;
+    int _devBlasterFrame, _devBlasterTicks;
     void DevBlasterHands()
     {
         if (MphRecomp.Config.RecompSettings.PublicBuild || Environment.GetEnvironmentVariable("MPH_DEV_BLASTER") != "1") return;
         // MPH_DEV_BLASTER_FIRE=1: the pad's B (a fire button) held, so desktop pictures get the main player's bolts
         if (Environment.GetEnvironmentVariable("MPH_DEV_BLASTER_FIRE") == "1") Pad.Set(PadButton.B, _devBlasterFrame++ % 90 < 70);
+        // MPH_DEV_BLASTER_TURN=n / MPH_DEV_BLASTER_STRAFE=n: the right / left stick held right then left, n steps each
+        // (pictures of the bolts leaving the gun while turning / strafing)
+        int tick = _devBlasterTicks++;
+        if (int.TryParse(Environment.GetEnvironmentVariable("MPH_DEV_BLASTER_TURN"), out int turn) && turn > 0) Pad.Rx = tick / turn % 2 == 0 ? 1 : -1;
+        if (int.TryParse(Environment.GetEnvironmentVariable("MPH_DEV_BLASTER_STRAFE"), out int strafe) && strafe > 0) Pad.Lx = tick / strafe % 2 == 0 ? 1 : -1;
         foreach (PlayerEntity p in PlayerEntity.Players)
         {
             if (p == null || p.Health <= 0 || !_devBlasterGiven.Add(p)) continue;
@@ -245,6 +265,12 @@ internal sealed partial class CampaignRenderer
         Vector3 dir = b.Direction.LengthSquared > 1e-6f ? b.Direction.Normalized() : Vector3.UnitZ;
         var bolt = new BlasterBolt { Spawn = b.SpawnPosition, Age = b.Age, Dir = dir, SimDir = dir };
         bolt.Lead = MathF.Max(0, Vector3.Dot(b.Position - b.SpawnPosition, dir));
+        if (b.Owner is PlayerEntity { IsMainPlayer: true } op && !op.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson))
+        {
+            bolt.OwnView = true;
+            bolt.Shooter = op;
+            bolt.Gun0 = op.GunDrawTransform.Inverted();
+        }
         BoltPath(bolt, b);
         bolt.Pos = BoltDrawn(bolt, b);
         bolt.First = bolt.Pos;
@@ -253,8 +279,7 @@ internal sealed partial class CampaignRenderer
             $"dev: blaster bolt seat {(b.Owner as PlayerEntity)?.SlotIndex} lead {bolt.Lead:0.00} arm {bolt.ArmPath} shift {bolt.Shift.Length:0.00} fade {bolt.FadeAt:0.0} drawn-from-spawn {(bolt.Pos - bolt.Spawn).Length:0.00}"));
         int seed = BlasterSeed;
         // first person: the second part's puff (APS2) would hang right in front of the camera as a big cloud
-        bool ownView = b.Owner is PlayerEntity { IsMainPlayer: true } op && !op.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson);
-        bolt.OwnView = ownView;
+        bool ownView = bolt.OwnView;
         Matrix4 at = BoltFrame(bolt.Dir, bolt.Pos, BoltScale(bolt));
         for (int i = 0; i < cfg.Parts.Count; i++)
         {
@@ -329,6 +354,8 @@ internal sealed partial class CampaignRenderer
             return;
         }
         if (b.Owner is not PlayerEntity p || BlasterTip(p) is not Vector3 tip) return;
+        // the player's own view: the muzzle where the gun is drawn (header: another field of view or framing)
+        if (bolt.OwnView && HyperGunSeen(tip, out Vector3 seen, out _)) tip = seen;
         if ((tip - start).LengthSquared < 0.0025f) return; // already at the tip
         res = new CollisionResult();
         if (CollisionDetection.CheckBetweenPoints(start, tip, TestFlags.Beams, scene, ref res)) return; // tip through a wall
@@ -369,9 +396,79 @@ internal sealed partial class CampaignRenderer
     void EndBolt(BlasterBolt bolt)
     {
         bolt.Live = false;
-        foreach (DroneFxLive fx in bolt.Fx) fx.Sys.Emitting = false;
+        foreach (DroneFxLive fx in bolt.Fx)
+        {
+            fx.Sys.Emitting = false;
+            fx.Ride = null; // left where it stopped
+        }
         foreach (RetroSwoosh w in bolt.Swooshes) w.Emitting = false;
         _blasterDying.Add(bolt);
+    }
+
+    // where a live bolt is drawn in this picture, and along what (header: in the player's own view it leaves on the gun)
+    void BoltSeen(BlasterBolt bolt, BeamProjectileEntity beam, Scene scene, out Vector3 pos, out Vector3 dir)
+    {
+        // smooth frames: carried with its shot (SmoothCarry), as MphRead's own shots are
+        pos = Vector3.TransformPosition(bolt.Pos, SmoothCarry(beam, scene));
+        dir = bolt.Dir;
+        if (BoltRide(bolt, scene) is not Matrix4 ride) return;
+        // on the gun at the muzzle, on its path in the world once it has caught up with the shot (BlasterBolt.CatchUp)
+        float t = Math.Clamp((pos - bolt.First).Length / bolt.CatchUp, 0, 1);
+        float w = 1 - t * t * (3 - 2 * t);
+        if (w <= 0) return;
+        pos = Vector3.Lerp(pos, Vector3.TransformPosition(pos, ride), w);
+        Vector3 on = Vector3.TransformVector(bolt.Dir, ride);
+        if (on.LengthSquared <= 1e-12f) return;
+        Vector3 d = Vector3.Lerp(dir, on.Normalized(), w);
+        if (d.LengthSquared > 1e-12f) dir = d.Normalized();
+    }
+
+    // an own-view bolt's world to where its gun has carried it in this picture (the gun's move since the shot, then the
+    // step's view to the picture's, as the gun is drawn: GunView), or null when the gun isn't drawn from the player's eyes
+    Matrix4? BoltRide(BlasterBolt bolt, Scene scene)
+    {
+        if (!bolt.OwnView || bolt.Shooter is not PlayerEntity p || _host == null || p != _host.Player || !p.IsMainPlayer) return null;
+        if (p.Flags2.TestFlag(PlayerFlags2.DrawnThirdPerson) || p.Health <= 0 || p.IsAltForm || p.IsMorphing || p.IsUnmorphing) return null;
+        if (!RidesCamera(p, scene)) return null;
+        return bolt.Gun0 * p.GunDrawTransform * SmoothCarry(p, scene);
+    }
+
+    // DrawSkins (MatchSkins.cs), before DrawDroneFx: each own-view bolt's systems placed where its trails are drawn in this
+    // picture (BoltSeen), so its halo stays on them (DroneFxLive.Ride); the other bolts' as they were
+    void PlaceBlasterFx(Scene scene, SuitPass pass)
+    {
+        if (pass != SuitPass.Additive || _host == null || scene != _host.Scene || _blasterCfg == null) return;
+        foreach ((BeamProjectileEntity beam, BlasterBolt bolt) in _blasterBolts)
+        {
+            if (!bolt.OwnView || bolt.Fx.Count == 0) continue;
+            BoltSeen(bolt, beam, scene, out Vector3 pos, out Vector3 dir);
+            Matrix4 at = BoltFrame(dir, pos, BoltScale(bolt));
+            foreach (DroneFxLive fx in bolt.Fx) fx.Ride = fx.Sys.Transform.Inverted() * at;
+        }
+    }
+
+    // dev only (MPH_DEV_BLASTER_LOG=1 with MPH_DEV_BLASTER=1, never set on a device, ignored in public builds): an own-view
+    // bolt's first pictures, how far (in half screen heights) its path in the world and where it is drawn are from where
+    // its gun has carried it (BoltRide)
+    static readonly bool DevBlasterLogSet = Environment.GetEnvironmentVariable("MPH_DEV_BLASTER") == "1"
+        && Environment.GetEnvironmentVariable("MPH_DEV_BLASTER_LOG") == "1";
+    static bool DevBlasterLog => DevBlasterLogSet && !MphRecomp.Config.RecompSettings.PublicBuild;
+    void DevBoltGap(BlasterBolt bolt, BeamProjectileEntity beam, Scene scene, Vector3 drawn)
+    {
+        if (bolt.Logged >= 8 || BoltRide(bolt, scene) is not Matrix4 ride) return;
+        bolt.Logged++;
+        Matrix4 proj = scene.PerspectiveMatrix, vp = scene.ViewMatrix * proj;
+        float aspect = MathF.Abs(proj.M11) > 1e-6f ? proj.M22 / proj.M11 : 1;
+        Vector2? Screen(Vector3 at)
+        {
+            Vector4 c = new Vector4(at, 1) * vp;
+            return c.W > 1e-4f ? new Vector2(c.X / c.W * aspect, c.Y / c.W) : null;
+        }
+        Vector3 world = Vector3.TransformPosition(bolt.Pos, SmoothCarry(beam, scene));
+        if (Screen(Vector3.TransformPosition(world, ride)) is not Vector2 gun || Screen(world) is not Vector2 path
+            || Screen(drawn) is not Vector2 seen) return;
+        Log.Info("MPHMatch", FormattableString.Invariant(
+            $"dev: blaster own bolt picture {bolt.Logged} out {(world - bolt.First).Length:0.00} gap path {(path - gun).Length:0.0000} drawn {(seen - gun).Length:0.0000}"));
     }
 
     // DroneFx's HostImpact: a blaster bolt's hit here, the rest the drone's
@@ -436,16 +533,18 @@ internal sealed partial class CampaignRenderer
         GLES30.GlBindVertexArray(_fxVao);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _fxVbo);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
-        GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_fxProg, "uTex"), 0);
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(false);
         GLES30.GlDisable(CullFaceCap);
         void Draw(BlasterBolt bolt, BeamProjectileEntity? beam)
         {
-            // smooth frames: a live bolt carried with its shot (SmoothCarry), as MphRead's own shots are
-            Vector3 pos = beam != null ? Vector3.TransformPosition(bolt.Pos, SmoothCarry(beam, scene)) : bolt.Pos;
-            Matrix4 at = BoltFrame(bolt.Dir, pos, BoltScale(bolt));
+            // a live bolt where it's seen in this picture (BoltSeen: carried with its shot; in the player's own view, on the
+            // gun as it leaves it); an ended one where it stopped
+            Vector3 pos = bolt.Pos, dir = bolt.Dir;
+            if (beam != null) BoltSeen(bolt, beam, scene, out pos, out dir);
+            if (beam != null && DevBlasterLog) DevBoltGap(bolt, beam, scene, pos);
+            Matrix4 at = BoltFrame(dir, pos, BoltScale(bolt));
             foreach (RetroSwoosh w in bolt.Swooshes)
             {
                 _blasterVerts.Clear();

@@ -274,6 +274,7 @@ namespace MphRead
                 case "hunters": hunters = value.Split(','); break; // bot seats' hunters in order (vanilla matches: samus,kanden,spire)
                 case "replay": replay = value; break;
                 case "seed": Seed = UInt32.Parse(value); break; // varies the match RNG (0 = as before) // analyze CSV(s) (comma list; ours or vanilla's) on arena=<name>, no match played
+                case "primenav": PrimeNav(value, args.Select(a => a.Split('=')).FirstOrDefault(a => a[0] == "out" && a.Length == 2)?[1]); return; // step 1 measure: an imported arena's nav parts, every node kept (room[@spacing])
                 case "navscc": NavScc(value); return; // P3 measure: ArenaNav nodes kept for a First Hunt arena, spawn anchors vs every floor sample (fhroot= first)
                 case "aitree": AiTree(value); return; // prints the Battle AI tree's nodes with these Func24 ids (comma list) + parent/children
                 case "picks": PickCheck(); return; // A5: the online host lobby's bot picks (no server)
@@ -283,6 +284,16 @@ namespace MphRead
                 case "giveups": PlayerEntity.HostUnstickGiveUp = (p, n) => Console.WriteLine( // the stuck fix's give-ups: where, which node
                     $"giveup {p.Hunter} at {p.Position.X:0.0} {p.Position.Y:0.0} {p.Position.Z:0.0} node {n.Id} {n.Position.X:0.0} {n.Position.Y:0.0} {n.Position.Z:0.0}"); break;
                 case "demo": DemoKind = Int32.Parse(value.Split('@')[0]); DemoTimes = new Queue<long>(value.Split('@')[1].Split(',').Select(Int64.Parse)); break; // demo=1@600[,1500..]: PlayerAiDemo.cs at those frames, then the bot's escape time
+                case "livemerge": // livemerge=<live .mphreplay with its .steps and .end beside it>: one whole replay file, <name>.full.mphreplay (step 1 solver: the owner's live climb)
+                {
+                    var f = MphRecomp.Replay.ReplayFile.Load(value);
+                    var fo = MphRecomp.Replay.ReplayFeed.Follow(f, value);
+                    while (fo.More()) { }
+                    f.Save(System.IO.Path.ChangeExtension(value, ".full.mphreplay"));
+                    Console.WriteLine($"{f.Steps.Count} steps");
+                    foreach (var mp in f.Settings.Players) Console.WriteLine($"  {mp.Hunter} bot={mp.Bot} level={mp.BotLevel} remote={mp.Remote} {mp.Nickname}");
+                    return;
+                }
                 case "matchreplay": MatchReplayTrace(value, args); return; // matchreplay=<file.mphreplay> seat=N steps=a-b: a bot's AI state each step of a recorded match
                 case "trace": TraceSeat = Int32.Parse(value.Split('@')[0]); TraceFrom = Int64.Parse(value.Split('@')[1]); break;
                 default: throw new ArgumentException($"unknown option {arg}");
@@ -1133,6 +1144,7 @@ namespace MphRead
         private static long SelfEdgeFrame = -1; // the last edge jump (any bot)
         private static readonly long[] SelfClimbFrame = new long[8]; // each bot's last jump start (_unstickClimb 0 -> 1)
         private static readonly int[] SelfClimbLast = new int[8];
+        private static readonly bool WetLog = Environment.GetEnvironmentVariable("BOTPROBE_WETLOG") == "1";
         private static readonly long[] SelfStuckFrame = new long[8]; // each bot's last stuck-fix climb (_unstickClimbs up)
         private static readonly int[] SelfStuckLast = new int[8];
         private static readonly string[] SelfNode = new string[8];
@@ -1811,6 +1823,10 @@ namespace MphRead
             if (air && !s.WasAirJump) s.AirJumps++;
             s.WasAirJump = air;
             if (p.EchoesSubmerged) s.WetFrames++;
+            if (WetLog && p.EchoesSubmerged && s.WetFrames % 30 == 0) // BOTPROBE_WETLOG=1: where a bot is while under water, every 0.5 s of it
+            {
+                Console.WriteLine(FormattableString.Invariant($"WET	{p.SlotIndex}	{s.WetFrames}	{p.Position.X:F1}	{p.Position.Y:F1}	{p.Position.Z:F1}	spd {p.Speed.Length:F2}	stand {p.Flags1.TestFlag(PlayerFlags1.Standing)}"));
+            }
             bool boost = p.EchoesBoosting;
             if (boost && !s.WasBoost) s.Boosts++;
             s.WasBoost = boost;

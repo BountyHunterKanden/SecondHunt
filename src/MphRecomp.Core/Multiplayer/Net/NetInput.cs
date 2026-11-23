@@ -43,6 +43,10 @@ namespace MphRecomp.Multiplayer.Net
         // SeatExtras.Pushes) and its speed at the start of the step, which the host takes for a while after a push
         public bool ReportPushes;
         public OpenTK.Mathematics.Vector3 ReportSpeed;
+        // the third-person true aim, CampaignInput.TrueAim (MphRead PlayerHostAim.cs; 0 = none). Not in Write / WriteRecord
+        // either: a LAN input packet carries it after the input (LanSession protocol 26), online sends none (first person),
+        // and the host's replay records it as its own event (ReplayNetKind.AimCam, on a change)
+        public ushort TrueAim;
 
         // the LAN wire form (Write/Read, LanSession) is unchanged; the online match and the host's replay record carry
         // every field (WriteRecord/ReadRecord)

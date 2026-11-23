@@ -905,7 +905,7 @@ namespace MphRead
             l.AfterMatch(M(0, false, Human(Hunter.Trace, 1, 4)), null);
             Check(l.RankPoints == 850 && l.RankLevel == 4, $"points stop at 850, level 4 from 750 ({l.RankPoints}, level {l.RankLevel})");
             // the hunter of choice can be a character (owner 2026-11-07), counted as a hunter is: most own matches, the one
-            // just played keeping a tie; the vanilla FavoriteHunter counts the character's matches as its base hunter's
+            // just played keeping a tie; a character's matches never count as its base hunter's, FavoriteHunter included (owner 11-18)
             int kanden = l.HunterMatches[(int)Hunter.Kanden];
             Check(l.HunterOfChoice() == ((int)Hunter.Kanden, null) && l.ChoiceHunter == -1, $"no character played: the vanilla hunter ({kanden} Kanden)");
             HunterLicense.MatchRecord As(Hunter h, string? character) => new(false, GameMode.Battle, 95, 60, h, 1, false, 0,
@@ -913,21 +913,30 @@ namespace MphRead
             for (int i = 0; i < kanden - 1; i++) l.AfterMatch(As(Hunter.Weavel, "TROOPER"), null);
             Check(l.HunterOfChoice() == ((int)Hunter.Kanden, null), $"{kanden - 1} Trooper matches: still Kanden ({l.HunterOfChoice()})");
             l.AfterMatch(As(Hunter.Weavel, "TROOPER"), null);
-            Check(l.HunterOfChoice() == ((int)Hunter.Weavel, "trooper") && l.FavoriteHunter == (int)Hunter.Weavel,
-                $"{kanden} Trooper matches tie Kanden's: the one just played, TROOPER ({l.HunterOfChoice()}; vanilla Weavel {l.FavoriteHunter})");
+            Check(l.HunterOfChoice() == ((int)Hunter.Weavel, "trooper") && l.FavoriteHunter == (int)Hunter.Kanden,
+                $"{kanden} Trooper matches tie Kanden's: the one just played, TROOPER ({l.HunterOfChoice()}; favourite stays Kanden {l.FavoriteHunter})");
             for (int i = 0; i < kanden - 1; i++) l.AfterMatch(As(Hunter.Weavel, null), null);
             Check(l.HunterOfChoice() == ((int)Hunter.Weavel, "trooper") && l.OwnMatches((int)Hunter.Weavel, null) == kanden - 1,
                 $"Weavel's own matches don't count the Trooper's ({l.OwnMatches((int)Hunter.Weavel, null)}): still TROOPER");
             l.AfterMatch(As(Hunter.Weavel, null), null);
             Check(l.HunterOfChoice() == ((int)Hunter.Weavel, null), $"Weavel ties the Trooper: Weavel ({l.HunterOfChoice()})");
             for (int i = 0; i <= kanden; i++) l.AfterMatch(As(Hunter.Samus, "DARK SAMUS"), null);
-            Check(l.HunterOfChoice() == ((int)Hunter.Samus, "darksamus") && l.FavoriteHunter == (int)Hunter.Weavel,
-                $"more Dark Samus matches: DARK SAMUS ({l.HunterOfChoice()}; vanilla stays Weavel, {l.HunterMatches[(int)Hunter.Weavel]} > {l.HunterMatches[0]})");
+            Check(l.HunterOfChoice() == ((int)Hunter.Samus, "darksamus") && l.FavoriteHunter == (int)Hunter.Weavel && l.OwnMatches((int)Hunter.Samus, null) == 0,
+                $"more Dark Samus matches: DARK SAMUS ({l.HunterOfChoice()}; favourite stays Weavel, Samus's own count {l.OwnMatches((int)Hunter.Samus, null)})");
             System.IO.Directory.CreateDirectory(dir);
             l.Save(dir);
             HunterLicense back = HunterLicense.Load(dir);
             Check(back.HunterOfChoice() == ((int)Hunter.Samus, "darksamus") && back.CharacterMatches.GetValueOrDefault("darksamus") == kanden + 1,
                 $"saved and loaded: DARK SAMUS ({back.HunterOfChoice()})");
+            // an older file whose favourite led only with Dark Samus's matches (Samus 5 = 1 own + 4 Dark Samus, Kanden 3)
+            var old = new HunterLicense { HunterMatches = new[] { 5, 3, 0, 0, 0, 0, 0 }, LocalMatches = 8, FavoriteHunter = 0,
+                CharacterMatches = new() { ["darksamus"] = 4 }, ChoiceHunter = (int)Hunter.Samus, ChoiceCharacter = "darksamus" };
+            string oldDir = System.IO.Path.Combine(dir, "old");
+            System.IO.Directory.CreateDirectory(oldDir);
+            old.Save(oldDir);
+            HunterLicense oldBack = HunterLicense.Load(oldDir);
+            Check(oldBack.FavoriteHunter == (int)Hunter.Kanden && oldBack.HunterOfChoice() == ((int)Hunter.Samus, "darksamus"),
+                $"an older file: the favourite from own counts, Kanden ({oldBack.FavoriteHunter}); choice still DARK SAMUS ({oldBack.HunterOfChoice()})");
             var bad = new HunterLicense { ChoiceHunter = (int)Hunter.Kanden, ChoiceCharacter = "darksamus", FavoriteHunter = 3 };
             bad.ClampChoice(counted: false);
             Check(bad.HunterOfChoice() == (3, null), $"a character on the wrong hunter: the vanilla hunter ({bad.HunterOfChoice()})");

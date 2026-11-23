@@ -88,6 +88,11 @@ namespace MphRecomp.Multiplayer.Net
                     + $"{PlayerEntity.NetShotsRefused[i, PlayerEntity.NetShotCooldown]} gun {PlayerEntity.NetShotsRefused[i, PlayerEntity.NetShotGunLowered]} "
                     + $"none {PlayerEntity.NetShotsRefused[i, PlayerEntity.NetShotNoSpawn]}, beam hits {PlayerEntity.NetBeamHits[i]} "
                     + $"(its device {Seen(_seenHits[i])})");
+                // (Fruity P2: a seat fired from its device's shot events, and those dropped unfired)
+                if (PlayerEntity.Players[i].NetShotEventsDriven || PlayerEntity.NetShotEventsFired[i] + PlayerEntity.NetShotEventsDropped[i] > 0)
+                {
+                    line.Append($", shot events fired {PlayerEntity.NetShotEventsFired[i]} dropped {PlayerEntity.NetShotEventsDropped[i]}");
+                }
             }
             return line.Length > 0 ? line.ToString() : "no remote seats";
         }

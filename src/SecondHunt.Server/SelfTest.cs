@@ -66,6 +66,18 @@ namespace SecondHunt.Server
                     Console.WriteLine($"{_pass} passed, {_fail} failed");
                     return _fail == 0 ? 0 : 1;
                 }
+                if (Environment.GetEnvironmentVariable("SELFTEST_ONLY") == "cloud")
+                {
+                    await Cloud(dir);
+                    Console.WriteLine($"{_pass} passed, {_fail} failed");
+                    return _fail == 0 ? 0 : 1;
+                }
+                if (Environment.GetEnvironmentVariable("SELFTEST_ONLY") == "drain")
+                {
+                    await DrainTests(dir);
+                    Console.WriteLine($"{_pass} passed, {_fail} failed");
+                    return _fail == 0 ? 0 : 1;
+                }
                 if (Environment.GetEnvironmentVariable("SELFTEST_ONLY") == "safety")
                 {
                     await Safety(dir);
@@ -82,6 +94,8 @@ namespace SecondHunt.Server
                 await ServedTests(dir); // (0.8.0: served games, HubServed.cs: SelfTestServed.cs)
                 await Replays(dir); // (0.9.0: shared replays, HubReplays.cs: SelfTestReplays.cs)
                 await HubTests(dir); // (0.10.0: the Gaming Hub, HubStats.cs: SelfTestStats.cs)
+                await Cloud(dir); // (0.11.0: CLOUD SAVE, HubCloud.cs: SelfTestCloud.cs)
+                await DrainTests(dir); // (0.10.3: restart drain + request flood limit, HubDrain.cs/HubFlood.cs: SelfTestDrain.cs)
             }
             catch (Exception ex)
             {
@@ -159,8 +173,9 @@ namespace SecondHunt.Server
         }
 
         // device: the scrambled device ID to log in with ("" = none, so this PC's own never joins a test's bans)
-        private static async Task<OnlineClient> Connect(Uri uri, OnlineIdentity id, string name, string device = "")
-            => await OnlineClient.ConnectAsync(uri, id, name, "selftest", default, device);
+        // app: what the login says it is (the hub keeps anything but the game, the match host and "selftest" off its pages)
+        private static async Task<OnlineClient> Connect(Uri uri, OnlineIdentity id, string name, string device = "", string app = "selftest")
+            => await OnlineClient.ConnectAsync(uri, id, name, app, default, device);
 
         // the next push of type T on c (that matches), or null after the timeout; start waiting before the action
         private static Task<T?> Next<T>(OnlineClient c, Func<T, bool>? match = null, int ms = 3000) where T : OnlineMsg

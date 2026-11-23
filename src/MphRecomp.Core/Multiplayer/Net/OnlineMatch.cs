@@ -68,6 +68,9 @@ namespace MphRecomp.Multiplayer.Net
         public const string MigrateSinceServer = "0.5.0";
         // served games (docs/DEDICATED_SERVERS.md): servers from this version run the match themselves when they can
         public const string ServedSinceServer = "0.8.0";
+        // a served game's PLAYERS edit (UpdateGame's MaxPlayers): servers from this version pass it on to their match host
+        // (an older one's match host keeps the seats it opened with, so the lobby's owner can't raise the people past them)
+        public const string SeatsSinceServer = "0.10.2";
         public bool Served => Game.Info.Served;
 
         // (the server connection's thread) the server moved this match to a new host, or closed it
@@ -88,6 +91,18 @@ namespace MphRecomp.Multiplayer.Net
                     Game.Host = next;
                 }
                 Net.HostMoved(slot);
+            }
+            else if (msg is MemberEvent { Joined: true, MaxPlayers: int players } joined && joined.GameId == Game.Id)
+            {
+                // an invited player joined a full game and the server grew it (owner 2026-11-22, issue 19): the card says so,
+                // and a player-hosted game's host takes one more person (a served game's match host hears it from the server).
+                // On this thread, so the seat is there before the joiner's JOIN comes over the relay
+                if (players > Game.Info.MaxPlayers)
+                {
+                    MatchLog?.Invoke($"lobby: {players} players now (an invited player joined a full game)");
+                    Game.Info.MaxPlayers = players;
+                }
+                if (Net.IsHost) Net.GrowPeople(players);
             }
             else if (msg is GameClosedEvent closed && closed.GameId == Game.Id)
             {
@@ -289,7 +304,9 @@ namespace MphRecomp.Multiplayer.Net
             }
             // the match's seats: the people (maxPlayers) and the template's bots (P8: past 4, so a joiner doesn't push a bot out)
             int seatLimit = maxPlayers + template.Players.Count(p => p.Bot);
-            return new OnlineMatch(client, relay, link, NetMatchSession.Host(link, template, romKey, seatLimit), game.Game);
+            NetMatchSession host = NetMatchSession.Host(link, template, romKey, seatLimit);
+            host.SetSeats(null, maxPlayers); // (its People: the lobby's open seats, and its joiners hear them)
+            return new OnlineMatch(client, relay, link, host, game.Game);
         }
 
         // a served game's new lobby: the creator's mode, arena, rules and bots (the match host opened it with the card's mode
@@ -326,14 +343,15 @@ namespace MphRecomp.Multiplayer.Net
             info.ExtraArena = ExtraArenas.IsExtra(template.Arena); // (server 0.7.0: Find Game's backfill)
         }
 
-        // host: the lobby's game changed (the host's MODE / RULES tabs from its own seat): the server's card says so too
-        public async Task UpdateGameAsync(MatchSettings template)
+        // host: the lobby's game changed (the host's MODE / RULES tabs from its own seat): the server's card says so too.
+        // maxPlayers / who: its edit of WHO CAN JOIN (null = as they were); one request, so two edits can't cross
+        public async Task UpdateGameAsync(MatchSettings template, int? maxPlayers = null, (bool Public, bool Friends, bool Rivals)? who = null)
         {
             GameInfo old = Game.Info;
             var info = new GameInfo
             {
-                MaxPlayers = old.MaxPlayers, Public = old.Public, Friends = old.Friends, Rivals = old.Rivals,
-                Version = old.Version, Mods = old.Mods,
+                MaxPlayers = maxPlayers ?? old.MaxPlayers, Public = who?.Public ?? old.Public, Friends = who?.Friends ?? old.Friends,
+                Rivals = who?.Rivals ?? old.Rivals, Version = old.Version, Mods = old.Mods,
             };
             CardRules(info, template);
             GameMsg reply = await Client.RequestAsync<GameMsg>(new UpdateGameReq { Info = info });

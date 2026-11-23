@@ -37,6 +37,8 @@ internal sealed partial class CampaignRenderer
     bool _keyframesOff;
     // a LAN / online match's replay link (host: the guests' identities in, its recording out; guest: the other way)
     ReplayLink? _replayLink;
+    ReplayLiveSender? _replayLive; // (host: its recording to the guests as it goes)
+    ReplayLiveMirror? _replayMirror; // (guest: the host's, prepared here as it comes)
     // guest: the host's recording is wanted, and arrived (the match screen's session stays up a moment for it: LinkHold)
     volatile bool _replayWanted, _replayArrived;
     string? _replayPath;
@@ -100,6 +102,7 @@ internal sealed partial class CampaignRenderer
         {
             _error = "REPLAY REFUSED: " + ex.Message;
             Log.Warn("MPHReplay", $"can't read {which}: {ex.Message}");
+            SelfTestRefused(_error);
         }
         return true;
     }
@@ -117,6 +120,7 @@ internal sealed partial class CampaignRenderer
             {
                 _error = "REPLAY REFUSED: " + refused;
                 Log.Warn("MPHReplay", $"refused {_replayPath}: {refused}");
+                SelfTestRefused(_error);
                 return null;
             }
             // the gameplay mods it was recorded with, from their recorded data, settings and seed (Core Mods/LiveMods.cs);
@@ -128,6 +132,7 @@ internal sealed partial class CampaignRenderer
             {
                 _error = "REPLAY REFUSED: " + why;
                 Log.Warn("MPHReplay", "refused: " + why);
+                SelfTestRefused(_error);
                 return played;
             }
             // a new match: new checkpoints (one that went wrong stays off for this replay), the first one at its start
@@ -172,10 +177,14 @@ internal sealed partial class CampaignRenderer
             recorder.File.Steps.Capacity = (int)(seconds * 60) + 600;
             _replayRecorder = recorder;
             _replayFeed?.End();
-            _replayFeed = _netSession == null && mods.Count == 0 && ReplayDataDir is string feedDir && ReplayPrepHost.Start != null
+            // (a network match's host feeds its network events with the steps, 2026-11-15; a guest doesn't record)
+            _replayFeed = mods.Count == 0 && ReplayDataDir is string feedDir && ReplayPrepHost.Start != null
                 && RecompSettings.Load(SettingsPath).PrepareReplays is not ("after" or "off")
                 ? new ReplayFeed(recorder.File, feedDir) : null;
+            // (and streams it to each guest that prepares during the match, so theirs seek instantly too: ReplayLive.cs)
+            _replayLive = _replayLink is { IsHost: true } && mods.Count == 0 ? new ReplayLiveSender(recorder.File, _replayLink) : null;
         }
+        SelfTestMatchStarted(recorder != null, mods.Count); // (dev --es replayselftest: MatchReplaySelfTest.cs)
         return host;
     }
 
@@ -304,6 +313,7 @@ internal sealed partial class CampaignRenderer
         {
             if (_replayWanted && _replayLink is { IsHost: false }) Log.Info("MPHReplay", "no recording asked for: the host is gone");
             _replayWanted = false;
+            _replayMirror?.End(); // (what streamed in is prepared; no file to save it as)
         }
         else if (!complete && _replayWanted && _matchResults == null && _replayLink is { IsHost: false } asking
             && (_host?.Frame ?? 0) >= MinIncompleteSteps)
@@ -328,6 +338,7 @@ internal sealed partial class CampaignRenderer
                     : $"left at frame {_host?.Frame ?? 0}, under {MinIncompleteSteps}"));
             }
             _replayWanted = false;
+            _replayMirror?.End();
         }
         if (_replayPlayer != null)
         {
@@ -348,6 +359,12 @@ internal sealed partial class CampaignRenderer
         _replayRecorder = null;
         _replayFeed?.End(); // (its prepare finishes the steps so far; the saved replay has the same key)
         _replayFeed = null;
+        if (_replayLive != null)
+        {
+            _replayLive.End(); // (each guest's stream ends: its whole file goes below, as before)
+            Log.Info("MPHReplay", $"streamed the recording live: {_replayLive.Blobs} blobs, {_replayLive.Bytes / 1024} KB");
+            _replayLive = null;
+        }
         MphRecomp.Multiplayer.Net.ShotCheck.Settled = null;
         if (recorder == null || ReplayDataDir is not string dir)
         {
@@ -392,9 +409,11 @@ internal sealed partial class CampaignRenderer
             Log.Info("MPHReplay", $"saved {Path.GetFileName(path)}: {steps} steps{(complete ? "" : " (incomplete)")}, "
                 + $"{recorder.File.Identities.Count} identities, {recorder.File.NetEvents.Count} network events, "
                 + $"{new FileInfo(path).Length / 1024} KB in {sw.ElapsedMilliseconds} ms");
-            // (an online match isn't fed live keyframes, so every saved one, cut short or not, is prepared now: seeking is instant)
+            // (PREPARE REPLAYS: AFTER MATCH, or a fed match whose feed failed: prepared now; a fed one's prepare is running)
             PrepareAfter(dir, path, recorder.File);
+            SelfTestSaved(path, complete); // (dev --es replayselftest: its replay opened now)
             // a network match's host: its recording to each guest that keeps replays (a complete match only)
+            TakeRejoins(); // (a guest that left and came back gets this one too)
             if (_replayLink != null && !complete)
             {
                 // a guest that left asked for the recording so far, and the host left before it was answered between steps
@@ -462,25 +481,66 @@ internal sealed partial class CampaignRenderer
         int localSeat = settings.LocalSeat;
         if (_netSession.IsHost)
         {
-            link.IdentityReceived += id => Log.Info("MPHReplay", $"seat {id.Seat}: {id.Name}#{id.Tag:0000} "
-                + $"({(id.FriendCode != null ? "friend code" : "no friend code")}{(id.LicenseJson != null ? ", license" : "")})");
+            link.IdentityReceived += id =>
+            {
+                Log.Info("MPHReplay", $"seat {id.Seat}: {id.Name}#{id.Tag:0000} "
+                    + $"({(id.FriendCode != null ? "friend code" : "no friend code")}{(id.LicenseJson != null ? ", license" : "")})");
+                _replayRejoined.Enqueue(id.Seat); // (one that comes back after its cut-short copy: TakeRejoins)
+            };
             _replayAsked.Clear();
             _replayGiven.Clear();
+            _replayRejoined.Clear();
             link.ReplayRequested += seat => _replayAsked.Enqueue(seat); // (answered between steps, RecordNetStep)
         }
         else
         {
             _replayWanted = keep;
             _replayArrived = false;
+            // (PREPARE REPLAYS: DURING MATCH: the host streams its recording as it goes and this device prepares from it, as
+            // the host does from its own, so the replay seeks instantly from its opening here too, 2026-11-21)
+            ReplayLiveMirror? mirror = null;
+            // (public builds too: every replay seeks instantly in every build, owner 2026-11-22; never gate this)
+            if (keep && ReplayPrepHost.Start != null && RecompSettings.Load(SettingsPath).PrepareReplays is not ("after" or "off"))
+            {
+                mirror = new ReplayLiveMirror(dir);
+                mirror.Log += line => Log.Info("MPHReplay", line);
+                mirror.Begun += (replay, sidecar) =>
+                {
+                    try
+                    {
+                        // (a rejoin, or this app restarted mid-match: the earlier stream's prepare may still hold the
+                        // sidecar; this one starts when it lets go and goes on from its keyframes, owner 11-22)
+                        ReplayPrep.Prune(dir);
+                        ReplayPrep.StartLive(sidecar, () =>
+                        {
+                            ReplayPrepHost.Start?.Invoke(replay, sidecar);
+                            Log.Info("MPHReplay", "preparing keyframes as the match is played (the host's stream): "
+                                + Path.GetFileName(sidecar));
+                        }, line => Log.Info("MPHReplay", line));
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+                    {
+                        Log.Warn("MPHReplay", "no live keyframes for this match: " + ex.Message);
+                    }
+                };
+                link.LiveReceived += mirror.Receive;
+                link.Closing += mirror.End;
+            }
+            _replayMirror?.End();
+            _replayMirror = mirror;
             link.ReplayReceived += bytes =>
             {
                 try
                 {
                     ReplayFile file = ReplayFile.Read(new MemoryStream(bytes)); // (checked whole, as any file)
                     file.OwnSeat = localSeat;
+                    mirror?.Complete(file); // (what the stream missed, from the file: the live prepare fits the saved file)
                     string path = ReplayLibrary.Save(dir, file, DateTime.Now);
                     Log.Info("MPHReplay", $"saved the host's recording as {Path.GetFileName(path)}: {file.Steps.Count} steps, "
                         + $"{bytes.Length / 1024} KB, this player at seat {localSeat}");
+                    // its keyframes start now, as the host's do after its match (they waited for the replay's opening
+                    // before: a guest's or served match's first seeks went the slow way, 11-21)
+                    PrepareAfter(dir, path, file);
                 }
                 catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
                 {
@@ -490,7 +550,7 @@ internal sealed partial class CampaignRenderer
             };
             try
             {
-                link.SendIdentity(ReplayLink.OwnIdentity(dir, localSeat, OnlineMe), wantReplay: keep);
+                link.SendIdentity(ReplayLink.OwnIdentity(dir, localSeat, OnlineMe), wantReplay: keep, wantLive: mirror != null);
             }
             catch (Exception ex)
             {
@@ -509,13 +569,32 @@ internal sealed partial class CampaignRenderer
     // came through the host's taps during the step)
     void RecordNetStep(CampaignInput input)
     {
-        if (_replayRecorder != null && _host != null) _replayRecorder.Step(input, _host.Scene);
+        if (_replayRecorder != null && _host != null)
+        {
+            _replayRecorder.Step(input, _host.Scene);
+            if (_replayFeed != null) FeedStep();
+            _replayLive?.Step();
+        }
         AnswerReplayRequests();
     }
 
     // a network match's host: a guest leaving mid-match asked for the recording so far (0.3.6); it goes at once, cut short
     readonly ConcurrentQueue<int> _replayAsked = new();
     readonly HashSet<int> _replayGiven = new(); // (had theirs as they left: not sent again at the end)
+    // (11-22, owner: a guest that quit mid-match took its cut-short copy, rejoined, played on and got no replay of
+    // the whole match: it stayed "given". A rejoined guest sends its identity again; the identity's seat comes off the list)
+    readonly ConcurrentQueue<int> _replayRejoined = new();
+
+    void TakeRejoins()
+    {
+        while (_replayRejoined.TryDequeue(out int seat))
+        {
+            if (_replayGiven.Remove(seat))
+            {
+                Log.Info("MPHReplay", $"seat {seat} is back: it gets the recording at the end too");
+            }
+        }
+    }
 
     void AnswerReplayRequests()
     {
@@ -545,6 +624,7 @@ internal sealed partial class CampaignRenderer
                 Log.Warn("MPHReplay", $"seat {seat} left: recording not sent: " + ex.Message);
             }
         }
+        TakeRejoins(); // (after the asks: a rejoin comes after its seat's ask)
     }
 
     // The match screen's hold on a network match's session: disposing it waits (off the caller's thread) while the replay link
@@ -564,6 +644,13 @@ internal sealed partial class CampaignRenderer
         public ReplayLinkHold(IDisposable? inner, ReplayLink link, Func<bool> busy, int stallMs)
         {
             (_inner, _link, _busy, _stallMs) = (inner, link, busy, stallMs);
+            // (LAN: the menus come back before this is disposed, and their leaving a LAN page ended the session under the
+            // transfer; while busy they only let go of it, LanSession.EndCurrent. Owner 11-22)
+            // (not disposed yet: the match screen still has it, as after a QUIT, whose menus come first)
+            if (inner is MphRecomp.Multiplayer.Net.LanSession lan)
+            {
+                lan.KeepOpen = () => System.Threading.Volatile.Read(ref _disposed) == 0 || _busy();
+            }
         }
 
         bool Quiet(long start)
@@ -595,6 +682,7 @@ internal sealed partial class CampaignRenderer
         void Close()
         {
             _link.Dispose();
+            if (_inner is MphRecomp.Multiplayer.Net.LanSession lan) lan.KeepOpen = null;
             _inner?.Dispose();
         }
     }
@@ -722,6 +810,7 @@ internal sealed partial class CampaignRenderer
         }
         if (_host != null) PlaceReplayView(_host.Scene); // a seat or the free cam, paused or not
         BenchTick(); // (--es replaybench: MatchReplayBench.cs)
+        SelfTestTick(); // (--es replayselftest: MatchReplaySelfTest.cs)
         bool seeking = _seekTarget >= 0 && _seekTarget > _replayPlayer.Position && !_replayDone;
         if (_seekTarget >= 0 && !seeking)
         {
@@ -729,6 +818,7 @@ internal sealed partial class CampaignRenderer
             _accum = 0;
             Log.Info("MPHReplay", $"at step {_replayPlayer.Position}");
             BenchArrived();
+            SelfTestArrived();
         }
         if (_sfx != null)
         {
@@ -1026,6 +1116,7 @@ internal sealed partial class CampaignRenderer
         _sfx?.StopAll(); // the later sounds stop (the restored match plays its own again)
         ResetDroneFx();
         foreach (PlayerEntity p in PlayerEntity.Players) p.HostAfterRestore(); // the reticles' pixel data with their restored size
+        _host?.Scene.HostClearHud(); // not the restored step's HUD (a seat view's, also shown in free cam)
         _replayDone = false;
         _error = null;
         _restoredFrom = step;
@@ -1043,23 +1134,29 @@ internal sealed partial class CampaignRenderer
     {
         try
         {
-            if (_replayFeed!.Step() && ReplayDataDir is string dir && _replayFeed.Sidecar is string sidecar
-                && ReplayPrep.NeedsPrep(sidecar))
+            if (_replayFeed!.Step() && ReplayDataDir is string dir && _replayFeed.Sidecar is string sidecar)
             {
                 ReplayPrep.Prune(dir);
-                ReplayPrepHost.Start?.Invoke(_replayFeed.ReplayPath!, sidecar);
-                Log.Info("MPHReplay", "preparing keyframes as the match is played: " + Path.GetFileName(sidecar));
+                string replay = _replayFeed.ReplayPath!;
+                // (an earlier match with the same start still preparing: this one starts when it's done, owner 11-22)
+                ReplayPrep.StartLive(sidecar, () =>
+                {
+                    ReplayPrepHost.Start?.Invoke(replay, sidecar);
+                    Log.Info("MPHReplay", "preparing keyframes as the match is played: " + Path.GetFileName(sidecar));
+                }, line => Log.Info("MPHReplay", line));
+                SelfTestFed(null);
             }
         }
         catch (Exception ex)
         {
             Log.Warn("MPHReplay", "no live keyframes for this match: " + ex.Message);
+            SelfTestFed(ex.Message);
             _replayFeed?.End();
             _replayFeed = null;
         }
     }
 
-    // a saved match (PREPARE REPLAYS: AFTER MATCH, or a network match's): its keyframes prepared now, in another process;
+    // a saved match (PREPARE REPLAYS: AFTER MATCH, or a fed match whose feed failed): its keyframes prepared now, in another process;
     // DURING MATCH's feed has its prepare running already (NeedsPrep false), OFF waits for the first viewing
     void PrepareAfter(string dir, string path, ReplayFile file)
     {
@@ -1092,6 +1189,7 @@ internal sealed partial class CampaignRenderer
                 ReplayPrep.Prune(dir);
                 start(Path.GetFullPath(_replayPath), sidecar);
                 Log.Info("MPHReplay", "preparing keyframes in another process: " + Path.GetFileName(sidecar));
+                SelfTestPrepAtOpen();
             }
             _replayKeyframes = new ReplayKeyframes(played, sidecar, _replayPlayer.File); // (it opens the sidecar at the first seek)
         }
@@ -1102,9 +1200,39 @@ internal sealed partial class CampaignRenderer
         }
     }
 
+    bool _keyframesMatchedLogged;
+    // dev builds (instant seek always, owner 11-21): a refusal on screen, not only in the log, so a seek that
+    // went slow is seen at once; the status line carries it (every 30 frames, nothing when there's none)
+    const long ReplayNoticeMs = 15000;
+    string? _replayNotice;
+    long _replayNoticeUntil;
+
+    string WithReplayNotice(string status) => _replayNotice != null && Environment.TickCount64 < _replayNoticeUntil
+        ? _replayNotice + (status.Length > 0 ? "\n" + status : "") : status;
+
+    // "KEYFRAMES REFUSED: <why, to its first '; '>" and the walk diff's first differing line, when there is one
+    internal static string RefusalNotice(string why)
+    {
+        string head = why.Split('\n')[0];
+        int cut = head.IndexOf("; ", StringComparison.Ordinal);
+        if (cut > 0) head = head[..cut];
+        if (head.Length > 110) head = head[..107] + "...";
+        string notice = "KEYFRAMES REFUSED: " + head;
+        string? diff = why.Split('\n').Skip(1).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
+        if (diff != null) notice += "\n" + (diff.Length > 110 ? diff[..107] + "..." : diff);
+        return notice;
+    }
+
     void KeyframesOff(string why)
     {
         if (!_keyframesOff) Log.Warn("MPHReplay", "keyframes off for this replay: " + why);
+        if (!_keyframesOff) SelfTestRefused("keyframes refused: " + why);
+        if (!_keyframesOff && !RecompSettings.PublicBuild)
+        {
+            _replayNotice = RefusalNotice(why);
+            _replayNoticeUntil = Environment.TickCount64 + ReplayNoticeMs;
+            _statusCountdown = 0; // show it now
+        }
         _keyframesOff = true;
         _replayKeyframes?.Dispose();
         _replayKeyframes = null;
@@ -1135,7 +1263,13 @@ internal sealed partial class CampaignRenderer
             return true;
         }
         AfterRestore(at, keyframe: true);
+        SelfTestKeyframe(at, sw.Elapsed.TotalMilliseconds);
         if (!preview) Log.Info("MPHReplay", $"seek to step {step}: keyframe at step {at} loaded ({sw.Elapsed.TotalMilliseconds:0.0} ms)");
+        if (!_keyframesMatchedLogged && _replayKeyframes.MatchedByName is string matched)
+        {
+            _keyframesMatchedLogged = true; // (once a replay: the walks differed but every keyframe field found its owner)
+            Log.Info("MPHReplay", matched);
+        }
         return true;
     }
 
@@ -1311,6 +1445,13 @@ internal sealed partial class CampaignRenderer
         {
             // (B3) the seat's own view exactly: its eye, target (with any shake) and up, as CameraInfo.ViewMatrix has them
             Vector3 up = eye.TrueUp.LengthSquared > 0.0001f ? eye.TrueUp : Vector3.UnitY;
+            // a dead remote seat: MPH's free camera without the turns its stopped aim target kept adding (bug report
+            // 2026-11-22, "the camera keeps spinning very quickly"; PlayerDeathCam.cs RemoteDeadStep)
+            if (p.RemoteDeadView is HostView still)
+            {
+                scene.HostView = still with { FovY = fov };
+                return true;
+            }
             if (!seatHead)
             {
                 scene.HostView = new HostView(eye.Position, eye.Target, up, fov);

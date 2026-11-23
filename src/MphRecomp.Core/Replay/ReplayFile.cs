@@ -40,7 +40,15 @@ namespace MphRecomp.Replay
     // Format 54 adds Position: a guest's own position the host checked and took (Input = CampaignHost.PositionRecord's bytes),
     // (format 55: and whether its device runs its own knockback, and the speed the host took with it),
     // applied at the start of that step (MphRecomp Net/ClientPosition.cs).
-    public enum ReplayNetKind : byte { Input = 0, Drop = 1, Rejoin = 2, Hit = 3, Position = 4 }
+    // Format 93 adds Pickup: a served match's pickup claim the host judged and took (Input = CampaignHost.PickupRecord's
+    // bytes: the item's type and place; Seat = the taker), handed to that seat at the start of that step (MphRecomp
+    // Net/PickupClaims.cs).
+    // Format 95 adds Shot: a served match's seat's new shot events, and whether its device sends them (Input =
+    // CampaignHost's shot record: [driven u8][n u8][n x NetShotEvent]), handed to that seat at the start of that step (MphRecomp
+    // Net/NetMatchSession.Shots.cs, Fruity P2).
+    // Format 96 adds AimCam: a LAN guest's third-person true aim changed (Input = the seat's new HostTrueAimCam, a ushort,
+    // little-endian; MphRead PlayerHostAim.cs), set on that seat at the start of that step (CampaignHost.SetRemoteTrueAim).
+    public enum ReplayNetKind : byte { Input = 0, Drop = 1, Rejoin = 2, Hit = 3, Position = 4, Pickup = 5, Shot = 6, AimCam = 7 }
 
     public readonly record struct ReplayNetEvent(int Step, byte Seat, ReplayNetKind Kind, byte[]? Input);
 
@@ -250,6 +258,22 @@ namespace MphRecomp.Replay
     //   moves and re-plan a route they've lost (Settings.TurretBotNav, PlayerEntity.HostTurretBotNav); older files read it as off.
     //   Format 92: the same layout; a weapon pickup the rules equip switches to it while the gun is rising or lowered too
     //   (Settings.PickupEquipRaise, PlayerEntity.HostPickupEquipRaise); older files read it as off.
+    //   Format 93: the same layout; the network events add Pickup (ReplayNetKind: a served match's pickup claim the host took,
+    //   MphRecomp Net/PickupClaims.cs), which an older app couldn't read past.
+    //   Format 94: the same layout as 93; an item one seat took isn't taken again the same step by another seat in reach
+    //   (Settings.PickupOneTaker, PlayerEntity.HostPickupOneTaker); older files read it as off.
+    //   Format 95: the same layout as 94; the network events add Shot (ReplayNetKind: a served match's seat's shot events,
+    //   MphRecomp Net/NetMatchSession.Shots.cs), which an older app couldn't read past.
+    //   Format 96: then the third-person true aim's camera (CampaignInput.TrueAim, a ushort: 0 = vanilla aim; MphRead
+    //   PlayerHostAim.cs HostTrueAimCode); the network events add AimCam (a LAN guest's code). Older files read it as 0.
+    //   Format 97: the same layout as 96; a Brawl Zero Suit Samus seat's alt form is her army crawl (Settings.ZeroSuitCrawl,
+    //   PlayerEntity.HostCrawl); older files read it as off, so her seat rolls the Morph Ball as recorded.
+    //   Format 98: the same layout as 97; a Mining Plaza / Main Quarry crate's drop counts the health crates dropped for
+    //   that player that is still lying there (Settings.CrateHealthPending, MiningPlazaCrates.PendingHealth); older files
+    //   read it as off.
+    //   Attachments (any format, not a format bump): files a match needs beyond the game's own (Attachments), as an
+    //   optional block after the ShotChecks, written only when there are some. An older app stops reading before it, so
+    //   it still opens the file (and refuses it for the missing arena, as before).
     //   Format 46: the same layout; an online host's lag compensation no longer shifts a homing beam (the Shock Coil, homing
     //   missiles) off its own target or Weavel's turret's shots, and shifts bombs, Lockjaw's lines + snare and the drone's laser
     //   (Settings.LagCompFix, PlayerEntity.HostLagFix);
@@ -261,7 +285,7 @@ namespace MphRecomp.Replay
     //   MatchSettings.Validate refuses at the start, so it saves the file and refuses to play it, never plays it wrong.
     public sealed class ReplayFile
     {
-        public const int FormatVersion = 92;
+        public const int FormatVersion = 98;
         // Bump when a code change alters how a match plays: an old replay then is refused instead of drifting.
         // (R2c: golden replays checked on every build say when.)
         // 2 (R1): matches play with Scene.HostDrawFreeSim (Spire's rocks placed whether or not a frame draws).
@@ -289,7 +313,31 @@ namespace MphRecomp.Replay
         // 13 (2026-11-08): alt-form friction and Sylux's ride spring drop the remainder like vanilla's fixed point (a ball
         //    coasted and bobbed on forever), and the alt form's face and edge push-out depth is the cart's fx32 math, the edge
         //    depth linear (PlayerInput.cs, PlayerCollision.cs); docs/ACCURACY.md A13.
-        public const int CurrentSimVersion = 13;
+        // 14 (2026-11-13): Spire's Dialanche climbs a wall it's held into at vanilla's rate (the spikes' push-out was lost and
+        //    the lift halved, so straight up barely climbed; checked against BizHawk, PlayerCollision.cs).
+        // 15 (2026-11-13): the alt form's camera closes half its height gap to the ball a 30 Hz tick, as vanilla (it closed
+        //    three quarters, a bouncy view; the stick steers by this camera), and Spire's ball touches a wall it climbs every
+        //    few ticks as vanilla's does, so it spins slower climbing (PlayerCamera.cs, PlayerCollision.cs; BizHawk).
+        //    The Hyper Beam's charged release fires a stream, as Corruption's gun does: a shot every 2 ticks for max(0.1,
+        //    charge) x 2.5 s, in place of one charged bolt (PlayerHyperBeam.cs, Metadata/HyperBeam.cs; main.dol).
+        // 16 (2026-11-14): a charged Hyper Beam shot (the release's stream) flies Corruption's PhazonBurst curl, WIND eased
+        //    each frame from its own seeded random, for PSLT 50-80 frames, then bursts; no ricochet (BeamHyperWind.cs; the
+        //    WPSC, main.dol).
+        // 17 (2026-11-14): that curl's seed is its release's seat, life (the seat's deaths) and count in that life, each
+        //    stream shot's the release's and its place in the stream, so every online copy flies it the same (BeamHyperWind.cs).
+        // 18 (2026-11-15): the Hyper Beam's press shot flies Corruption's PhazonBeam speed, IVEC 2.5 m a frame x 1.6/2.7 =
+        //    1.48 u a tick (it flew 2.0; Metadata/HyperBeam.cs, the WPSC).
+        // 19 (2026-11-15): Sylux's next bomb waits vanilla's 4 ticks (8 frames; it was 7, the ammo's stale step cost one frame
+        //    in place of one tick), as does his overuse lockout, so fast taps are dropped and Lockjaw doesn't hover (PlayerInput.cs).
+        // 20 (2026-11-15): the Hyper Beam's stream fires every tick, as Corruption's every other 60 Hz frame (main.dol
+        //    0x8018b0a8; it fired every 2 ticks), so a full release is 75 shots, and a player's charged Hyper Beam shots get
+        //    their own 48 slots after the 16 (Metadata/HyperBeam.cs StreamPool, BeamProjectileEntity.ChooseBeamSlot).
+        // 21 (2026-11-15): a charged Hyper Beam shot first moves (and can first hit) the frame after it's made, as Corruption's
+        //    (main.dol 0x8027351c: the gun fires after the Think pass, the shot made at its LBEAM locator, 0x80071268), so its
+        //    hit lands a frame later than it did and it bursts after its PSLT moves (BeamProjectileEntity.cs, BeamHyperWind.cs).
+        // 22 (2026-11-18): a Brawl Zero Suit Samus seat's alt form is her army crawl, not the Morph Ball (MphRead
+        //    PlayerCrawl.cs, Settings.ZeroSuitCrawl, Characters.CrawlFor; docs/ZERO_SUIT_SAMUS.md section 7).
+        public const int CurrentSimVersion = 22;
         private static ReadOnlySpan<byte> Magic => "MPHRPLY\0"u8;
 
         public int SimVersion { get; set; } = CurrentSimVersion;
@@ -330,6 +378,12 @@ namespace MphRecomp.Replay
         // format 75: the gameplay mods the match ran with (cosmetic mods aren't recorded), and their random seed
         public List<ReplayMod> Mods { get; } = new();
         public ulong ModSeed { get; set; }
+        // files the match needs beyond the game's own (by name), carried so the replay plays on a device without them;
+        // an optional block at the end of any format (see the format notes)
+        public List<ReplayAttachment> Attachments { get; } = new();
+        public const int MaxAttachments = 8;
+        public const int MaxAttachmentBytes = 8 << 20;
+        static readonly byte[] AttachmentTag = "ATT1"u8.ToArray();
         // a network input of another size than this build's (NetInput.RecordSize), or an event it doesn't know: refused by ReplayPlayer.CheckBeforeStart
         public bool OldNetInput { get; private set; }
 
@@ -410,7 +464,8 @@ namespace MphRecomp.Replay
                     lastStep = e.Step;
                     w.Write(e.Seat);
                     w.Write((byte)e.Kind);
-                    if (e.Kind is ReplayNetKind.Input or ReplayNetKind.Hit or ReplayNetKind.Position)
+                    if (e.Kind is ReplayNetKind.Input or ReplayNetKind.Hit or ReplayNetKind.Position or ReplayNetKind.Pickup
+                        or ReplayNetKind.Shot or ReplayNetKind.AimCam)
                     {
                         byte[] input = e.Input ?? Array.Empty<byte>();
                         w.Write((byte)input.Length);
@@ -456,9 +511,10 @@ namespace MphRecomp.Replay
                     w.Write(m.Data);
                 }
                 w.Write(Steps.Count);
+                int layout = SavedFormat(Settings); // (the layout the stamp reads: a re-saved older file keeps its own)
                 foreach (ReplayStep step in Steps)
                 {
-                    WriteInput(w, step.Input);
+                    WriteInput(w, step.Input, layout);
                     w.Write(step.Checksum);
                 }
                 w.Write(ShotChecks.Count); // format 47
@@ -471,6 +527,17 @@ namespace MphRecomp.Replay
                     w.Write(c.AimOff);
                     w.Write(c.Victim);
                     w.Write(c.VictimOff);
+                }
+                if (Attachments.Count > 0)
+                {
+                    w.Write(AttachmentTag);
+                    w.Write(Attachments.Count);
+                    foreach (ReplayAttachment a in Attachments)
+                    {
+                        w.Write(a.Name);
+                        w.Write(a.Bytes.Length);
+                        w.Write(a.Bytes);
+                    }
                 }
             }
             byte[] data = payload.ToArray();
@@ -642,6 +709,9 @@ namespace MphRecomp.Replay
             file.Settings.TurretSeatSafe = format >= 90 ? null : false; // not written: on from format 90
             file.Settings.TurretBotNav = format >= 91 ? null : false; // not written: on from format 91
             file.Settings.PickupEquipRaise = format >= 92 ? null : false; // not written: on from format 92
+            file.Settings.PickupOneTaker = format >= 94 ? null : false; // not written: on from format 94
+            file.Settings.ZeroSuitCrawl = format >= 97 ? null : false; // not written: on from format 97
+            file.Settings.CrateHealthPending = format >= 98; // not written: on from format 98 (said outright: a public build plays null as off)
             file.Settings.EchoesTurretBots = format >= 41 ? null : false; // not written: on from format 41
             file.Settings.RecolorPerSkin = format >= 43 ? null : false; // not written: on from format 43
             file.Settings.NoBallJump = format >= 44 ? null : false; // not written: on from format 44
@@ -704,7 +774,9 @@ namespace MphRecomp.Replay
                     byte seat = r.ReadByte();
                     var kind = (ReplayNetKind)r.ReadByte();
                     byte[]? input = kind == ReplayNetKind.Input || kind == ReplayNetKind.Hit && format >= 50
-                        || kind == ReplayNetKind.Position && format >= 54 ? r.ReadBytes(r.ReadByte()) : null;
+                        || kind == ReplayNetKind.Position && format >= 54 || kind == ReplayNetKind.Pickup && format >= 93
+                        || kind == ReplayNetKind.Shot && format >= 95 || kind == ReplayNetKind.AimCam && format >= 96
+                        ? r.ReadBytes(r.ReadByte()) : null;
                     if (format < 26 && input != null && input.Length == MphRecomp.Multiplayer.Net.NetInput.OldRecordSize)
                     {
                         input = MphRecomp.Multiplayer.Net.NetInput.UpgradeOldRecord(input); // (no touch bytes: the stylus up)
@@ -716,6 +788,18 @@ namespace MphRecomp.Replay
                     else if (kind == ReplayNetKind.Position && format >= 54)
                     {
                         if (!MphRecomp.Campaign.CampaignHost.IsPositionRecord(input!)) file.OldNetInput = true;
+                    }
+                    else if (kind == ReplayNetKind.Pickup && format >= 93)
+                    {
+                        if (input!.Length != MphRecomp.Campaign.CampaignHost.PickupRecordSize) file.OldNetInput = true;
+                    }
+                    else if (kind == ReplayNetKind.Shot && format >= 95)
+                    {
+                        if (!MphRecomp.Campaign.CampaignHost.IsShotRecord(input!)) file.OldNetInput = true;
+                    }
+                    else if (kind == ReplayNetKind.AimCam && format >= 96)
+                    {
+                        if (input!.Length != 2) file.OldNetInput = true;
                     }
                     else if (input != null && input.Length != MphRecomp.Multiplayer.Net.NetInput.RecordSize || kind > ReplayNetKind.Rejoin)
                     {
@@ -795,6 +879,26 @@ namespace MphRecomp.Replay
                         r.ReadSingle(), r.ReadSByte(), r.ReadSingle()));
                 }
             }
+            // (only a whole unpacked payload has a length: the header-only read returned before the steps)
+            if (r.BaseStream.CanSeek && r.BaseStream.Length - r.BaseStream.Position >= AttachmentTag.Length + 4
+                && r.ReadBytes(AttachmentTag.Length).AsSpan().SequenceEqual(AttachmentTag))
+            {
+                int count = r.ReadInt32();
+                if (count < 0 || count > MaxAttachments)
+                {
+                    throw new InvalidDataException("damaged replay file (attachments)");
+                }
+                for (int i = 0; i < count; i++)
+                {
+                    string name = r.ReadString();
+                    int length = r.ReadInt32();
+                    if (length < 0 || length > MaxAttachmentBytes || length > r.BaseStream.Length - r.BaseStream.Position)
+                    {
+                        throw new InvalidDataException("damaged replay file (attachments)");
+                    }
+                    file.Attachments.Add(new ReplayAttachment(name, r.ReadBytes(length)));
+                }
+            }
             return file;
         }
 
@@ -804,6 +908,9 @@ namespace MphRecomp.Replay
         static int SavedFormat(MatchSettings s)
         {
             int f = FormatVersion;
+            if ((s.CrateHealthPending ?? !MphRecomp.Config.RecompSettings.PublicBuild) == false) f = 97; // (as MatchStart played it)
+            if (s.ZeroSuitCrawl == false) f = 96;
+            if (s.PickupOneTaker == false) f = 93;
             if (s.PickupEquipRaise == false) f = 91;
             if (s.TurretBotNav == false) f = 90;
             if (s.TurretSeatSafe == false) f = Math.Min(f, 89);
@@ -897,6 +1004,9 @@ namespace MphRecomp.Replay
             copy.TurretSeatSafe = s.TurretSeatSafe; // format 90 (not written)
             copy.TurretBotNav = s.TurretBotNav; // format 91 (not written)
             copy.PickupEquipRaise = s.PickupEquipRaise; // format 92 (not written)
+            copy.PickupOneTaker = s.PickupOneTaker; // format 94 (not written)
+            copy.ZeroSuitCrawl = s.ZeroSuitCrawl; // format 97 (not written)
+            copy.CrateHealthPending = s.CrateHealthPending; // format 98 (not written)
             copy.EchoesTurretBots = s.EchoesTurretBots; // format 41 (not written)
             copy.RecolorPerSkin = s.RecolorPerSkin; // format 43 (not written)
             copy.NoBallJump = s.NoBallJump; // format 44 (not written)
@@ -1030,7 +1140,7 @@ namespace MphRecomp.Replay
         private static void WriteOpt(BinaryWriter w, float? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
         private static void WriteOpt(BinaryWriter w, bool? v) { w.Write(v.HasValue); if (v.HasValue) w.Write(v.Value); }
 
-        private static void WriteInput(BinaryWriter w, in CampaignInput input)
+        private static void WriteInput(BinaryWriter w, in CampaignInput input, int format)
         {
             w.Write(input.Move.X);
             w.Write(input.Move.Y);
@@ -1044,8 +1154,18 @@ namespace MphRecomp.Replay
             w.Write(input.TouchDown); // format 26
             w.Write(input.TouchDx);
             w.Write(input.TouchDy);
-            w.Write(input.MovePush); // format 88
-            w.Write(input.MoveDir); // format 89
+            if (format >= 88)
+            {
+                w.Write(input.MovePush);
+            }
+            if (format >= 89)
+            {
+                w.Write(input.MoveDir);
+            }
+            if (format >= 96)
+            {
+                w.Write(input.TrueAim);
+            }
         }
 
         private static CampaignInput ReadInput(BinaryReader r, int format)
@@ -1074,6 +1194,10 @@ namespace MphRecomp.Replay
             {
                 input.MoveDir = r.ReadByte();
             }
+            if (format >= 96)
+            {
+                input.TrueAim = r.ReadUInt16();
+            }
             return input;
         }
 
@@ -1099,6 +1223,9 @@ namespace MphRecomp.Replay
         }
     }
     // a gameplay mod a match ran with (ReplayFile format 75): what playback needs to bring back the same mod
+    // a file a match needs beyond the game's own; whoever uses it checks it (a custom arena: its hash and signature)
+    public sealed record ReplayAttachment(string Name, byte[] Bytes);
+
     public sealed class ReplayMod
     {
         public string Id { get; set; } = "";

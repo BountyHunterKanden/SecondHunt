@@ -65,6 +65,9 @@ namespace MphRecomp.Replay
             host.SeatRejoinTap = SeatRejoined;
             host.ClaimedHitTap = ClaimedHit;
             host.ClientPositionTap = ClientPositionTaken;
+            host.PickupClaimTap = ClaimedPickup;
+            host.ShotEventTap = ShotEvents;
+            host.TrueAimTap = RemoteTrueAim;
         }
 
         // (CampaignHost's taps, before the step they belong to: Steps.Count is that step's index)
@@ -86,6 +89,18 @@ namespace MphRecomp.Replay
         // (the same: a guest's own position the host took, format 54)
         public void ClientPositionTaken(int seat, byte[] record) => File.NetEvents.Add(new ReplayNetEvent(File.Steps.Count, (byte)seat,
             ReplayNetKind.Position, record));
+
+        // (the same: a served match's pickup claim the host took, format 93)
+        public void ClaimedPickup(int seat, byte[] record) => File.NetEvents.Add(new ReplayNetEvent(File.Steps.Count, (byte)seat,
+            ReplayNetKind.Pickup, record));
+
+        // a served seat's shot events handed to it at this step (Fruity P2, Multiplayer/MatchShotEvents.cs)
+        public void ShotEvents(int seat, byte[] record) => File.NetEvents.Add(new ReplayNetEvent(File.Steps.Count, (byte)seat,
+            ReplayNetKind.Shot, record));
+
+        // a LAN guest's third-person true aim changed at this step (format 96)
+        public void RemoteTrueAim(int seat, ushort code) => File.NetEvents.Add(new ReplayNetEvent(File.Steps.Count, (byte)seat,
+            ReplayNetKind.AimCam, new[] { (byte)code, (byte)(code >> 8) }));
 
         public void Step(in CampaignInput input, Scene scene)
         {
@@ -305,6 +320,9 @@ namespace MphRecomp.Replay
                 else if (e.Kind == ReplayNetKind.Rejoin) _host.ReconnectSeat(e.Seat);
                 else if (e.Kind == ReplayNetKind.Hit) _host.ClaimHit(CampaignHost.ReadClaimRecord(e.Seat, e.Input!));
                 else if (e.Kind == ReplayNetKind.Position) _host.TakeClientPosition(e.Seat, e.Input!);
+                else if (e.Kind == ReplayNetKind.Pickup) _host.ClaimPickupRecord(e.Seat, e.Input!);
+                else if (e.Kind == ReplayNetKind.Shot) _host.SetRemoteShotsRecord(e.Seat, e.Input!);
+                else if (e.Kind == ReplayNetKind.AimCam) _host.SetRemoteTrueAim(e.Seat, (ushort)(e.Input![0] | e.Input[1] << 8));
             }
         }
 

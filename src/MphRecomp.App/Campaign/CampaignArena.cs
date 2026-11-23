@@ -68,10 +68,9 @@ internal sealed partial class CampaignRenderer
             _arenaHdLoad = null;
             _turretLook = null;
             RoomMetadata? meta = Metadata.GetRoomById(_host.RoomId, noThrow: true);
-            if (meta != null && EchoesArena.IsEchoesRoom(meta.Name) && meta.Archive is string archive)
+            if (meta != null && ArenaHdDirFor(meta) is string dir)
             {
-                string dir = EchoesArena.HdDir(meta.Name) ?? Path.Combine(Paths.FileSystem, "_archives", archive, ArenaHdWriter.Dir);
-                _arenaHdLoad = Task.Run(() => ArenaHdDraw.TryLoad(dir));
+                _arenaHdLoad = (_menuBackdrop ? TakeArenaHdAhead(dir) : null) ?? Task.Run(() => ArenaHdDraw.TryLoad(dir));
                 if (EchoesTurret.LoadLook(dir) is { } look)
                 {
                     _turretLook = (look, EchoesTurret.Light(look.Ambient, look.Lights), EchoesTurret.Light(look.HoloAmbient, look.HoloLights),
@@ -79,6 +78,32 @@ internal sealed partial class CampaignRenderer
                 }
             }
         }
+    }
+
+    static string? ArenaHdDirFor(RoomMetadata meta) =>
+        EchoesArena.IsEchoesRoom(meta.Name) && meta.Archive is string archive
+            ? EchoesArena.HdDir(meta.Name) ?? Path.Combine(Paths.FileSystem, "_archives", archive, ArenaHdWriter.Dir)
+            : null;
+
+    // the menus' next arena backdrop's HD bundle, read on a worker while a game's pause menu is up (MenuArenaBackdrop.
+    // ReadAhead), so the menus' first frame back from the game has only its GL objects to make (owner 11-22: back from a
+    // game as instant as launch; Crossfire Chaos's read was 79 ms of that frame on the Odin). No GL in the read.
+    static (string Dir, Task<ArenaHdDraw?> Load)? s_arenaHdAhead;
+
+    public static void ReadArenaHdAhead(string arena)
+    {
+        s_arenaHdAhead = null;
+        if (Metadata.GetRoomByName(arena).Item1 is not RoomMetadata meta || ArenaHdDirFor(meta) is not string dir) return;
+        s_arenaHdAhead = (dir, Task.Run(() => ArenaHdDraw.TryLoad(dir)));
+    }
+
+    public static void DropArenaHdAhead() => s_arenaHdAhead = null;
+
+    static Task<ArenaHdDraw?>? TakeArenaHdAhead(string dir)
+    {
+        if (s_arenaHdAhead is not { } ahead || ahead.Dir != dir) return null;
+        s_arenaHdAhead = null;
+        return ahead.Load;
     }
 
     // GL thread, before a room's first frame (OnSurfaceChanged): the HD bundle read and its GL objects made now, so the
@@ -108,6 +133,13 @@ internal sealed partial class CampaignRenderer
         if (first) ArenaPerfFrame();
         hd.Draw(scene.ViewMatrix, scene.PerspectiveMatrix, pass, _clock.Elapsed.TotalSeconds, sky: first);
         if (pass == 0) DrawCrates(scene, hd);
+        // the props' blended and additive parts (Mining Plaza's lens glass, the lore hologram, glowing crate parts) after
+        // every opaque thing: drawn with the opaque pass and writing no depth, the holiday snow and the players painted
+        // over them (owner 11-21)
+        // (not in the fixes-only release: a public build draws every part in one go below, as before, until the owner has
+        // checked the new order)
+        bool propsSplit = !MphRecomp.Config.RecompSettings.PublicBuild;
+        if (pass == 1 && _crates.Count > 0 && propsSplit) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _crates, ArenaHdDraw.PropParts.Blended);
         // the occupant's see-through turret after the arena's blended surfaces (water, glass) and the crates: drawn with
         // the opaque pass and writing no depth, the water and the crates painted over it (owner 10-16)
         // (turned with the step's aim, so seen with the step's view: it rides the camera under smooth frames)
@@ -144,6 +176,9 @@ internal sealed partial class CampaignRenderer
             if (c.X >= min.X && c.X <= max.X && c.Z >= min.Z && c.Z <= max.Z && c.Y >= min.Y && c.Y < max.Y) { inside = true; break; }
         }
         if (!inside) return;
+
+        if (DrawPrime1Underwater()) return; // Prime 1 rooms: their own fog colour + multiply filter (CampaignRenderer.Prime1Fx.cs)
+
         float[] fog = EchoesArena.WaterFog;
         GLES30.GlDisable(GLES30.GlDepthTest);
         GLES30.GlUseProgram(_hudProgram);
@@ -262,7 +297,9 @@ internal sealed partial class CampaignRenderer
         _crates.Clear();
         _seatShell.Clear();
         _turretFxProps.Clear();
+        _presents.Clear();
         bool turret = false;
+        bool holiday = MphRecomp.Holiday.HolidaySnow.Enabled, quarryPresents = holiday && IsMainQuarry();
         foreach (EnemyInstanceEntity e in scene.GetEnemyInstanceEntities())
         {
             if (e is EchoesTurretEntity t)
@@ -273,7 +310,9 @@ internal sealed partial class CampaignRenderer
             }
             if (e is EchoesCrateEntity { Up: true } c && hd.HasProps)
             {
-                _crates.Add((Matrix4.CreateRotationY(c.Spin) * Matrix4.CreateTranslation(c.Position), c.Flash, c.Light, ArenaHdWriter.PropPass, 1, null));
+                // HOLIDAY MODE: a present in its place (CampaignRenderer.HolidayPresents.cs)
+                if (holiday) AddPresent(hd, Matrix4.CreateRotationY(c.Spin) * Matrix4.CreateTranslation(c.Position), ArenaHdWriter.PropPass, c.Flash, c.Light, 1, c.Position);
+                else _crates.Add((Matrix4.CreateRotationY(c.Spin) * Matrix4.CreateTranslation(c.Position), c.Flash, c.Light, ArenaHdWriter.PropPass, 1, null));
             }
             else if (e is EchoesBreakableEntity { Up: true } br && hd.HasPlaced)
             {
@@ -293,12 +332,24 @@ internal sealed partial class CampaignRenderer
                 gt.AddPieces(_pieces);
                 foreach ((Matrix4 m, int pass, CrateLight? light, float fade) in _pieces) _crates.Add((m, false, light, pass, fade, null));
             }
+            else if (e is MainQuarryCraneEntity cr && hd.HasPlaced)
+            {
+                // Main Quarry's crane: at rest or swinging, the wall standing or broken
+                _pieces.Clear();
+                cr.AddPieces(_pieces);
+                foreach ((Matrix4 m, int pass, CrateLight? light, float fade) in _pieces) _crates.Add((m, false, light, pass, fade, null));
+            }
             else if (e is MiningPlazaCrateEntity sc && hd.HasPlaced)
             {
                 // Mining Plaza's sand crates: swaying, flinching (red flash) or growing back
                 _pieces.Clear();
                 sc.AddPieces(_pieces);
-                foreach ((Matrix4 m, int pass, CrateLight? light, float fade) in _pieces) _crates.Add((m, sc.Flash, light, pass, fade, null));
+                foreach ((Matrix4 m, int pass, CrateLight? light, float fade) in _pieces)
+                {
+                    // HOLIDAY MODE: Main Quarry's crates are presents (Mining Plaza's sand crates are plants, kept)
+                    if (quarryPresents) AddPresent(hd, m, pass, sc.Flash, light, fade, sc.Position);
+                    else _crates.Add((m, sc.Flash, light, pass, fade, null));
+                }
             }
         }
         // the arena's static actor models (Spires' pillars: solid in the collision, not in the render mesh; T6 N3)
@@ -315,7 +366,10 @@ internal sealed partial class CampaignRenderer
         if (hd.HasPlaced) AddTurretModels(_crates, _turretFxProps);
         // the sand crates' flying pieces (CampaignRenderer.SandCrateFx.cs)
         if (hd.HasPlaced) AddSandBits(_crates);
-        if (_crates.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _crates);
+        if (_crates.Count > 0) hd.DrawProps(scene.ViewMatrix, scene.PerspectiveMatrix, _clock.Elapsed.TotalSeconds, _crates,
+            MphRecomp.Config.RecompSettings.PublicBuild ? ArenaHdDraw.PropParts.All : ArenaHdDraw.PropParts.Opaque); // (All: the fixes-only release, see the draw pass)
+        if (holiday) AddPresentBits(scene, _presents);
+        if (_presents.Count > 0) hd.DrawPresents(scene.ViewMatrix, scene.PerspectiveMatrix, _presents);
     }
 
     // the turret's parts in its state's clip: lowered while free (the hologram spinning over it), rising as a player gets
@@ -448,7 +502,7 @@ internal sealed partial class CampaignRenderer
     }
 }
 
-internal sealed class ArenaHdDraw
+internal sealed partial class ArenaHdDraw
 {
     const string Tag = "MPHArena";
 
@@ -940,7 +994,10 @@ internal sealed class ArenaHdDraw
     // same view
     readonly HashSet<int> _fadeLogged = new();
 
-    public void DrawProps(Matrix4 view, Matrix4 proj, double seconds, List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> props)
+    public enum PropParts { All, Opaque, Blended }
+
+    public void DrawProps(Matrix4 view, Matrix4 proj, double seconds, List<(Matrix4 Model, bool Flash, CrateLight? Light, int Pass, float Fade, Vector3? Tint)> props,
+        PropParts parts = PropParts.All)
     {
         if (!_glReady || Failed) return;
         _curProg = _active = _blend = _blendSrc = _blendDst = _depthMask = _depthFunc = -1;
@@ -985,6 +1042,8 @@ internal sealed class ArenaHdDraw
             if (!_byPass.TryGetValue(pass, out Batch[]? passBatches)) continue;
             foreach (Batch b in passBatches)
             {
+                // (a blended part: one drawn with no depth write below)
+                if (parts != PropParts.All && (tint != null || see || b.P.Blend) != (parts == PropParts.Blended)) continue;
                 if (fade < 1 && !see && tint == null && _fadeLogged.Add(pass))
                     Log.Info("MPHArena", $"faded prop pass {pass}: blend {b.P.Blend} {b.P.BlendSrc}/{b.P.BlendDst} (additive fades by colour)");
                 if ((want.W != 0 ? b.PropTintSpec : b.PropSpec) is Spec s)
@@ -1416,6 +1475,7 @@ internal sealed class ArenaHdDraw
         foreach (Batch b in _batches) b.Spec = b.PropSpec = b.PropTintSpec = null;
         _step = 0;
         _glReady = false;
+        ResetPresentsGl();
         Failed = false;
         _u.Clear();
         _texIds.Clear();

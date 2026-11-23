@@ -246,6 +246,21 @@ namespace MphRead
         // order, the round trip direction -> sector holds for all seven; a match with the blaster off keeps six
         private static void RingCheck(MatchSettings settings, List<string> errors)
         {
+            // the seven-slot ring: the Hyper Beam off (on, it's the eighth slot: -hyperbeamtest ring)
+            bool? hyperBeam = settings.HyperBeam;
+            settings.HyperBeam = false;
+            try
+            {
+                RingCheck7(settings, errors);
+            }
+            finally
+            {
+                settings.HyperBeam = hyperBeam;
+            }
+        }
+
+        private static void RingCheck7(MatchSettings settings, List<string> errors)
+        {
             var offSettings = new MatchSettings { Mode = settings.Mode, Arena = settings.Arena, TimeLimitSeconds = 20, PirateBlaster = false };
             offSettings.Players.AddRange(settings.Players);
             CampaignHost.StartMatch(offSettings);
@@ -521,7 +536,8 @@ namespace MphRead
                 host.Step(new CampaignInput { Buttons = i % 2 == 0 ? CampaignButtons.Shoot : 0 });
             }
             for (int i = 0; i < 30; i++) host.Step(default);
-            foreach (ItemType item in new[] { ItemType.VoltDriver, ItemType.Battlehammer, ItemType.Judicator, ItemType.Magmaul, ItemType.PirateBlaster })
+            foreach (ItemType item in new[] { ItemType.VoltDriver, ItemType.Battlehammer, ItemType.Judicator, ItemType.Magmaul, ItemType.PirateBlaster,
+                ItemType.HyperBeam }) // (the Hyper Beam: slot 8 where it's on, a dev build)
             {
                 p.HostPickUpWeapon(item);
             }
@@ -540,6 +556,22 @@ namespace MphRead
             CampaignSim.RenderHud(host.Scene, 1920, 1080, System.IO.Path.Combine(dir, "hud_blaster.png"));
             PlayerEntity.HostInstantWeaponIcon = false;
             Console.WriteLine($"equipped {p.CurrentWeapon}; wrote hud_blaster.png");
+            if (PlayerEntity.WeaponSlotCount == 8)
+            {
+                // the ring pointing at the Hyper Beam (straight up), then the HUD with it equipped
+                var up = new CampaignInput { Buttons = CampaignButtons.WeaponMenu, WeaponWheel = CampaignHost.WheelDirection(7) };
+                for (int i = 0; i < 10; i++) host.Step(up);
+                CampaignSim.RenderHud(host.Scene, 1920, 1080, System.IO.Path.Combine(dir, "ring_arc_hyper.png"));
+                PlayerEntity.HostWeaponRing = true;
+                host.Step(up);
+                CampaignSim.RenderHud(host.Scene, 1920, 1080, System.IO.Path.Combine(dir, "ring_ring_hyper.png"));
+                PlayerEntity.HostWeaponRing = false;
+                PlayerEntity.HostInstantWeaponIcon = true;
+                for (int i = 0; i < 30; i++) host.Step(default);
+                CampaignSim.RenderHud(host.Scene, 1920, 1080, System.IO.Path.Combine(dir, "hud_hyper.png"));
+                PlayerEntity.HostInstantWeaponIcon = false;
+                Console.WriteLine($"equipped {p.CurrentWeapon}; wrote ring_arc_hyper.png, ring_ring_hyper.png, hud_hyper.png");
+            }
             Console.WriteLine($"wrote {System.IO.Path.Combine(dir, "ring_arc.png")} + ring_ring.png (selection {p.WeaponSelection}, slots {PlayerEntity.WeaponSlotCount})");
             // (T4 N15) the ring with the Omega Cannon held in the third slot and the Power Beam equipped: Omega in the middle
             p.HostPickUpWeapon(ItemType.OmegaCannon);
@@ -587,6 +619,7 @@ namespace MphRead
                     cells.Add((f, rowCount)); sheets.Add((hunter, f, obj.Width, obj.CharacterData, obj.Height, obj.PaletteData));
                 }
                 cells.Add((-1, rowCount++)); sheets.Add((hunter + " blaster", 0, obj.Width, (weaponIcon ? PlayerEntity.PirateBlasterWeaponIcon(obj).Frame : PlayerEntity.PirateBlasterSelectIcon(obj)), obj.Height, weaponIcon ? PlayerEntity.PirateBlasterWeaponIcon(obj).Palette : obj.PaletteData));
+                cells.Add((-2, rowCount - 1)); sheets.Add((hunter + " hyper", 0, obj.Width, (weaponIcon ? PlayerEntity.HyperBeamWeaponIcon(obj).Frame : PlayerEntity.HyperBeamSelectIcon(obj)), obj.Height, weaponIcon ? PlayerEntity.HyperBeamWeaponIcon(obj).Palette : obj.PaletteData));
                 if (hunter == "Samus")
                 {
                     for (int i = 0; i < 16 && i < obj.PaletteData.Count; i++)
@@ -629,12 +662,12 @@ namespace MphRead
             }
             const int scale = 8;
             int cw = sheets[0].Item3 + 2, ch = sheets[0].Item5 + 2;
-            int cols = cells.Max(c => c.Col) + 2;
+            int cols = cells.Max(c => c.Col) + 3;
             for (int n = 0; n < cells.Count; n++)
             {
                 if (cells[n].Col < 0)
                 {
-                    cells[n] = (cols - 1, cells[n].Row);
+                    cells[n] = (cells[n].Col == -1 ? cols - 2 : cols - 1, cells[n].Row); // the blaster, then the Hyper Beam
                 }
             }
             int rows = rowCount;
@@ -667,7 +700,7 @@ namespace MphRead
             }
             string png = System.IO.Path.Combine(dir, weaponIcon ? "weaponicon.png" : "icons.png");
             SixLabors.ImageSharp.ImageExtensions.SaveAsPng(img, png);
-            Console.WriteLine($"wrote {png} ({sheets.Count} icons, last = the blaster)");
+            Console.WriteLine($"wrote {png} ({sheets.Count} icons, last two = the blaster, the Hyper Beam)");
         }
 
         // one pixel of an 8x8-tiled frame (HudObjectInstance.DoTexture's layout)

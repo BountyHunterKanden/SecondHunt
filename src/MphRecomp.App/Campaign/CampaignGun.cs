@@ -392,8 +392,11 @@ internal sealed class CampaignGun
             {
                 GLES30.GlUniform4f(U(prog, "uTint"), SeatTint.X, SeatTint.Y, SeatTint.Z, SeatTint.W);
                 GLES30.GlUniform4f(U(prog, "uTint2"), SeatTint2.X, SeatTint2.Y, SeatTint2.Z, SeatTint2.W);
+                // (its lights still take the weapon's colour, as the 1st copy's do: GxShader uGlowTint)
+                GLES30.GlUniform4f(U(prog, "uGlowTint"), tint.X, tint.Y, tint.Z, GunPrograms.TintMode(Gun, m, P));
             }
-            else GLES30.GlUniform4f(U(prog, "uTint"), tint.X, tint.Y, tint.Z, GunPrograms.TintMode(Gun, m, P));
+            else if (prog == _prog) GLES30.GlUniform4f(U(prog, "uGlowTint"), 0, 0, 0, 0);
+            if (!seat) GLES30.GlUniform4f(U(prog, "uTint"), tint.X, tint.Y, tint.Z, GunPrograms.TintMode(Gun, m, P));
             Viewmodel.FillPalette(m, _pal);
             GlUniforms.UniformMatrix4fv(U(prog, "uBones"), Gun.Materials[m].Palette.Length, false, _pal, 0);
             for (int u = 0; u < 8; u++)

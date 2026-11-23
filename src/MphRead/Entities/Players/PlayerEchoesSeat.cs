@@ -203,6 +203,22 @@ namespace MphRead.Entities
             UpdateAimVecs();
         }
 
+        // the share of an aim turn (degrees: yaw + = left as SeatYaw, pitch + = up) the seat would take: none before the
+        // turret is under control, and only inside the barrel's limits. For the App's aim preview (CampaignLookAhead), which
+        // turned the pictures between steps by the walking rule, so a stick held getting in turned the view and each step put
+        // it back (owner 2026-11-21: "the turret shaking going back and forth between allowing and refusing controls")
+        public Vector2 HostSeatPreviewTurn(float yaw, float pitch)
+        {
+            if (!HostSeated || !HostSeatControl || _health == 0 || _frozenTimer != 0)
+            {
+                return Vector2.Zero;
+            }
+            float y = Math.Clamp(SeatYaw + yaw, -_seatRight, _seatLeft) - SeatYaw;
+            float aimPitch = Math.Clamp(_seatAimPitch + pitch, -_seatDown, _seatUp);
+            float p = Math.Clamp(aimPitch + _seatStickPitch, -_seatDown, _seatUp) - SeatPitch;
+            return new Vector2(y, p);
+        }
+
         // the manned pitch step's ease (rso 0xeb4-0xefc): 1 - CMath::PhongBlob(|gap| / 90 degrees, 8), where PhongBlob(x, p) =
         // ((1 + cos(pi x)) / 2) ^ p with x clamped to 0..1 (Trilogy DOL 0x803855d0): full speed at a 90 degree gap, slowing as
         // the barrel nears its target (recentring, unmanned, is linear at 4x)

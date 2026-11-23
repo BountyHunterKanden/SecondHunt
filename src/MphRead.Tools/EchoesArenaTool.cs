@@ -301,21 +301,44 @@ namespace MphRead
             var gunFx = new Pak(gc.ReadFile("SamGunFx.pak"), "SamGunFx.pak");
             // (a story room as an arena: its own disc file, Def.Pak)
             var paks = new Dictionary<string, Pak> { ["Metroid6.pak"] = pak };
-            foreach (EchoesArena.Def def in EchoesArena.All)
+            // (a Prime 1 room as an arena, the Main Quarry: mp1=<Prime 1 disc>, default brawl_extract/prime/mp1.iso; only
+            // its own pak, none of Echoes' turret/grapple/spider ones)
+            MphRecomp.Import.IFileSource? mp1 = null;
+            Pak? mp1Audio = null, mp1Misc = null;
+            try
             {
-                if (which != "all" && EchoesArena.Find(which) != def) continue;
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                if (!paks.TryGetValue(def.Pak, out Pak? defPak)) paks[def.Pak] = defPak = new Pak(gc.ReadFile(def.Pak), def.Pak);
-                // out=<dir> (T6 2026-10-10): one folder per arena there (the in-app import's layout, pads not tuned), not
-                // the shared staged file system
-                if (Arg(args, "out") is string outDir)
+                foreach (EchoesArena.Def def in EchoesArena.All)
                 {
-                    EchoesArena.Import(defPak, def, EchoesArena.Layout.Folder(Path.Combine(outDir, def.Key)), scale, null, Console.WriteLine, audio: audio, hud: hud, gunFx: gunFx);
+                    if (which != "all" && EchoesArena.Find(which) != def) continue;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    bool prime1 = def.Game == "mp1";
+                    if (prime1 && mp1 == null)
+                    {
+                        string mp1Disc = Arg(args, "mp1") ?? Path.Combine(Path.GetDirectoryName(DefaultDisc) ?? "", "mp1.iso");
+                        if (!File.Exists(mp1Disc)) { Console.WriteLine($"  {def.InGameName}: no Prime 1 disc at {mp1Disc} (mp1=<disc>); skipped"); continue; }
+                        mp1 = DiscImage.Open(mp1Disc);
+                        if (mp1.GameId != "GM8E01") Console.WriteLine($"  note: {mp1.GameId} is not the NTSC-U Prime 1 disc the Main Quarry was checked on");
+                    }
+                    string pakKey = (prime1 ? "mp1:" : "") + def.Pak;
+                    if (!paks.TryGetValue(pakKey, out Pak? defPak)) paks[pakKey] = defPak = new Pak((prime1 ? mp1! : gc).ReadFile(def.Pak), def.Pak);
+                    // (Prime 1: mp1's own AudioGrp.pak and MiscData.pak, the snow, splash and runoff sounds: Prime1Fx)
+                    if (prime1 && mp1Audio == null) { mp1Audio = new Pak(mp1!.ReadFile("AudioGrp.pak"), "AudioGrp.pak"); mp1Misc = new Pak(mp1.ReadFile("MiscData.pak"), "MiscData.pak"); }
+                    Pak? audioFor = prime1 ? mp1Audio : audio, hudFor = prime1 ? null : hud, gunFxFor = prime1 ? null : gunFx, miscFor = prime1 ? mp1Misc : null;
+                    // out=<dir> (T6 2026-10-10): one folder per arena there (the in-app import's layout, pads not tuned), not
+                    // the shared staged file system
+                    if (Arg(args, "out") is string outDir)
+                    {
+                        EchoesArena.Import(defPak, def, EchoesArena.Layout.Folder(Path.Combine(outDir, def.Key)), scale, null, Console.WriteLine, audio: audioFor, hud: hudFor, gunFx: gunFxFor, misc: miscFor);
+                        Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
+                        continue;
+                    }
+                    EchoesArena.Import(defPak, def, Paths.FileSystem, scale, Console.WriteLine, audioFor, hudFor, gunFxFor, miscFor);
                     Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
-                    continue;
                 }
-                EchoesArena.Import(defPak, def, Paths.FileSystem, scale, Console.WriteLine, audio, hud, gunFx);
-                Console.WriteLine($"  ({sw.ElapsedMilliseconds} ms)");
+            }
+            finally
+            {
+                mp1?.Dispose();
             }
             if (Arg(args, "out") == null) ArenaMusic.Import(gc, Paths.FileSystem, Console.WriteLine);
         }

@@ -291,7 +291,7 @@ namespace MphRecomp.Mods
 
         static void DetachHosts()
         {
-            GameEvents.Any = false;
+            GameEvents.Any = GameEvents.LogListener != null; // (the play log listens all run: PlayLog.cs)
             LiveEntities.Instance.SetScene(null);
             GameEvents.Tick = false;
             GameEvents.Listener = null;
@@ -545,7 +545,7 @@ namespace MphRecomp.Mods
             GameEvents.Messages = watch ? (m, f, t, p1, p2) => { c?.FireMessage(m, f, t, p1, p2); p?.FireMessage(m, f, t, p1, p2); } : null;
             _wantTick = (c?.Wants("tick") ?? false) || (p?.Wants("tick") ?? false);
             GameEvents.Tick = _wantTick;
-            GameEvents.Any = any;
+            GameEvents.Any = any || GameEvents.LogListener != null; // (the play log listens all run: PlayLog.cs)
             GameState.HostModeTick = p?.Wants(ModHost.ModeTickEvent) == true ? scene => LiveGame.ModeTick(scene, p) : null;
             SetFilters();
         }

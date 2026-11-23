@@ -69,8 +69,10 @@ namespace MphRead.Entities
                 || CameraSequence.Current != null || CameraType != CameraType.Free)
             {
                 _deathCam = null;
+                RemoteDeadStep();
                 return;
             }
+            _remoteDeadCam = null;
             DeathCam? cam = _deathCam;
             (float freeYaw, float freePitch) = DeathCamAngles(CameraInfo.Facing);
             if (cam == null || cam.Doll != doll)
@@ -90,9 +92,12 @@ namespace MphRead.Entities
             // the free camera's turn this step (as UpdateCameraFree turned it), and its moves: past its pull-out, MPH's
             // free camera moves by the controls (a bot's don't steer: a replay watching a bot's seat keeps the stop)
             bool steered = !IsBot && _camSwitchTimer >= Values.CamSwitchTime * 2; // todo: FPS stuff (as UpdateCameraFree)
-            float turnYaw = steered ? freeYaw - cam.FreeYaw : 0;
+            // (recomp, bug report 2026-11-22: a remote seat's turns aren't its player's. Its device sends the gun's heading,
+            // which stops turning at the death, and the host's delta toward it never closes (RemoteDeadStep), so MPH's free
+            // camera turned the same amount every step and the view spun once handed over. Its moves are its own: kept)
+            float turnYaw = steered && !HostRemote ? freeYaw - cam.FreeYaw : 0;
             turnYaw -= MathF.Round(turnYaw / 360) * 360;
-            float turnPitch = steered ? freePitch - cam.FreePitch : 0;
+            float turnPitch = steered && !HostRemote ? freePitch - cam.FreePitch : 0;
             cam.FreeYaw = freeYaw;
             cam.FreePitch = freePitch;
             int forward = steered ? (Controls.MoveUp.IsDown ? 1 : Controls.MoveDown.IsDown ? -1 : 0) : 0;
@@ -167,6 +172,76 @@ namespace MphRead.Entities
                 position = Vector3.Clamp(position, _scene.Room.Meta.CameraMin, _scene.Room.Meta.CameraMax);
             }
             cam.View = new HostView(position, position + facing, Vector3.UnitY, 0);
+        }
+
+        // recomp (bug report 2026-11-22, *AB*'s served Prime Hunter replay: "when dying the camera keeps spinning very
+        // quickly"): a replay's watched REMOTE seat, dead without the follow cam above. Its aim is an absolute target that the
+        // host turns into this step's delta toward the gun's heading (PlayerNet.cs HostRemoteAimDelta). Dead, the gun stops
+        // turning and its device keeps sending that stopped heading, so the gap left at the death never closes and MPH's free
+        // camera turned by it every step (35 deg a step there). The device never sends its dead camera's own turns, so this
+        // view keeps the facing MPH's free camera had at the end of its pull-out, and moves by the seat's controls as
+        // UpdateCameraFree does (along that facing and its side, kept out of walls). View only (excluded from the replay
+        // walk): the match's own free camera is untouched
+        private sealed class RemoteDeadCam
+        {
+            public Vector3 Position;
+            public Vector3 Facing;
+            public bool Pulling = true; // MPH's pull-out from the eyes: its own view, which doesn't turn yet
+            public HostView? View;
+        }
+
+        // (one object, so the replay walk excludes it as one field)
+        private RemoteDeadCam? _remoteDeadCam;
+
+        // the view for this dead remote seat (null: not one; MatchReplay.cs draws it in place of MPH's free camera)
+        public HostView? RemoteDeadView => _health == 0 && CameraSequence.Current == null ? _remoteDeadCam?.View : null;
+
+        private void RemoteDeadStep()
+        {
+            if (!HostRemote || SlotIndex != HostDeathFollowSeat || _health > 0 || CameraSequence.Current != null
+                || CameraType != CameraType.Free)
+            {
+                _remoteDeadCam = null;
+                return;
+            }
+            RemoteDeadCam cam = _remoteDeadCam ??= new RemoteDeadCam
+            {
+                Position = CameraInfo.Position,
+                Facing = CameraInfo.Facing
+            };
+            if (cam.Pulling && _camSwitchTimer < Values.CamSwitchTime * 2) // todo: FPS stuff (as UpdateCameraFree)
+            {
+                cam.Position = CameraInfo.Position;
+                cam.Facing = CameraInfo.Facing;
+                cam.View = new HostView(CameraInfo.Position, CameraInfo.Target, Vector3.UnitY, 0);
+                return;
+            }
+            cam.Pulling = false;
+            Vector3 facing = cam.Facing.LengthSquared > 1e-6f ? cam.Facing.Normalized() : Vector3.UnitZ;
+            var side = new Vector3(facing.Z, 0, -facing.X); // (CameraInfo.Field50/54: the facing's side, as Update sets them)
+            side = side.LengthSquared > 1e-6f ? side.Normalized() : Vector3.UnitX;
+            Vector3 step = Vector3.Zero;
+            if (Controls.MoveUp.IsDown)
+            {
+                step += facing * 0.4f / 2; // todo: FPS stuff (as UpdateCameraFree)
+            }
+            else if (Controls.MoveDown.IsDown)
+            {
+                step -= facing * 0.4f / 2;
+            }
+            if (Controls.MoveLeft.IsDown)
+            {
+                step += side * 0.4f / 2;
+            }
+            else if (Controls.MoveRight.IsDown)
+            {
+                step -= side * 0.4f / 2;
+            }
+            if (step != Vector3.Zero)
+            {
+                cam.Position = DeathCamOutOfWalls(cam.Position, cam.Position + step);
+            }
+            cam.View = new HostView(cam.Position, cam.Position + facing, Vector3.UnitY, 0);
         }
 
         // a facing's yaw (as UpdateCameraFree's: atan2 of x and z) and pitch, in degrees

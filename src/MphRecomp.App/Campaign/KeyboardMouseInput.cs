@@ -54,7 +54,12 @@ public sealed class KeyboardMouseInput
         _mouseRoll = settings.MouseRoll;
         _slowMove = Array.IndexOf(RecompSettings.SlowMovePercents, settings.SlowMovePercent) >= 0 ? settings.SlowMovePercent / 100f : 0.4f;
         _rollScale = RollPxPerCount * settings.MouseSens / MouseScale.Default;
+        // KEYBOARD & MOUSE > BUTTONS "slow move mode" and "spider ball mode": hold or toggle (Core Input/StickShape.cs)
+        _slowToggle = settings.SlowMoveToggle;
+        _spiderToggle = settings.SpiderToggle;
     }
+    bool _slowToggle, _spiderToggle;
+    MphRecomp.Input.HoldToggle _slowLatch, _spiderLatch;
 
     // KEYBOARD & MOUSE > AIM > MOVE (owner 2026-11-09, "so the other hunters have a way to move more subtly in alt form on
     // pc"). SLOW MOVE: while its key is held (Left Shift by default) walking and every alt form move at a part push
@@ -256,7 +261,7 @@ public sealed class KeyboardMouseInput
         UpdateZoomTook(up, down);
         PlayerControls c = _binds;
         bool alt = player.IsAltForm;
-        _slowHeld = Held(ControlBinds.SlowMove, up, down);
+        _slowHeld = _slowLatch.Next(Held(ControlBinds.SlowMove, up, down), _slowToggle);
         float x = 0, y = 0;
         // (MphRead's walk and roll keys are the same W A S D; one function each moves both)
         if (Held(ControlBinds.Right, up, down)) x += 1;
@@ -287,13 +292,20 @@ public sealed class KeyboardMouseInput
         // (one function a row since owner 2026-10-17, C10: zoom, scan and bombs)
         if (Held(ControlBinds.Scan, up, down)) b |= CampaignButtons.Scan;
         if (HeldUnless(ControlBinds.Zoom, player.ScanVisor ? ControlBinds.Scan : null, up, down)) b |= CampaignButtons.Zoom;
-        if (Held(ControlBinds.Jump, up, down)) b |= CampaignButtons.Jump | CampaignButtons.Boost; // MphRead: both Space
+        // MphRead: both Space; in the campaign's alt forms with the hop on, a jump key that is ALT HOP too only hops (as the pad)
+        if (alt && player.AltHopActive ? HeldUnless(ControlBinds.Jump, ControlBinds.AltHop, up, down) : Held(ControlBinds.Jump, up, down))
+        {
+            b |= CampaignButtons.Jump | CampaignButtons.Boost;
+        }
         // (the Trooper's morph is his drone: the morph key deploys it)
         if (Held(ControlBinds.Morph, up, down)) b |= CampaignButtons.Morph;
         if (Held(ControlBinds.Bombs, up, down)) b |= CampaignButtons.AltAttack; // (MphRead: Q, which scans too)
         if (Held(ControlBinds.ScanVisor, up, down)) b |= CampaignButtons.ScanVisor;
         // recomp: the spider ball in alt form on an Echoes spider-track arena (right mouse by default; docs/SPIDER_BALL.md)
-        if (alt && PlayerEntity.HostSpiderBall && Held(ControlBinds.Spider, up, down)) b |= CampaignButtons.Spider;
+        // (a toggle turns off leaving the alt form)
+        if (!(alt && PlayerEntity.HostSpiderBall)) _spiderLatch.Clear();
+        else if (_spiderLatch.Next(Held(ControlBinds.Spider, up, down), _spiderToggle)) b |= CampaignButtons.Spider;
+        if (Held(ControlBinds.AltHop, up, down)) b |= CampaignButtons.AltHop; // (the campaign's alt-form hop, PlayerAltHop.cs; X by default)
         if (Held(ControlBinds.ZoomIn, up, down)) b |= CampaignButtons.ZoomIn; // ZOOM STEP (the game reads them only zoomed)
         if (Held(ControlBinds.ZoomOut, up, down)) b |= CampaignButtons.ZoomOut;
         if (Down(c.AffinitySlot, up, down)) b |= CampaignButtons.AffinitySlot;

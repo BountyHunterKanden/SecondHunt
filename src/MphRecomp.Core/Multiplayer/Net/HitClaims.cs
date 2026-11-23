@@ -50,11 +50,16 @@ namespace MphRecomp.Multiplayer.Net
         private const float VictimReach = 1.0f, BodyRadius = 1.2f, BodyBelow = 0.5f, BodyAbove = 2.5f, LineReach = 1.0f;
 
         private readonly record struct Claim(ushort Id, ushort Seq, byte Victim, bool Head, uint View, Vector3 VictimPosition, Vector3 Point,
-            int Predicted = 0);
+            int Predicted = 0, ushort Event = 0);
+        // (Fruity P2 shot events, 2026-11-13: to a host with FruitySync.HostShots the claims go with an 'E' trailer, [0x45] then
+        // n x u16, each claim's shot's event number (0 = none, PlayerEntity.NetShotOut.Event): the host's shot fired from that
+        // event is the claim's shot, whatever input it went out on (an event may wait, or ride a later input). Older hosts read
+        // only the claims)
+        private const byte EventTrailerMark = 0x45; // 'E'
 
         // ---- guest ----
         private static readonly List<Claim> _claims = new();
-        private static readonly Dictionary<int, ushort> _shotSeq = new(); // its own shots: number -> input seq
+        private static readonly Dictionary<int, (ushort Seq, ushort Event)> _shotSeq = new(); // its own shots: number -> input seq, event
         private static readonly Queue<int> _shotOrder = new();
         private static ushort _nextId;
         // P2 (FRUITY_PORT.md): claims kept until the host's verdict comes back; OutboxOff = the old repeat-4 path (A/B in the tools)
@@ -94,7 +99,8 @@ namespace MphRecomp.Multiplayer.Net
             public readonly Queue<ushort> LedgerOrder = new();
             public readonly List<ushort> Repeats = new(); // (P2) claims the guest sent again
             public int Answered; // (P2) repeats answered from the ledger
-            public readonly List<(ushort Seq, int Number, uint View, long Frame)> Shots = new(); // (View: its input's view tick, 0 = none)
+            // (View: its input's view tick, 0 = none; Event: the shot event it was fired from, 0 = none)
+            public readonly List<(ushort Seq, int Number, uint View, long Frame, ushort Event)> Shots = new();
             public readonly int[] Verdicts = new int[(int)Verdict.Other + 1];
             public int Claims;
         }
@@ -163,15 +169,15 @@ namespace MphRecomp.Multiplayer.Net
             }
             foreach (PlayerEntity.NetShotOut s in PlayerEntity.NetShotLog)
             {
-                if (s.Seat != seat || !_shotSeq.TryAdd(s.Number, (ushort)seq)) continue;
+                if (s.Seat != seat || !_shotSeq.TryAdd(s.Number, ((ushort)seq, s.Event))) continue;
                 _shotOrder.Enqueue(s.Number);
                 if (_shotOrder.Count > 64) _shotSeq.Remove(_shotOrder.Dequeue());
             }
             foreach (PlayerEntity.NetHitClaim h in PlayerEntity.NetHitClaimLog)
             {
-                if (!_shotSeq.TryGetValue(h.Shot, out ushort shotSeq) || h.Victim < 0 || h.Victim > 255) continue;
+                if (!_shotSeq.TryGetValue(h.Shot, out (ushort Seq, ushort Event) shot) || h.Victim < 0 || h.Victim > 255) continue;
                 ushort id = _nextId++;
-                _claims.Add(new Claim(id, shotSeq, (byte)h.Victim, h.Head, view, h.VictimPosition, h.Point, h.Predicted));
+                _claims.Add(new Claim(id, shot.Seq, (byte)h.Victim, h.Head, view, h.VictimPosition, h.Point, h.Predicted, shot.Event));
                 _made++;
                 _born[id] = step;
                 if (_born.Count > 512) _born.Clear();
@@ -194,7 +200,8 @@ namespace MphRecomp.Multiplayer.Net
             }
             else if (_claims.Count == 0 || step != _newStep && (step - _sentStep < 6 || step - _newStep > 60)) return;
             _sentStep = step;
-            byte[] p = new byte[2 + _claims.Count * ClaimBytes];
+            bool events = FruitySync.On && FruitySync.HostShots;
+            byte[] p = new byte[2 + _claims.Count * ClaimBytes + (events ? 1 + _claims.Count * 2 : 0)];
             p[0] = TypeHitClaim;
             p[1] = (byte)_claims.Count;
             Span<byte> d = p.AsSpan(2);
@@ -208,6 +215,14 @@ namespace MphRecomp.Multiplayer.Net
                 WriteV(d[10..], c.VictimPosition);
                 WriteV(d[22..], c.Point);
                 d = d[ClaimBytes..];
+            }
+            if (events)
+            {
+                d[0] = EventTrailerMark;
+                for (int i = 0; i < _claims.Count; i++)
+                {
+                    BinaryPrimitives.WriteUInt16LittleEndian(d[(1 + i * 2)..], _claims[i].Event);
+                }
             }
             try
             {
@@ -226,13 +241,16 @@ namespace MphRecomp.Multiplayer.Net
             int n = data[1];
             if (data.Length < 2 + n * ClaimBytes) return;
             ReadOnlySpan<byte> d = data.AsSpan(2);
+            int events = 2 + n * ClaimBytes; // (the 'E' trailer, if it came)
+            bool hasEvents = data.Length >= events + 1 + n * 2 && data[events] == EventTrailerMark;
             lock (_lock)
             {
                 SeatClaims seat = _seats[fromSeat] ??= new SeatClaims();
                 for (int i = 0; i < n; i++, d = d[ClaimBytes..])
                 {
                     var c = new Claim(BinaryPrimitives.ReadUInt16LittleEndian(d), BinaryPrimitives.ReadUInt16LittleEndian(d[2..]), d[4],
-                        (d[5] & 1) != 0, BinaryPrimitives.ReadUInt32LittleEndian(d[6..]), ReadV(d[10..]), ReadV(d[22..]));
+                        (d[5] & 1) != 0, BinaryPrimitives.ReadUInt32LittleEndian(d[6..]), ReadV(d[10..]), ReadV(d[22..]),
+                        Event: hasEvents ? BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(events + 1 + i * 2)) : (ushort)0);
                     if (!seat.Seen.TryAdd(c.Id, 0))
                     {
                         // (a repeat: the guest still waits for its verdict, so the ledger answers it in HostStep)
@@ -258,7 +276,7 @@ namespace MphRecomp.Multiplayer.Net
                 {
                     if (s.Seat < 0 || s.Seat >= _seats.Length) continue;
                     SeatClaims seat = _seats[s.Seat] ??= new SeatClaims();
-                    seat.Shots.Add((host.RemoteSeq[s.Seat], s.Number, host.RemoteView[s.Seat], frame));
+                    seat.Shots.Add((host.RemoteSeq[s.Seat], s.Number, host.RemoteView[s.Seat], frame, s.Event));
                     if (seat.Shots.Count > 64) seat.Shots.RemoveAt(0);
                 }
                 foreach (Pending p in _incoming)
@@ -360,11 +378,17 @@ namespace MphRecomp.Multiplayer.Net
             // late input repeats on the host (the same seq on two steps), so more than one can carry it; each is tried
             List<int> shots = _candidates;
             shots.Clear();
-            for (int i = seat.Shots.Count - 1; i >= 0; i--)
+            // (Fruity P2: a claim on a shot event's shot has the host's shot from that event, none other; until the host fires
+            // it the claim waits, as for a late input)
+            for (int i = seat.Shots.Count - 1; i >= 0 && c.Event != 0; i--)
+            {
+                if (seat.Shots[i].Event == c.Event) shots.Add(seat.Shots[i].Number);
+            }
+            for (int i = seat.Shots.Count - 1; i >= 0 && c.Event == 0; i--)
             {
                 if (seat.Shots[i].Seq == c.Seq) shots.Add(seat.Shots[i].Number);
             }
-            for (int i = seat.Shots.Count - 1; i >= 0; i--)
+            for (int i = seat.Shots.Count - 1; i >= 0 && c.Event == 0; i--)
             {
                 ushort seq = seat.Shots[i].Seq;
                 // (P2: the host runs only the newest of the inputs waiting and folds the older ones' presses into it, so a shot
@@ -507,7 +531,7 @@ namespace MphRecomp.Multiplayer.Net
             if (!shot.Claimable) return Verdict.Kind;
             // the frame the claim names: one the guest saw while this shot flew (from its input's view, a step either way)
             uint fired = 0;
-            foreach ((ushort _, int n, uint view, long _) in seat.Shots)
+            foreach ((ushort _, int n, uint view, long _, ushort _) in seat.Shots)
             {
                 if (n == number) fired = view;
             }

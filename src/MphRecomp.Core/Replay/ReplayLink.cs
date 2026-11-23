@@ -19,6 +19,9 @@ namespace MphRecomp.Replay
     //   a guest leaving a match that's still going (0.3.6, 2026-10-19: they get the partial replay):
     //   a request for the recording so far; the host sends it cut short (Complete = false) while the match goes on, and the
     //   guest's screen hold waits for it as for a whole one. An older host ignores the request (the guest gives up waiting).
+    //   the host, while the match goes on (2026-11-21): its recording as it grows, to each guest that said it takes it (the
+    //   identity's trailing flags byte, which an older host doesn't read), so the guest prepares its keyframes during the
+    //   match as the host does (ReplayLive.cs). An older guest never asks, so never gets one.
     // Everything goes in pieces of up to ChunkBytes, each acked and sent again until it is (the relay or a LAN loses some),
     // pumped by its own timer, so a transfer goes on while the screens change. Up to Window pieces of each transfer are out at
     // once, all transfers together paced to PiecesPerSecond (the relay drops a sender's packets past 500/s or 256 KB/s), and a
@@ -26,11 +29,13 @@ namespace MphRecomp.Replay
     // link several times over). A transfer gives up only when nothing new is acked for StallMs (0.3.8: it was a fixed 20 s,
     // which cut a long recording off on a slower link at 784 of 1276 pieces), and a recording that never got there goes to
     // SendFailed (the served match host files it in the player's server replay mailbox).
-    public sealed class ReplayLink : IDisposable
+    public sealed class ReplayLink : IDisposable, IReplayLiveLink
     {
         public const int ChunkBytes = 1100;
         private const byte TypeChunk = 1, TypeAck = 2;
-        private const byte KindIdentity = 1, KindReplay = 2, KindRequest = 3;
+        private const byte KindIdentity = 1, KindReplay = 2, KindRequest = 3, KindLive = 4;
+        // (the identity's trailing flags)
+        private const byte FlagLive = 1;
         private const int Window = 128, PumpMs = 40, StallMs = 8000, MaxChunks = 8192;
         private const int MinResendMs = 250, FirstResendMs = 400, MaxResendMs = 3000;
         private const double PiecesPerSecond = 150, Burst = 24;
@@ -41,6 +46,9 @@ namespace MphRecomp.Replay
         private readonly Dictionary<(int Seat, uint Id), Incoming> _in = new();
         private readonly Dictionary<int, ReplaySeatIdentity> _identities = new();
         private readonly HashSet<int> _wantReplay = new();
+        // (seat -> its live stream's generation: a new one each time its identity comes in, e.g. it joined again)
+        private readonly Dictionary<int, int> _wantLive = new();
+        private int _liveGeneration;
         private readonly Timer _timer;
         private uint _nextId = (uint)Environment.TickCount;
         private bool _disposed;
@@ -56,6 +64,10 @@ namespace MphRecomp.Replay
         public event Action<int>? ReplayRequested;
         // guest: the host's recording came in (the file's bytes, not yet checked)
         public event Action<byte[]>? ReplayReceived;
+        // guest: a blob of the host's live recording came in (ReplayLiveMirror.Receive; the receive thread, in any order)
+        public event Action<byte[]>? LiveReceived;
+        // the link is closing (Dispose): a guest's live mirror ends its feed
+        public event Action? Closing;
         // host: a recording that didn't get to a seat (stalled out, or still going when the link closed): the seat and the file
         public event Action<int, byte[]>? SendFailed;
 
@@ -88,6 +100,18 @@ namespace MphRecomp.Replay
             get { lock (_lock) return _wantReplay.ToList(); }
         }
 
+        // host: the guests that take the live recording, with their stream's generation
+        public IReadOnlyList<(int Seat, int Generation)> SeatsWantingLive
+        {
+            get { lock (_lock) return _wantLive.Select(kv => (kv.Key, kv.Value)).ToList(); }
+        }
+
+        // host: live blobs to a seat not yet all acked
+        public int LiveInFlight(int seat)
+        {
+            lock (_lock) return _out.Count(o => o.Kind == KindLive && o.Seat == seat);
+        }
+
         // something is still on its way out (not every piece acked, and not given up)
         public bool Sending
         {
@@ -101,7 +125,7 @@ namespace MphRecomp.Replay
         }
 
         // guest: this player's identity (and whether to send the recording back) to the host
-        public void SendIdentity(ReplaySeatIdentity id, bool wantReplay)
+        public void SendIdentity(ReplaySeatIdentity id, bool wantReplay, bool wantLive = false)
         {
             var ms = new MemoryStream();
             using (var w = new BinaryWriter(ms))
@@ -109,6 +133,7 @@ namespace MphRecomp.Replay
                 w.Write((byte)1); // (version)
                 w.Write(wantReplay);
                 WriteIdentity(w, id);
+                w.Write(wantLive ? FlagLive : (byte)0); // (an older host stops reading before this)
             }
             Queue(0, KindIdentity, ms.ToArray());
         }
@@ -118,6 +143,9 @@ namespace MphRecomp.Replay
 
         // host: the recording to a guest's seat
         public void SendReplay(int seat, byte[] file) => Queue(seat, KindReplay, file);
+
+        // host: a blob of the live recording to a guest's seat (ReplayLiveSender)
+        public void SendLive(int seat, byte[] blob) => Queue(seat, KindLive, blob);
 
         private void Queue(int seat, byte kind, byte[] blob)
         {
@@ -249,7 +277,7 @@ namespace MphRecomp.Replay
                 int at = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(6));
                 int count = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(8));
                 // what each side may receive: the host identities, a guest the host's recording
-                bool expected = _net.IsHost ? kind is KindIdentity or KindRequest : kind == KindReplay && fromSeat == 0;
+                bool expected = _net.IsHost ? kind is KindIdentity or KindRequest : kind is KindReplay or KindLive && fromSeat == 0;
                 if (!expected || count == 0 || count > MaxChunks || at >= count || data.Length - 10 > ChunkBytes) return;
                 byte[] ack = new byte[7];
                 ack[0] = TypeAck;
@@ -284,10 +312,15 @@ namespace MphRecomp.Replay
                     r.ReadByte();
                     bool want = r.ReadBoolean();
                     ReplaySeatIdentity id = ReadIdentity(r) with { Seat = fromSeat };
+                    byte flags = r.BaseStream.Position < r.BaseStream.Length ? r.ReadByte() : (byte)0;
                     lock (_lock)
                     {
                         _identities[fromSeat] = id;
                         if (want) _wantReplay.Add(fromSeat);
+                        // (a new stream: what still goes of an older one to this seat is dropped)
+                        _out.RemoveAll(o => o.Kind == KindLive && o.Seat == fromSeat);
+                        if ((flags & FlagLive) != 0) _wantLive[fromSeat] = ++_liveGeneration;
+                        else _wantLive.Remove(fromSeat);
                     }
                     IdentityReceived?.Invoke(id);
                 }
@@ -298,6 +331,10 @@ namespace MphRecomp.Replay
                         _wantReplay.Add(fromSeat);
                     }
                     ReplayRequested?.Invoke(fromSeat);
+                }
+                else if (kind == KindLive)
+                {
+                    LiveReceived?.Invoke(whole);
                 }
                 else
                 {
@@ -381,6 +418,14 @@ namespace MphRecomp.Replay
 
         public void Dispose()
         {
+            try
+            {
+                Closing?.Invoke();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                Console.Error.WriteLine("replay link: " + ex.Message);
+            }
             List<Outgoing> unfinished;
             lock (_lock)
             {

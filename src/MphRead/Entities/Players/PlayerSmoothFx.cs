@@ -7,10 +7,17 @@ namespace MphRead.Entities
     // same way.
     public partial class PlayerEntity
     {
+        // drew its first-person gun this frame (PlayerDraw): the effects at its muzzle are part of the gun's view
+        // (RenderItem.HostViewmodel), so the host frames them with the gun whatever its FOV setting (owner 11-13)
+        private bool _hostViewmodelDrawn;
+
         public void HostTagFx()
         {
             _muzzleEffect?.SetHostOwner(this);
             _chargeEffect?.SetHostOwner(this);
+            _muzzleEffect?.SetHostViewmodel(_hostViewmodelDrawn);
+            _chargeEffect?.SetHostViewmodel(_hostViewmodelDrawn);
+            _doubleDmgEffect?.SetHostViewmodel(_hostViewmodelDrawn);
             // the ones that follow the player each step too (Transform in PlayerProcess/PlayerInput): the double damage glow at
             // the muzzle, the boost ball dash, the morph ball furl, the burn after a Magmaul hit, the alt form death
             _doubleDmgEffect?.SetHostOwner(this);

@@ -29,7 +29,7 @@ namespace MphRecomp.Campaign
     //    ("ual:<name>", Tools UalRetarget) for the run forward, jumps, landings and hits, her Brawl Wait1 idle, Samus's
     //    for the rest (the 10-15 15:39 build);
     //  - her gun arm on the aim in every state, her hair and chest on springs (BrawlZeroSuitRig, after each pose);
-    //  - her Brawl crawl (Crawl) is in the body for the crawl alt form, which isn't built yet (section 7, phase 3).
+    //  - her Brawl crawl (Crawl) draws her crawl alt form (BrawlZeroSuitCrawl; the sim's MphRead PlayerCrawl.cs, section 7).
     // Hits play on the upper body too, from BustN (dev --es zsaim arm: from the gun shoulder only). The waist bends with
     // the aim as a hunter's does (AimBone BodyN).
     public static class BrawlZeroSuitBody
@@ -56,7 +56,7 @@ namespace MphRecomp.Campaign
         // the first-person gun arm's hold (BrawlZeroSuitRig.Cannon): the idle's grip
         public const string HoldClip = WaitUpArms, HoldFallback = WaitArms;
         static readonly string[] Arms = { "LShoulderN", "RShoulderN" };
-        // her Brawl crawl clips (the alt form's, when it's built)
+        // her Brawl crawl clips (the alt form's: BrawlZeroSuitCrawl)
         public static readonly string[] Crawl = { "Squat", "SquatWait", "SquatF", "SquatB", "SquatRv" };
 
         // dev (--es zsaim): "upper" (hits from BustN, default) or "arm"

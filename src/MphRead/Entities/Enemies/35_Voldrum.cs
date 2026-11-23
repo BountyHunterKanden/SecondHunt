@@ -61,11 +61,12 @@ namespace MphRead.Entities.Enemies
             // todo: this additional hack is needed so the orientation isn't totally wrong after spawning,
             // but what actually happens in the game needs to be investigated more, as it seems like it just has unit Y
             // for both until eventually overwritten by seeking the player -- but in our case the first seek would cause NaN
-            if (facing == Vector3.UnitY)
+            // recomp: straight down too (Stasis Bunker spawner); up stays (0,1,0) since the seeks pass unit Y, and a
+            // vertical facing next to that turned the transform into NaN, so the spawner respawned it every few frames
+            if (facing.X == 0 && facing.Z == 0)
             {
-                Vector3 swap = facing;
                 facing = up;
-                up = swap;
+                up = Vector3.UnitY;
             }
             SetTransform(facing, up, _spawner.Data.Header.Position.ToFloatVector());
             Flags |= EnemyFlags.Visible;

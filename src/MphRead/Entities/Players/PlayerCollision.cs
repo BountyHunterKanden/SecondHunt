@@ -437,6 +437,8 @@ namespace MphRead.Entities
             // reused + cleared (same contents as a fresh array): a new one per player per tick was ~1.4 MB/s of sim garbage with 7 bots
             CollisionResult[] results = _checkResults;
             Array.Clear(results);
+            float climbTouchLift = _climbTouchLift;
+            _climbTouchLift = 0;
             CollisionVolume altVolume = PlayerVolumes[(int)Hunter, 2];
             Vector3 point1;
             Vector3 point2;
@@ -651,8 +653,19 @@ namespace MphRead.Entities
             {
                 TakeDamage(dmgRes.Damage, DamageFlags.IgnoreInvuln, direction: null, source: null);
             }
+            // recomp: the lift of the Spire ball's wall touch on the last step, at the end of the 30 Hz tick as vanilla (HandleCollision)
+            if (climbTouchLift > 0 && _scene.FrameCount % 2 == 0 && Speed.Y < 0.15f) // todo: FPS stuff
+            {
+                Speed = Speed.AddY(climbTouchLift);
+                if (Speed.Y > 0.15f)
+                {
+                    Speed = Speed.WithY(Fixed.ToFloat(614));
+                }
+            }
             _volume = CollisionVolume.Move(_volumeUnxf, Position);
         }
+
+        private float _climbTouchLift = 0; // recomp: CheckCollision, HandleCollision
 
         // recomp: in an Echoes arena a face a player can't stand on: steeper than MPH's 0.5 floor slope but not a wall, or
         // (Prime's rule) below a 0.85 slope without Echoes' floor material (CollisionFlags.Bit12, EchoesArena's import).
@@ -694,6 +707,11 @@ namespace MphRead.Entities
             }
             return (int)((root + 0x200) >> 10);
         }
+
+        // recomp: how far down a biped's 4x ceiling push-out goes before it is only the overlap (HandleCollision). The switch is set
+        // on every room load (Core EchoesMovement.Extra): off in public builds for now, on the match host, and for Tools -weavelmorphtest off
+        private const float CeilingPushMax = 0.85f;
+        public static bool HostCeilingPushCap = true;
 
         public void HandleCollision(CollisionResult result)
         {
@@ -989,11 +1007,28 @@ namespace MphRead.Entities
                 }
             }
             Vector3 position = Position;
+            bool climbing = IsAltForm && Hunter == Hunter.Spire && result.Field0 == 0 && !SpiderAttached
+                && !((_scene.RoomId == 30 || _scene.RoomId == 67) // Magma Drop, Cortex CPU
+                    && result.Plane.Y == 0 && result.Plane.Z == 0)
+                && !(_scene.RoomId == 80 && CameraSequence.Current != null); // Frost Labyrinth
+            // recomp: climbing a wall, vanilla's Spire ball (moving, then colliding, once a 30 Hz tick) touches it every ~7-14 ticks,
+            // on the tick its whole move into the wall carries the sphere past the spikes' push-out, and that touch takes away the
+            // speed into the wall, so it spins slower than it rolls (BizHawk, owner's run 2026-11-13: speed into the wall builds
+            // 0 -> ~0.17 over ~8 ticks, then a CollidingLateral tick zeroes it; holding Up, horizontal speed averages 0.135). A 60 Hz
+            // step's half move never got the sphere there, so the ball kept rolling into the wall at ~0.18 (owner: "in bizhawk it
+            // seems the ball slows down at a climb and the spin slows with it"). On the step halfway through a tick, before this
+            // tick's spikes push out, the sphere also meets a wall the other half of the tick's move would reach, and goes where
+            // vanilla's push-out leaves it, touching (-spireclimbtest: a touch every ~10 ticks, 0.13 average). Vanilla's spikes lift
+            // a touching ball at the end of that tick, to the tick's 0.15 cap; that lift waits for the tick's step here
+            // (_climbTouchLift, CheckCollision), since spent on this step's 0.12 cap it left the tick ending ~0.09 and each touch
+            // cost ~4x the height it costs vanilla (climbing 0.081 a tick, vanilla 0.0875)
+            bool climbTouch = climbing && v2 <= 0 && MathF.Abs(result.Plane.Y) < 0.1f && _scene.FrameCount % 2 != 0 // todo: FPS stuff
+                && v2 - MathF.Min(0, Vector3.Dot(Speed, result.Plane.Xyz)) / 2 > 0;
             if (v2 >= Fixed.ToFloat(-5))
             {
                 v164 = true;
             }
-            if (v2 > 0)
+            if (v2 > 0 || climbTouch)
             {
                 // recomp: in an Echoes arena a face too steep to stand on (normal Y 0.1..0.5) pushes out sideways only, like a
                 // wall. MPH's push-out along the slanted normal (and the speed bounced off it) lifted a player who kept pushing
@@ -1049,7 +1084,18 @@ namespace MphRead.Entities
                     {
                         factor = 2 * 2; // todo: FPS stuff
                     }
-                    position.Y += normal.Y * depth * factor;
+                    float push = depth * factor;
+                    // recomp: past 0.85 down, a biped's 4x ceiling push is only the overlap itself (vanilla's 1x). A body put
+                    // deep into a ceiling in one step (Weavel starting to morph beside an overhang: his Halfturret, added under
+                    // him at once, lifts his still-standing body 0.9) was pushed 4x the 0.7 overlap, 2.8 down, to below the
+                    // floor's plane, and fell out of the arena (owner's replay "clip", Cryochasm, 2026-11-22). The overlap alone
+                    // can't take a body below where it stood. Hits up to 0.21 deep (a jump's; 4x of them is under 0.85) are
+                    // pushed as before, and nothing is pushed further than those were (docs/ACCURACY.md A15, -weavelmorphtest)
+                    if (factor > 1 && HostCeilingPushCap)
+                    {
+                        push = MathF.Min(push, MathF.Max(depth, CeilingPushMax / -normal.Y));
+                    }
+                    position.Y += normal.Y * push;
                 }
                 float dot = Vector3.Dot(Speed, normal);
                 if (dot < 0 && IsAltForm && MathF.Abs(normal.Y) <= 0.05f && Values.AltFormStrafe != 0)
@@ -1115,48 +1161,57 @@ namespace MphRead.Entities
             }
             if (IsAltForm)
             {
-                bool climbing = Hunter == Hunter.Spire && result.Field0 == 0 && !SpiderAttached;
                 if (climbing)
                 {
-                    if ((_scene.RoomId == 30 || _scene.RoomId == 67) // Magma Drop, Cortex CPU
-                        && result.Plane.Y == 0 && result.Plane.Z == 0)
-                    {
-                        climbing = false;
-                    }
-                    else if (_scene.RoomId == 80 && CameraSequence.Current != null) // Frost Labyrinth
-                    {
-                        climbing = false;
-                    }
-                }
-                if (climbing)
-                {
+                    // recomp: holding straight into a wall barely climbed (Discord report 2026-11-13); vanilla (US rev 0, the spike
+                    // loop at 0x20204A8) differs from MphRead's port in three ways, all fixed here:
+                    // - the spikes push the same position the wall push-out above moves (vanilla writes player->pos for both, in
+                    //   turn). MphRead pushed Position, which the write-back at the end of this method overwrote, so the ball rolled
+                    //   into the wall each frame and the wall's push-out took away the speed the lift scales with
+                    // - the lift factor is the full horizontal speed, plus 0.3 once the ball is rising (speed.Y > 0.01). MphRead
+                    //   halved the speed and added the 0.3 only while not rising, so the lift stayed under gravity
+                    // - no 60 Hz halving of the two speed kicks: each scales with the spike's depth, which a step's half move
+                    //   already halves
+                    // BizHawk (US rev 1, 2026-11-13): straight up a wall, speed.Y stays at the cap, y +0.09 a tick.
+                    // The 0.15 cap is the speed at the end of a 30 Hz tick; at the step halfway through one, the same climb is half a
+                    // tick's gravity slower, so that step caps there (capping both steps at 0.15 climbed a sixth faster than vanilla)
+                    float capY = _scene.FrameCount % 2 == 0 ? 0.15f : 0.15f + _gravity / 2; // todo: FPS stuff
+                    float capSetY = _scene.FrameCount % 2 == 0 ? Fixed.ToFloat(614) : Fixed.ToFloat(614) + _gravity / 2;
                     for (int i = 0; i < _spireAltVecs.Length; i++)
                     {
-                        Vector3 vec = Position + _spireAltVecs[i];
+                        Vector3 vec = position + _spireAltVecs[i];
                         float dot = result.Plane.W - Vector3.Dot(vec, result.Plane.Xyz);
                         if (dot >= 0)
                         {
-                            Debug.Assert(vec != Position);
+                            Debug.Assert(vec != position);
                             v164 = true;
-                            // todo: revisit these calculations and improve the wall climbing "stickiness" issue
-                            // --> related to the need for a hack to get pushed out more by horizontal collision (without jittering)
-                            Position += result.Plane.Xyz * dot;
-                            vec = new Vector3(Position.X - vec.X, 0, Position.Z - vec.Z).Normalized();
+                            position += result.Plane.Xyz * dot;
+                            vec = new Vector3(position.X - vec.X, 0, position.Z - vec.Z).Normalized();
                             vec.X *= dot / 4;
                             vec.Z *= dot / 4;
                             vec.X *= _hSpeedMag + 0.1f;
                             vec.Z *= _hSpeedMag + 0.1f;
-                            Speed += vec / 2;
-                            if (result.Plane.Y > Fixed.ToFloat(-357) && Speed.Y < 0.15f)
+                            Speed += vec;
+                            if (result.Plane.Y > Fixed.ToFloat(-357) && (climbTouch || Speed.Y < capY))
                             {
                                 v166 = true;
-                                float yFactor = _hSpeedMag / 2;
-                                if (Speed.Y < 0.01f)
+                                float yFactor = _hSpeedMag;
+                                if (Speed.Y > 0.01f)
                                 {
                                     yFactor += 0.3f;
                                 }
-                                Speed = Speed.AddY(4 * dot * yFactor / 2);
-                                Speed = Speed.WithY(Math.Min(Speed.Y, 0.15f));
+                                if (climbTouch)
+                                {
+                                    _climbTouchLift += 4 * dot * yFactor;
+                                }
+                                else
+                                {
+                                    Speed = Speed.AddY(4 * dot * yFactor);
+                                    if (Speed.Y > capY)
+                                    {
+                                        Speed = Speed.WithY(capSetY);
+                                    }
+                                }
                             }
                         }
                     }

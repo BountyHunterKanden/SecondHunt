@@ -180,7 +180,40 @@ namespace MphRecomp.Arenas
         public static Graph Build(ArenaRaycaster ray, IReadOnlyList<Vector3> anchors, float killHeight,
             IReadOnlyList<(Vector3 From, Vector3 To)>? jumps = null, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water = null,
             Vector2? gridOrigin = null, bool echoesMoves = true, float padReach = 0, int heavyFrom = int.MaxValue, bool carrier = false,
-            IReadOnlyList<(Vector3 Min, Vector3 Max)>? noBots = null)
+            IReadOnlyList<(Vector3 Min, Vector3 Max)>? noBots = null, float spacing = Spacing, bool keepAll = false, bool human = false)
+        {
+            bool was = _human;
+            _human = human;
+            try
+            {
+                if (!human)
+                {
+                    return BuildScan(ray, anchors, killHeight, jumps, water, gridOrigin, echoesMoves, padReach, heavyFrom, carrier, noBots, spacing, keepAll);
+                }
+                // the human scan: floor sampled fine (narrow ledges and walkways), then thinned back to about MPH's spacing,
+                // keeping each way between the walk parts (a jump, a drop, a bridge) by its own two ends
+                Graph fine = BuildScan(ray, anchors, killHeight, jumps, water, gridOrigin, echoesMoves, padReach, heavyFrom, carrier, noBots,
+                    MathF.Min(spacing, FineSpacing), keepAll, hops: false);
+                (List<Vector3> nodes, List<(Vector3 A, Vector3 B, int Kind)> ways) = Thin(fine, jumps, spacing / 1.5f);
+                return BuildScan(ray, anchors, killHeight, jumps, water, gridOrigin, echoesMoves, padReach, heavyFrom, carrier, noBots,
+                    spacing, keepAll, given: nodes, forced: ways);
+            }
+            finally
+            {
+                _human = was;
+            }
+        }
+
+        [ThreadStatic] static bool _human;
+        // the floor slope stood on (Build's human scan: MPH's own)
+        static float Stand => _human ? 0.51f : 0.7f;
+        const float HumanDoubleRise = 4.75f, HumanStepUp = 0.9f;
+
+        static Graph BuildScan(ArenaRaycaster ray, IReadOnlyList<Vector3> anchors, float killHeight,
+            IReadOnlyList<(Vector3 From, Vector3 To)>? jumps, IReadOnlyList<(Vector3 Min, Vector3 Max)>? water,
+            Vector2? gridOrigin, bool echoesMoves, float padReach, int heavyFrom, bool carrier,
+            IReadOnlyList<(Vector3 Min, Vector3 Max)>? noBots, float spacing, bool keepAll, bool hops = true,
+            IReadOnlyList<Vector3>? given = null, IReadOnlyList<(Vector3 A, Vector3 B, int Kind)>? forced = null)
         {
             var g = new Graph();
             bool Wet(Vector3 p) => water?.Any(w => p.X >= w.Min.X && p.X <= w.Max.X && p.Z >= w.Min.Z && p.Z <= w.Max.Z
@@ -191,11 +224,12 @@ namespace MphRecomp.Arenas
             // Assault Cradle: the centre lifts are discs 2.9 up, which Samus jumps into from the floor around: -fharena liftjump)
             // gridOrigin: a point the grid passes through (First Hunt's arenas: their centre, where their narrow doorways sit
             // on the axes); default half a step in from the arena's corner
-            float x0 = gridOrigin is { } go ? go.X + MathF.Ceiling((ray.Min.X - go.X) / Spacing) * Spacing : ray.Min.X + Spacing / 2;
-            float z0 = gridOrigin is { } gz ? gz.Y + MathF.Ceiling((ray.Min.Z - gz.Y) / Spacing) * Spacing : ray.Min.Z + Spacing / 2;
-            for (float x = x0; x < ray.Max.X; x += Spacing)
+            float x0 = gridOrigin is { } go ? go.X + MathF.Ceiling((ray.Min.X - go.X) / spacing) * spacing : ray.Min.X + spacing / 2;
+            float z0 = gridOrigin is { } gz ? gz.Y + MathF.Ceiling((ray.Min.Z - gz.Y) / spacing) * spacing : ray.Min.Z + spacing / 2;
+            if (given != null) g.Nodes.AddRange(given);
+            for (float x = x0; given == null && x < ray.Max.X; x += spacing)
             {
-                for (float z = z0; z < ray.Max.Z; z += Spacing)
+                for (float z = z0; z < ray.Max.Z; z += spacing)
                 {
                     float top = ray.Max.Y + 1;
                     while (top > ray.Min.Y)
@@ -205,8 +239,9 @@ namespace MphRecomp.Arenas
                         if (hit is not { } h) break;
                         float y = top - (top - (ray.Min.Y - 1)) * h.T;
                         var floor = new Vector3(x, y, z);
-                        if (h.Normal.Y >= 0.7f && y > killHeight + 0.5f && ray.Cast(floor + Vector3.UnitY * 0.05f, floor + Vector3.UnitY * (Height + 0.3f)) == null
-                            && noBots?.Any(b => x >= b.Min.X && x <= b.Max.X && z >= b.Min.Z && z <= b.Max.Z && y >= b.Min.Y - 0.5f && y <= b.Max.Y) != true)
+                        if (h.Normal.Y >= Stand && y > killHeight + 0.5f && ray.Cast(floor + Vector3.UnitY * 0.05f, floor + Vector3.UnitY * (Height + 0.3f)) == null
+                            && noBots?.Any(b => x >= b.Min.X && x <= b.Max.X && z >= b.Min.Z && z <= b.Max.Z && y >= b.Min.Y - 0.5f && y <= b.Max.Y) != true
+                            && (!_human || Footing(ray, floor)))
                         {
                             g.Nodes.Add(floor);
                         }
@@ -241,7 +276,7 @@ namespace MphRecomp.Arenas
                         if (jump) g.Kinds[(i, j)] = LinkJump;
                     }
                     // Echoes' moves (version 3): a ledge too high for one jump, out of water with the boost, a gap
-                    else if (echoesMoves && Walkable(ray, a, b, rise: DoubleRise) == true)
+                    else if (echoesMoves && Walkable(ray, a, b, rise: _human ? HumanDoubleRise : DoubleRise) == true)
                     {
                         g.Edges[i].Add((j, (b - a).Length + MoveCost));
                         g.Kinds[(i, j)] = LinkDouble;
@@ -256,6 +291,18 @@ namespace MphRecomp.Arenas
                         g.Edges[i].Add((j, (b - a).Length + MoveCost));
                         g.Kinds[(i, j)] = LinkGap;
                     }
+                }
+            }
+            // the human scan's thinned graph: the ways between walk parts the fine scan found, by their own ends
+            if (forced != null)
+            {
+                var at = new Dictionary<Vector3, int>();
+                for (int i = 0; i < n; i++) at.TryAdd(g.Nodes[i], i);
+                foreach ((Vector3 fa, Vector3 fb, int kind) in forced)
+                {
+                    if (!at.TryGetValue(fa, out int i) || !at.TryGetValue(fb, out int j) || g.Edges[i].Any(e => e.To == j)) continue;
+                    g.Edges[i].Add((j, (fb - fa).Length + (kind == LinkJump ? JumpCost : kind != 0 ? MoveCost : 0)));
+                    if (kind != 0) g.Kinds[(i, j)] = kind;
                 }
             }
             // long drops: stepping off a ledge to any floor further below (MPH has no fall damage). Without these, a ledge or
@@ -313,12 +360,15 @@ namespace MphRecomp.Arenas
                     }
                 }
             }
+            // the human scan's bridges: between parts no scanned way joins, a jump a human would try (up to the double jump,
+            // across, or down), offered when the hunter's box clears an arc over; the move solver proves or drops them
+            if (_human && given == null) Bridges(ray, g, n, reach, pads.Select(q => q.From).ToHashSet(), echoesMoves);
             // 3. keep what the spawns' component can reach and come back from
             var starts = anchors.Select(p => Nearest(g.Nodes, p)).Where(k => k >= 0).Distinct().ToList();
-            var keep = StrongComponentOf(g, starts);
+            var keep = keepAll ? Enumerable.Repeat(true, n).ToArray() : StrongComponentOf(g, starts);
             // pockets left out: try longer ways down out of them and into them (Spider Complex's east ledge is left only down
             // a narrow ramp, with no floor node in reach on a straight line past the void beside it), then keep again
-            if (keep.Contains(false))
+            if (!keepAll && keep.Contains(false))
             {
                 float far = reach * 2.5f;
                 bool added = false;
@@ -339,8 +389,218 @@ namespace MphRecomp.Arenas
             }
             Compact(g, keep);
             // 4. next hops: shortest paths to each destination over the reversed graph
-            g.Next = Hops(g.Nodes.Count, g.Edges);
+            // (keepAll: a probe's look at every part, no routes)
+            if (!keepAll && hops) g.Next = Hops(g.Nodes.Count, g.Edges);
             return g;
+        }
+
+        const float FineSpacing = 1.5f;
+        const int WaysPerPair = 2;
+
+        // the fine graph thinned: every end of a way between walk parts (the parts of its plain walk links), then floor
+        // nodes no closer than 2/3 of the grid spacing to one already taken; the rebuild links them again with the same checks
+        // the human scan: a spot a player can stand still on, not a lone facet or a crease a ray happens to hit: floor
+        // MPH stands on, level with it, under at least three of four points a body's half width (0.35) around
+        static bool Footing(ArenaRaycaster ray, Vector3 p)
+        {
+            int held = 0;
+            foreach ((float dx, float dz) in new[] { (0.35f, 0f), (-0.35f, 0f), (0f, 0.35f), (0f, -0.35f) })
+            {
+                var top = new Vector3(p.X + dx, p.Y + 0.35f, p.Z + dz);
+                if (ray.Cast(top, top - Vector3.UnitY * 0.7f) is { } h && h.Normal.Y >= Stand) held++;
+            }
+            return held >= 3;
+        }
+
+        static (List<Vector3> Nodes, List<(Vector3 A, Vector3 B, int Kind)> Ways) Thin(Graph fine, IReadOnlyList<(Vector3 From, Vector3 To)>? jumps, float radius)
+        {
+            int n = fine.Nodes.Count;
+            var kind = new Dictionary<(int, int), int>();
+            foreach (int[] l in fine.Links) kind[(l[0], l[1])] = l[2];
+            var walks = new List<List<(int To, float Cost)>>();
+            for (int i = 0; i < n; i++) walks.Add(fine.Edges[i].Where(e => !kind.ContainsKey((i, e.To))).ToList());
+            int[] part = Components(n, walks, out _);
+            var padEnds = new HashSet<Vector3>((jumps ?? Array.Empty<(Vector3, Vector3)>()).SelectMany(q => new[] { q.From, q.To }));
+            var best = new Dictionary<(int, int), List<(float D, int I, int J)>>();
+            for (int i = 0; i < n; i++)
+            {
+                foreach ((int j, float c) in fine.Edges[i])
+                {
+                    if (part[i] == part[j] && !kind.ContainsKey((i, j))) continue;
+                    if (padEnds.Contains(fine.Nodes[i]) || padEnds.Contains(fine.Nodes[j])) continue;
+                    if (part[i] == part[j]) continue; // a jump inside a walk part: the walk is there
+                    var key = (part[i], part[j]);
+                    if (!best.TryGetValue(key, out var list)) best[key] = list = new List<(float, int, int)>();
+                    list.Add((c, i, j));
+                }
+            }
+            var ways = new List<(Vector3, Vector3, int)>();
+            var taken = new List<Vector3>();
+            var mark = new bool[n];
+            foreach (var list in best.Values)
+            {
+                foreach ((_, int i, int j) in list.OrderBy(w => w.D).Take(WaysPerPair))
+                {
+                    ways.Add((fine.Nodes[i], fine.Nodes[j], kind.TryGetValue((i, j), out int k) ? k : 0));
+                    foreach (int e in new[] { i, j }) if (!mark[e]) { mark[e] = true; taken.Add(fine.Nodes[e]); }
+                }
+            }
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 p = fine.Nodes[i];
+                if (mark[i] || padEnds.Contains(p)) continue;
+                if (taken.Any(t => (t.Xz - p.Xz).LengthSquared < radius * radius && MathF.Abs(t.Y - p.Y) < 1.2f)) continue;
+                taken.Add(p);
+            }
+            return (taken, ways);
+        }
+
+        const int BridgesPerPair = 4;
+
+        // a long jump across a gap with the second press late in the fall (Monitor Station's walkway to the east ledge, ~14
+        // across, the owner's replay 2026-11-21): Echoes' moves only, landing at most LongRise up
+        const float LongReach = 15f, LongRise = 1.5f, LongDetour = 2.5f;
+
+        // cost from i over walk links and plain jumps (no Echoes moves, gaps or bridges: links the scan only guesses at),
+        // up to limit; beyond it, infinity
+        static float[] OnFoot(Graph g, int n, int i, float limit)
+        {
+            var cost = new float[n];
+            Array.Fill(cost, float.PositiveInfinity);
+            cost[i] = 0;
+            var queue = new PriorityQueue<int, float>();
+            queue.Enqueue(i, 0);
+            while (queue.TryDequeue(out int u, out float c))
+            {
+                if (c > cost[u]) continue;
+                foreach ((int v, float e) in g.Edges[u])
+                {
+                    if (v >= n || g.Kinds.TryGetValue((u, v), out int kind) && kind != LinkJump) continue;
+                    float nc = c + e;
+                    if (nc < cost[v] && nc <= limit) { cost[v] = nc; queue.Enqueue(v, nc); }
+                }
+            }
+            return cost;
+        }
+
+        static void Bridges(ArenaRaycaster ray, Graph g, int n, float reach, HashSet<int> pads, bool echoesMoves)
+        {
+            int[] comp = Components(n, g.Edges, out int parts);
+            // which part reaches which (over the parts' graph)
+            var next = new HashSet<int>[parts];
+            for (int c = 0; c < parts; c++) next[c] = new HashSet<int>();
+            for (int i = 0; i < n; i++) foreach ((int j, _) in g.Edges[i]) if (comp[i] != comp[j]) next[comp[i]].Add(comp[j]);
+            var reaches = new bool[parts][];
+            for (int c = 0; c < parts; c++) reaches[c] = Flood(parts, new List<int> { c }, k => next[k]);
+            var best = new Dictionary<(int, int), List<(float D, int I, int J)>>();
+            // (a long jump's test: how far i's walks and plain jumps get, up to LongDetour times the jump)
+            float[]? around = null;
+            int aroundOf = -1;
+            for (int i = 0; i < n; i++)
+            {
+                if (pads.Contains(i)) continue;
+                for (int j = 0; j < n; j++)
+                {
+                    if (comp[i] == comp[j]) continue;
+                    Vector3 a = g.Nodes[i], b = g.Nodes[j];
+                    float h = (a.Xz - b.Xz).Length;
+                    // (a long jump is offered where the way around on foot, by walks and plain jumps, is LongDetour times
+                    // longer or more, even between parts the scan's untried links join: the owner's walkway jump had the
+                    // ledge "reached" down a drop and up a jump the solver dropped)
+                    bool far = h > reach;
+                    if (far ? !echoesMoves || h > LongReach : reaches[comp[i]][comp[j]]) continue;
+                    if (b.Y - a.Y > (far ? LongRise : HumanDoubleRise) || a.Y - b.Y > MaxDrop) continue;
+                    if (far)
+                    {
+                        if (aroundOf != i) { around = OnFoot(g, n, i, LongReach * LongDetour); aroundOf = i; }
+                        if (around![j] <= h * LongDetour) continue;
+                    }
+                    var key = (comp[i], comp[j] + (far ? parts : 0));
+                    float d = h + MathF.Max(0, b.Y - a.Y) * 2;
+                    if (best.TryGetValue(key, out var list) && list.Count >= BridgesPerPair && d >= list[^1].D) continue;
+                    if (!ArcClear(ray, a, b)) continue;
+                    if (list == null) best[key] = list = new List<(float, int, int)>();
+                    list.Add((d, i, j));
+                    list.Sort((x, y) => x.D.CompareTo(y.D));
+                    if (list.Count > BridgesPerPair) list.RemoveAt(list.Count - 1);
+                }
+            }
+            foreach (var list in best.Values)
+            {
+                foreach ((_, int i, int j) in list)
+                {
+                    g.Edges[i].Add((j, (g.Nodes[j] - g.Nodes[i]).Length + MoveCost));
+                    g.Kinds[(i, j)] = LinkDouble;
+                }
+            }
+        }
+
+        // a jump's box clears: up from a to a height over both ends, across, down onto b (a few heights tried, highest last)
+        static bool ArcClear(ArenaRaycaster ray, Vector3 a, Vector3 b)
+        {
+            float top = MathF.Max(a.Y, b.Y);
+            for (float over = 0.4f; over <= 1.6f; over += 0.6f)
+            {
+                float y = top + over;
+                if (y - a.Y > HumanDoubleRise + 0.4f) break;
+                bool clear = true;
+                foreach (float off in new[] { 0.3f, 0.8f, Height })
+                {
+                    Vector3 a0 = a + Vector3.UnitY * off, b0 = b + Vector3.UnitY * off;
+                    Vector3 a1 = new(a.X, y + off, a.Z), b1 = new(b.X, y + off, b.Z);
+                    if (ray.Cast(a0, a1) != null || ray.Cast(a1, b1) != null || ray.Cast(b1, b0) != null) { clear = false; break; }
+                }
+                if (clear) return true;
+            }
+            return false;
+        }
+
+        // strongly connected components (Kosaraju, iterative): each node's part
+        static int[] Components(int n, List<List<(int To, float Cost)>> edges, out int parts)
+        {
+            var order = new List<int>(n);
+            var seen = new bool[n];
+            for (int s = 0; s < n; s++)
+            {
+                if (seen[s]) continue;
+                var stack = new Stack<(int V, int K)>();
+                stack.Push((s, 0));
+                seen[s] = true;
+                while (stack.Count > 0)
+                {
+                    (int v, int k) = stack.Pop();
+                    if (k < edges[v].Count)
+                    {
+                        stack.Push((v, k + 1));
+                        int w = edges[v][k].To;
+                        if (!seen[w]) { seen[w] = true; stack.Push((w, 0)); }
+                    }
+                    else order.Add(v);
+                }
+            }
+            var rev = new List<int>[n];
+            for (int i = 0; i < n; i++) rev[i] = new List<int>();
+            for (int i = 0; i < n; i++) foreach ((int j, _) in edges[i]) rev[j].Add(i);
+            var comp = new int[n];
+            Array.Fill(comp, -1);
+            parts = 0;
+            for (int o = n - 1; o >= 0; o--)
+            {
+                int s = order[o];
+                if (comp[s] >= 0) continue;
+                var stack = new Stack<int>();
+                stack.Push(s);
+                comp[s] = parts;
+                while (stack.Count > 0)
+                {
+                    foreach (int w in rev[stack.Pop()])
+                    {
+                        if (comp[w] < 0) { comp[w] = parts; stack.Push(w); }
+                    }
+                }
+                parts++;
+            }
+            return comp;
         }
 
         static int[,] Hops(int n, List<List<(int To, float Cost)>> edges)
@@ -458,6 +718,15 @@ namespace MphRecomp.Arenas
         // MPH's bot jumps onto when it walks into it), with room for the body. Null = no way; else whether it jumps.
         // rise: the one ledge's limit (JumpRise; DoubleRise / BoostRise for Echoes' moves). gap: one stretch with no floor
         // under it (GapMax across, landing at most GapRise up or GapDrop down, room for the arc), jumped from its edge
+        // a probe's look at why a walk fails (Tools -botprobe primenav why=); null in the game
+        public static Action<string>? Trace;
+        public static bool? WalkableProbe(ArenaRaycaster ray, Vector3 a, Vector3 b, float rise, bool gap, bool human = false)
+        {
+            bool was = _human;
+            _human = human;
+            try { return Walkable(ray, a, b, rise: rise, gap: gap); } finally { _human = was; }
+        }
+
         static bool? Walkable(ArenaRaycaster ray, Vector3 a, Vector3 b, float maxDrop = MaxDrop, float rise = JumpRise, bool gap = false)
         {
             int steps = Math.Max(1, (int)MathF.Ceiling((b.Xz - a.Xz).Length / Sample));
@@ -477,7 +746,8 @@ namespace MphRecomp.Arenas
                     {
                         Vector3 q = Vector3.Lerp(a, b, t / (float)steps);
                         if ((q.Xz - prev.Xz).Length > GapMax + Sample) break;
-                        if (FloorAt(ray, q, prev.Y + GapRise, GapDrop) is { Lip: false } gf && gf.F.Y - prev.Y <= GapRise)
+                        // (the human scan: across and down as far as a walk drops, MaxDrop)
+                        if (FloorAt(ray, q, prev.Y + GapRise, _human ? MaxDrop : GapDrop) is { Lip: false } gf && gf.F.Y - prev.Y <= GapRise)
                         {
                             land = t;
                             lf = gf.F;
@@ -488,16 +758,28 @@ namespace MphRecomp.Arenas
                     if (land < 0 || ray.Cast(prev + chest, lf + chest) != null || ray.Cast(prev + head, lf + head) != null
                         || ray.Cast(prev + chest, prev + head) != null)
                     {
-                        return null;
+                        { Trace?.Invoke($"fail 1 at {prev}"); return null; }
                     }
                     jumped = true;
                     prev = lf;
                     s = land;
                     continue;
                 }
-                (Vector3 F, bool Lip)? floor = FloorAt(ray, p, prev.Y + StepUp, maxDrop);
+                // the human scan walks up the steepest floor MPH stands on (normal 0.51: 0.84 a sample), not 0.6
+                float stepUp = _human ? HumanStepUp : StepUp;
+                (Vector3 F, bool Lip)? floor = FloorAt(ray, p, prev.Y + stepUp, maxDrop);
                 Vector3 f;
-                if (floor is { } fl && fl.F.Y - prev.Y <= StepUp && !(fl.Lip && (lip || s == steps)))
+                // the human scan: a ledge over floor that runs on under it, jumped onto when the walk is bound up there
+                // (the walk took the floor underneath and ended below b); or the step's way blocked at the chest
+                if (_human && !jumped && !lip && !gap && b.Y - prev.Y > StepUp && FloorAt(ray, p, prev.Y + rise) is { Lip: false } ledge
+                    && ledge.F.Y - prev.Y > stepUp && ledge.F.Y - b.Y < 0.3f
+                    && (floor is not { } under || ledge.F.Y - under.F.Y > StepUp || ray.Cast(prev + chest, under.F + chest) != null)
+                    && TakeOff(ray, trail, p, ledge.F, rise))
+                {
+                    jumped = true;
+                    f = ledge.F;
+                }
+                else if (floor is { } fl && fl.F.Y - prev.Y <= stepUp && !(fl.Lip && (lip || s == steps)))
                 {
                     f = fl.F;
                     lip = fl.Lip;
@@ -505,9 +787,9 @@ namespace MphRecomp.Arenas
                     {
                         // a long fall: off the edge level, then straight down (a slanted ray would clip the ledge's corner)
                         var over = new Vector3(f.X, prev.Y, f.Z);
-                        if (ray.Cast(prev + chest, over + chest) != null || ray.Cast(over + chest, f + chest) != null) return null;
+                        if (ray.Cast(prev + chest, over + chest) != null || ray.Cast(over + chest, f + chest) != null) { Trace?.Invoke($"fail 2 at {prev}"); return null; }
                     }
-                    else if (ray.Cast(prev + chest, f + chest) != null) return null;
+                    else if (ray.Cast(prev + chest, f + chest) != null) { Trace?.Invoke($"fail 3 at {prev}"); return null; }
                 }
                 else if (!jumped && SlideAt(ray, p, prev.Y, maxDrop) is { } down)
                 {
@@ -515,7 +797,7 @@ namespace MphRecomp.Arenas
                     // normal 0.3, and entered down one from the deck; the centre top's rim is a 0.64 bevel)
                     f = down;
                     lip = false;
-                    if (ray.Cast(prev + chest, f + chest) != null) return null;
+                    if (ray.Cast(prev + chest, f + chest) != null) { Trace?.Invoke($"fail 4 at {prev}"); return null; }
                 }
                 else if (!jumped && !lip && !gap && FloorAt(ray, p, prev.Y + rise) is { Lip: false } up && up.F.Y - prev.Y > StepUp
                     && TakeOff(ray, trail, p, up.F, rise))
@@ -523,14 +805,38 @@ namespace MphRecomp.Arenas
                     jumped = true;
                     f = up.F;
                 }
+                else if (_human && !jumped && !lip && !gap && JumpOver(ray, a, b, s, steps, prev, trail, rise) is { } over)
+                {
+                    // a wall leaning out over its foot: jumped up and on, onto the ledge a sample or few further along
+                    jumped = true;
+                    (s, f) = over;
+                }
                 else
                 {
-                    return null;
+                    { Trace?.Invoke($"fail 5 at {prev} -> {p}: step {floor?.F.Y}{(floor?.Lip == true ? " lip" : "")}, up {FloorAt(ray, p, prev.Y + rise)?.F.Y}{(FloorAt(ray, p, prev.Y + rise)?.Lip == true ? " lip" : "")}, jumped {jumped}"); return null; }
                 }
                 prev = f;
                 trail.Add(f);
             }
+            if (MathF.Abs(prev.Y - b.Y) >= 0.3f) Trace?.Invoke($"ends at {prev}");
             return MathF.Abs(prev.Y - b.Y) < 0.3f ? jumped : null;
+        }
+
+        // the human scan: the first ledge within rise a little past p (up to TakeOffBack on), when the wall in front leans
+        // out over its foot; the step taken and the ledge
+        static (int S, Vector3 F)? JumpOver(ArenaRaycaster ray, Vector3 a, Vector3 b, int s, int steps, Vector3 prev, List<Vector3> trail, float rise)
+        {
+            Vector3 p = Vector3.Lerp(a, b, s / (float)steps);
+            for (int t = s + 1; t <= steps; t++)
+            {
+                Vector3 q = Vector3.Lerp(a, b, t / (float)steps);
+                if ((q.Xz - p.Xz).Length > TakeOffBack + 0.01f) break;
+                if (FloorAt(ray, q, prev.Y + rise) is { Lip: false } up && up.F.Y - prev.Y > StepUp && TakeOff(ray, trail, q, up.F, rise))
+                {
+                    return (t, up.F);
+                }
+            }
+            return null;
         }
 
         // where a jump up onto `top` (first floor found at p) leaves from: the last floor walked, or one a little further
@@ -563,7 +869,7 @@ namespace MphRecomp.Arenas
             (float T, Vector3 Normal)? hit = ray.Cast(new Vector3(p.X, from, p.Z), new Vector3(p.X, bottom, p.Z));
             if (hit is not { } h) return null;
             float y = from - (from - bottom) * h.T;
-            if (h.Normal.Y >= 0.7f) return (new Vector3(p.X, y, p.Z), false);
+            if (h.Normal.Y >= Stand) return (new Vector3(p.X, y, p.Z), false);
             if (h.Normal.Y < 0.25f || ray.Cast(new Vector3(p.X, y - 0.02f, p.Z), new Vector3(p.X, y - StepUp, p.Z)) != null) return null;
             return (new Vector3(p.X, y, p.Z), true);
         }
@@ -573,7 +879,7 @@ namespace MphRecomp.Arenas
         {
             float from = y + StepUp + 0.05f, bottom = y - StepUp - maxDrop - 0.1f;
             (float T, Vector3 Normal)? hit = ray.Cast(new Vector3(p.X, from, p.Z), new Vector3(p.X, bottom, p.Z));
-            if (hit is not { } h || h.Normal.Y < 0.25f || h.Normal.Y >= 0.7f) return null;
+            if (hit is not { } h || h.Normal.Y < 0.25f || h.Normal.Y >= Stand) return null;
             float fy = from - (from - bottom) * h.T;
             return fy < y - 0.1f ? new Vector3(p.X, fy, p.Z) : null;
         }

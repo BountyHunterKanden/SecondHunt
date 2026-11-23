@@ -27,6 +27,7 @@ with A on the right.
 | Hold L2 + right stick | Weapon ring: point at a weapon (it stays picked when you let go of the stick), let go of L2 to equip it. Works while you move. |
 | L2 with the Imperialist | Zoom. The weapon ring then needs a short hold of L2 to open. |
 | Y or L2 | Scan, with the scan visor on |
+| L1 in alt form | Alt hop (campaign, with ALT FORM HOP on): hops any alt form up to bomb jump height. L1 doesn't boost then; A still does |
 | R1 | Switch between missiles and the Power Beam |
 | D-pad left / right | Previous / next weapon (only weapons you have, with ammo) |
 | D-pad up | Scan visor on/off (campaign) |
@@ -50,6 +51,10 @@ with A on the right.
 A few functions have no button until you give them one: CHAT (the quick message wheel, with a CHAT MODE row for
 hold or toggle), GYRO (see [Gyro](#gyro)) and L3.
 
+CONTROLS > AIM > STICKS sets each stick's dead zone (LEFT STICK DEAD ZONE, RIGHT STICK DEAD ZONE, 15% by default) and
+the AIM CURVE of the aim stick (LINEAR by default). SCOREBOARD and SLOW MOVE each have a MODE row under them in
+CONTROLS > BUTTONS for hold or toggle.
+
 ## Keyboard and mouse
 
 Windows only. A controller works on Windows too, with the buttons above.
@@ -64,6 +69,7 @@ Windows only. A controller works on Windows too, with the buttons above.
 | R / F while zoomed | Zoom in / out, with ZOOM STEP on |
 | Space | Jump (boost in morph ball) |
 | C | Morph ball |
+| X in alt form | Alt hop (campaign, with ALT FORM HOP on): hops any alt form up to bomb jump height |
 | Q | Lay bombs in morph ball (left click does too), or scan with the scan visor on |
 | E | Scan visor on/off |
 | Mouse wheel | Next / previous weapon (only weapons you have, with ammo) |
@@ -107,6 +113,12 @@ Under CONTROLS > TOUCH:
 - TOUCH CONTROLS: AUTO (only while no controller is connected), ON, AIM ONLY or OFF
 - TOUCH AIM: STICK, or STYLUS to aim like the DS
 - AIM WHILE FIRING (on by default) lets the thumb on FIRE aim too
+
+## Rumble
+
+RUMBLE in SECOND HUNT SETTINGS > CONTROLS is the same setting as OPTIONS > RUMBLE PAK: the controller (or the
+phone on Android) vibrates where the game's Rumble Pak did. Off by default. Turning it on gives a short buzz. Both rows
+are greyed when there is nothing to vibrate.
 
 ## Gyro
 

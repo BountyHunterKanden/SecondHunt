@@ -19,8 +19,9 @@ namespace MphRead.Entities
         // each shot as it went out (the shot check, MphRecomp Net/ShotCheck.cs): a match client's own player's, and a host's
         // remote seats', with where it left the gun and its direction; and each hit a client's own beam made on its screen,
         // with where the player hit was then. Drained by the shot check every step; off (nothing kept) unless it runs.
-        // (Number: the shooter's shot count, HitClaimShotNumber: what hit claims name the shot by)
-        public readonly record struct NetShotOut(int Seat, Vector3 Origin, Vector3 Direction, sbyte Weapon, int Number);
+        // (Number: the shooter's shot count, HitClaimShotNumber: what hit claims name the shot by; Event: its Fruity P2 shot
+        // event's number, the device's and the host's alike, 0 = none: PlayerNetShotEvents.cs)
+        public readonly record struct NetShotOut(int Seat, Vector3 Origin, Vector3 Direction, sbyte Weapon, int Number, ushort Event = 0);
         public readonly record struct NetHitSeen(int Victim, Vector3 VictimPosition);
         public static bool NetShotLogOn { get; set; }
         public static readonly List<NetShotOut> NetShotLog = new();
@@ -45,7 +46,7 @@ namespace MphRead.Entities
         }
 
         // TryFireWeapon: -1 = a shot went out (from origin along direction), else the refusal (only for a press)
-        private void NetCountShot(int outcome, bool pressed, Vector3 origin = default, Vector3 direction = default)
+        private void NetCountShot(int outcome, bool pressed, Vector3 origin = default, Vector3 direction = default, ushort ev = 0)
         {
             if (!(HostRemote || NetClient && this == Main) || SlotIndex < 0 || SlotIndex >= NetShotsFired.Length)
             {
@@ -55,7 +56,7 @@ namespace MphRead.Entities
             {
                 NetShotsFired[SlotIndex]++;
                 _hitClaimShotNumber++; // (the beams Spawn just made were tagged with this number: PlayerHitClaims.cs)
-                if (NetShotLogOn) NetShotLog.Add(new NetShotOut(SlotIndex, origin, direction, (sbyte)CurrentWeapon, _hitClaimShotNumber));
+                if (NetShotLogOn) NetShotLog.Add(new NetShotOut(SlotIndex, origin, direction, (sbyte)CurrentWeapon, _hitClaimShotNumber, ev));
             }
             else if (pressed)
             {

@@ -150,10 +150,12 @@ namespace MphRead.Entities
             }
             if (!GameState.SinglePlayer || HostPrimeRadar)
             {
+                _scene.HostHudTag("radar"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                 DrawRadar();
             }
             if (GameState.SinglePlayer && HostPrimeMiniMap)
             {
+                _scene.HostHudTag("minimap"); // recomp: HUD editor element (HUD/HostHudElements.cs)
                 DrawMiniMap();
             }
         }

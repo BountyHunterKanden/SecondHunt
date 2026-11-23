@@ -52,7 +52,7 @@ namespace MphRecomp.Config
             PowerBeam = "powerbeam", VoltDriver = "voltdriver", Battlehammer = "battlehammer", Imperialist = "imperialist",
             Judicator = "judicator", Magmaul = "magmaul", ShockCoil = "shockcoil", OmegaCannon = "omegacannon",
             PirateBlaster = "pirateblaster", ZoomIn = "zoomin", ZoomOut = "zoomout", Spider = "spider",
-            Gyro = "gyro", SlowMove = "slowmove";
+            Gyro = "gyro", SlowMove = "slowmove", AltHop = "althop";
 
         // the weapon functions (the keyboard's WEAPONS section) and the weapon each picks (MphRead BeamType's number)
         public static readonly (string Id, int Beam)[] WeaponPicks =
@@ -77,6 +77,9 @@ namespace MphRecomp.Config
                 + "require a short hold to appear when imp is equipped.", new[] { "L2" }, Touch: new[] { "Y" }),
             // (owner 2026-11-06, docs/SPIDER_BALL.md: hold L2 in alt form; read only there, where the weapon ring stays shut)
             new(Spider, "spider\nball", "in alt form on a spider track (sidehopper station, spider complex), hold to cling to the track and move over it like ground. boost to jump off it.", new[] { "L2" }),
+            // (owner 2026-11-12: not on A, jump's button that boosts samus's ball; it keeps jump's L1, which in the campaign's
+            // alt forms then hops, no boost: BuildInput; PlayerAltHop.cs)
+            new(AltHop, "alt\nhop", "in the campaign with alt form hop on, hops your alt form up to bomb jump height. a jump button that is alt hop too only hops then, no boost.", new[] { "L1" }),
             // (owner 2026-10-17: the D-pad by default; only while zoomed, and then they do nothing else)
             new(ZoomIn, "zoom\nin", "with zoom step on, this button will perform the same auto zoom vanilla does when a target is in "
                 + "sight, but only when you press it while the reticle is lit.", new[] { "DpadUp" }, ZoomStep),
@@ -119,6 +122,8 @@ namespace MphRecomp.Config
             new(Zoom, "imp\nzoom", "zooms in with the imperialist.", new[] { "Mouse.Right" }),
             // (owner 2026-11-06, docs/SPIDER_BALL.md: hold right click in alt form)
             new(Spider, "spider\nball", "in alt form on a spider track (sidehopper station, spider complex), hold to cling to the track and move over it like ground. boost to jump off it.", new[] { "Mouse.Right" }),
+            // (owner 2026-11-12: its own key, not jump's space, which boosts samus's ball)
+            new(AltHop, "alt\nhop", "in the campaign with alt form hop on, hops your alt form up to bomb jump height. a jump key that is alt hop too only hops then, no boost.", new[] { "X" }),
             new(Scan, "scan", "with the scan visor on hold to scan.", new[] { "Mouse.Right", "Q" }),
             new(ZoomIn, "zoom\nin", "with zoom step on, this key will perform the same auto zoom vanilla does when a target is in "
                 + "sight, but only when you press it while the reticle is lit.", new[] { "R" }, ZoomStep),
@@ -171,6 +176,7 @@ namespace MphRecomp.Config
         {
             (WeaponMenu, Scan), (WeaponMenu, Zoom), (Scan, Zoom), (Scan, Bombs), (Map, Scoreboard),
             (Spider, WeaponMenu), (Spider, Zoom), (Spider, Scan), // (the spider ball: only in alt form, where these aren't)
+            (AltHop, Jump), // (the alt hop on jump's L1: in the campaign's alt forms it hops, no jump or boost)
         };
 
         private static bool WorkTogether(string a, string b) => Array.Exists(Together, p => p == (a, b) || p == (b, a));

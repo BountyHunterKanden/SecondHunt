@@ -21,10 +21,15 @@ internal static class DesktopPlatform
         AppPlatform.CacheDir = DesktopPaths.Cache;
         AppPlatform.DecodeImage = DecodeImage;
         AppPlatform.EncodePng = EncodePng;
+        AppPlatform.SaveScreenshot = DesktopScreenshots.Save; // photo mode / F12 (DesktopScreenshots.cs)
         _audio = sound ? DesktopAudio.TryOpen() : null;
         if (_audio != null) AppPlatform.Audio = _audio;
         MphRecomp.App.VoiceAudio.Install(DesktopPaths.Root, () => new VoiceCaptureWindows()); // online voice chat (O8)
+#if MPH_LINUX
+        MphRecomp.Online.Voice.VoiceDevices.OnLoudspeaker = () => true; // no device form factor to read: "unknown = yes"
+#else
         MphRecomp.Online.Voice.VoiceDevices.OnLoudspeaker = AudioOutputWindows.OnLoudspeaker; // self duck on push to talk
+#endif
         MphRecomp.App.ReplayPrepHost.Start = StartReplayPrep;
     }
 

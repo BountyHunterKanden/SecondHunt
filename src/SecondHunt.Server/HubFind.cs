@@ -66,6 +66,8 @@ namespace SecondHunt.Server
             _safetyTimer?.Dispose();
             _findTimer?.Dispose();
             _replayTimer?.Dispose(); // (HubReplays.cs)
+            _drainTimer?.Dispose(); // (HubDrain.cs)
+            _cloudTimer?.Dispose(); // (HubCloud.cs)
             StopMatchHosts(); // (served games, HubServed.cs)
         }
 

@@ -14,7 +14,7 @@ namespace SecondHunt.Desktop;
 // keyboard and mouse.
 // Read fills DesktopInput's arrays in GLFW's gamepad layout (Xbox names by position: A = the bottom button), sticks and
 // triggers -1..1 as GLFW gives them, so the rest of DesktopInput is unchanged.
-internal sealed unsafe class Sdl3Pads : IDisposable
+internal sealed unsafe partial class Sdl3Pads : IDisposable // + Sdl3Pads.Rumble.cs
 {
     const uint InitGamepad = 0x00002000; // SDL_INIT_GAMEPAD (brings in joystick + events)
 
@@ -103,12 +103,23 @@ internal sealed unsafe class Sdl3Pads : IDisposable
     public static Sdl3Pads? Open(string[]? args = null)
     {
         if (args != null && args.Contains("--glfw-pads")) return null;
+#if MPH_LINUX
+        // the app folder's libSDL3.so.0, else the system's (libsdl3-0 / SDL3 packages)
+        string path = Path.Combine(AppContext.BaseDirectory, "libSDL3.so.0");
+        IntPtr lib = IntPtr.Zero;
+        if (!(File.Exists(path) && NativeLibrary.TryLoad(path, out lib)) && !NativeLibrary.TryLoad("libSDL3.so.0", out lib))
+        {
+            Log.Info("MPHPad", "no libSDL3.so.0 (install SDL3): pads through GLFW");
+            return null;
+        }
+#else
         string path = Path.Combine(AppContext.BaseDirectory, "SDL3.dll");
         if (!File.Exists(path) || !NativeLibrary.TryLoad(path, out IntPtr lib))
         {
             Log.Info("MPHPad", "no SDL3.dll next to the game: pads through GLFW");
             return null;
         }
+#endif
         try
         {
             var setHint = (delegate* unmanaged[Cdecl]<byte*, byte*, byte>)(void*)NativeLibrary.GetExport(lib, "SDL_SetHint");
@@ -131,6 +142,7 @@ internal sealed unsafe class Sdl3Pads : IDisposable
             var eventOn = (delegate* unmanaged[Cdecl]<uint, byte, void>)(void*)NativeLibrary.GetExport(lib, "SDL_SetEventEnabled");
             eventOn(EventSensorUpdate, 1);
             var pads = new Sdl3Pads(lib);
+            MphRead.Rumble.Output = pads; // OPTIONS > RUMBLE PAK's motor (Sdl3Pads.Rumble.cs)
             int v = pads.Version;
             Log.Info("MPHPad", $"pads through SDL {v / 1000000}.{v / 1000 % 1000}.{v % 1000}");
             return pads;
@@ -173,6 +185,7 @@ internal sealed unsafe class Sdl3Pads : IDisposable
         for (int i = 0; i < 4; i++) axes[i] = Math.Max(-1f, _axis(_pad, i) / 32767f); // y positive down, as GLFW
         for (int i = 4; i < 6; i++) axes[i] = _axis(_pad, i) / 32767f * 2f - 1f; // triggers 0..32767 -> GLFW's -1..1
         ReadMotion();
+        SendRumble(); // (Sdl3Pads.Rumble.cs)
         return true;
     }
 
@@ -281,6 +294,7 @@ internal sealed unsafe class Sdl3Pads : IDisposable
 
     public void Dispose()
     {
+        if (MphRead.Rumble.Output == this) MphRead.Rumble.Output = null;
         if (_pad != IntPtr.Zero) _close(_pad);
         _pad = IntPtr.Zero;
         _quit();

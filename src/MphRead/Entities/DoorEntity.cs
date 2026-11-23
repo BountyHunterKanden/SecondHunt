@@ -333,7 +333,10 @@ namespace MphRead.Entities
                 {
                     Flags |= DoorFlags.Open;
                 }
-                if (_data.DoorType != DoorType.Standard || AnimInfo.Frame[0] >= 10)
+                // recomp: a door shot again while it is still closing turns passable at once (Open is set from the
+                // closing frames above half) but keeps closing below frame 10 -- keep the portal up while it can be
+                // walked through, or the player's room part stays behind and the corridor past it draws black
+                if (_data.DoorType != DoorType.Standard || AnimInfo.Frame[0] >= 10 || Flags.TestFlag(DoorFlags.Open))
                 {
                     portalActive = true;
                 }
@@ -501,7 +504,12 @@ namespace MphRead.Entities
             {
                 foreach (DoorEntity door in _scene.GetDoorEntities())
                 {
-                    if (door.Id == -1)
+                    if (door.Id == -1 && door.ConnectorInactive)
+                    {
+                        // vanilla hasn't loaded this corridor yet, so it plays no chime for it; just leave it unlocked
+                        door.Flags &= ~DoorFlags.Locked;
+                    }
+                    else if (door.Id == -1)
                     {
                         door.Unlock(updateState: true, noLockAnimSfx: false);
                     }

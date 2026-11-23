@@ -64,6 +64,12 @@ internal sealed partial class CampaignRenderer
         PillarSound(lib, "crate_break", sound);
         PillarOnce(lib, "crate_flash", at, null);
         PillarOnce(lib, "crate_dust", at, null);
+        // HOLIDAY MODE: a present bursts into paper and ribbon instead (CampaignRenderer.HolidayPresents.cs)
+        if (MphRecomp.Holiday.HolidaySnow.Enabled && IsMainQuarry())
+        {
+            BurstPresent(at);
+            return;
+        }
         if (s.Debris.Count == 0) return;
         float scale = EchoesArena.DefaultScale;
         float R(float lo, float hi) => lo + (float)_sandRandom.NextDouble() * (hi - lo);

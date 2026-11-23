@@ -1313,6 +1313,12 @@ namespace MphRead
                     $"walking into the box gets in (state {turret.State}, feet y {me.Position.Y:0.00})");
                 Check(dummy.Health == 0 && GameState.Kills[me.SlotIndex] == kills0 + 1, $"the dummy 2 units off dies, the occupant's kill (health {dummy.Health}, kills {GameState.Kills[me.SlotIndex] - kills0})");
                 long t0 = host.Frame;
+                {
+                    // the App's aim preview turns the pictures between steps only as the seat will (owner 2026-11-21: a stick
+                    // held getting in shook the view, the pictures turning and each step putting them back)
+                    Vector2 early = me.HostSeatPreviewTurn(10, 5);
+                    Check(early == Vector2.Zero, $"no aim preview before control ({early.X:0.0}, {early.Y:0.0})");
+                }
                 for (int k = 0; k < 180 && turret.State == EchoesTurretEntity.TurretState.Entering; k++) host.Step(idle);
                 Check(turret.State == EchoesTurretEntity.TurretState.Active && Math.Abs(host.Frame - t0 - 120) <= 2, $"control after {host.Frame - t0} steps (2 s)");
                 // the seat keeps its player safe, they die only with the turret (owner 2026-11-10)
@@ -1356,6 +1362,11 @@ namespace MphRead
                 Check(MathF.Abs(turret.Yaw - 60) < 3, $"stick left 0.5 s: yaw {turret.Yaw:0.0} (60)");
                 Step(60, left);
                 Check(MathF.Abs(turret.Yaw - 90) < 0.01f, $"stick left 1.5 s: yaw {turret.Yaw:0.0} (stops at 90)");
+                {
+                    Vector2 edge = me.HostSeatPreviewTurn(10, 60), back = me.HostSeatPreviewTurn(-10, 0);
+                    Check(MathF.Abs(edge.X) < 0.01f && MathF.Abs(me.SeatPitch + edge.Y - spot.PitchUp) < 0.01f && MathF.Abs(back.X + 10) < 0.01f,
+                        $"the aim preview stops at the barrel's limits (yaw {edge.X:0.0} at 90, pitch to {me.SeatPitch + edge.Y:0.0} of {spot.PitchUp:0}, back {back.X:0.0})");
+                }
                 var aim = idle; aim.AimDelta = new System.Numerics.Vector2(4 * 30, 0);
                 Step(1, aim);
                 {

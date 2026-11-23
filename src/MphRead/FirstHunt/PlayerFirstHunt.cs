@@ -44,7 +44,7 @@ namespace MphRead.Entities
                 {
                     DrawWeaponRing();
                 }
-                else if (WeaponSlotCount == 7)
+                else if (WeaponSlotCount >= 7)
                 {
                     DrawWeaponArc7();
                 }

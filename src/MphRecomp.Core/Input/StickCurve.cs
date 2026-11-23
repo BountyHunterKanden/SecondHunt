@@ -18,7 +18,8 @@ namespace MphRecomp.Input
         public const string Modern = "modern", Classic = "classic";
         public static readonly string[] Options = { Modern, Classic };
 
-        public const float DeadZone = 0.15f; // a radial dead zone: below it the stick is at rest
+        // a radial dead zone: below it the stick is at rest. CONTROLS > AIM "left stick dead zone" (StickShape.cs; 0.15 by default)
+        public static float DeadZone => StickShape.LeftDeadZone;
         public const float Edge = 0.92f; // from here out the whole push (a worn stick's rim, a square gate's sides)
         public const float Floor = 0.15f; // the push just past the dead zone
         public const float Power = 1; // the ramp between: Floor + (1 - Floor) * t^Power (the first curve was 2)

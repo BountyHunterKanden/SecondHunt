@@ -20,7 +20,14 @@ internal static class DesktopImport
         string what = request.Kind == ImportPickKind.WiiKey ? "Wii key file"
             : request.Kind == ImportPickKind.SwitchKeys ? "Switch prod.keys file"
             : request.Kind == ImportPickKind.DsSave ? "Metroid Prime Hunters DS save"
+            : request.Kind == ImportPickKind.Profile ? "Second Hunt profile"
             : System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(request.Title.ToLowerInvariant()) + " ROM";
+#if MPH_LINUX
+        string? file = LinuxDialogs.OpenFile($"Select your {what}", what, request.Extensions.ToList());
+        if (file == null) return null;
+        Log.Info("MPHFrontend", "import: picked " + Path.GetFileName(file));
+        return new ImportPicked(file, Path.GetFileName(file));
+#else
         using var dialog = new System.Windows.Forms.OpenFileDialog
         {
             Title = $"Select your {what}",
@@ -31,12 +38,18 @@ internal static class DesktopImport
         if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return null;
         Log.Info("MPHFrontend", "import: picked " + Path.GetFileName(dialog.FileName));
         return new ImportPicked(dialog.FileName, Path.GetFileName(dialog.FileName));
+#endif
     }
 
     // a game imported from its files (Prime 4: the RomFS folder of the player's own dump), read where it is
     static ImportPicked? PickFolder(ImportPickRequest request)
     {
         string title = System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(request.Title.ToLowerInvariant());
+#if MPH_LINUX
+        string? picked = LinuxDialogs.OpenFolder($"Select your {title} RomFS folder (the folder holding Preload, or the one above it)");
+        if (picked == null) return null;
+        string path = picked.TrimEnd(Path.DirectorySeparatorChar);
+#else
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
             Description = $"Select your {title} RomFS folder (the folder holding Preload, or the one above it)",
@@ -45,6 +58,7 @@ internal static class DesktopImport
         };
         if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return null;
         string path = dialog.SelectedPath.TrimEnd(Path.DirectorySeparatorChar);
+#endif
         Log.Info("MPHFrontend", "import: picked folder " + Path.GetFileName(path));
         return new ImportPicked(path, Path.GetFileName(path));
     }

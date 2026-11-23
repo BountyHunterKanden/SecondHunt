@@ -801,10 +801,11 @@ namespace MphRead.Entities.Enemies
                 sfx = BeamSfx.Shot;
             }
             int id = Metadata.BeamSfx[(int)beam, (int)sfx];
-            // todo: this is a hack so the Shock Coil SFX doesn't play every frame. I'm not sure what
-            // the game is doing, since other beam SFX do overlap, but Shock Coil's shot SFX
-            // (using Power Beam sounds) only plays again after the previous one has finished.
-            if (id != -1 && (_weaponIndex != 5 || _soundSource.CountSourcePlayingSfx(id) == 0))
+            // recomp: no Shock Coil special case, as in the game (rev 1). Weapon 5 fires every 30 Hz tick (0x21377FC) and
+            // each shot asks for the Power Beam charge shot sound (0x8A, 3 slots) with no caller gate (ov12 0x21358E0 ->
+            // 0x2103668 flags 0/1): the slot picker (ARM9 0x20741B8) takes the quietest-or-equal instance, so a busy
+            // source just restarts its own. GameAudio.TakeSlot does the same, so the old play-once-finished hack is gone.
+            if (id != -1)
             {
                 _soundSource.PlaySfx(id);
             }

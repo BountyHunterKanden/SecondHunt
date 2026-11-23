@@ -15,14 +15,14 @@ namespace MphRecomp.App;
 // YES) ends the hosted session; the ship screen then offers the save, the star map of unlocked planets (MphRead's own
 // unlock rules, see ShipNavigation) and launches a new session in the chosen planet's landing room carrying the
 // story save. Also: continuing a save file (--es save <slot>), the ending (save marked cleared), and quitting at game
-// over (load the last save / new game / quit); --es slot <n> picks the file a new game saves to. Saves: <external files>/saves/campaign<slot>.json (CampaignSaves).
+// over (to the menus, as vanilla; a host with no menus gets a load last save / new game / quit page); --es slot <n> picks the file a new game saves to. Saves: <external files>/saves/campaign<slot>.json (CampaignSaves).
 // Boarding opens the game's own in-ship menu (Core Frontend/ShipMenu, from the ROM's shipGrnd graphics): SAVE GAME
 // saves here with no movie, EXIT SHIP returns on foot to the landing room (no landing movie), LAUNCH SHIP rises off
 // the pad in the cockpit view, fades out and plays the planet's take-off movie, then the planet select (Core
 // Frontend/ShipPlanetSelect, the game's own ShipInSpace screen: pick a planet on the star map, LAND SHIP). A first
 // visit lands in the game (the landing room plays its landing movie and camera sequence); a revisit plays the landing
-// movie, then the cockpit view coming down onto the pad with the in-ship menu. The ending's save prompt and game over
-// are still a plain gamepad-driven text panel.
+// movie, then the cockpit view coming down onto the pad with the in-ship menu. Only hosts with no menus to leave for
+// still get the plain gamepad-driven text panel (the ending's save prompt, game over), plus a --es save slot that can't be read.
 internal sealed partial class CampaignRenderer
 {
     // Veil: the screen held white while the next view loads (VeilThen)
@@ -163,6 +163,7 @@ internal sealed partial class CampaignRenderer
             _shipNote = "";
             if (!file!.Started)
             {
+                SpeedrunStart(archives: false); // a new file: the run starts (SpeedrunTimer.cs)
                 StartNewGameIntro();
             }
             else
@@ -204,6 +205,7 @@ internal sealed partial class CampaignRenderer
         CampaignEnd end = ShipNavigation.Classify(host);
         int roomId = host.RoomId;
         _playFrames += host.Frame;
+        SpeedrunHostEnded(end); // the credits end a run (SpeedrunTimer.cs)
         StorySave story = CampaignSaves.Clone(MphRead.GameState.StorySave);
         CampaignSaves.RepairLogbook(story);
         Log.Info("MPHCampaign", $"session ended in room {roomId}: {end}");
@@ -251,6 +253,14 @@ internal sealed partial class CampaignRenderer
             if (_shipExitOff) Log.Info("MPHCampaign", "boarded during the escape: EXIT SHIP off this visit");
             if (_shipEnding) OpenShip(ShipPage.SavePrompt);
             else VeilThen(() => OpenShip(ShipPage.Menu), VeilHatchIn); // the game faded out to white already
+        }
+        else if (ExitSink != null)
+        {
+            // NO at the death prompt (ENERGY DEPLETED / continue from last checkpoint?) leaves for the menus as vanilla's
+            // does: the game's QuitGame(enteringShip: false) fades out to black, saves nothing (SaveFromExit) and goes back
+            // to the front end -- the same way out as the pause menu's QUIT. A host with no menus keeps the stand-in page.
+            Log.Info("MPHCampaign", $"game over in room {roomId}: to the menus");
+            ExitSink();
         }
         else
         {
@@ -955,6 +965,7 @@ internal sealed partial class CampaignRenderer
             SaveShip();
         }
         PlanetInfo planet = ShipNavigation.Get(_shipPlanet);
+        SpeedrunLanded(_shipPlanet); // a planet's first landing splits (SpeedrunTimer.cs)
         if (_shipStory != null && _shipStory.CheckVisitedRoom(planet.LandingRoomId))
         {
             // a revisit (LAND, rev 1 ov0 0x2105398: the landing room's VisitedRooms bit -> mode 12, the ship on the
@@ -1130,6 +1141,7 @@ internal sealed partial class CampaignRenderer
                     _shipCleared = false;
                     _shipUnsaved = false;
                     _playFrames = 0;
+                    SpeedrunStart(archives: true); // game over's NEW GAME: a new run, straight onto the Archives
                     _shipPlanet = Planet.CelestialArchives;
                     LaunchSession(ShipNavigation.Get(Planet.CelestialArchives).LandingRoom, save: null);
                     return;

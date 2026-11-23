@@ -38,6 +38,7 @@ namespace MphRecomp.Multiplayer
         // a gameplay mod's mode played on Mode (docs/MOD_API.md 4.2): "<mod id>:<mode id>", null = Mode as it is. Offline
         // only; LiveMods.StartMatch runs that mod and records the choice in the replay's mods row
         public string? ModMode { get; set; }
+        public bool SideView { get; set; } // dev builds: played side-on (GAME MODE's side-view row, docs/SIDE_VIEW_MODE.md), offline only
         public string Arena { get; set; } = "MP3 PROVING GROUND"; // a RoomMetadata name (MatchArenas)
         public List<MatchPlayer> Players { get; } = new();
         // the seat this device plays (the host is seat 0; a match client plays its own seat)
@@ -331,6 +332,18 @@ namespace MphRecomp.Multiplayer
         // lowered after idling, where the game put it in the third slot only (Discord report 2026-11-12: an Omega Cannon
         // that didn't switch; PlayerEntity.HostPickupEquipRaise): null = on (not on the wire); replays before format 92 read as off
         public bool? PickupEquipRaise { get; set; }
+        // an item is taken by one seat only: one a seat took this step isn't taken again by another in reach the same step, where
+        // the game's check let both take it (owner's online test 2026-11-13: a health that spawned under two players healed both;
+        // PlayerEntity.HostPickupOneTaker): null = on (not on the wire); replays before format 94 read as off
+        public bool? PickupOneTaker { get; set; }
+        // Brawl Zero Suit Samus's alt form is her army crawl instead of the Morph Ball (owner 2026-11-18, docs/ZERO_SUIT_SAMUS.md
+        // section 7; Characters.CrawlFor, PlayerEntity.HostCrawl): null = on (not on the wire); replays before format 97 read
+        // as off
+        public bool? ZeroSuitCrawl { get; set; }
+        // a Mining Plaza / Main Quarry crate's drop counts the health crates dropped for that player that is still lying there
+        // (owner 2026-11-20: at low health every crate broken without picking up gave a 100 health;
+        // MiningPlazaCrates.PendingHealth): null = on (not on the wire); replays before format 98 read as off
+        public bool? CrateHealthPending { get; set; }
         // the zoom (Imperialist) as the game does it (2026-10-16, owner: the zoom felt bad; PlayerEntity.HostVanillaZoom):
         // the zoomed aim speed, the zoom's step in and ease out, the facing's catch-up. null = on (not on the wire: each
         // device plays its own seat's aim); replays recorded before it (format < 39) read as off, so they play exactly

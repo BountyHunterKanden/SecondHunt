@@ -64,7 +64,9 @@ namespace MphRecomp.PrimeMusic
         {
             string dir = Folder(importRoot, t.Name);
             byte[][] files = t.Files.Select(f => File.ReadAllBytes(Path.Combine(dir, Path.GetFileName(f)))).ToArray();
-            return MusicFormats.Open(t.Format, files, t.Loop);
+            IMusicStream music = MusicFormats.Open(t.Format, files, t.Loop);
+            Holiday.HolidayBells.Tag(music, t.Files[0]); // HOLIDAY MODE's sleigh bells for this song, if it has any
+            return music;
         }
     }
 

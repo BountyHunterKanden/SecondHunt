@@ -59,6 +59,15 @@ namespace MphRead
             var input = new CampaignInput { SelectWeapon = c.Weapon };
             var marks = new List<string>();
             int after = -1;
+            void Mark(int frame)
+            {
+                // what CampaignMap.MapTrack does each frame
+                string? name = Metadata.GetRoomById(host.RoomId, noThrow: true)?.Name;
+                if (name != null && index.ConnectorAt(name, host.Player.Position) is (int pair, int number) && AreaMapIndex.Set(bits, pair, number))
+                {
+                    marks.Add($"Con{number:00} (area {pair}, frame {frame}, in {name})");
+                }
+            }
             for (int i = 0; i < 1500 && !host.Ended; i++)
             {
                 bool pastDoor = Vector3.Dot(host.Player.Position - door.Position, facing) < -0.5f;
@@ -70,12 +79,9 @@ namespace MphRead
                     : host.Dialog == DialogType.YesNo ? HostDialogButton.No : HostDialogButton.Advance;
                 host.Step(input);
                 input.SelectWeapon = BeamType.None;
-                // what CampaignMap.MapTrack does each frame
-                string? name = Metadata.GetRoomById(host.RoomId, noThrow: true)?.Name;
-                if (name != null && index.ConnectorAt(name, host.Player.Position) is (int pair, int number) && AreaMapIndex.Set(bits, pair, number))
-                {
-                    marks.Add($"Con{number:00} (area {pair}, frame {i}, in {name})");
-                }
+                Mark(i);
+                // room-load frames don't count (CampaignRoomLoadWait.cs)
+                WaitRoomLoad(host, input.Move, load => { host.Step(load); Mark(i); });
                 if (after < 0 && host.RoomId != startRoom && GameState.TransitionState == TransitionState.None) after = i;
                 if (after >= 0 && i - after > 120) break; // a little way into the next room
             }

@@ -25,7 +25,7 @@ namespace MphRead
         private static string? SolveList; // linklist=: only these links (arena<TAB>link#; a links_on.tsv works)
 
         private sealed record SolveMove(string Name, string Param, bool Alt = false, float RunUp = 0, int Jump = 0,
-            float JumpAt = 0, bool Climb = false, int Wait = 0, bool Coast = false, bool Boost = false, int Hold = 8, bool Echoes = false);
+            float JumpAt = 0, bool Climb = false, int Wait = 0, bool Coast = false, bool Boost = false, int Hold = 8, bool Echoes = false, bool Late = false);
 
         // cheapest first (the first move that gets there from the most start spots wins). Jump: 0 none, 1 at the ledge (no
         // floor ahead), 2 at a point along the link (JumpAt, 0 = a standing jump), 3 at the ledge else at JumpAt
@@ -53,6 +53,10 @@ namespace MphRead
             new("double", "0.6", Jump: 2, JumpAt: 0.6f, Climb: true, Echoes: true),
             new("gboost", "0", Jump: 2, JumpAt: 0, Climb: true, Hold: 90, Echoes: true),
             new("gboost", "ledge", Jump: 1, Climb: true, Hold: 90, Echoes: true),
+            // a long jump: the second press late, falling back past the take-off height (more time in the air: the owner's
+            // Monitor Station walkway jump, ~14 across)
+            new("long", "ledge", Jump: 1, Climb: true, Late: true, Echoes: true),
+            new("long", "runup2", RunUp: 2, Jump: 3, Climb: true, Late: true, Echoes: true),
         };
 
         private static readonly System.Reflection.FieldInfo PadTimeField = typeof(PlayerEntity).GetField("_timeSinceJumpPad",
@@ -95,6 +99,21 @@ namespace MphRead
                     host.Step(input);
                 }
                 IReadOnlyList<NodeData3> nodes = bot.AiData.AuditNodes;
+                if (Environment.GetEnvironmentVariable("MPH_SOLVE_NODES") == "1")
+                {
+                    foreach (NodeData3 n in nodes)
+                    {
+                        Console.WriteLine(FormattableString.Invariant($"N	{n.Id}	{n.Position.X:F2}	{n.Position.Y:F2}	{n.Position.Z:F2}	{n.NodeType}"));
+                    }
+                    int k = 0; // (the link numbers linkdebug= and linklist= take)
+                    foreach (NodeData3 n in nodes)
+                    {
+                        foreach (NodeData3 t in bot.AiData.AuditLinks(n))
+                        {
+                            Console.WriteLine($"L	{++k}	{n.Id}	{t.Id}");
+                        }
+                    }
+                }
                 var padNodes = new HashSet<NodeData3>();
                 foreach (JumpPadEntity pad in host.Scene.GetJumpPadEntities())
                 {
@@ -263,6 +282,7 @@ namespace MphRead
                     }
                     int limit = (SolveSeconds + mv.Wait + (int)mv.RunUp) * 60;
                     int jumpFrame = -1, second = -1;
+                    float takeOff = 0;
                     Vector3 dir = d;
                     float len = (to.Position - from.Position).Xz.Length;
                     int at = 1;
@@ -312,13 +332,15 @@ namespace MphRead
                             if (go)
                             {
                                 jumpFrame = f;
+                                takeOff = me.Position.Y;
                             }
                         }
                         if (jumpFrame >= 0 && f - jumpFrame < 8)
                         {
                             ci.Buttons |= CampaignButtons.Jump;
                         }
-                        if (mv.Climb && jumpFrame >= 0 && f - jumpFrame > 16 && second < 0 && me.Speed.Y < 0.05f)
+                        if (mv.Climb && jumpFrame >= 0 && f - jumpFrame > 16 && second < 0 && me.Speed.Y < 0.05f
+                            && (!mv.Late || me.Position.Y < takeOff))
                         {
                             second = f;
                         }
@@ -438,7 +460,16 @@ namespace MphRead
                                 {
                                     continue;
                                 }
-                                int r = Try(new[] { from, to }, mv, off);
+                                int r;
+                                try
+                                {
+                                    r = Try(new[] { from, to }, mv, off);
+                                }
+                                catch (NullReferenceException ex)
+                                {
+                                    Console.WriteLine($"  link {total} {from.Id}->{to.Id} {mv.Name} health {me.Health}: {ex}");
+                                    r = -2;
+                                }
                                 if (mv == SolveMenu[0] && off == Vector2.Zero)
                                 {
                                     walkEnd = r == -2 ? (lastEnd.StartsWith("moved") ? lastEnd : "bad start") : r > 0 ? "ok" : lastEnd;

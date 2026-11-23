@@ -433,7 +433,7 @@ namespace MphRead.Entities
             bool boosted = boosting && !_spiderBoostPrev;
             _spiderBoostPrev = boosting;
             bool held = HostScoutDrone ? _spiderLock == 0 && SpiderDroneHeld() : IsBot ? SpiderBotHeld() : HostSpiderButton;
-            if (!held || !IsAltForm || IsMorphing || _health <= 0 || _frozenTimer > 0 || _spiderLock > 0)
+            if (!held || HostCrawl || !IsAltForm || IsMorphing || _health <= 0 || _frozenTimer > 0 || _spiderLock > 0)
             {
                 SpiderDetach();
                 return false;

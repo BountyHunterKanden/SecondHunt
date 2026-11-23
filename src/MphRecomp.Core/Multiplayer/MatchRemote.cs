@@ -16,6 +16,21 @@ namespace MphRecomp.Campaign
         public Action<int>? SeatDropTap;
         // (O5 rejoin) a dropped seat back in the match
         public Action<int>? SeatRejoinTap;
+        // a seat's third-person true aim changed (SetRemoteTrueAim; Replays: ReplayNetKind.AimCam)
+        public Action<int, ushort>? TrueAimTap;
+
+        // a LAN guest's third-person true aim (MphRead PlayerHostAim.cs, owner 2026-11-13), sent beside its input
+        // (NetInput.TrueAim, not on the online wire). Held in the seat until it changes; only a change is tapped
+        public void SetRemoteTrueAim(int seat, ushort code)
+        {
+            PlayerEntity p = PlayerEntity.Players[seat];
+            if (!p.HostRemote || p.HostTrueAimCam == code)
+            {
+                return;
+            }
+            TrueAimTap?.Invoke(seat, code);
+            p.HostTrueAimCam = code;
+        }
 
         public void SetRemoteInput(int seat, in NetInput input)
         {
@@ -26,6 +41,11 @@ namespace MphRecomp.Campaign
             }
             // N4: a view older than the cap counts as the cap's (before the tap, so a replay rewinds the same at any cap)
             NetInput applied = input;
+            if (seat >= 0 && seat < _lastRemote.Length)
+            {
+                _lastRemote[seat] = input; // (HoldRemoteForLife)
+                _hasRemote[seat] = true;
+            }
             CountLag(seat, input, p.NetAimEpoch); // (for the match host's log only: MatchRemote.LagStats.cs)
             if (applied.ViewTick != 0 && Frame - applied.ViewTick > LagCompensation.MaxRewind)
             {
@@ -54,6 +74,34 @@ namespace MphRecomp.Campaign
             // rewinds the same)
             p.HostLagRewind = LagCompensation.RewindFor(Frame, applied.ViewTick);
         }
+
+        // Fruity P4 (Net/NetMatchSession.Lives.cs): the seat's life changed (a spawn) and its device hasn't sent an input for
+        // the new one yet, so the last one, made for the old life, would keep steering it. One neutral input: no move, stick,
+        // stylus or weapon pick. The buttons stay as they were: each is a press only when it goes down (PlayerControls),
+        // so a button held through the respawn stays held, not pressed again (vanilla's NoShotsFired keeps a held trigger
+        // from firing), and the device's next input carries on from there. The view and its aim epoch stay too.
+        public void HoldRemoteForLife(int seat)
+        {
+            if (seat < 0 || seat >= _lastRemote.Length || !_hasRemote[seat])
+            {
+                return;
+            }
+            NetInput n = _lastRemote[seat];
+            n.SelectWeapon = BeamType.None;
+            n.MoveX = n.MoveY = 0;
+            n.MovePush = n.MoveDir = 0;
+            n.Touching = false;
+            n.TouchDx = n.TouchDy = 0;
+            n.ReportBasis = 0;
+            SetRemoteInput(seat, n);
+            LifeHolds++;
+        }
+
+        // neutral inputs given at a new life, this match (the PC tests' line)
+        public int LifeHolds { get; private set; }
+
+        private readonly NetInput[] _lastRemote = new NetInput[16];
+        private readonly bool[] _hasRemote = new bool[16];
 
         // each remote seat's last applied input's sequence number
         public readonly ushort[] RemoteSeq = new ushort[16];
@@ -90,6 +138,7 @@ namespace MphRecomp.Campaign
             p.HostTouchDown = false;
             p.HostMovePush = 1;
             p.HostMoveAnalog = false;
+            p.HostTrueAimCam = 0; // (vanilla aim while it's gone; a replay's Drop does the same)
             SetControls(p.Controls, 0, 0, CampaignButtons.None, BeamType.None);
         }
 

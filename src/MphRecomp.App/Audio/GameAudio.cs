@@ -261,6 +261,8 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
                     defaultLengthInMS: 115000, defaultFadeInMS: 5000, NCSF123.VolumeType.ReplayGainAlbum, PeakType.ReplayGainTrack,
                     playForever: true, volume, channelMutes: 0, (ushort)(tracks ^ 0xFFFF), ignoreVolume: false);
                 Configure(stream, mode);
+                // HOLIDAY MODE's sleigh bells, on the song's own ticks (HolidayBellsOverlay)
+                stream.Overlay = HolidayBellsOverlay.For((int)seqId, mode.Rate);
                 if (myGen != System.Threading.Volatile.Read(ref _generation))
                 {
                     // a newer Load() arrived while the NCSF stream/file I/O above was in flight -- discard our
@@ -349,6 +351,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
         MphRecomp.Frontend.DsEcho _echo;
         int _count, _offset; // _floats[_offset.._count) still to go into _track
         long _written; // frames given to _track
+        int _seenFlushes; // _owner._flushes when _written was last lined up with _track's playback head
         int _fadeIn; // frames of fade-in left after a mode change
         IPcmTrack? _retired; // the track before a rate change, playing out its fade; released a moment later
         long _retiredAt;
@@ -371,6 +374,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
             {
                 while (!_owner._stopped)
                 {
+                    ThreadAllocProbe.Tick("mph-music"); // dev probe (Diagnostics/ThreadAllocProbe.cs)
                     if (_offset == _count)
                     {
                         if (!ReferenceEquals(_owner._mode, _mode))
@@ -378,14 +382,18 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
                             if (!Switch()) return;
                             continue;
                         }
+                        long mark = ThreadAllocProbe.Mark(); // dev probe
                         if (!Render()) return;
+                        ThreadAllocProbe.Part(ThreadAllocProbe.PartId.MusicRender, mark);
                         if (_retired != null && System.Environment.TickCount64 - _retiredAt > 200)
                         {
                             _retired.Release();
                             _retired = null;
                         }
                     }
+                    long writeMark = ThreadAllocProbe.Mark(); // dev probe
                     if (!Write()) return;
+                    ThreadAllocProbe.Part(ThreadAllocProbe.PartId.MusicWrite, writeMark);
                 }
             }
             catch (System.Exception ex)
@@ -426,6 +434,14 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
         // one blocking write of what's left of the chunk; false = stop
         bool Write()
         {
+            // DropFadedQueue flushed the track: the frames it held never play, so count from where the head is now
+            // (0 on Android). Otherwise a later rate change (Switch) waits forever for them and the music stops.
+            int flushes = System.Threading.Volatile.Read(ref _owner._flushes);
+            if (flushes != _seenFlushes)
+            {
+                _seenFlushes = flushes;
+                _written = _track.PlaybackHeadPosition & 0xFFFFFFFFL;
+            }
             int w = _track.Write(_floats, _offset, _count - _offset, blocking: true);
             if (w < 0)
             {
@@ -497,6 +513,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
             }
             // the old track only moves while it plays (a paused host, the pause menu, holds it until Play)
             long head;
+            int flushes = System.Threading.Volatile.Read(ref _owner._flushes);
             while (true)
             {
                 if (_owner._stopped)
@@ -506,7 +523,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
                 }
                 head = oldTrack.PlaybackHeadPosition & 0xFFFFFFFFL;
                 long left = fadeStart - head;
-                if (left <= 0) break;
+                if (left <= 0 || flushes != System.Threading.Volatile.Read(ref _owner._flushes)) break; // (flushed: never reached)
                 if (!oldTrack.IsPlaying)
                 {
                     _owner._resume.Wait(50);
@@ -537,6 +554,7 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
                 fresh.SetVolume(_owner.Level); // MasterVolume may have changed meanwhile (it sets _owner._track's)
                 if (playing) fresh.Play();
                 _owner._track = fresh;
+                _seenFlushes = _owner._flushes; // a flush during the wait was of the old track
             }
             finally
             {
@@ -572,30 +590,65 @@ internal sealed class GameMusicPlayer : MusicPlayer.IHost
         _thread = null;
     }
 
+    // Coming back to the menus after a game: the track holds a buffer of music written during the fade out into the
+    // game, and a track's gain goes into the samples as they're written (AndroidPlatform Track.SetVolume, 2026-11-14),
+    // so that buffer is silence: the menu music came back after a second's pause (owner 2026-11-17, quitting the
+    // campaign or a match; the menus' 1 s buffer). While the music is still faded down and paused, drop what the
+    // tracks hold, so the next music written (at the reset fade) is the first heard.
+    public void DropFadedQueue()
+    {
+        if (_fade >= 1 || !_hostPaused) return;
+        lock (_gate)
+        {
+            if (_track != null && !_track.IsPlaying)
+            {
+                System.Threading.Interlocked.Increment(ref _flushes);
+                _track.Flush();
+                Log.Info("MPHAudio", "music: dropped the faded-out queue before resume");
+            }
+        }
+        Stream.DropQueued();
+    }
+
+    // bumped by DropFadedQueue: a pump waiting for the old track to play out its frames (Switch) stops waiting
+    int _flushes;
+
+    // Play/Pause start and stop the tracks on a worker, one call after another (TrackOps), never on the caller's thread:
+    // with Bluetooth LE Audio earbuds a track's Play waits ~1.7 s on the Odin while the link comes back, and on the
+    // game thread that froze the picture on every unpause (owner 2026-11-20, Pixel Buds Pro 2)
     public void Play(float volume)
     {
         _hostPaused = false;
         Volume = volume;
-        lock (_gate)
+        TrackOps.Run(() =>
         {
-            Log.Info("MPHAudio", $"music Play({volume:0.00}), track {(_track == null ? "null" : "present")}");
-            _track?.Play();
-            _playing = _track != null;
-            _resume.Set();
-        }
-        Stream.Resume();
+            if (_hostPaused) return; // paused again meanwhile
+            lock (_gate)
+            {
+                Log.Info("MPHAudio", $"music Play({volume:0.00}), track {(_track == null ? "null" : "present")}");
+                _track?.Play();
+                _playing = _track != null;
+                _resume.Set();
+            }
+            Stream.Resume();
+        });
     }
 
     public void Pause()
     {
         _hostPaused = true;
-        lock (_gate)
+        _resume.Reset();
+        TrackOps.Run(() =>
         {
-            Log.Info("MPHAudio", "music Pause()");
-            _resume.Reset();
-            _track?.Pause();
-        }
-        Stream.Pause();
+            if (!_hostPaused) return; // played again meanwhile
+            lock (_gate)
+            {
+                Log.Info("MPHAudio", "music Pause()");
+                _resume.Reset();
+                _track?.Pause();
+            }
+            Stream.Pause();
+        });
     }
 
     public void Stop()
@@ -884,8 +937,10 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         {
             while (!_mixStop)
             {
+                ThreadAllocProbe.Tick("mph-sfx-mixer"); // dev probe (Diagnostics/ThreadAllocProbe.cs)
                 System.Array.Clear(mixL);
                 System.Array.Clear(mixR);
+                if (!_mixHold)
                 lock (_lock)
                 {
                     for (int vi = _voices.Count - 1; vi >= 0; vi--)
@@ -951,7 +1006,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
                     }
                 }
                 // the ship screens' post-mix echo (no-op elsewhere)
-                echo.Process(mixL, mixR, _mixChunkFrames);
+                if (!_mixHold) echo.Process(mixL, mixR, _mixChunkFrames);
                 for (int i = 0; i < _mixChunkFrames; i++)
                 {
                     outBuf[i * 2] = (short)System.Math.Clamp(mixL[i], short.MinValue, short.MaxValue);
@@ -1045,19 +1100,36 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         Log.Info("MPHAudio", $"First Hunt banks loaded: sfx {sfx}, menu {menu}, global {global}, bgm {bgm} ({all.Count} samples)");
     }
 
-    public void SetPaused(bool paused)
+    // keepOutput (the game's own pause, CampaignAudio): the track keeps playing silence and the voices wait where
+    // they are, so the Bluetooth link stays up and unpausing is instant. Stopping and starting a track costs ~1.7 s
+    // on the Odin with LE Audio earbuds, which froze the picture on unpause (owner 2026-11-20). Without it (the app
+    // in the background, the menus under a game) the track really pauses, on the TrackOps worker, off this thread.
+    public void SetPaused(bool paused, bool keepOutput = false)
     {
-        if (paused)
+        _mixHold = paused;
+        if (paused && keepOutput) return;
+        bool trackPaused = paused;
+        if (trackPaused == _mixTrackPaused) return;
+        _mixTrackPaused = trackPaused;
+        if (paused) _mixResume.Reset();
+        TrackOps.Run(() =>
         {
-            _mixResume.Reset();
-            _mixTrack?.Pause();
-        }
-        else
-        {
-            _mixTrack?.Play();
-            _mixResume.Set();
-        }
+            if (_mixTrackPaused != trackPaused) return; // changed again meanwhile
+            if (trackPaused)
+            {
+                _mixTrack?.Pause();
+            }
+            else
+            {
+                _mixTrack?.Play();
+                _mixResume.Set();
+            }
+        });
     }
+
+    // SetPaused: the mixer writes silence and leaves the voices alone
+    volatile bool _mixHold;
+    volatile bool _mixTrackPaused;
 
     public void Dispose()
     {
@@ -1215,7 +1287,18 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
             FrozenPosition = noUpdate && source != null && !source.Self ? source.Position : null,
         };
         _instances.Add(inst);
+        _started = (id, source, _uiRequest); // logged once the lock is let go (LogStarted)
         return true;
+    }
+
+    // a sound that really started (SetUpInstance true): its MPHAudio line (SoundLog.cs), written outside _lock so the
+    // mixer never waits on the log file
+    [System.ThreadStatic] static (int Id, SoundSource? Source, bool Ui)? _started;
+    static void LogStarted()
+    {
+        if (_started is not { } s) return;
+        _started = null;
+        MphRecomp.App.Platform.SoundLog.Started(s.Id, s.Source, s.Ui);
     }
 
     public override int PlaySample(int id, SoundSource? source, bool? loop, bool noUpdate,
@@ -1226,6 +1309,8 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
             return -1;
         }
         short[] pcm = GetPcm(id); // decode outside the lock so the mixer never waits on it
+        try
+        {
         lock (_lock)
         {
             if (!SetUpInstance(id, source, loop.GetValueOrDefault(), recency, sourceOnly, cancellable, noUpdate, out Instance? inst))
@@ -1239,17 +1324,19 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
             }
             return inst.Handle;
         }
+        }
+        finally { LogStarted(); }
     }
 
     // A host's own sound, not in MPH's tables (Scout Drone MP1 beam: Prime's drone sounds, CampaignRenderer.DroneFx.cs):
     // mono PCM at its own rate, once, at a volume, placed like a sample from its source where it starts (no handle, no
     // later position updates: the sounds are short). `everyone`: an unplaced sound the whole match hears (Mining Plaza's
-    // gate jingle), not a seat cue, so a replay's free cam keeps it.
-    public void PlayPcm(short[] pcm, int rate, float volume, SoundSource? source, bool everyone = false)
+    // gate jingle), not a seat cue, so a replay's free cam keeps it. Returns the voice (StopPcm, PcmAlive), or null.
+    public object? PlayPcm(short[] pcm, int rate, float volume, SoundSource? source, bool everyone = false)
     {
         if (pcm.Length == 0 || rate <= 0 || (FreeCamEar && !everyone && IsSeatCue(source)))
         {
-            return; // nothing, or a seat cue in a replay's free cam (FreeCamEar)
+            return null; // nothing, or a seat cue in a replay's free cam (FreeCamEar)
         }
         lock (_lock)
         {
@@ -1275,12 +1362,18 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
                 _voices[oldest].Stopped = true;
                 _voices.RemoveAt(oldest);
             }
+            return v;
         }
     }
 
+    // recomp: a PlayPcm / PlayPcmLoop voice still sounding (not ended, stopped or fading out), for a host's own instance
+    // caps (Hyper Beam: Corruption's per-sound cap, CampaignRenderer.HyperBeamFx.cs HyperSfxOneShot, 2026-11-15)
+    public bool PcmAlive(object? voice) => voice is Voice v && v.Alive;
+
     // ... and one that loops until StopPcm (Dark Samus's Hyper Ball hum, CampaignRenderer.HyperFx.cs): placed where it
-    // starts, Volume() moves its gains as its source moves; returns the voice (null: nothing played)
-    public object? PlayPcmLoop(short[] pcm, int rate, float volume, SoundSource? source)
+    // starts, Volume() moves its gains as its source moves; returns the voice (null: nothing played). loopStart: the
+    // sample the loop restarts at (the sample's own loop point; 0 = the whole sample)
+    public object? PlayPcmLoop(short[] pcm, int rate, float volume, SoundSource? source, int loopStart = 0)
     {
         if (pcm.Length == 0 || rate <= 0)
         {
@@ -1288,7 +1381,7 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         }
         lock (_lock)
         {
-            var v = new Voice { Pcm = pcm, Step = rate / (double)_mixRate, Loop = true, HostLoop = true };
+            var v = new Voice { Pcm = pcm, Step = rate / (double)_mixRate, Loop = true, HostLoop = true, LoopStart = loopStart > 0 && loopStart < pcm.Length - 1 ? loopStart : 0 };
             PcmGains(v, volume, source);
             _voices.Add(v);
             return v;
@@ -1362,6 +1455,8 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         {
             anyVolume |= DgnCurves(file, file.Entries[i], amountA, amountB).Volume > 0;
         }
+        try
+        {
         lock (_lock)
         {
             if (!SetUpInstance(id, source, loop, recency, sourceOnly: true, cancellable, noUpdate, out Instance? inst,
@@ -1386,6 +1481,8 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
                 }
             }
         }
+        }
+        finally { LogStarted(); }
     }
 
     public override void PlayScript(int id, SoundSource? source, bool noUpdate,
@@ -1412,6 +1509,8 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
                 GetPcm(e.SfxData & 0x3FFF); // decode now, outside the lock, rather than mid-Update
             }
         }
+        try
+        {
         lock (_lock)
         {
             if (!SetUpInstance(id, source, loop: false, recency, sourceOnly, cancellable, noUpdate, out Instance? inst))
@@ -1420,6 +1519,8 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
             }
             inst.Script = file;
         }
+        }
+        finally { LogStarted(); }
     }
 
     // driven by the game loop once per sim frame (Sfx.Update): SfxInstance.Update/UpdateScript
@@ -2061,6 +2162,8 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         }
     }
 
+    public override void StopStreams(int fadeFrames) => StopStream(fadeFrames, 30);
+
     // the game's !IsStreamStopped: a fade-out still counts as playing
     public bool StreamPlaying
     {
@@ -2225,6 +2328,34 @@ internal sealed class GameSfxPlayer : SfxInstanceBase
         lock (_lock)
         {
             return _instances.Count(i => i.SfxId == id && ReferenceEquals(i.Source, source) && i.IsPlaying);
+        }
+    }
+}
+
+// Starts and stops the players' tracks on one worker, in the order asked (GameMusicPlayer.Play/Pause,
+// GameSfxPlayer.SetPaused): a track's Play can wait ~1.7 s for a Bluetooth LE Audio link (the Odin, owner 2026-11-20),
+// which the game thread mustn't. One at a time, so a pause and the play after it land in that order.
+internal static class TrackOps
+{
+    static readonly object _lock = new();
+    static System.Threading.Tasks.Task _tail = System.Threading.Tasks.Task.CompletedTask;
+
+    public static void Run(System.Action op)
+    {
+        lock (_lock)
+        {
+            _tail = _tail.ContinueWith(_ =>
+            {
+                try
+                {
+                    op();
+                }
+                catch (System.Exception ex)
+                {
+                    // a track released meanwhile (the player disposed): nothing left to start or stop
+                    Log.Warn("MPHAudio", "track op: " + ex.Message);
+                }
+            }, System.Threading.Tasks.TaskScheduler.Default);
         }
     }
 }

@@ -71,7 +71,6 @@ internal sealed partial class CampaignRenderer
                 GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _fxVbo);
                 GLES30.GlActiveTexture(GLES30.GlTexture0);
                 GLES30.GlBindSampler(0, 0);
-                GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_fxProg, "uTex"), 0);
                 GLES30.GlEnable(GLES30.GlBlend);
             }
             Vector4 col = Vector4.Lerp(GrappleIconOff, GrappleIconOn, t);

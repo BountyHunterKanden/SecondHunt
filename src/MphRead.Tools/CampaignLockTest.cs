@@ -66,9 +66,15 @@ namespace MphRead
             {
                 return;
             }
+            if (args.Length >= 2 && args[1] == "escape")
+            {
+                EscapeArrival(args);
+                return;
+            }
             if (args.Length < 2 || !File.Exists(args[1]))
             {
                 Console.WriteLine("usage: -campaignlock <campaign save .json> [room=UNIT1_LAND] [teleporterId=25]");
+                Console.WriteLine("       -campaignlock escape [save .json] [secs=150]");
                 return;
             }
             StorySave story = CampaignSaves.FromJson(File.ReadAllText(args[1])).Story;
@@ -213,6 +219,103 @@ namespace MphRead
             return doors;
         }
 
+        // -campaignlock escape [save.json] [secs=150]: triage #6's Sic Transit half (owner 11-19: "do the bizhawk check for
+        // sic transit"): lists Sic Transit's doors on the escape layer, then for each neighbour room starts there on the
+        // escape layer with the escape running and walks through its door into Sic Transit, logging the same sounds
+        private static void EscapeArrival(string[] args)
+        {
+            if (args.Length >= 4 && args[2] == "doors")
+            {
+                foreach (string name in args[3..])
+                {
+                    using CampaignHost h = CampaignHost.Start(name, setupSave: s => s.BossFlags = FlagsForPlanet(79, layer: 1),
+                        arriving: false);
+                    h.Step(default);
+                    DumpDoors(h, 0, $"{name} on the escape layer");
+                }
+                return;
+            }
+            string? savePath = args.Length >= 3 && File.Exists(args[2]) ? args[2] : null;
+            int escapeSeconds = args.Length >= 3 && Int32.TryParse(args[^1], out int secs) ? secs : 150;
+            StorySave? story = savePath != null ? CampaignSaves.FromJson(File.ReadAllText(savePath)).Story : null;
+            const int sicTransit = 79;
+            void Setup(StorySave s)
+            {
+                s.BossFlags = FlagsForPlanet(sicTransit, layer: 1); // 1 = Escape
+            }
+            List<int> neighbours;
+            using (CampaignHost probe = CampaignHost.Start("UNIT4_RM3", save: story, setupSave: Setup, arriving: false))
+            {
+                for (int i = 0; i < 30; i++)
+                {
+                    probe.Step(default);
+                }
+                DumpDoors(probe, 0, "Sic Transit on the escape layer");
+                neighbours = Doors(probe.Scene).Where(d => d.Id >= 0).Select(d => d.TargetRoomId).Distinct().ToList();
+            }
+            foreach (int from in neighbours)
+            {
+                RoomMetadata? meta = Metadata.GetRoomById(from, noThrow: true);
+                if (meta == null)
+                {
+                    continue;
+                }
+                Console.WriteLine($"  from room {from} {meta.Name} ({meta.InGameName}) into Sic Transit, escape running:");
+                using CampaignHost host = CampaignHost.Start(meta.Name, save: story, setupSave: Setup, arriving: false);
+                Scene scene = host.Scene;
+                int frame = 0;
+                var trace = new SfxTrace { Where = () => $"f{frame,5} room {scene.RoomId} scene frame {scene.FrameCount}" };
+                int lastRoom = scene.RoomId;
+                void Step(CampaignInput input)
+                {
+                    host.Step(input);
+                    frame++;
+                    if (Sfx.Instance != trace)
+                    {
+                        Sfx.SetHost(trace);
+                    }
+                    if (scene.RoomId != lastRoom)
+                    {
+                        Console.WriteLine($"    f{frame,5} ROOM {lastRoom} -> {scene.RoomId} (escape {GameState.EscapeState}, timer {GameState.EscapeTimer})");
+                        lastRoom = scene.RoomId;
+                        DumpDoors(host, frame, "on arrival");
+                    }
+                }
+                for (int i = 0; i < 3000 && (i < 60 || CameraSequence.Current != null); i++)
+                {
+                    Step(default);
+                }
+                typeof(GameState).GetMethod("UpdateEscapeState", System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static)!.Invoke(null, [escapeSeconds * 30, (int)EscapeState.Escape]);
+                Sfx.SetHost(trace);
+                for (int i = 0; i < 30; i++)
+                {
+                    Step(default);
+                }
+                DoorEntity? door = Doors(scene).FirstOrDefault(d => d.Id >= 0 && d.TargetRoomId == sicTransit);
+                if (door == null)
+                {
+                    Console.WriteLine("    no door to Sic Transit here");
+                    continue;
+                }
+                Console.WriteLine($"    through door#{door.Id} at {Fmt(door.Position)} (locked {door.Flags.TestFlag(DoorFlags.Locked)})");
+                if (!CrossDoor(host, door, Step) || scene.RoomId != sicTransit)
+                {
+                    Console.WriteLine($"    FAIL: didn't reach Sic Transit (room {scene.RoomId})");
+                    continue;
+                }
+                for (int i = 0; i < 120; i++)
+                {
+                    Step(new CampaignInput { Move = new System.Numerics.Vector2(0, 1) });
+                }
+                for (int i = 0; i < 90; i++)
+                {
+                    Step(default);
+                }
+                DumpDoors(host, frame, "after walking in");
+            }
+        }
+
         private static string StoryDoor(int roomId, int doorId)
         {
             int raw = GameState.StorySave.GetRoomState(roomId, doorId) + 1;
@@ -250,6 +353,7 @@ namespace MphRead
                 input.DialogButton = !host.DialogPaused || i % 10 != 0 ? HostDialogButton.None
                     : host.Dialog == DialogType.YesNo ? HostDialogButton.No : HostDialogButton.Advance;
                 step(input);
+                WaitRoomLoad(host, input.Move, step); // room-load frames don't count (CampaignRoomLoadWait.cs)
                 if (host.RoomId != startRoom && GameState.TransitionState == TransitionState.None)
                 {
                     return true;

@@ -110,7 +110,6 @@ namespace MphRead.Entities
                 // recomp: the app plays Corruption's shot (CampaignRenderer.HyperBeamFx.cs)
                 HostHyperBeamShots++;
                 HostHyperBeamLastCharged = charged;
-                HostHyperBeamLastRapid = HyperBeamRapid;
                 return;
             }
             if (continuous)
@@ -541,6 +540,11 @@ namespace MphRead.Entities
             UpdateScanSfx(index: -1, enable: false);
             // the game doesn't stop music if a likely download play check passes
             // todo: the game stops music here, but I think we have other cases covered, and need to not stop for teleporters
+            // recomp: rev 1 this is ov2 0x2104010, run by the game state's exit (ARM9 0x20561C4). Its music stop
+            // (0x206EAFC) is skipped when the next state is 0x10 or 0x11 (byte 0x020E54C4), the in-game reloads; our room
+            // load starts the room's music right after anyway (RoomEntity.LoadRoom). It also cuts the free stream
+            // (0x207206C(0)) and the voice stream queue (0x2070B6C) with no fade, which we do here.
+            Sfx.Instance.StopStreams(0);
             _soundSource.StopFreeSfxScripts();
             _soundSource.StopFreeSfx(SfxId.FAST_SCROLL_UP_LOOP);
             Sfx.Instance.StopEnvironmentSfx();
@@ -648,6 +652,7 @@ namespace MphRead.Entities
         public void UpdateTimedSounds()
         {
             _timedSfxSource.Update(Position, rangeIndex: HostMainSoundsPlaced ? 1 : -1);
+            Rumble.Tick(); // recomp: host-only, no game state (the death buzz after the killing hit's)
             if (_sfxStopTimer > 0)
             {
                 _sfxStopTimer -= _scene.FrameTime;
@@ -747,12 +752,14 @@ namespace MphRead.Entities
                     Music.PlayMusic(musicId);
                 }
             }
-            // sfxtodo: escape sequence and pause stuff
+            // recomp: rev 1 ov2 0x2104b94 has no escape or pause code here (the sound pause at ARM9 0x2072298
+            // only runs on lid close). It restarts a scan sound whenever its handle isn't playing (0x2072464),
+            // so a one-shot scan sound repeats for as long as its bit stays on.
             if (Sfx.TimedSfxMute == 0)
             {
                 for (int i = 0; i < _scanSfxOn.Length; i++)
                 {
-                    if (_scanSfxOn[i] && _scanSfxHandles[i] == -1)
+                    if (_scanSfxOn[i] && !_soundSource.IsHandlePlaying(_scanSfxHandles[i]))
                     {
                         _scanSfxHandles[i] = _soundSource.PlayFreeSfx(_scanSfxIds[i]);
                     }

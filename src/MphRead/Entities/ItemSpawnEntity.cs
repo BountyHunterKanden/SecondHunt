@@ -124,6 +124,18 @@ namespace MphRead.Entities
             return base.Process();
         }
 
+        // recomp: network play, a match client: the host spawned this spawner's next item (ItemSync); its sound, as Process
+        // plays it with a spawn
+        public void NetSpawnSfx()
+        {
+            if (_data.ItemType != ItemType.ArtifactKey)
+            {
+                _soundSource.Update(Position, rangeIndex: 7);
+                UpdateNodeRefVolume();
+                _soundSource.PlaySfx(SfxId.ITEM_SPAWN1);
+            }
+        }
+
         public void OnItemPickedUp()
         {
             if (_data.CollectedMessage != Message.None)

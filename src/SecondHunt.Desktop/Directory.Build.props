@@ -1,0 +1,14 @@
+<Project>
+  <!-- src/Directory.Build.props first (the path map for every project) -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+  <!-- The Linux build (SecondHunt.Desktop.csproj, MphLinux): on by itself when built on Linux; -p:MphLinux=true builds
+       it on Windows (a compile check, Publish-Linux.ps1). Its restore and build files go in their own obj/linux and
+       bin/linux, so a Linux build never touches the Windows build's (several sessions build in this checkout). -->
+  <PropertyGroup>
+    <MphLinux Condition=" '$(MphLinux)' == '' And $([MSBuild]::IsOSPlatform('Linux')) ">true</MphLinux>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(MphLinux)' == 'true' ">
+    <BaseIntermediateOutputPath>obj\linux\</BaseIntermediateOutputPath>
+    <BaseOutputPath>bin\linux\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

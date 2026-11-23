@@ -45,6 +45,19 @@ namespace MphRead
                 .Select(c => ContentKeys.HunterKey(c.Id, c.Base.ToString())).ToList();
             Check(picks.All(k => ContentKeys.Find(ContentKeys.Hunter, k) != null),
                 "every picked character (TROOPER, DARK SAMUS...) has a known key: " + string.Join(" ", picks));
+            // each hunter's alt-form kills count as its own alt form (Guardian has none), and a served match's seats (the
+            // match host sets no HostCharacterName) count as their picked character: MatchResults.Read's path
+            var alts = Enum.GetValues<Hunter>().Where(h => h is not (Hunter.Random or Hunter.Guardian))
+                .Select(h => ContentKeys.HunterKey(null, h.ToString())).Concat(picks)
+                .Select(k => (k, alt: ContentKeys.AltFormKey(k))).ToList();
+            Check(alts.All(a => a.alt != ContentKeys.AltForm && ContentKeys.Find(ContentKeys.Weapon, a.alt) != null),
+                "every hunter and character has its own known alt form: " + string.Join(" ", alts.Select(a => a.k + "=" + a.alt)));
+            string? darkSamus = MphRecomp.Multiplayer.LookAlikes.CharacterName(new() { Hunter = Hunter.Samus, Character = "darksamus" });
+            string? trooper = MphRecomp.Multiplayer.LookAlikes.CharacterName(new() { Hunter = Hunter.Weavel, Character = "trooper" });
+            Check(ContentKeys.HunterKey(darkSamus, "Samus") == "dark_samus" && ContentKeys.HunterKey(trooper, "Weavel") == "trooper"
+                && ContentKeys.AltFormKey(ContentKeys.HunterKey(darkSamus, "Samus")) == "morph_ball"
+                && ContentKeys.AltFormKey(ContentKeys.HunterKey(trooper, "Weavel")) == "scout_drone",
+                $"a served seat's character from its settings: {darkSamus} {trooper}");
             Console.WriteLine(fail == 0 ? "hubselftest: PASS" : $"hubselftest: {fail} FAILED");
             Environment.ExitCode = fail == 0 ? 0 : 1;
         }

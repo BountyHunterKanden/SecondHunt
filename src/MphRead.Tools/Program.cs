@@ -19,6 +19,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-savetest") { SaveTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-configtest") { ConfigTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-settingstest") { SettingsSafetyTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-speedruntest") { string? f = MphRecomp.Campaign.SpeedrunSplits.SelfTest(); Console.WriteLine(f == null ? "speedrun: all pass" : "speedrun FAIL: " + f); Environment.ExitCode = f == null ? 0 : 1; return; } // the speedrun timer (SpeedrunSplits.cs)
             if (args.Length >= 1 && args[0] == "-simtest") { SimTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-modtest") { ModTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-inputtest") { InputTest.Run(args); return; }
@@ -64,11 +65,19 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-altpickuptest") { AltPickupTest.Run(args); return; } // beam pickup in alt form
             if (args.Length >= 1 && args[0] == "-placetest") { PlacementTest.Run(args); return; } // Pickup placement editor
             if (args.Length >= 1 && args[0] == "-botprobe") { BotProbe.Run(args); return; } // Bots batch 10-23: jitter/hops/walls/roam pitch
+            if (args.Length >= 1 && args[0] == "-matchloadtime") { MatchLoadTimeTest.Run(args); return; } // Match start ms
             if (args.Length >= 1 && args[0] == "-botpacetest") { BotPaceTest.Run(args); return; } // Bot difficulty vs vanilla
             if (args.Length >= 1 && args[0] == "-althoptest") { AltHopTest.Run(args); return; } // campaign alt-form hop (owner 11-07)
+            if (args.Length >= 1 && args[0] == "-spireclimbtest") { SpireClimbTest.Run(args); return; } // Spire climbs straight up (11-13)
+            if (args.Length >= 1 && args[0] == "-quarrycranetest") { QuarryCraneTest.Run(args); return; } // Prime 1 Main Quarry crane (11-16)
+            if (args.Length >= 1 && args[0] == "-quarrystacktest") { QuarryStackTest.Run(args); return; } // Main Quarry stacked crates (11-20)
+            if (args.Length >= 1 && args[0] == "-lockjawhovertest") { LockjawHoverTest.Run(args); return; } // Lockjaw bombs in the air (11-15)
+            if (args.Length >= 1 && args[0] == "-weavelmorphtest") { WeavelMorphCeilingTest.Run(args); return; } // Weavel morphing beside a low overhang (11-22)
+            if (args.Length >= 1 && args[0] == "-sideviewtest") { SideViewTest.Run(args); return; } // side-view mode P0 (owner 11-12)
             if (args.Length >= 1 && args[0] == "-hyperballtest") { HyperBallTest.Run(args); return; } // Dark Samus Hyper Mode (H1)
             if (args.Length >= 1 && args[0] == "-hyperfxtest") { HyperFxTest.Run(args); return; } // Dark Samus Hyper Mode (H3 effects)
             if (args.Length >= 1 && args[0] == "-paralyzertest") { ParalyzerTest.Run(args); return; } // Zero Suit beam + alt form
+            if (args.Length >= 1 && args[0] == "-crawltest") { CrawlTest.Run(args); return; } // Brawl Zero Suit army crawl (11-18)
             if (args.Length >= 1 && args[0] == "-hyperbeamtest") { HyperBeamTest.Run(args); return; } // Dark Samus Hyper Beam (H2)
             if (args.Length >= 1 && args[0] == "-brawlfxcheck") { BrawlFxCheck.Run(args); return; } // Zero Suit beam + alt form (Brawl Paralyzer)
             if (args.Length >= 1 && args[0] == "-zsbrawl") { ZeroSuitBrawl.Run(args); return; } // Brawl Zero Suit Samus rig setup
@@ -87,6 +96,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-deathanim") { DeathAnimTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-ragdoll") { RagdollTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-ragdollvariety") { RagdollVarietyTest.Run(args); return; }
+            if (args.Length >= 1 && args[0] == "-ragdollair") { RagdollAirTest.Run(args); return; }   // mid-air deaths fall with gravity
             if (args.Length >= 1 && args[0] == "-fittedice") { FittedIceTest.Run(args); return; }   // fitted per-body ice: shell measure + per-body checks
             if (args.Length >= 1 && args[0] == "-animtest") { AnimTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-hdpose") { HdPoseProbe.Run(args); return; }
@@ -110,11 +120,21 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-spiretrace") { SpireMeetingTrace.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignsuit") { CampaignSim.Suit(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignportal") { CampaignSim.Portal(args); return; }
+            if (args.Length >= 1 && args[0] == "-campaigntp") { CampaignSim.ThirdPersonCheck(args); return; } // the third-person camera: doorways + true aim
+            if (args.Length >= 1 && args[0] == "-tpperf") { CampaignSim.ThirdPersonPerf(args); return; } // what true aim + the camera-part walk cost
+            if (args.Length >= 1 && args[0] == "-doorreopen") { CampaignSim.DoorReopen(args); return; }
             if (args.Length >= 1 && args[0] == "-campaignlock") { CampaignSim.LockReplay(args); return; }
             if (args.Length >= 1 && args[0] == "-fxscan") { CampaignSim.FxScan(args); return; }
             if (args.Length >= 1 && args[0] == "-fxpool") { CampaignSim.FxPool(args); return; }
             if (args.Length >= 1 && args[0] == "-bossfx") { CampaignSim.BossFx(args); return; }
             if (args.Length >= 1 && args[0] == "-roomentry") { CampaignSim.RoomEntry(args); return; }
+            if (args.Length >= 1 && args[0] == "-holidayscan") { HolidayTool.Scan(args); return; } // holiday mode: vanilla snow placement + snow surfaces
+            if (args.Length >= 1 && args[0] == "-holidayground") { HolidayGroundTool.Run(args); return; } // holiday ground snow: floor materials of snowy rooms
+            if (args.Length >= 1 && args[0] == "-holidaylayers") { HolidayGroundTool.Layers(args); return; } // holiday ground snow: undrawn roof nodes per MP room
+            if (args.Length >= 1 && args[0] == "-holidayprebuild") { HolidayGroundTool.Prebuild(args); return; } // holiday ground snow: every arena built ahead, timed
+            if (args.Length >= 1 && args[0] == "-holidaybackdroptest") { HolidayGroundTool.BackdropTest(args); return; } // holiday snow built on the menu backdrop's worker, not its first frame
+            if (args.Length >= 1 && args[0] == "-holidaysky") { HolidayGroundTool.Sky(args); return; } // holiday snow: a room's sky map as built, or every MP room's summary
+            if (args.Length >= 1 && args[0] == "-holidayroof") { HolidayGroundTool.Roofs(args); return; } // holiday falling snow: a room's roof map, what tops each cell
             if (args.Length >= 1 && args[0] == "-fxobjects") { CampaignSim.FxObjects(args); return; }
             if (args.Length >= 1 && args[0] == "-escapemusic") { CampaignSim.EscapeMusic(args); return; }
             if (args.Length >= 1 && args[0] == "-bossskip") { CampaignSim.BossSkipRun(args); return; }
@@ -147,12 +167,14 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-replaytest") { ReplayTest.Test(args); return; }
             if (args.Length >= 1 && args[0] == "-replayplay") { ReplayTest.PlayFile(args); return; }
             if (args.Length >= 1 && args[0] == "-replaycullprobe") { CullProbe.Run(args); return; } // aim view pop-in: pieces the turned view needs vs the draw list
+            if (args.Length >= 1 && args[0] == "-replayhudseats") { ReplayTest.HudSeats(args); return; } // 11-22: a replay watched from each seat: turret text, mode score, dead view turn
             if (args.Length >= 1 && args[0] == "-replayevents") { ReplayTest.Events(args); return; } // hits, deaths, HUD messages, indicators
             if (args.Length >= 1 && args[0] == "-replayhpbox") { ReplayTest.HealthBox(args); return; } // opponent health box log
             if (args.Length >= 1 && args[0] == "-replaygrapple") { ReplayTest.GrappleTrace(args); return; } // Echoes grapple states + each pick
             if (args.Length >= 1 && args[0] == "-replaybotskf") { ReplayTest.BotTraceKeyframes(args); return; } // 11-06: -replaybots from a device's keyframes
             if (args.Length >= 1 && args[0] == "-replaybots") { ReplayTest.BotTrace(args); return; } // match review 11-04: bot positions + AI states over a stretch
             if (args.Length >= 1 && args[0] == "-replayseat") { ReplayTest.SeatTrace(args); return; } // 11-06: one seat (bot or person) + the Echoes turret over a stretch
+            if (args.Length >= 1 && args[0] == "-replayweapons") { ReplayTest.WeaponTrace(args); return; } // 11-12: one seat's weapon, Omega slot, FIRE held
             if (args.Length >= 1 && args[0] == "-replaynetdump") { ReplayNetDump.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-replaymock") { ReplayMockTool.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-replaysound") { ReplaySoundCheck.Run(args); return; } // C2: replay menu sounds
@@ -160,11 +182,15 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-ducktest") { DuckTest.Run(); return; } // C3: music ducking envelope
             if (args.Length >= 1 && args[0] == "-replaysweep") { ReplayTest.Sweep(args); return; }
             if (args.Length >= 1 && args[0] == "-drawinvariance") { ReplayTest.DrawInvariance(args); return; }
-            if (args.Length >= 1 && args[0] == "-replaygolden") { ReplayTest.Golden(args); return; }
+            if (args.Length >= 1 && args[0] == "-replaygolden") { if (args.Contains("prewarm")) { ToolPaths.UseDesktopExtraction(); SceneSetup.HostPrewarmHunterResources(); } ReplayTest.Golden(args.Where(a => a != "prewarm").ToArray()); return; } // prewarm: the menus' hunter prewarm first
             if (args.Length >= 1 && args[0] == "-hubselftest") { HubSelfTest.Run(); return; } // Gaming Hub: rank rule + content keys
+            if (args.Length >= 1 && args[0] == "-hubresulttest") { HubResultTest.Run(); return; } // Hunter Hub: a served seat's character + alt form
             if (args.Length >= 1 && args[0] == "-detmathtest") { DetMathTest.Run(args); return; }
             if (args.Length >= 1 && args[0] == "-replayverify") { ReplayTest.Verify(args); return; }
             if (args.Length >= 1 && args[0] == "-replaynettest") { ReplayTest.NetTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-tpreplay") { ReplayTest.TrueAimTest(args); return; } // third-person true aim in replays (format 96)
+            if (args.Length >= 1 && args[0] == "-tplan") { LanTrueAimTest.Host(args); return; } // third-person true aim in a LAN match (2 processes)
+            if (args.Length >= 1 && args[0] == "-tplanjoin") { LanTrueAimTest.Join(args); return; } // (-tplan's guest)
             if (args.Length >= 1 && args[0] == "-replaysnaptest") { ReplayTest.SnapTest(args); return; } // T9 seek checkpoints
             if (args.Length >= 1 && args[0] == "-replaykeyframetest") { ReplayTest.KeyframeTest(args); return; } // thread B portable keyframes
             if (args.Length >= 1 && args[0] == "-replaydrawtest") { ReplayTest.DrawTest(args); return; } // FAST SEEK: the picture after a prepared keyframe
@@ -182,6 +208,8 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-lantest") { MatchNetLoop.LanTest(args); return; }
             if (args.Length >= 1 && args[0] == "-lanpausetest") { LanPauseTest.Run(); return; } // (host pause keeps a LAN match, 2026-10-11)
             if (args.Length >= 1 && args[0] == "-lanagaintest") { LanAgainTest.Run(); return; } // (host + join twice in one process, release 0.2.0)
+            if (args.Length >= 1 && args[0] == "-lanrulestest") { LanRulesEditTest.Run(); return; } // (host edits rules with a joiner in, 2026-11-15)
+            if (args.Length >= 1 && args[0] == "-lanreplayholdtest") { LanReplayHoldTest.Run(); return; } // (LAN guest's replay after both quit at once, 2026-11-22)
             if (args.Length >= 1 && args[0] == "-latearenatest") { LateArenaTest.Run(); return; } // (Stasis Bunker hotfix: older LAN joiners, no ROM)
             if (args.Length >= 1 && args[0] == "-lanjoin") { MatchNetLoop.LanJoin(args); return; }
             if (args.Length >= 1 && args[0] == "-onlinetest") { OnlineMatchTool.Test(args); return; }
@@ -193,11 +221,14 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-chattest") { ChatTool.Test(args); return; } // (Social O7: ChatTool.cs)
             if (args.Length >= 1 && args[0] == "-onlinemenutest") { OnlineMenuTool.Test(args); return; }
             if (args.Length >= 1 && args[0] == "-onlinehostleaveagain") { OnlineHostLeaveTool.Test(args); return; } // (release 0.2.0 F1)
+            if (args.Length >= 1 && args[0] == "-onlineinvitegrow") { OnlineMatchTool.InviteGrowTest(args); return; } // (invited player grows a full game, 11-22)
             if (args.Length >= 1 && args[0] == "-onlinehost") { OnlineMenuTool.Host(args); return; }
             if (args.Length >= 1 && args[0] == "-onlinecreatetest") { OnlineMenuTool.CreateTest(args); return; }
             if (args.Length >= 1 && args[0] == "-migratemenutest") { MigrateMenuTool.Test(args); return; }
             if (args.Length >= 1 && args[0] == "-onlinefriendstest") { OnlineMenuTool.FriendsTest(args); return; }
             if (args.Length >= 1 && args[0] == "-onlinehubtest") { OnlineMenuTool.HubTest(args); return; }
+            if (args.Length >= 1 && args[0] == "-onlinereconnecttest") { OnlineReconnectTool.Test(args); return; } // (0.10.3: hub auto-reconnect + restart notice)
+            if (args.Length >= 1 && args[0] == "-onlinefloodtest") { OnlineReconnectTool.FloodTest(args); return; } // (0.10.3: the request flood limit from outside)
             if (args.Length >= 1 && args[0] == "-onlinerecordtest") { OnlineRecordTool.Test(args); return; } // (T3: head to head on the server)
             if (args.Length >= 1 && args[0] == "-onlinejoin") { OnlineMatchTool.Join(args); return; }
             if (args.Length >= 1 && args[0] == "-turntest") { TurnTestServer.Test(); return; } // O5 TURN client vs a local TURN server
@@ -227,6 +258,10 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-feflow") { FrontendTool.Flow(args); return; }
             if (args.Length >= 1 && args[0] == "-felayouts") { FrontendTool.Layouts(); return; }
             if (args.Length >= 1 && args[0] == "-licensequit") { LicenseQuitTest.Run(); return; } // the Hunter License quit penalty
+            if (args.Length >= 1 && args[0] == "-licensesign") { LicenseSignatureTest.Run(); return; } // the signed hunter_license.json
+            if (args.Length >= 1 && args[0] == "-profilepacktest") { ProfilePackTest.Run(); return; } // the .shprofile file (PROFILE_SYNC Phase 1)
+            if (args.Length >= 1 && args[0] == "-cloudsavetest") { CloudSaveTest.Run(args); return; } // CLOUD SAVE (PROFILE_SYNC Phase 2)
+            if (args.Length >= 1 && args[0] == "-restorelicensetest") { RestoreLicenseTest.Run(); return; } // after RESTORE: the online card onto this license (PROFILE_SYNC Phase 0)
             if (args.Length >= 1 && args[0] == "-mpmenu") { MultiplayerMenuTool.Run(args); return; } // Vanilla multiplayer menu
             if (args.Length >= 1 && args[0] == "-extrarules") { ExtraRulesTest.Run(args); return; } // Extra pickups + Extra characters rules
             if (args.Length >= 1 && args[0] == "-culturetest") { CultureTest.Run(); return; } // non-invariant locales (Realme crash log, 2026-10-16)
@@ -237,6 +272,7 @@ namespace MphRead
             if (args.Length >= 1 && args[0] == "-dmgind") { DamageIndicatorTool.Run(args); return; } // damage direction indicator (DamageIndicatorTool.cs)
             if (args.Length >= 1 && args[0] == "-enemyplacetest") { EnemyPlaceTest.Run(args); return; } // Hard Mode enemy placement (EnemyPlaceTest.cs)
             if (args.Length >= 1 && args[0] == "-fsmdump") { FsmDumpTool.Run(args); return; } // Retro AI state machines (FsmDumpTool.cs)
+            if (args.Length >= 1 && args[0] == "-splintertest") { SplinterTest.Run(args); return; } // Echoes enemy pilot: Splinter (SplinterTest.cs)
             if (args.Length >= 1 && args[0] == "-mp1scly") { Mp1SclyTool.Run(args); return; } // Prime 1 room scripts census (Mp1SclyTool.cs)
             if (args.Length >= 1 && args[0] == "-mp3scly") { Mp3SclyTool.Run(args); return; } // Corruption room scripts (Mp3SclyTool.cs)
             if (args.Length >= 1 && args[0] == "-moduleindex") { ModuleIndexTool.Run(args); return; } // RSO/REL module symbol index (ModuleIndexTool.cs)

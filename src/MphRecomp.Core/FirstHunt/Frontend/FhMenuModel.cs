@@ -484,10 +484,41 @@ namespace MphRecomp.FirstHunt
                     tri.C = vertex;
                     tri.Z = zSum / 3;
                     zSum = 0;
+                    if (textureId >= 0)
+                    {
+                        Texture texture = Model.Recolors[0].Textures[material.CurrentTextureId];
+                        SnapTexels(ref tri, texture.Width, texture.Height);
+                    }
                     output.Add(tri);
                     break;
                 }
             }
+        }
+
+        // a texture drawn one texel per DS pixel but off the texel grid (the lit buttons: t starts 0.48 texel above the
+        // texture, a_REGULATOR) shows on the cart as the texture shifted by whole texels, each DS pixel sampling one texel
+        // at its centre. Scaled up, nearest sampling at many points per DS pixel reaches the off-grid fraction too, and
+        // with repeat wrap that is the texture's far row: a one-pixel line at the top and at the seam (owner 11-12). So
+        // such a triangle's texcoords move onto the grid, by under half a texel, as the DS rounds them.
+        private static void SnapTexels(ref WidgetTri tri, int width, int height)
+        {
+            float du = Snap(tri.A.U, tri.B.U, tri.C.U, tri.A.X, tri.B.X, tri.C.X, width);
+            tri.A.U += du / width;
+            tri.B.U += du / width;
+            tri.C.U += du / width;
+            float dv = Snap(tri.A.V, tri.B.V, tri.C.V, tri.A.Y, tri.B.Y, tri.C.Y, height);
+            tri.A.V += dv / height;
+            tri.B.V += dv / height;
+            tri.C.V += dv / height;
+        }
+
+        // the texel shift that puts a triangle's texcoords on the grid along one axis, 0 unless one texel spans one unit
+        private static float Snap(float t0, float t1, float t2, float p0, float p1, float p2, int size)
+        {
+            float tMin = Math.Min(t0, Math.Min(t1, t2)) * size, tMax = Math.Max(t0, Math.Max(t1, t2)) * size;
+            float pSpan = Math.Max(p0, Math.Max(p1, p2)) - Math.Min(p0, Math.Min(p1, p2));
+            if (pSpan < 1 || Math.Abs(tMax - tMin - pSpan) > 0.02f * pSpan) return 0;
+            return MathF.Round(tMin) - tMin;
         }
 
         private Matrix4 StackMatrix(int index)

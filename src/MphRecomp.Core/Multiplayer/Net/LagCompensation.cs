@@ -21,7 +21,7 @@ namespace MphRecomp.Multiplayer.Net
         // moved on (live report: point-blank hits not landing, a different player each match; two other MphRead online forks
         // measured most shots clamped at 24 frames and use 45). The PC tests may change it (-onlinetest maxrewind=)
         public static int MaxRewind { get; set; } = 45;
-        private const int Size = 64; // (the pose ring: past MaxRewind)
+        private const int Size = 128; // (the pose ring: past MaxRewind, and past a pickup claim's oldest contact, Net/PickupClaims.cs)
 
         private struct Entry
         {

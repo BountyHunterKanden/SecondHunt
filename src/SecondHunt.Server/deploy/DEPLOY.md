@@ -18,12 +18,23 @@ setup.sh: updates, Caddy (HTTPS on its own), a `secondhunt` system user, firewal
 UDP), SSH keys only (no password logins; the root password still works on Linode's LISH console), the systemd
 service, nightly SQLite backups (14 kept). Then the Linux build goes up and starts.
 Later updates: `.\deploy.ps1 -Server root@<server ip>`.
+Since server 0.10.3 an update drains first (deploy/drain.sh, docs/RELEASE.md section 12): everyone online is told the
+server restarts, searches end, no new lobbies, joins or served games, running matches finish (at most `-DrainCap`
+seconds, default 600), then the restart. `-NoDrain` restarts at once, as before. The first deploy from a 0.10.2 server
+can't drain (an old server reads the file as `drain on`: only served games stop); drain.sh sees that and goes ahead
+once no served match runs.
 
 ## 3. Check
 - `https://<domain>/v1/health` (or `http://<ip>/v1/health`) answers `ok <version> online 0` (0.5.0 on 2026-10-09).
 - `MphRead.Tools -onlinetest server=wss://<domain>/v1/ws` plays a PC match through the real server and relay.
 - Logs: `journalctl -u secondhunt`. Data: `/var/lib/secondhunt/` (database + `backups/`).
 - Health also shows the TURN GB counted this month: `ok 0.4.0 online 0 turn 0.00 GB`.
+- During a restart drain (0.10.3) health ends ` restart <secs left>s <N> matches`, then ` drained` once the last started
+  match ended or the cap passed (safe to restart). By hand: `secondhunt-admin drain restart [secs] [exit]` (exit = the
+  server stops by itself once drained; systemd starts it again), `secondhunt-admin drain off` calls it off.
+- Request flood limit (0.10.3): a connection gets 100 requests at once and 10 a second back; past that it hears
+  `slow_down`, and after 200 refusals it's dropped. The log says `flood: dropping <name>: ...`. A real app peaks near 30
+  in a second (docs/ONLINE_PLAY.md section 13). `SECONDHUNT_FLOODSTATS=1` logs every connection's counts.
 
 ## 4. Cloudflare TURN key (decision 18, server 0.4.0+)
 Optional: without it every match uses our own relay, as before. On the server only (never in the repo or this kit):

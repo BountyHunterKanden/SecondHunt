@@ -13,8 +13,11 @@ namespace SecondHunt.Server
     // One WebSocket per player: the signed login, then requests and pushes (docs/ONLINE_PLAY.md sections 4-5, 13).
     public sealed partial class Hub
     {
-        public const string ServerVersion = "0.10.0"; // 0.10.0: the Gaming Hub (get_hub / get_leaders / get_stats: HubStats.cs, StoreStats.cs, Core Online/OnlineProtocol.Hub.cs; docs/GAMING_HUB.md), counted from online and served match results (ResultRow.Stats, MatchResultReq Mode/Arena/Seconds, the match host's !result stats); 0.9.9: 0.9.9: typed chat has no match minimum (ChatUnlockMatches default 0, was 3; owner 2026-10-23); 0.9.8: the hub tells a served match host a relay slot is free ("left <slot>": HubGames.LeaveGame, HubServed.TellLeft) and the match host closes that seat (NetMatchSession.SlotLeft; a JOIN from a slot held by another name replaces the stale seat), so a new player on a reused slot is no longer shown as the last one (2026-10-24 Yaba as <AB>); 0.9.7 (0.3.8): a served match's recording that didn't reach a player (ReplayLink: nothing acked for 8 s) goes to their replay mailbox as their own (match host --mailbox replays/drop, "!replay"; ReplayOffer.Own; HubReplays.ServedReplay), the app takes it into REPLAYS at the next login; 0.9.6 (0.3.6): hit claims wait for their shot's input as long as the rewind window (HitClaims ShotWait 30 -> 51: a stalled mobile uplink refused late hits); 0.9.5 (0.3.6): Fruity P1 match host runs a seat with no input that step on its last input (no stop: bursty uplinks drew as jitter); 0.9.4 (0.3.6): served matches run Fruity Prime's P1 movement sync (MatchSettings.FruitySync, match host --fruity-p1 on by default; docs/FRUITY_PORT.md); 0.9.3 (0.3.6): Fruity Prime player sync in served matches (position pin/hold, loop catch-up cap; latest input only switchable, off; --served-fruity-pin/-hold/-latest-input/-catchup-cap); 0.9.2 (0.3.6): the match host buffers a bursty seat's inputs to its jitter (NetMatchSession Pace: trims only after 4 calm windows); 0.9.1 (0.3.6): the match host runs client-run knockback (hands hits' pushes to the device, takes its speed) and sends a quitter its cut-short replay (ReplayLink KindRequest), an early-ended match a cut-short one to every seat; 0.9.0: shared replays (replay_send / get_replays / replay_fetch / replay_drop / set_replay_block, ev_replay; files over HTTP /v1/replays/{id}: HubReplays.cs, Core Online/ReplayMail.cs); 0.8.2 (DEDICATED_SERVERS.md D3): served games seat 8 players (RelayWire.MaxSlots 9: slots 1-8 + the match host on 0) and run in imported arenas the match host has (its imports folder, --arenas); 0.8.1 (DEDICATED_SERVERS.md D3): Find Game matches served (HubServedFind.cs: the hub opens the game, every matched player gets FindState.Game, the match host starts it, the vote's host owns the lobby after); 0.8.0 (docs/DEDICATED_SERVERS.md D3): served games (GameInfo.Served: the match runs in a SecondHuntMatchHost process here on relay slot 0, Host = the lobby's owner on slot 1; JoinGameReq.Served; MemberEvent.Owner; results from the match host); 0.7.2 (release 0.2.0 F1): a seat dropped for its silence gets its slot back when its device sends again (Relay.Returned, Hub.SeatReturned); 0.7.1 (release 0.2.0 F3): Find Game matches up to 8 (FindConfig.MaxPlayers; a full party of 4 plays alone after the fill wait); 0.2.0: report, delete_profile; 0.3.0: ping, Find Game; 0.4.0: rejoin, TURN; 0.5.0: chat + safety (filter, mutes, bans, report evidence), host migration; 0.6.0: games carry the extra rules (GameInfo.ExtraPickups / ExtraCharacters), Find Game filters them; 0.7.0 (release test fixes): held seats (WelcomeMsg.Held = the hub's REJOIN, FIND releases a held seat, a seat silent 90 s is dropped); T3: friend OR rival (a rival upgrades to a friend, rival links between friends removed), head to head on the server (match_result, PlayerCard.Record), typed-chat lock skipped for friends only; T2: GameInfo.ExtraArena (Find Game's backfill only into games in an imported arena the searchers all have)
+        public const string ServerVersion = "0.11.0"; // 0.11.0: CLOUD SAVE (cloud_get / cloud_put / cloud_delete: one sealed profile per player, compare-and-swap on rev, a put every 30 s and 100 a day at most, only after a started online match, banned profiles refused, deleted with delete_profile or after a year unseen: HubCloud.cs, StoreCloud.cs, Core Online/CloudSave.cs; docs/PROFILE_SYNC.md Phase 2; no protocol bump, all additive; owner 2026-11-17); 0.10.3: the restart drain before a deploy (HubDrain.cs: the drain file's "restart <unix> <cap> [exit]" from secondhunt-admin drain restart / deploy.ps1 ends every search, refuses new lobbies, searches and joins with error "draining", lets started matches finish up to the cap, then /v1/health says " drained"; ServerNoticeEvent ev_notice only to apps whose hello set Notices, WelcomeMsg.Restart; on SIGTERM every session is told why it closes), Find Game parties keep a dropped member invited so a reconnect rejoins, and a per-connection request flood limit (HubFlood.cs); no protocol bump, all additive; owner 2026-11-16; 0.10.2: a lobby's PLAYERS can change after it opens (the host's EDIT RULES > WHO CAN JOIN: UpdateGame takes the new MaxPlayers as before; a served game's match host hears "seats <n>": HubServed.TellSeats, ControlMode, NetMatchSession.SetSeats; owner 2026-11-11); 0.10.1: dev builds and test tools are kept off the Gaming Hub (a login from an app not in HubCountedApps hides that profile for good: Store.HideFromHub, table hub_hidden; a match with a hidden profile in it isn't counted, nor are they in online lately; owner 2026-11-11); 0.10.0: the Gaming Hub (get_hub / get_leaders / get_stats: HubStats.cs, StoreStats.cs, Core Online/OnlineProtocol.Hub.cs; docs/GAMING_HUB.md), counted from online and served match results (ResultRow.Stats, MatchResultReq Mode/Arena/Seconds, the match host's !result stats); 0.9.9: 0.9.9: typed chat has no match minimum (ChatUnlockMatches default 0, was 3; owner 2026-10-23); 0.9.8: the hub tells a served match host a relay slot is free ("left <slot>": HubGames.LeaveGame, HubServed.TellLeft) and the match host closes that seat (NetMatchSession.SlotLeft; a JOIN from a slot held by another name replaces the stale seat), so a new player on a reused slot is no longer shown as the last one (2026-10-24 Yaba as <AB>); 0.9.7 (0.3.8): a served match's recording that didn't reach a player (ReplayLink: nothing acked for 8 s) goes to their replay mailbox as their own (match host --mailbox replays/drop, "!replay"; ReplayOffer.Own; HubReplays.ServedReplay), the app takes it into REPLAYS at the next login; 0.9.6 (0.3.6): hit claims wait for their shot's input as long as the rewind window (HitClaims ShotWait 30 -> 51: a stalled mobile uplink refused late hits); 0.9.5 (0.3.6): Fruity P1 match host runs a seat with no input that step on its last input (no stop: bursty uplinks drew as jitter); 0.9.4 (0.3.6): served matches run Fruity Prime's P1 movement sync (MatchSettings.FruitySync, match host --fruity-p1 on by default; docs/FRUITY_PORT.md); 0.9.3 (0.3.6): Fruity Prime player sync in served matches (position pin/hold, loop catch-up cap; latest input only switchable, off; --served-fruity-pin/-hold/-latest-input/-catchup-cap); 0.9.2 (0.3.6): the match host buffers a bursty seat's inputs to its jitter (NetMatchSession Pace: trims only after 4 calm windows); 0.9.1 (0.3.6): the match host runs client-run knockback (hands hits' pushes to the device, takes its speed) and sends a quitter its cut-short replay (ReplayLink KindRequest), an early-ended match a cut-short one to every seat; 0.9.0: shared replays (replay_send / get_replays / replay_fetch / replay_drop / set_replay_block, ev_replay; files over HTTP /v1/replays/{id}: HubReplays.cs, Core Online/ReplayMail.cs); 0.8.2 (DEDICATED_SERVERS.md D3): served games seat 8 players (RelayWire.MaxSlots 9: slots 1-8 + the match host on 0) and run in imported arenas the match host has (its imports folder, --arenas); 0.8.1 (DEDICATED_SERVERS.md D3): Find Game matches served (HubServedFind.cs: the hub opens the game, every matched player gets FindState.Game, the match host starts it, the vote's host owns the lobby after); 0.8.0 (docs/DEDICATED_SERVERS.md D3): served games (GameInfo.Served: the match runs in a SecondHuntMatchHost process here on relay slot 0, Host = the lobby's owner on slot 1; JoinGameReq.Served; MemberEvent.Owner; results from the match host); 0.7.2 (release 0.2.0 F1): a seat dropped for its silence gets its slot back when its device sends again (Relay.Returned, Hub.SeatReturned); 0.7.1 (release 0.2.0 F3): Find Game matches up to 8 (FindConfig.MaxPlayers; a full party of 4 plays alone after the fill wait); 0.2.0: report, delete_profile; 0.3.0: ping, Find Game; 0.4.0: rejoin, TURN; 0.5.0: chat + safety (filter, mutes, bans, report evidence), host migration; 0.6.0: games carry the extra rules (GameInfo.ExtraPickups / ExtraCharacters), Find Game filters them; 0.7.0 (release test fixes): held seats (WelcomeMsg.Held = the hub's REJOIN, FIND releases a held seat, a seat silent 90 s is dropped); T3: friend OR rival (a rival upgrades to a friend, rival links between friends removed), head to head on the server (match_result, PlayerCard.Record), typed-chat lock skipped for friends only; T2: GameInfo.ExtraArena (Find Game's backfill only into games in an imported arena the searchers all have)
         private const int MaxPendingRequests = 100;
+        // the apps whose players count on the Gaming Hub: the public game ("android" / "desktop"; a dev build adds "-dev"),
+        // the match host (served results) and the selftest's own temp server; each test tool sends its own name
+        private static readonly HashSet<string> HubCountedApps = new() { "android", "desktop", "matchhost", "selftest" };
 
         private readonly Store _store;
         private readonly ConcurrentDictionary<string, Session> _online = new();
@@ -28,6 +31,8 @@ namespace SecondHunt.Server
             _relay.Returned = SeatReturned;
             StartSafetyTimer();
             StartSeatTimer();
+            StartDrainTimer(); // (HubDrain.cs)
+            StartCloudTimer(); // (HubCloud.cs)
         }
 
         public int OnlineCount => _online.Count;
@@ -40,6 +45,8 @@ namespace SecondHunt.Server
             public CancellationTokenSource Cts { get; }
             // the scrambled device ID from the login (memory only; written down only if this profile is banned)
             public string Device { get; }
+            // 0.10.3: the app understands ServerNoticeEvent (HelloMsg.Notices)
+            public bool Notices { get; init; }
 
             public Session(WebSocket ws, string code, CancellationTokenSource cts, string device = "")
             {
@@ -114,6 +121,7 @@ namespace SecondHunt.Server
             byte[] nonce = RandomNumberGenerator.GetBytes(32);
             Store.Player me;
             string device = "";
+            bool notices = false, cloudOnly = false;
             try
             {
                 await OnlineProtocol.SendAsync(ws, new ChallengeMsg
@@ -152,6 +160,8 @@ namespace SecondHunt.Server
                     throw new OnlineException("bad_signature", "login signature doesn't match the key");
                 }
                 device = CleanDevice(hello.Device);
+                notices = hello.Notices;
+                cloudOnly = hello.CloudOnly; // (0.11.0: HubCloud.cs)
                 if (_store.ActiveBan(key) is Store.BanRow ban)
                 {
                     _store.AddBanDevice(ban.Code, device); // a banned profile's device is banned with it
@@ -162,6 +172,10 @@ namespace SecondHunt.Server
                     throw new OnlineException("banned", BanText(deviceBan, device: true)); // a new profile on a banned device
                 }
                 me = _store.Login(key, hello.Name);
+                if (!HubCountedApps.Contains(hello.App ?? ""))
+                {
+                    _store.HideFromHub(me.Code, "app " + hello.App); // a dev build ("android-dev") or a test tool
+                }
             }
             catch (OnlineException ex)
             {
@@ -173,12 +187,17 @@ namespace SecondHunt.Server
                 return;
             }
 
-            var session = new Session(ws, me.Code, cts, device);
-            if (_online.TryGetValue(me.Code, out Session? old))
+            var session = new Session(ws, me.Code, cts, device) { Notices = notices };
+            var flood = new FloodMeter();
+            if (cloudOnly)
+            {
+                // (not the player's place: their other connection stays, and nobody sees this one)
+            }
+            else if (_online.TryGetValue(me.Code, out Session? old))
             {
                 await old.Kick("logged in on another device");
             }
-            _online[me.Code] = session;
+            if (!cloudOnly) _online[me.Code] = session;
             try
             {
                 await session.Send(new WelcomeMsg
@@ -188,8 +207,9 @@ namespace SecondHunt.Server
                     ChatLeft = Math.Max(0, ChatUnlockMatches - _store.Matches(me.Code)),
                     ChatMutedUntil = _store.ChatUntil(me.Code),
                     Held = HeldCard(me.Code), // (0.7.0: a started match whose seat waits for this player: the hub's REJOIN)
+                    Restart = WelcomeRestart, // (0.10.3: HubDrain.cs)
                 });
-                BroadcastPresence(me.Code);
+                if (!cloudOnly) BroadcastPresence(me.Code);
                 while (!ct.IsCancellationRequested)
                 {
                     OnlineMsg? msg = await OnlineProtocol.ReceiveAsync(ws, ct);
@@ -198,8 +218,23 @@ namespace SecondHunt.Server
                         break;
                     }
                     OnlineMsg reply;
+                    if (FloodCheck(flood, me.Code, msg, out bool drop) is ErrorMsg slow) // (0.10.3: HubFlood.cs)
+                    {
+                        slow.Id = msg.Id;
+                        await session.Send(slow);
+                        if (drop)
+                        {
+                            await session.Kick("too many requests: the server closed this connection."); // (waits up to 2 s, reading nothing)
+                            break;
+                        }
+                        continue;
+                    }
                     try
                     {
+                        if (cloudOnly && msg is not (CloudGetReq or CloudPutReq or CloudDeleteReq or PingReq))
+                        {
+                            throw new OnlineException("cloud_only", "a cloud save connection only syncs the cloud save");
+                        }
                         reply = msg is TurnCredsReq ? await TurnCreds(me.Code) : Handle(me.Code, msg);
                     }
                     catch (OnlineException ex)
@@ -219,6 +254,7 @@ namespace SecondHunt.Server
             }
             finally
             {
+                FloodClosed(flood, me.Code);
                 session.Ended.TrySetResult();
                 if (_online.TryRemove(KeyValuePair.Create(me.Code, session)))
                 {
@@ -243,6 +279,7 @@ namespace SecondHunt.Server
 
         private OnlineMsg Handle(string me, OnlineMsg msg)
         {
+            RefuseWhileRestarting(me, msg); // (0.10.3: the restart drain, HubDrain.cs)
             if (msg is FindStartReq)
             {
                 ReleaseHeld(me); // (a seat held in a match this player isn't playing isn't "your game": 0.7.0, N1)
@@ -390,6 +427,12 @@ namespace SecondHunt.Server
                 return ReplayDrop(me, r.ReplayId);
             case ReplayBlockReq r:
                 return ReplayBlock(me, r.Block);
+            case CloudGetReq: // (0.11.0: CLOUD SAVE, HubCloud.cs)
+                return CloudGet(me);
+            case CloudPutReq r:
+                return CloudPut(me, r);
+            case CloudDeleteReq:
+                return new OkMsg { Done = _store.DropCloud(me) };
             case ReportReq r:
             {
                 if (!ReportReason.Valid(r.Reason))

@@ -48,6 +48,7 @@ internal sealed partial class CampaignRenderer
         // TRY CONTROLS' and the solo run's statics off for every match (menu, LAN, online, replay, dev); only ConfigureTry /
         // ConfigureSolo turn them on again (owner 10-17: the try mode must not touch real multiplayer; SoloArena.cs)
         ResetSoloStatics();
+        ResetSideView(); // side view off for every match; dev --es sideview 1 turns it on (SideViewArena.cs)
         // dev --es turrettest 1: Shooting Gallery's bots go straight for the turret (EchoesTurretBots.ForceSeat); off otherwise
         MphRecomp.Arenas.EchoesTurretBots.ForceSeat = args.Get("turrettest") == "1" && !MphRecomp.Config.RecompSettings.PublicBuild;
         // dev --es dronetest 1: Trooper bots fire their drone whenever they have a target (PlayerEntity.HostDroneTest)
@@ -57,6 +58,7 @@ internal sealed partial class CampaignRenderer
         MphRead.Entities.PlayerEntity.HostIceProbe = MphRecomp.Config.RecompSettings.PublicBuild ? 0
             : int.TryParse(args.Get("iceprobe"), out int iceProbe) ? Math.Clamp(iceProbe, 0, 4) : 0;
         _cpuSplit = args.Get("cpusplit") is string cs && cs.Length > 0 && cs != "0"; // dev: live matches too (CampaignRenderer.CpuSplit.cs)
+        ConfigureSelfTest(args); // dev --es replayselftest: instant seeking checked on the device (MatchReplaySelfTest.cs)
         if (ConfigureReplay(args)) return; // --es replay: a recorded match played back (MatchReplay.cs)
         string? mode = args.Get("match");
         string? net = args.Get("net");
@@ -72,6 +74,7 @@ internal sealed partial class CampaignRenderer
             {
                 MatchSettings menuSettings = MphRecomp.Frontend.MatchSetupText.Read(setup);
                 if (args.Get("try") != null) ConfigureSolo(args, menuSettings); // TRY CONTROLS' practice run (SoloArena.cs)
+                if (menuSettings.SideView) ConfigureSideView(args, menuSettings); // GAME MODE's dev side-view row (SideViewArena.cs)
                 menuSettings.Validate();
                 renderer._matchSettings = menuSettings;
                 renderer._hunter = menuSettings.Players[menuSettings.LocalSeat].Hunter;
@@ -137,6 +140,7 @@ internal sealed partial class CampaignRenderer
                 System.Globalization.CultureInfo.InvariantCulture, out float time)) settings.TimeLimitSeconds = time;
             if (int.TryParse(args.Get("points"), out int points)) settings.PointGoal = points;
             ConfigureSolo(args, settings); // dev --es solo 1: alone in the arena, third person (SoloArena.cs)
+            ConfigureSideView(args, settings); // dev --es sideview 1: Data Shrine side-on (SideViewArena.cs)
             settings.Validate();
             renderer._matchSettings = settings;
         }
@@ -157,7 +161,8 @@ internal sealed partial class CampaignRenderer
         _host = StartMatchReplayed(_matchSettings, width, height); // CampaignHost.StartMatch, recorded or a replay (MatchReplay.cs)
         if (_host == null) return true; // a replay refused at its start (_error says why)
         _netDriver = _netSession != null ? new MatchNetDriver(_netSession, _host) : null;
-        Log.Info("MPHMatch", $"match {_matchSettings.Mode} in {_matchSettings.Arena}, {_matchSettings.Players.Count} players");
+        string shown = MphRead.Metadata.RoomMetadata.TryGetValue(_matchSettings.Arena ?? "", out var arenaMeta) && arenaMeta.InGameName is { Length: > 0 } n ? $" ({n})" : ""; // (the name the menus show)
+        Log.Info("MPHMatch", $"match {_matchSettings.Mode} in {_matchSettings.Arena}{shown}, {_matchSettings.Players.Count} players");
         return true;
     }
 
@@ -259,6 +264,7 @@ internal sealed partial class CampaignRenderer
         {
             return ""; // the results are in the centred panel
         }
+        if (MphRead.Entities.PlayerEntity.SideViewOn) return SideViewStatusText(); // dev side view: no status lines (SideViewArena.cs)
         if (_statusMode == 2)
         {
             return _paused ? PauseText() : RecordOffNotice();

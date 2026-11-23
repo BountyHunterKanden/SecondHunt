@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 6-11 backup (AndroidManifest.xml fullBackupContent): the player's saves and settings only, never the
-     extracted ROM or imported game data. Keep in step with data_extraction_rules.xml. -->
+<!-- Android 6-11 backup (AndroidManifest.xml fullBackupContent): the player's saves, settings and hunter license only,
+     never the extracted ROM or imported game data, and never online_identity.json (the backup code moves that one:
+     docs/PROFILE_SYNC.md section 6). Keep in step with data_extraction_rules.xml. -->
 <full-backup-content>
     <include domain="external" path="saves" />
     <include domain="external" path="recomp_settings.json" />
+    <include domain="external" path="hunter_license.json" />
+    <include domain="external" path="hunter_license.json.bak" />
 </full-backup-content>

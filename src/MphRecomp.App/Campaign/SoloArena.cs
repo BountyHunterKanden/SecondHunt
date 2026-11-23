@@ -49,6 +49,7 @@ internal sealed partial class CampaignRenderer
     int _devSeatAt; // dev --es seat N: at step N the player is put in the arena's turret seat (Shooting Gallery)
     System.Numerics.Vector2 _devSeatMove; int _devSeatMoveFor; // dev --es seatmove x,y,steps: the move stick held once seated
     int _devGratesAt; // dev --es grates N: at step N every Echoes grate breaks (the break effect's captures)
+    int _devCrateCam; // dev --es cratecam N: at step N the player stands before the nearest crate, facing it (HOLIDAY presents captures)
     bool _devGrateCam; // dev --es gratecam 1 (with grates): 30 steps before, the player stands beside the first grate, facing it
     bool _devTurretBot; // dev --es turretbot 1: a practice target sits in the turret (TurretBotStep)
     bool _devTurretView, _devTurretViewed; // dev --es turretview 1: the player put by the slot once (TurretBotStep)
@@ -95,6 +96,7 @@ internal sealed partial class CampaignRenderer
             && float.TryParse(args.Get("pullbot"), System.Globalization.NumberStyles.Float, inv, out float pb) ? pb : 0;
         _devSeatAt = !MphRecomp.Config.RecompSettings.PublicBuild && int.TryParse(args.Get("seat"), out int seatAt) ? seatAt : 0;
         _devGratesAt = !MphRecomp.Config.RecompSettings.PublicBuild && int.TryParse(args.Get("grates"), out int gratesAt) ? gratesAt : 0;
+        _devCrateCam = !MphRecomp.Config.RecompSettings.PublicBuild && int.TryParse(args.Get("cratecam"), out int crateCam) ? crateCam : 0;
         _devGrateCam = _devGratesAt > 30 && args.Get("gratecam") == "1";
         _devSeatMoveFor = 0;
         if (!MphRecomp.Config.RecompSettings.PublicBuild && args.Get("seatmove")?.Split(',') is { Length: 3 } sm
@@ -117,6 +119,7 @@ internal sealed partial class CampaignRenderer
         if (args.Get("solo") != "1" || MphRecomp.Config.RecompSettings.PublicBuild) return;
         ConfigureZeroSuitDev(args); // --es paralyzer 1 (ZeroSuitGunTip.cs)
         _solo = true;
+        ConfigureMenuShotPick(args); // --es menushot 1: the menu background shot picker (CampaignRenderer.MenuShotPick.cs)
         PlayerEntity.HostSelfBodyHits = args.Get("selfbody") == "1";
         if (args.Get("spawnnow") == "1") PlayerEntity.HostSpawnAtOnce = true;
         settings.Solo = true;
@@ -562,7 +565,7 @@ internal sealed partial class CampaignRenderer
             input.AimDelta = new System.Numerics.Vector2(0, _devTurretViewAim);
             _devTurretViewAimed++;
         }
-        if (_devMorphAt <= 0 && _devJumpAt <= 0 && _devHoldFrom <= 0 && _devSeatAt <= 0 && _devGratesAt <= 0) return;
+        if (_devMorphAt <= 0 && _devJumpAt <= 0 && _devHoldFrom <= 0 && _devSeatAt <= 0 && _devGratesAt <= 0 && _devCrateCam <= 0) return;
         _devSteps++;
         if (_devGrateCam && _devSteps == _devGratesAt - 30 && _host != null)
         {
@@ -581,6 +584,26 @@ internal sealed partial class CampaignRenderer
                 p.Teleport(by, look.Normalized(), _host.Scene.GetNodeRefContaining(by));
                 p.PrevPosition = by;
                 break;
+            }
+        }
+        if (_devSteps == _devCrateCam && _host != null)
+        {
+            EntityBase? near = null; Vector3 at = default;
+            foreach (EntityBase e in _host.Scene.Entities)
+            {
+                if (e is MphRecomp.Arenas.EchoesCrateEntity ec) ec.UpNow(); // (not the 15 s wait)
+                if (e is not (MphRecomp.Arenas.EchoesCrateEntity or MphRecomp.Arenas.MiningPlazaCrateEntity)) continue;
+                e.GetPosition(out Vector3 c);
+                if (near == null || (c - p.Position).LengthSquared < (at - p.Position).LengthSquared) { near = e; at = c; }
+            }
+            if (near != null)
+            {
+                Vector3 away = new Vector3(p.Position.X - at.X, 0, p.Position.Z - at.Z);
+                away = away.LengthSquared > 0.01f ? away.Normalized() : Vector3.UnitZ;
+                Vector3 by = at + away * 3.5f, look = at - by;
+                Log.Info("MPHMatch", $"dev cratecam: {near.GetType().Name} at {at}, player to {by}");
+                p.Teleport(by, look.Normalized(), _host.Scene.GetNodeRefContaining(by));
+                p.PrevPosition = by;
             }
         }
         if (_devSteps == _devGratesAt && _host != null)
@@ -606,11 +629,13 @@ internal sealed partial class CampaignRenderer
         }
         // (the turret's aim: the move stick, from 2.5 s after the seat (its rise) for the steps asked; occupant view captures)
         if (_devSeatAt > 0 && _devSteps >= _devSeatAt + 150 && _devSteps < _devSeatAt + 150 + _devSeatMoveFor) input.Move = _devSeatMove;
+        if (_devCrateCam > 0 && _devSteps > _devCrateCam && _devSteps <= _devCrateCam + 10) input.AimDelta = new System.Numerics.Vector2(0, 3); // (a little down, at the crate)
         if (_devSteps == _devMorphAt) input.Buttons |= MphRecomp.Campaign.CampaignButtons.Morph;
         if (_devSteps == _devJumpAt) input.Buttons |= MphRecomp.Campaign.CampaignButtons.Jump;
         if (_devHoldFrom > 0 && _devSteps >= _devHoldFrom)
         {
-            input.Buttons |= MphRecomp.Campaign.CampaignButtons.Shoot;
+            // (with cratecam, taps: a held power beam only charges, and a crate wants a run of shots)
+            if (_devCrateCam <= 0 || _devSteps % 8 < 4) input.Buttons |= MphRecomp.Campaign.CampaignButtons.Shoot;
             if (p.IsAltForm) input.Buttons |= MphRecomp.Campaign.CampaignButtons.AltAttack;
             if (_devPullBot > 0)
             {

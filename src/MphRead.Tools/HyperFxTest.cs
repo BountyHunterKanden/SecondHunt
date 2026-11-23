@@ -19,6 +19,7 @@ namespace MphRead
             0x06fe1d75af37114a, 0x019855c26606c969, 0x3cf9229136ce2a88, 0x774aaa456a4c5ac9, 0xe694dbadf484b47b, 0x192f13da8ff3ff56,
             0x7fa2a74e3923db6c, 0xaab065969602e73f, 0x90bc1f5a1997eded, 0x80efe360c0a5855d, 0x0c581c8ba10d4429,
             0x04f4f7c2c217a6e0, 0x2b91ce7603b3abd1, 0x1c1a8eba57ecf57f, 0x5cec3a793be7b616, 0xd6558a90ff59e86a,
+            0x74887ad42ed2a25a, 0x88b530f154c766de, 0xf205f3d73d438be0, 0xbe548d438a07849a,
         };
 
         // the body recipe's roles (recipes/bodies/MP3DarkSamus.json "hyperfx")
@@ -29,8 +30,12 @@ namespace MphRead
             ("ballglow", 0x90bc1f5a1997eded), ("wake", 0x80efe360c0a5855d), ("contacts", 0x0c581c8ba10d4429),
             ("fire", 0x04f4f7c2c217a6e0), ("chargefire", 0x5cec3a793be7b616), ("ballloop", 0x2b91ce7603b3abd1),
             ("ballimpact", 0x1c1a8eba57ecf57f), ("ballbolts", 0xd6558a90ff59e86a), ("ballparams", 0x248eaae62c74481e),
+            ("chargeloop", 0x74887ad42ed2a25a), ("chargeready", 0x88b530f154c766de), ("streamloop", 0xf205f3d73d438be0),
+            ("hit", 0xbe548d438a07849a),
         };
 
+        // dump: every key of a curve (HYPERFX_ALLKEYS=1), not the first 24
+        static readonly bool AllKeys = Environment.GetEnvironmentVariable("HYPERFX_ALLKEYS") == "1";
         public static readonly string[] Paks = { "SamGunFx.pak", "InGameNAND.pak", "InGameAudio.pak" };
 
         public static void Run(string[] args)
@@ -182,6 +187,25 @@ namespace MphRead
                 File.WriteAllBytes(args[4], set.Get(Convert.ToUInt64(args[3], 16)));
                 return;
             }
+            if (args.Length >= 5 && args[1] == "caudwav")
+            {
+                // research: CAUD sounds' entries as WAVs (<id>_<n>.wav), with their header values, to match against a capture
+                using IFileSource src = Open(args[2]);
+                using Pak3Set set = OpenPaks(src);
+                Directory.CreateDirectory(args[3]);
+                foreach (string a in args.Skip(4))
+                {
+                    ulong id = Convert.ToUInt64(a, 16);
+                    var c = MphRecomp.Import.Retro3.Caud3.Load(set.Get(id));
+                    for (int i = 0; i < c.Entries.Count; i++)
+                    {
+                        (short[] pcm, int rate, bool loop, int loopStart) = MphRecomp.Import.Retro3.Caud3.Decode(set.Get(c.Entries[i].Csmp));
+                        MphRecomp.Import.Retro.MusyX.WriteWav(Path.Combine(args[3], $"{id:x16}_{i}.wav"), pcm, rate);
+                        Console.WriteLine($"{id:x16} {c.Name} flags {c.Flags} entry {i}: csmp {c.Entries[i].Csmp:x16} vol {c.Entries[i].Volume} pitch {c.Entries[i].Pitch} +- {c.Entries[i].Spread} {pcm.Length / (float)rate:0.00} s {rate} Hz loop {loop} from {loopStart} ({loopStart / (float)rate:0.00} s)");
+                    }
+                }
+                return;
+            }
             if (args.Length >= 4 && args[1] == "dump")
             {
                 // research: one PART / SWHC / ELSC / DGRP's properties, element trees, and named dependencies
@@ -196,7 +220,7 @@ namespace MphRead
                 }
                 foreach (string a in args.Skip(3))
                 {
-                    try { Dump(set, Convert.ToUInt64(a, 16), fold, names); }
+                    try { ulong id = Convert.ToUInt64(a, 16); Dump(set, id <= uint.MaxValue && fold.TryGetValue((uint)id, out ulong full) ? full : id, fold, names); }
                     catch (Exception ex) { Console.WriteLine($"  FAIL {ex.Message}"); }
                 }
                 return;
@@ -247,7 +271,7 @@ namespace MphRead
             var cfg = MphRecomp.Import.Effects.HyperFx.Config.Load(outDir);
             Console.WriteLine($"{files} files: {string.Join(", ", kinds.OrderBy(k => k.Key).Select(k => $"{k.Value} .{k.Key}"))}");
             Console.WriteLine($"roles: {string.Join(' ', cfg!.Roles.Select(r => $"{r.Key}={r.Value.Type}:{r.Value.Id:x8}"))}");
-            Console.WriteLine($"sounds: {string.Join(' ', cfg.Sounds.Select(s => $"{s.Key} x{s.Value.Count} vol {s.Value[0].Volume} loop {s.Value[0].Loop}"))}");
+            Console.WriteLine($"sounds: {string.Join(' ', cfg.Sounds.Select(s => $"{s.Key} x{s.Value.Count} vol {s.Value[0].Volume} loop {s.Value[0].Loop} pitch {s.Value[0].Pitch} +- {s.Value[0].Spread} loop start {s.Value[0].LoopStart}"))}");
             foreach (string wav in Directory.GetFiles(dir, "*.wav"))
             {
                 short[]? pcm = MphRecomp.Import.Retro.MusyX.ReadWav(wav, out int rate);
@@ -317,7 +341,7 @@ namespace MphRead
                 };
                 if (e.Cat == MphRecomp.Import.Retro.Part.Cat.Bool) v = e.B ? "true" : "false";
                 if (e.Id != 0) v += "[" + Ref(e.Id) + "]";
-                if (e.Keys != null) v += $"{{{(e.Percent ? "%" : "")}{(e.Loop ? "loop " : "")}{string.Join(",", e.Keys.Take(24).Select(k => k.ToString("0.###")))}{(e.Keys.Length > 24 ? ",..." : "")}}}";
+                if (e.Keys != null) v += $"{{{(e.Percent ? "%" : "")}{(e.Loop ? "loop " : "")}{(e.Kind == "KEYF" ? $"@{e.KeyStart:0.###}x{e.F:0.####} " : "")}{string.Join(",", e.Keys.Take(AllKeys ? 100000 : 24).Select(k => k.ToString("0.###")))}{(e.Keys.Length > 24 && !AllKeys ? ",..." : "")}}}";
                 if (e.Kids.Length > 0 && !(e.Kind == "CNST" && e.Cat is MphRecomp.Import.Retro.Part.Cat.Real or MphRecomp.Import.Retro.Part.Cat.Int))
                     v += "(" + string.Join(", ", e.Kids.Select(Tree)) + ")";
                 else if (e.Kids.Length > 0) v += "(" + string.Join(", ", e.Kids.Select(Tree)) + ")";
@@ -333,6 +357,7 @@ namespace MphRead
                     break;
                 case "SWHC": props = MphRecomp.Import.Retro.Part.Swoosh.Load(b, mp3: true).Props; break;
                 case "ELSC": props = MphRecomp.Import.Retro.Elsc.Load(b, mp3: true).Props; break;
+                case "WPSC": props = MphRecomp.Import.Retro.Wpsc.Load(b, mp3: true).Props; break;
                 case "DGRP":
                     int n = (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(b);
                     for (int i = 0; i < n; i++)

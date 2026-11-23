@@ -225,8 +225,9 @@ namespace MphRead
             DamageArrowItem = -1;
             HostReticleItem = -1;
             HudMaskBindingId = -1;
+            HostHudElementsReset(); // recomp: the HUD editor's element tags (HUD/HostHudElements.cs)
             // (recomp: seatless, only a served match replay's watched seat has a HUD: PlayerServedHost.cs)
-            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player && PlayerEntity.HostHudShown)
+            if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player && PlayerEntity.HostHudShown && !PlayerEntity.SideViewOn) // recomp: side view: no HUD (SideViewArena.cs)
             {
                 if (PlayerEntity.HostFirstHunt && FirstHuntHud.Loaded) // recomp: First Hunt's own HUD
                 {
@@ -244,6 +245,7 @@ namespace MphRead
                 _hudDialogBox = false;
                 HudMaskBindingId = Layer1Info.MaskId;
                 PlayerEntity.HudOwner.DrawHudObjects(); // recomp: HudOwner (PlayerHud.cs)
+                HostHudTag(null);
             }
         }
 
@@ -265,7 +267,8 @@ namespace MphRead
         private Matrix4 _viewInvRotMatrix = Matrix4.Identity;
         private Matrix4 _viewInvRotYMatrix = Matrix4.Identity;
         private Matrix4 _perspectiveMatrix = Matrix4.Identity;
-        public Matrix4 PerspectiveMatrix => _perspectiveMatrix;
+        public Matrix4 PerspectiveMatrix => HostPerspective ?? _perspectiveMatrix;
+        public Matrix4? HostPerspective { get; set; } // recomp: side view's bubbles (SideView/SideViewArena.cs)
 
         private CameraMode _cameraMode = CameraMode.Pivot;
         public CameraMode CameraMode => _cameraMode;
@@ -323,7 +326,7 @@ namespace MphRead
         private int _fogOffset = 0;
         private int _fogSlope = 0;
         private Color4 _clearColor = new Color4(0f, 0f, 0f, 1f);
-        private readonly float _nearClip = 0.0625f;
+        private float _nearClip => HostNearClip ?? 0.0625f; public static float? HostNearClip { get; set; } // recomp: side-view mode's near clip (SideViewArena.cs)
         private float _farClip = 0;
         private bool _useClip = false;
         private float _killHeight = 0f;
@@ -617,6 +620,12 @@ namespace MphRead
             return Room?.PartHasGeometryAt(partIndex, position) ?? false;
         }
 
+        // recomp: see RoomEntity.PartHoldsSpot
+        public bool PartHoldsSpot(int partIndex, Vector3 position, float slack = 0)
+        {
+            return Room?.PartHoldsSpot(partIndex, position, slack) ?? false;
+        }
+
         public bool IsNodeRefVisible(NodeRef nodeRef)
         {
             return Room?.IsNodeRefVisible(nodeRef) ?? false;
@@ -625,6 +634,10 @@ namespace MphRead
         // recomp: HostDrawCullWiden: true while the entities (not the players) add their draws, so a door, platform or
         // pickup in a room part only the widened frustum reached draws too. The step's own visibility otherwise.
         public bool HostDrawVisibility { get; private set; }
+
+        // recomp: true while the players add their draws: they read RoomEntity's own players' parts (a far force-field
+        // doorway doesn't hide a player in a match; a replay's free cam draws every player)
+        public bool HostDrawPlayerVisibility { get; private set; }
 
         public bool IsNodeRefStepVisible(NodeRef nodeRef)
         {
@@ -1250,14 +1263,45 @@ namespace MphRead
                 {
                     continue;
                 }
-                IReadOnlyList<ColorRgba> decoded = model.GetPixels(textureId, paletteId, recolorId);
-                bool opaque = true;
-                for (int i = 0; i < decoded.Count; i++)
-                {
-                    opaque &= decoded[i].Alpha == 255;
-                }
-                _predecoded[(model.Id, textureId, paletteId, recolorId)] = (decoded, opaque);
+                _predecoded[(model.Id, textureId, paletteId, recolorId)] = DecodePixels(model, textureId, paletteId, recolorId);
             }
+        }
+
+        // recomp: a kept model's textures decoded ahead into its HostPixels, on any thread (SceneSetup.HostPrewarmHunterResources)
+        public static void HostDecodeKeptTextures(Model model)
+        {
+            if (model.HostPixels == null)
+            {
+                return;
+            }
+            foreach ((int textureId, int paletteId, int recolorId) in TextureCombos(model, fixRenderModes: false))
+            {
+                DecodePixels(model, textureId, paletteId, recolorId);
+            }
+        }
+
+        // recomp: a texture's pixels and whether they're all opaque; a kept model's come from (and go into) its HostPixels
+        // (Read.HostKeepLoads: the pixels are only read, by SetHostTexture and the App's upload)
+        private static (IReadOnlyList<ColorRgba> Pixels, bool Opaque) DecodePixels(Model model, int textureId, int paletteId,
+            int recolorId)
+        {
+            if (model.HostPixels?.TryGetValue((textureId, paletteId, recolorId), out var kept) == true)
+            {
+                return (kept.Pixels, kept.Opaque);
+            }
+            IReadOnlyList<ColorRgba> decoded = model.GetPixels(textureId, paletteId, recolorId);
+            bool opaque = true;
+            for (int i = 0; i < decoded.Count; i++)
+            {
+                opaque &= decoded[i].Alpha == 255;
+            }
+            if (model.HostPixels != null)
+            {
+                ColorRgba[] pixels = decoded as ColorRgba[] ?? decoded.ToArray();
+                model.HostPixels[(textureId, paletteId, recolorId)] = (pixels, opaque);
+                return (pixels, opaque);
+            }
+            return (decoded, opaque);
         }
 
         // the room is in: drop what was decoded for models whose textures were already filed
@@ -1353,11 +1397,7 @@ namespace MphRead
                 }
                 else
                 {
-                    decoded = model.GetPixels(textureId, paletteId, recolorId);
-                    for (int i = 0; i < decoded.Count; i++)
-                    {
-                        opaque &= decoded[i].Alpha == 255;
-                    }
+                    (decoded, opaque) = DecodePixels(model, textureId, paletteId, recolorId);
                 }
                 Texture tex = model.Recolors[recolorId].Textures[textureId];
                 SetHostTexture(_textureCount, decoded, tex.Width, tex.Height);
@@ -1583,7 +1623,7 @@ namespace MphRead
                 // recomp: HostDrawFreeSim ages effects on frames without a draw list too (GetDrawItems' own condition)
                 if (HostDrawFreeSim && ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
                 {
-                    ProcessEffects();
+                    ProcessEffects(_activeElements); // (no cosmetic effects: nothing is drawn)
                 }
             }
             if (ProcessFrame)
@@ -2011,7 +2051,7 @@ namespace MphRead
             {
                 if (_cameraMode == CameraMode.Player)
                 {
-                    _viewMatrix = PlayerEntity.Main.CameraInfo.ViewMatrix;
+                    _viewMatrix = PlayerEntity.Main.CameraInfo.DrawView; // recomp: DrawView (the shake held over 60 Hz steps)
                     if (HostCameraOffset != Vector3.Zero)
                     {
                         _viewMatrix = Matrix4.CreateTranslation(-HostCameraOffset) * _viewMatrix;
@@ -2332,11 +2372,13 @@ namespace MphRead
 
         private EffectElementEntry? InitEffectElement(Effect effect, EffectElement element, EntityCollision? entCol, bool child)
         {
-            if (_inactiveElements.Count == 0)
+            Queue<EffectElementEntry> pool = _cosmeticPass ? _cosmeticElements : _inactiveElements; // recomp: Renderer.HostCosmetic.cs
+            if (pool.Count == 0)
             {
                 return null;
             }
-            EffectElementEntry entry = _inactiveElements.Dequeue();
+            EffectElementEntry entry = pool.Dequeue();
+            entry.HostCosmetic = _cosmeticPass;
             entry.EffectId = effect.Id;
             entry.EffectName = effect.Name;
             entry.ElementName = element.Name;
@@ -2359,6 +2401,7 @@ namespace MphRead
             entry.ChildEffectId = (int)element.ChildEffectId;
             entry.HostHidden = HostSpawnHidden;
             entry.HostOwner = null; // recomp: EffectEntry.SetHostOwner
+            entry.HostViewmodel = false; // recomp: EffectEntry.SetHostViewmodel
             entry.Acceleration = element.Acceleration;
             entry.ParticleDefinitions.AddRange(element.Particles);
             entry.Parity = (int)(_frameCount % 2);
@@ -2369,13 +2412,13 @@ namespace MphRead
             entry.RoField2 = 0;
             entry.RoField3 = 0;
             entry.RoField4 = 0;
-            _activeElements.Add(entry);
+            (_cosmeticPass ? _cosmeticActive : _activeElements).Add(entry);
             return entry;
         }
 
         private void UnlinkEffectElement(EffectElementEntry element)
         {
-            if (!_activeElements.Remove(element))
+            if (!(element.HostCosmetic ? _cosmeticActive : _activeElements).Remove(element))
             {
                 return; // already free: queueing it again would hand it to two owners
             }
@@ -2394,16 +2437,17 @@ namespace MphRead
             element.ParticleDefinitions.Clear();
             element.TextureBindingIds.Clear();
             Debug.Assert(element.Particles.Count == 0);
-            _inactiveElements.Enqueue(element);
+            (element.HostCosmetic ? _cosmeticElements : _inactiveElements).Enqueue(element);
         }
 
         private EffectParticle? InitEffectParticle()
         {
-            if (_inactiveParticles.Count == 0)
+            Queue<EffectParticle> pool = _cosmeticPass ? _cosmeticParticles : _inactiveParticles; // recomp: Renderer.HostCosmetic.cs
+            if (pool.Count == 0)
             {
                 return null;
             }
-            EffectParticle particle = _inactiveParticles.Dequeue();
+            EffectParticle particle = pool.Dequeue();
             particle.Position = Vector3.Zero;
             particle.Speed = Vector3.Zero;
             particle.ParticleId = 0;
@@ -2421,7 +2465,7 @@ namespace MphRead
 
         private void UnlinkEffectParticle(EffectParticle particle)
         {
-            _inactiveParticles.Enqueue(particle);
+            (particle.Owner != null && particle.Owner.HostCosmetic ? _cosmeticParticles : _inactiveParticles).Enqueue(particle);
         }
 
         public void LoadEffect(int effectId, bool persistent)
@@ -2541,6 +2585,7 @@ namespace MphRead
 
         public void ClearEffects()
         {
+            ClearCosmeticEffects(); // recomp: Renderer.HostCosmetic.cs
             for (int i = 0; i < _activeElements.Count; i++)
             {
                 EffectElementEntry element = _activeElements[i];
@@ -2563,11 +2608,11 @@ namespace MphRead
             }
         }
 
-        private void ProcessEffects()
+        private void ProcessEffects(List<EffectElementEntry> elements)
         {
-            for (int i = 0; i < _activeElements.Count; i++)
+            for (int i = 0; i < elements.Count; i++)
             {
-                EffectElementEntry element = _activeElements[i];
+                EffectElementEntry element = elements[i];
                 if (!element.Expired && _elapsedTime > element.ExpirationTime)
                 {
                     if (element.EffectEntry == null && !element.Flags.TestFlag(EffElemFlags.KeepAlive))
@@ -3136,11 +3181,13 @@ namespace MphRead
 
         private EntityBase? _hostItemOwner; // recomp: RenderItem.HostOwner
         public bool HostOneLayerItems { get; set; } // recomp: RenderItem.HostOneLayer for the items added while set
+        public bool HostViewmodelItems { get; set; } // recomp: RenderItem.HostViewmodel for the items added while set
 
         private void AddRenderItem(RenderItem item)
         {
             item.HostOwner = _hostItemOwner;
             item.HostOneLayer = HostOneLayerItems;
+            item.HostViewmodel = HostViewmodelItems;
             if (item.RenderMode == RenderMode.Decal)
             {
                 _decalItems.Add(item);
@@ -3263,6 +3310,7 @@ namespace MphRead
                 _room.GetDrawInfo();
                 _room.GetDisplayVolumes();
             }
+            HostDrawPlayerVisibility = true; // recomp: (RoomEntity.IsNodeRefVisible)
             foreach (PlayerEntity player in GetPlayerEntities())
             {
                 if (!player.Initialized)
@@ -3278,6 +3326,7 @@ namespace MphRead
                     player.GetDisplayVolumes();
                 }
             }
+            HostDrawPlayerVisibility = false;
             HostDrawVisibility = true; // recomp: HostDrawCullWiden (the room's widened parts for these draws)
             foreach (EntityBase entity in Entities)
             {
@@ -3301,15 +3350,17 @@ namespace MphRead
             _hostItemOwner = null;
             if (ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
             {
-                ProcessEffects();
+                ProcessEffects(_activeElements);
+                ProcessCosmeticEffects(); // recomp: Renderer.HostCosmetic.cs (own pools and random numbers, draw-only)
             }
 
-            for (int i = 0; i < _activeElements.Count; i++)
+            for (int i = 0; i < _activeElements.Count + _cosmeticActive.Count; i++)
             {
-                EffectElementEntry element = _activeElements[i];
+                EffectElementEntry element = i < _activeElements.Count ? _activeElements[i] : _cosmeticActive[i - _activeElements.Count];
                 if (element.Flags.TestFlag(EffElemFlags.DrawEnabled))
                 {
                     _hostItemOwner = element.HostOwner; // recomp: RenderItem.HostOwner (null unless EffectEntry.SetHostOwner)
+                    HostViewmodelItems = element.HostViewmodel; // recomp: RenderItem.HostViewmodel (EffectEntry.SetHostViewmodel)
                     for (int j = 0; j < element.Particles.Count; j++)
                     {
                         EffectParticle particle = element.Particles[j];
@@ -3328,6 +3379,7 @@ namespace MphRead
                 }
             }
             _hostItemOwner = null;
+            HostViewmodelItems = false;
             for (int i = 0; i < _singleParticleCount; i++)
             {
                 SingleParticle single = _singleParticles[i];

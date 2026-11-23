@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 12+ cloud backup and device-to-device transfer (AndroidManifest.xml dataExtractionRules): the player's
-     saves and settings only, never the extracted ROM or imported game data. Keep in step with backup_rules.xml. -->
+     saves, settings and hunter license only, never the extracted ROM or imported game data, and never
+     online_identity.json (the backup code moves that one: docs/PROFILE_SYNC.md section 6). Keep in step with
+     backup_rules.xml. -->
 <data-extraction-rules>
     <cloud-backup>
         <include domain="external" path="saves" />
         <include domain="external" path="recomp_settings.json" />
+        <include domain="external" path="hunter_license.json" />
+        <include domain="external" path="hunter_license.json.bak" />
     </cloud-backup>
     <device-transfer>
         <include domain="external" path="saves" />
         <include domain="external" path="recomp_settings.json" />
+        <include domain="external" path="hunter_license.json" />
+        <include domain="external" path="hunter_license.json.bak" />
     </device-transfer>
 </data-extraction-rules>

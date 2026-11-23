@@ -106,12 +106,15 @@ namespace MphRecomp.Frontend
             return edited;
         }
         public static bool InOnlineSetup => s_onlineNext >= 0;
+        // the host's edit of its made game (edit: above), not CREATE's setup
+        public static bool OnlineEditing => s_onlineEdit;
         // SELECT HUNTER on its own ended in a pick (not back): RecompMenus' TRY CONTROLS (RecompMenus.ZoomAim.cs)
         public static bool OnlineHunterPicked { get; private set; }
         private static int AfterHunter => s_onlineNext >= 0 ? s_onlineNext : LobbyPage;
 
         // fresh: a new game as CREATE GAME's (the boxes empty, no bots) from the mode page; else SELECT HUNTER only
-        public void BeginOnlineSetup(MenuEngine menu, int next, int back, bool fresh, bool edit = false)
+        // (first: a page other than SELECT HUNTER to open, not fresh: the host's EDIT LOBBY opens WHO CAN JOIN on its own)
+        public void BeginOnlineSetup(MenuEngine menu, int next, int back, bool fresh, bool edit = false, int first = -1)
         {
             s_onlineNext = next;
             s_onlineBack = back;
@@ -119,9 +122,10 @@ namespace MphRecomp.Frontend
             s_onlineEdit = edit && !fresh;
             s_onlineRulesEdited = false;
             OnlineHunterPicked = false;
+            s_botPick = null;
             if (!fresh)
             {
-                menu.GoTo(HunterPage);
+                menu.GoTo(first >= 0 ? first : HunterPage);
                 return;
             }
             EndLan();
@@ -136,6 +140,40 @@ namespace MphRecomp.Frontend
         {
             s_onlineNext = s_onlineBack = -1;
             s_onlineHunterOnly = s_onlineEdit = false;
+            s_botPick = null;
+        }
+
+        // SELECT HUNTER on its own for an online host's BOT (owner 2026-11-22: "if you tap directly on the portrait you get a
+        // sort of isolated picker just like the one a player would see ... just without the arena and mode and hunter tab"):
+        // the page as a player's (the hunters this device has open, the extra characters where the game allows them, the
+        // skins), its step tabs hidden; a pick goes to `picked` (hunter, skin, character) and not to this player's own look,
+        // then back to the lobby; back leaves the bot as it was
+        private static Action<Hunter, string?, string?>? s_botPick;
+        private static (Hunter Hunter, string? Skin) s_botLook;
+        private static bool s_botExtras, s_botPicked;
+        private static bool BotPicking => s_botPick != null;
+
+        public void BeginBotPick(MenuEngine menu, int back, MatchPlayer bot, bool extras, Action<Hunter, string?, string?> picked)
+        {
+            s_onlineNext = s_onlineBack = back;
+            s_onlineHunterOnly = true;
+            s_onlineEdit = s_onlineRulesEdited = false;
+            OnlineHunterPicked = false;
+            s_botPick = picked;
+            s_botLook = (bot.Hunter, bot.Skin);
+            s_botExtras = extras;
+            s_botPicked = false;
+            menu.GoTo(HunterPage);
+        }
+
+        // the bot picker's pick, once
+        private void BotPicked(MenuEngine menu, Hunter hunter, string? skin, string? character)
+        {
+            if (s_botPicked || s_botPick == null) return;
+            s_botPicked = true;
+            Log?.Invoke($"multiplayer: bot picked {hunter}{(skin != null ? " in " + skin : "")}{(character != null ? " (" + character + ")" : "")}");
+            s_botPick(hunter, skin, character);
+            menu.GoTo(AfterHunter);
         }
 
         // the game as set up, for WHO CAN JOIN's YOUR GAME box: mode, arena, then the mode's rules as its page labels them
@@ -185,13 +223,24 @@ namespace MphRecomp.Frontend
             return bot;
         }
 
-        // the same bot at another level (or remade by a new host): an extra character keeps its character, skin and name
+        // a bot with a picked look (the bot picker's): a hunter's skin, or an extra character (which goes by its name)
+        public static MatchPlayer OnlineBot(Hunter hunter, string? skin, string? character, int level)
+        {
+            MatchPlayer bot = OnlineBot(hunter, level);
+            bot.Skin = skin;
+            bot.Character = character;
+            if (character != null && Characters.Of(hunter, skin) is { HasOriginal: false } c) bot.Nickname = c.Name;
+            return bot;
+        }
+
+        // the same bot at another level (or remade by a new host): its skin stays, an extra character keeps its character
+        // and name
         public static MatchPlayer OnlineBotLike(MatchPlayer p, int level)
         {
             MatchPlayer bot = OnlineBot(p.Hunter, level);
+            bot.Skin = p.Skin;
             if (p.Character == null) return bot;
             bot.Character = p.Character;
-            bot.Skin = p.Skin;
             bot.Nickname = p.Nickname;
             return bot;
         }
@@ -472,6 +521,7 @@ namespace MphRecomp.Frontend
             BindMatchMusic(file, strings); // (the rules pages' MUSIC row, MultiplayerMenu.MatchMusic.cs)
             BindModeDescriptions(file); // (in a box under the mode panel, MultiplayerMenu.ModeDescription.cs)
             BindModModes(file, strings); // (the mod modes' row under BATTLE, MultiplayerMenu.ModModes.cs)
+            BindSideView(file, strings); // (the dev side-view row under the panel, MultiplayerMenu.SideView.cs)
             BindDoors(file, strings, type);
             BindReplays(file, strings, type);
             _resultsBound = BindResults(file, strings);
@@ -820,6 +870,7 @@ namespace MphRecomp.Frontend
 
         private string MapSize(int index)
         {
+            if (index == _setup.Arena && _hostMap != null && Lan is { IsHost: false }) return "";
             int room = ArenaRooms[index];
             if (!ArenaSize.TryGetValue(room, out int size))
             {
@@ -884,6 +935,7 @@ namespace MphRecomp.Frontend
             FillExtraRules(s, rules);
             FillMatchMusic(s);
             FillModModes(s);
+            FillSideView(s);
             // PLAYERS: every used seat, in seat order (the lobby's name texts are the same strings; P8: seats 5-8 too)
             for (int r = 0; r < _setup.Seats.Length; r++)
             {
@@ -903,6 +955,27 @@ namespace MphRecomp.Frontend
         private int _pendingInto = -1; // ticks left before the loading page gives way to the fade into the game
         private const int IntoGameHold = 12, IntoGameFade = 10; // page 17: ticks before the fade to black, and its length
         private int _intoTicks = -1;
+        // START's way out of the lobby, counted from the tap (2026-11-21, shorter tap-to-playing): vanilla's page
+        // number is 15 at +9 frames (4 ticks) while the lobby's panels and hunter bar are still sliding away (to ~+64), and
+        // page 17 comes 68 frames after that, so its loading page holds IntoGameTicks from +4 ticks, the exits inside it.
+        // Ours entered page 15 only once every exit had played (23 ticks from page 38), then held all 34: 0.6 s more than
+        // vanilla. The hold now ends where vanilla's does (page 17 at tap + 38 ticks); the exits still play in full
+        private const int VanillaLoadingAt = 4;
+        private int _intoExitTicks;
+        // A local match's START (no LAN, not online): its setup line (FrontendRequestKind.StartMatch's Arg) is known at the
+        // tap, so the app builds the match on a worker during the lead-in (App MatchPrebuild.cs); the request at the end of
+        // the fade sends the same line (the same settings: BuildMatch's RANDOM arena is picked once, at the tap). Null: the
+        // start failed, the build goes. LeadInFinish: the fade is over, StartMatch is next (the app waits for the worker)
+        public Action<string?>? LeadInSetup;
+        public Action? LeadInFinish;
+        private MatchSettings? _intoSettings;
+
+        private void BeginLeadIn(MenuEngine menu)
+        {
+            _pendingInto = -2;
+            _intoExitTicks = 0;
+            menu.GoTo(LoadingPage);
+        }
         // the fade to black into a match: -1 none, else 0..1 (FrontendSession draws it; the app fades the music out with it)
         public float IntoGameDim { get; private set; } = -1;
 
@@ -915,7 +988,8 @@ namespace MphRecomp.Frontend
             if (page != IntoGamePage) IntoGameDim = _intoTicks = -1;
             if (page == LoadingPage && _pendingInto == -2)
             {
-                _pendingInto = IntoGameTicks;
+                // (the ticks since START's GoTo, this one included: the old page's exits)
+                _pendingInto = Math.Max(1, IntoGameTicks + VanillaLoadingAt - (_intoExitTicks + 1));
                 return;
             }
             if (page == IntoGamePage && _pendingInto == -3)
@@ -939,8 +1013,11 @@ namespace MphRecomp.Frontend
             // a LAN session lives on its own pages (the host's lobby; the joiner's list, hunter and lobby) and on the way into
             // the match (above): anywhere else it ends. Not from the in-match pause menu's own session (OverGame): the match
             // screen plays that LanSession, and ending it here sent the joiner BYE (owner 2026-10-11: host pause -> guest
-            // kicked to results); the match screen closes it itself when it goes
-            if (Lan != null && OverGame?.Invoke() != true && !(Hosting ? page == LobbyPage : page is CreateJoinPage or JoinHunterPage or JoinLobbyPage or AddressPage))
+            // kicked to results); the match screen closes it itself when it goes. The host's MODE / RULES / SELECT HUNTER steps
+            // count as its lobby (owner 2026-11-15: changing the rules with someone in the lobby booted them): the joiners keep
+            // their seats and the lobby sends them the new rules when the host is back in it (HostTick)
+            if (Lan != null && OverGame?.Invoke() != true
+                && !(Hosting ? page is LobbyPage or >= ModePage and <= HunterPage : page is CreateJoinPage or JoinHunterPage or JoinLobbyPage or AddressPage))
             {
                 EndLan();
             }
@@ -976,6 +1053,7 @@ namespace MphRecomp.Frontend
             {
                 ShowMatchMusic(menu, page); // (before FillStrings: its text is cut with the menu's font)
                 ShowModModes(menu, page); // (the same)
+                ShowSideView(menu, page);
                 FillStrings();
                 Tabs(menu, p, page);
                 Preview(menu, p);
@@ -1002,6 +1080,7 @@ namespace MphRecomp.Frontend
             TickTime();
             WarmPictures(menu); // (the D9 picker's pictures, drawn ahead)
             TickLooks(menu); // (the D9 lobby pictures' fades)
+            if (_pendingInto == -2) _intoExitTicks++; // (the lobby's exits on the way to the loading page)
             if (_pendingInto > 0 && --_pendingInto == 0)
             {
                 _pendingInto = -3;
@@ -1037,6 +1116,12 @@ namespace MphRecomp.Frontend
                 .OrderBy(i => p.Items[i].X).ToArray();
             int[] labels = Enumerable.Range(0, p.Items.Count).Where(i => p.Items[i].IsText && p.Items[i].Y > 177 && p.Items[i].Y < 178.5f)
                 .OrderBy(i => p.Items[i].X).ToArray();
+            if (BotPicking && page == HunterPage)
+            {
+                // an online host's bot picker: SELECT HUNTER on its own, no step tabs (owner 2026-11-22)
+                foreach (int i in tabs.Concat(dots).Concat(labels)) ShowAtEntry(menu, i, false);
+                return;
+            }
             for (int t = 0; t < tabs.Length && t < 3; t++)
             {
                 if (t > step) continue;
@@ -1354,7 +1439,7 @@ namespace MphRecomp.Frontend
                 return true;
             }
             if (b == 100 || b == 13) return true; // (bookkeeping calls with nothing to show)
-            if (page == ModePage) return OnModModeCall(menu, b) || OnModeCall(b);
+            if (page == ModePage) return OnSideViewCall(menu, b) || OnModModeCall(menu, b) || OnModeCall(b);
             if (page >= 28 && page <= 34) return OnRulesCall(menu, b);
             if (page is HunterPage or JoinHunterPage && OnPickerCall(menu, b)) return true;
             if (page == HunterPage) return OnHunterCall(menu, b);
@@ -1485,13 +1570,18 @@ namespace MphRecomp.Frontend
 
         // Vanilla's ADVANCED box hides the rules page under it. Our texts draw above every widget, so the page's own
         // touch-screen texts and its OK check (none of them the box's links) are hidden while it's up, and come back with it.
-        private readonly List<int> _covered = new();
+        // So is everything we add to the page after the box's full-screen catcher (116): the MUSIC row would draw over the box
+        // and, first in touch order, take the taps meant for DEFAULT WEAPONS under it.
+        private readonly List<(int Item, MenuState State)> _covered = new();
 
         private void CoverPage(MenuEngine menu, bool covered)
         {
             if (!covered)
             {
-                foreach (int item in _covered) Show(menu, item, true);
+                foreach ((int item, MenuState state) in _covered)
+                {
+                    if (menu.ItemState(item) == MenuState.Hidden) menu.SetState(item, state);
+                }
                 _covered.Clear();
                 return;
             }
@@ -1499,16 +1589,22 @@ namespace MphRecomp.Frontend
             int box = FindItem(p, it => HasWidget(_file!, it, "popup"));
             if (box < 0) return;
             var boxItems = new HashSet<int>(p.Items[box].Links.Select(l => l.Target)) { box };
+            int catcher = FindItem(p, it => Calls(it).Contains(116));
             _covered.Clear();
             for (int i = 0; i < p.Items.Count; i++)
             {
                 MenuItem it = p.Items[i];
-                if (boxItems.Contains(i) || menu.ItemState(i) == MenuState.Hidden) continue;
+                MenuState state = menu.ItemState(i);
+                // (one still waiting out its page-entry delay, as after a quick tap on ADVANCED, would come in over the box:
+                // it starts hidden now and takes its initial state when the box closes)
+                if (!menu.ItemStarted(i)) state = (MenuState)it.Field34;
+                if (boxItems.Contains(i) || state == MenuState.Hidden) continue;
                 bool pageText = it.IsText && it.Y < 175; // (the tabs' labels stay, as vanilla's)
                 bool pageOk = HasWidget(_file!, it, "ok") && !Calls(it).Contains(117);
-                if (!pageText && !pageOk) continue;
+                bool overBox = catcher >= 0 && i > catcher;
+                if (!pageText && !pageOk && !overBox) continue;
                 menu.SetState(i, MenuState.Hidden);
-                _covered.Add(i);
+                _covered.Add((i, state == MenuState.Focused ? MenuState.Idle : state));
             }
         }
 
@@ -1537,6 +1633,11 @@ namespace MphRecomp.Frontend
             if (b is >= 132 and <= 138) // A on an icon, or a tap on the big portrait: that hunter, then the lobby
             {
                 if (!HunterOpen(HunterOrder[b - 132])) return true; // (its icon is hidden; a focus that still lands there)
+                if (BotPicking)
+                {
+                    BotPicked(menu, HunterOrder[b - 132], null, null);
+                    return true;
+                }
                 _setup.Seats[0].Hunter = _setup.MyHunter = HunterOrder[b - 132];
                 OnlineHunterPicked = true;
                 menu.GoTo(AfterHunter);
@@ -2112,6 +2213,8 @@ namespace MphRecomp.Frontend
         private static bool _rejoin; // the joiner's SELECT HUNTER after PLAY AGAIN: ask that host until its lobby answers
         private bool _joinShown;
         private int _joinLobbyVersion; // the LanSession.LobbyVersion the joiner's lobby shows
+        private int _shareVersion;     // the arenas the host sends that the list has (a shared-arena list version)
+        private static string? _hostMap; // LAN joiner: the host's arena while it isn't on this list yet (the map still coming)
         private int _lanTick, _hostRetry;
         // CREATE OR JOIN's AVAILABLE GAMES rows: the red bars (calls 95-98) and their texts ("game1".."game4")
         private readonly int[] _rowBar = { -1, -1, -1, -1 }, _rowText = { -1, -1, -1, -1 };
@@ -2132,12 +2235,9 @@ namespace MphRecomp.Frontend
 
         private static void EndLan()
         {
-            LanSession? lan = Lan;
-            if (lan != null)
-            {
-                lan.Dispose(); // (BYE to the other device; Current = null)
-                LanSession.Current = null;
-            }
+            // (BYE to the other device; Current = null. A session whose last match's replay is still going across is only let
+            // go of: the match screen ends it when the replay is done, owner 11-22 LAN guest got no replay)
+            if (LanSession.EndCurrent()) Console.WriteLine("multiplayer: lan: the last match's replay is still going across: its session ends after it");
             _multicast?.Dispose();
             _multicast = null;
             _joinState = 0;
@@ -2568,8 +2668,7 @@ namespace MphRecomp.Frontend
             if (lan.Started && _pendingInto == -1)
             {
                 // the host's START GAME: the same way into the match as the host's (loading page, then the fade)
-                _pendingInto = -2;
-                menu.GoTo(LoadingPage);
+                BeginLeadIn(menu);
             }
         }
 
@@ -2941,9 +3040,34 @@ namespace MphRecomp.Frontend
                 Popup?.Inform($"{string.Join(", ", lacking).ToLowerInvariant()} {(lacking.Count == 1 ? "doesn't" : "don't")} have {arena}.\n\npick another arena.");
                 return;
             }
-            _pendingInto = -2;
-            menu.GoTo(LoadingPage);
+            if (LocalStart)
+            {
+                // a local match: its settings now (RANDOM picks its arena here, once), so the app can get it ready during
+                // the lead-in; StartMatch sends the same ones
+                try
+                {
+                    MatchSettings settings = BuildMatch();
+                    settings.Validate();
+                    _intoSettings = settings;
+                    if (LeadInSetup != null)
+                    {
+                        // (the lead-in's pages read now: nothing of MphRead while the worker builds)
+                        menu.Preload(LoadingPage);
+                        menu.Preload(IntoGamePage);
+                        LeadInSetup(MatchSetupText.Write(settings, null));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _intoSettings = null; // (StartMatch builds it again and shows the popup)
+                    Log?.Invoke("multiplayer: lead-in: " + ex.Message);
+                }
+            }
+            BeginLeadIn(menu);
         }
+
+        // START with nobody on LAN: no session, or the lobby's own host session with no joiner seated (StartMatch ends it)
+        private static bool LocalStart => Lan == null || (Lan is { IsHost: true } && JoinerSeats().Count == 0);
 
         // LAN host: the joiners who don't have the lobby's arena (RANDOM: nobody, it picks around them)
         private static List<string> LackingArena()
@@ -3025,6 +3149,7 @@ namespace MphRecomp.Frontend
                 });
             }
             settings.ModMode = ActiveModMode()?.Key; // (offline only; MatchSetupText never writes it with a net role either)
+            settings.SideView = SideViewPicked(); // (dev builds, offline only: MultiplayerMenu.SideView.cs)
             ApplyExtraRules(settings);
             return settings;
         }
@@ -3034,12 +3159,13 @@ namespace MphRecomp.Frontend
         public void BeginIntoGame(MenuEngine menu, Action start)
         {
             _intoStart = start;
-            _pendingInto = -2;
-            menu.GoTo(LoadingPage);
+            _intoSettings = null;
+            BeginLeadIn(menu);
         }
 
         private void StartMatch(MenuEngine menu)
         {
+            LeadInFinish?.Invoke();
             if (_intoStart is { } online)
             {
                 _intoStart = null;
@@ -3063,7 +3189,8 @@ namespace MphRecomp.Frontend
                     RestoreOwnSeats();
                     return;
                 }
-                MatchSettings settings = BuildMatch();
+                MatchSettings settings = LocalStart && _intoSettings != null ? _intoSettings : BuildMatch();
+                _intoSettings = null;
                 settings.Validate();
                 Dictionary<int, int> joiners = JoinerSeats();
                 string? net = null;
@@ -3089,6 +3216,7 @@ namespace MphRecomp.Frontend
             catch (Exception ex)
             {
                 Log?.Invoke("multiplayer: can't start: " + ex.Message);
+                LeadInSetup?.Invoke(null);
                 IntoGameDim = -1;
                 // (2026-10-21 hotfix: this runs on the black fade page; staying there left a softlock behind the popup)
                 menu.GoTo(Lan is { IsHost: false } ? JoinLobbyPage : LobbyPage);
@@ -3842,7 +3970,14 @@ namespace MphRecomp.Frontend
                 float x0 = items.Min(t => MathF.Min(t.A.X, MathF.Min(t.B.X, t.C.X))), x1 = items.Max(t => MathF.Max(t.A.X, MathF.Max(t.B.X, t.C.X)));
                 bool flat = items.All(t => t.TextureId < 0 || menu.Widgets.Textures[t.TextureId] is { Width: <= 16, Height: <= 16 });
                 if (flat && x1 - x0 >= 250 && y1 - y0 >= 185) continue;
-                foreach (WidgetTri tri in items) order.Add((tri.Z, order.Count, tri));
+                // each tri tagged with its item as MenuEngine.Collect does: AddChoicePicture finds the portrait by it (without, the
+                // online / replay card kept the base hunter's ROM portrait for TROOPER / DARK SAMUS; walk 54, 2026-11-21)
+                foreach (WidgetTri tri in items)
+                {
+                    WidgetTri tagged = tri;
+                    tagged.Item = it.Index;
+                    order.Add((tri.Z, order.Count, tagged));
+                }
             }
             // far to near, ties in item order (as MenuEngine.Collect)
             int first = output.Count;
@@ -4328,6 +4463,18 @@ namespace MphRecomp.Frontend
             return lost;
         }
 
+        // after RESTORE: the restored hunter's online card taken onto this license, each number the higher one
+        // (HunterLicense.TakeOnlineCard; OnlineMenus.License.cs AskRestoredLicense). false = nothing changed
+        public bool TakeOnlineCard(HunterLicense card)
+        {
+            int points = _license.RankPoints;
+            if (!_license.TakeOnlineCard(card)) return false;
+            _setup.Rank = _license.RankLevel;
+            _license.Save(_profileDir);
+            Log?.Invoke($"multiplayer: the restored hunter's online card taken: rank points {points} -> {_license.RankPoints}");
+            return true;
+        }
+
         // TRY CONTROLS (RecompMenus.ZoomAim.cs): nothing counted for the license -- a match armed and left without RESULTS
         // keeps its counter hooked, so the try run's kills and time would land in it; every real match arms its own anew
         public static void DisarmMatch() => _kills = null;
@@ -4373,6 +4520,7 @@ namespace MphRecomp.Frontend
             _setup.Rank = _license.RankLevel;
             _license.Save(_profileDir);
             _unsavedSeconds = 0;
+            MphRecomp.Profile.CloudSync.Current?.Push("match"); // (CLOUD SAVE: a match's end is a sync point)
             Log?.Invoke($"multiplayer: match counted ({(_lastWifi ? "wi-fi" : "wireless")}, {seconds:0} s; {(local.Place == 0 ? "win" : "loss")}, "
                 + $"{_license.LocalMatches} wireless, {_license.OnlineMatches} wi-fi; kills {kills?.Biped ?? 0} biped + {kills?.AltForm ?? 0} alt-form, "
                 + $"{kills?.Headshots ?? 0} headshots, beams {String.Join(",", kills?.Weapons ?? new int[9])}, streak {String.Concat(kills?.Streak.Select(k => k ? '+' : '|') ?? "")}; "

@@ -23,7 +23,10 @@ namespace MphRecomp.Frontend
         ShareLog /* RECOMP SETTINGS > HELP: this run's log as a report, crash or not (2026-10-19) */,
         ShareReplay /* REPLAYS' details page EXPORT (Arg = the replay file's path, 2026-10-19) */,
         SaveLog /* RECOMP SETTINGS > HELP: this run's log as a file on the device (Android: Downloads/Second Hunt), 2026-10-19 */,
-        ExportDsSave /* SECOND HUNT SETTINGS > EXPORT DS SAVE: a campaign file as a vanilla DS .sav (Arg = the written file's path, 2026-10-26) */ }
+        ExportDsSave /* SECOND HUNT SETTINGS > EXPORT DS SAVE: a campaign file as a vanilla DS .sav (Arg = the written file's path, 2026-10-26) */,
+        HudEditor /* the pause's LOOK > HUD > CUSTOMIZE HUD: the HUD layout editor over the paused game (owner 2026-11-15, wave 2) */,
+        PhotoMode /* the pause's PHOTO MODE: free camera over the held frame (CampaignRenderer.PhotoMode.cs, 2026-11-16) */,
+        QuitPressed /* the pause's "quit to the main menu?" YES pressed, before its flash and QuitToMenu (2026-11-21) */ }
 
     public readonly record struct FrontendRequest(FrontendRequestKind Kind, int Slot = -1, string? Arg = null);
 
@@ -172,6 +175,17 @@ namespace MphRecomp.Frontend
 
         // settingsPath: the recomp settings file (null = defaults, nothing saved); modsDir: where installed mods live
         // savesDir: the campaign's save folder (CampaignSaves; files A/B/C = slots 1/2/3), null = every file empty
+        // CLOUD SAVE: a campaign save is a sync point (the save's own thread takes the snapshot)
+        private static void CloudCampaignSaved(int slot) => MphRecomp.Profile.CloudSync.Current?.Push($"campaign file {slot}");
+
+        // CLOUD SAVE: the app pausing or quitting (the platform shells): a last put; wait: a quit waits on it a little
+        // (Android's pause doesn't: the process keeps running a while in the background)
+        public static void CloudFlush(string why, bool wait = false)
+        {
+            if (wait) MphRecomp.Profile.CloudSync.Current?.Flush(why);
+            else MphRecomp.Profile.CloudSync.Current?.Push(why);
+        }
+
         public static FrontendSession Load(string fileSystemRoot, string lang = "en", string? settingsPath = null, string? modsDir = null,
             string? savesDir = null)
         {
@@ -222,6 +236,16 @@ namespace MphRecomp.Frontend
             if (settingsPath != null) multiplayer.ProfileDir = Path.GetDirectoryName(settingsPath); // the Hunter License (hunter_license.json) beside recomp_settings.json
             multiplayer.ModsDir = modsDir; // GAME MODE's mod modes (MultiplayerMenu.ModModes.cs)
             multiplayer.SavesDir = savesDir; // vanilla's unlocks from the campaign's files (defeated hunters, gateways)
+            recomp.ProfileLicense = () => multiplayer.License; // APP > FILES: EXPORT / IMPORT PROFILE (RecompMenus.Profile.cs)
+            recomp.ExportFile = files.ExportFile;
+            if (settingsPath != null && savesDir != null)
+            {
+                // CLOUD SAVE (docs/PROFILE_SYNC.md Phase 2): pulls from the menus (RecompMenus.Cloud.cs), pushes at the sync points
+                MphRecomp.Profile.CloudSync.Current = new MphRecomp.Profile.CloudSync(Path.GetDirectoryName(settingsPath)!, savesDir,
+                    settingsPath, () => multiplayer.License, () => recomp.Settings, () => RecompMenus.CloudServerUri, RecompMenus.GameApp);
+                MphRecomp.Campaign.CampaignSaves.Saved -= CloudCampaignSaved;
+                MphRecomp.Campaign.CampaignSaves.Saved += CloudCampaignSaved;
+            }
             // (a DS save's license comes in from the license card's IMPORT SAVE, not the file select: owner 2026-11-06)
             files.ExportUnlocks = multiplayer.DsSaveUnlocks;
             multiplayer.UnlockEverything = () => recomp.Settings.UnlockEverything; // RECOMP SETTINGS > UNLOCKS
@@ -354,6 +378,7 @@ namespace MphRecomp.Frontend
             Menu.Tick();
             Popup?.Tick();
             Files.Tick(); // a picked DS save's answer (FileSelect.DsSavePicked)
+            TickCrashNotice();
             TickUpdateCheck();
             TickLaunchCheck();
             TickStaleImports();
@@ -798,6 +823,41 @@ namespace MphRecomp.Frontend
         public const string CopiesLackText = "an update needs files from your rom that your copied files don't have. pick it on import games, then press update copies.";
         private bool _staleImportsChecked, _newContentChecked;
 
+        // the last run crashed: offer its report once on the main menu, before the other startup boxes (docs/RELEASE.md, crash
+        // reports). The host says whether there's a report the player hasn't been offered (Android CrashLog.HasUnseen) and marks
+        // it offered; YES goes to the same sheet as RECOMP SETTINGS' crash log row. Null hooks (Desktop) never ask.
+        public static Func<bool>? CrashUnseen { get; set; }
+        public static Action? CrashSeen { get; set; }
+        public const string CrashNoticeText = "the game closed unexpectedly last time. share its crash report?";
+        private static bool _crashChecked; // per process: the shell coming back from a game doesn't ask again
+
+        private void TickCrashNotice()
+        {
+            if (_crashChecked || Popup == null || PopupOpen || Paused || Menu.PendingPage >= 0 || Menu.Page?.Index != MainMenuPage) return;
+            _crashChecked = true;
+            bool unseen;
+            try
+            {
+                unseen = CrashUnseen?.Invoke() ?? false;
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                return;
+            }
+            if (!unseen) return;
+            Log?.Invoke("crash: the last run left a report -- offered to share it");
+            Popup.Ask(CrashNoticeText, yes =>
+            {
+                if (yes) Request?.Invoke(new FrontendRequest(FrontendRequestKind.ShareCrashLog)); // the sheet marks it seen
+                else
+                {
+                    try { CrashSeen?.Invoke(); }
+                    catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { } // asks again next start
+                }
+            });
+        }
+
+
         private void TickStaleImports()
         {
             if (_staleImportsChecked || Popup == null || PopupOpen || Paused || Menu.PendingPage >= 0 || Menu.Page?.Index != MainMenuPage) return;
@@ -1181,7 +1241,7 @@ namespace MphRecomp.Frontend
             if (page != FileSelect.Page) Popup?.Close();
             if (page == FileSelect.Page) Files.OnEnter(menu, menu.Strings);
             Movies.OnPageEntered(menu, page);
-            if (page == OptionsPage)
+            if (page == OptionsPage && MphRead.Rumble.Output == null) // (with a motor the row is live: RecompMenus.Rumble.cs)
             {
                 // no Rumble Pak here: the rumble row in its greyed State5 look, as the game sets it when its slot-2 check
                 // finds none (BizHawk USA rev 1: the row's label, value and arrows are state 5 from the page's first
@@ -1347,6 +1407,7 @@ namespace MphRecomp.Frontend
             Multiplayer.DrawValueEdit(Menu, _tris);
             Multiplayer.DrawTryPicker(Menu, _tris); // over them, TRY CONTROLS' pop-up or the menu art's (MultiplayerMenu.TryPicker.cs)
             Recomp.DrawModeDescription(Menu, _tris, wide: _layout.Kind == LayoutKind.Setup); // (MultiplayerMenu.ModeDescription.cs)
+            int advancedBox = Multiplayer.FitAdvancedBox(Menu, _tris); // the rules pages' ADVANCED box (MultiplayerMenu.ExtraRules.cs)
             AddFocusFrame();
             // Each item goes wholly to the region holding the centre of its bounds, so no widget or label is cut in two
             // -- except a model drawn across BOTH screens (the boot logos' oval-on-top + swirl-below), whose triangles
@@ -1376,6 +1437,8 @@ namespace MphRecomp.Frontend
             foreach ((int item, var b) in bounds)
             {
                 itemRegion[item] = Hidden(item) ? -1
+                    // the ADVANCED box: its frame goes with the rows it holds (its full-screen catcher still covers the canvas)
+                    : item == advancedBox ? _layout.RegionOf((b.X0 + b.X1) / 2, (b.Y0 + b.Y1) / 2, false)
                     : flatItems.Contains(item) && IsFullScreen(b) ? FullScreenItem
                     : b.Y1 - b.Y0 > 200 ? PerTriangle
                     // the multiplayer setup pages split the top screen into its left and right boxes: one model drawing
@@ -1783,6 +1846,9 @@ namespace MphRecomp.Frontend
         private int _hdVersion;
 
         public bool HasHdBackdrop => _hdBackground[0] != -1;
+        // the host draws a live arena under the menus this frame (LOOK > MENUS ARENA BACKGROUND, App MenuArenaBackdrop.cs):
+        // the Samus picture and its tint are left out past the title's logos
+        public bool ArenaBackdrop { get; set; }
 
         // bumped by a "menu art" pick: FrontendRenderer renders the backdrop again (the old one stays until the new is ready)
         public int MenuArtVersion { get; private set; }
@@ -1863,6 +1929,7 @@ namespace MphRecomp.Frontend
                 if (second > 0) DrawList.Quad(bottom, ax, ay, bx, by, 0, 0, 1, 1, 1, 1, 1, second);
                 return;
             }
+            if (ArenaBackdrop) return; // LOOK > MENUS ARENA BACKGROUND: the host drew an arena under the menus (MenuArenaBackdrop)
             if (_layout.Kind is LayoutKind.MainFamily or LayoutKind.Setup)
             {
                 // the two images are one continuous picture (helmet above chest): cover the canvas with it, top-aligned
@@ -1914,6 +1981,7 @@ namespace MphRecomp.Frontend
         private void DrawGrooves(int page, float width, float height)
         {
             if (Paused || _groovesFailed || page <= 12 || page is 49 or 50 or 65) return;
+            if (ArenaBackdrop) return; // LOOK > MENUS ARENA BACKGROUND: the arena alone, no grooves over it (owner 11-20)
             _grooveTris.Clear();
             try
             {

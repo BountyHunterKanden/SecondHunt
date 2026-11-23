@@ -89,6 +89,10 @@ namespace MphRecomp.Frontend
                     OkMsg ok = await client.RequestAsync<OkMsg>(report);
                     Console.WriteLine($"online: head to head report {(ok.Done ? "counted" : "already counted")}");
                 }
+                catch (OnlineException ex) when (ex.Code is "slow_down" or "disconnected" or "timeout")
+                {
+                    return; // (0.10.3: the server's request limit, or no answer: kept for the next login; a repeat counts once)
+                }
                 catch (OnlineException ex)
                 {
                     Console.Error.WriteLine($"online: head to head report refused: {ex.Code} {ex.Message}");

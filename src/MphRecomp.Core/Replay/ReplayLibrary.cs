@@ -257,7 +257,14 @@ namespace MphRecomp.Replay
         public int Seconds => Steps / 60;
         public MphRead.GameMode? Mode => Header?.Settings.Mode;
         // the arena's in-game name ("Combat Hall"), or the room name the file holds when this build doesn't know it
-        public string Arena => Header == null ? "" : MphRecomp.Multiplayer.MatchArenas.Find(Header.Settings.Arena)?.InGameName ?? Header.Settings.Arena;
+        public string Arena
+        {
+            get
+            {
+                if (Header == null) return "";
+                return MphRecomp.Multiplayer.MatchArenas.Find(Header.Settings.Arena)?.InGameName ?? Header.Settings.Arena;
+            }
+        }
         public IReadOnlyList<MphRecomp.Multiplayer.MatchPlayer> Players =>
             (IReadOnlyList<MphRecomp.Multiplayer.MatchPlayer>?)Header?.Settings.Players ?? Array.Empty<MphRecomp.Multiplayer.MatchPlayer>();
         // this device's player in it (the one who recorded it, or a guest's own seat in the host's file: ReplayFile.ViewerSeat)

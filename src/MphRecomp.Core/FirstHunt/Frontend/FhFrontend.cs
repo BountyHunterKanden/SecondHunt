@@ -416,7 +416,7 @@ namespace MphRecomp.FirstHunt
 
         // a popup from the cart's table over the current page; yes: its YES (yes/no popups), done: any other button;
         // lines: the app's own text in place of the cart's (STREAMING's notice)
-        private void OpenPopup(int type, Action? yes, Action? done, string[]? lines = null)
+        internal void OpenPopup(int type, Action? yes, Action? done, string[]? lines = null)
         {
             int at = PopupTable + type * 20;
             int from = _screen == FhMenuData.Popup ? _popupFrom : _screen;
@@ -441,7 +441,19 @@ namespace MphRecomp.FirstHunt
             }
             foreach (FhMenuItem item in items)
             {
-                if (item.IsButton && !PopupButton(item)) _popupHidden.Add(item.Node);
+                if (!item.IsButton || PopupButton(item)) continue;
+                // the item's node is its touch box (buttonOk...); its look is the model's own nodes (ok / ok_off...)
+                _popupHidden.Add(item.Node);
+                foreach (string node in PopupButtonNodes(item.StateBase)) _popupHidden.Add(node);
+            }
+            // the DS-wireless icon and the lines above and below the text: only the popup with flag 8 (0x11, "This mode
+            // requires Wireless..."; the bit is inferred, it is the only one with it); the cart's other popups show neither
+            // (fh_ref_tools v popup_erase / popup_disconnect / popup_notenough)
+            if ((_popupButtons & 8) == 0)
+            {
+                _popupHidden.Add("wifiIcon");
+                _popupHidden.Add("textBorderTop");
+                _popupHidden.Add("textBorderBottom");
             }
             _running = State("popup_open");
             Page(FhMenuData.Popup).Play(_running, clear: true);
@@ -470,6 +482,15 @@ namespace MphRecomp.FirstHunt
             "popup_ok" => (_popupButtons & 2) != 0,
             "popup_cancel" => (_popupButtons & 4) != 0,
             _ => false
+        };
+
+        private static string[] PopupButtonNodes(string stateBase) => stateBase switch
+        {
+            "popup_yes" => new[] { "yes1", "yes_off" },
+            "popup_no" => new[] { "no1", "no_off" },
+            "popup_ok" => new[] { "ok", "ok_off" },
+            "popup_cancel" => new[] { "cancel", "cancel_off" },
+            _ => Array.Empty<string>()
         };
 
         private int ResultMode => _result?.Mode switch { FhMode.Regulator => 1, FhMode.Survivor => 2, _ => 3 };
@@ -828,26 +849,107 @@ namespace MphRecomp.FirstHunt
         // the DS writes depth only where a texel is opaque (translucent texels and translucent polygons leave it): the
         // trail, drawn after the page at z 0.5, shows through a nearer button's glass but not its opaque texels (fh_ref_tools
         // p1 main__training_held40: the dot over lit TRAINING's glass, TRAINING's letters over the cells below it). So it
-        // draws over everything, then the opaque texels of the scene's nearer opaque polygons it overlaps draw again over it
-        private void Occlude(List<WidgetTri> tris, int scene, List<(float X0, float Y0, float X1, float Y1)> boxes, float z)
+        // draws over everything, then the opaque texels of the scene's nearer opaque polygons it overlaps draw again over it,
+        // and whatever lies in front of those draws again whole (its translucent texels blend over them as in the scene).
+        // Only inside the trail's boxes, in the scene's depth order: whole polygons redrawn at one depth covered what lay
+        // over them (the owner, 11-13: dragging over the popup hid its icon, lines, letters and the frame's glow under its
+        // black ApopupBG)
+        // (DsPixels: each polygon projected whole and cut after, as the trail's cells are, so a piece keeps its polygon's
+        // texels; rastered gets the pieces)
+        private void Occlude(List<WidgetTri> tris, int scene, List<(float X0, float Y0, float X1, float Y1)> boxes, float z,
+            HashSet<int> rastered)
         {
             if (boxes.Count == 0) return;
-            for (int i = 0; i < scene; i++)
+            (float X0, float Y0, float X1, float Y1) Bounds(WidgetTri t) => (MathF.Min(t.A.X, MathF.Min(t.B.X, t.C.X)),
+                MathF.Min(t.A.Y, MathF.Min(t.B.Y, t.C.Y)), MathF.Max(t.A.X, MathF.Max(t.B.X, t.C.X)), MathF.Max(t.A.Y, MathF.Max(t.B.Y, t.C.Y)));
+            static bool Overlap((float X0, float Y0, float X1, float Y1) a, (float X0, float Y0, float X1, float Y1) b)
+                => a.X0 < b.X1 && a.X1 > b.X0 && a.Y0 < b.Y1 && a.Y1 > b.Y0;
+            // the scene's nearer polygons, back to front as Evaluate sorts them
+            List<int> near = Enumerable.Range(0, scene).Where(i => tris[i].Z > z)
+                .OrderBy(i => tris[i].Z).ThenBy(i => i).ToList();
+            void Emit(WidgetTri t, (float X0, float Y0, float X1, float Y1) r)
             {
-                WidgetTri t = tris[i];
-                if (t.Z <= z || t.A.A < 1) continue;
-                float x0 = MathF.Min(t.A.X, MathF.Min(t.B.X, t.C.X)), x1 = MathF.Max(t.A.X, MathF.Max(t.B.X, t.C.X));
-                float y0 = MathF.Min(t.A.Y, MathF.Min(t.B.Y, t.C.Y)), y1 = MathF.Max(t.A.Y, MathF.Max(t.B.Y, t.C.Y));
-                bool over = false;
-                foreach ((float bx0, float by0, float bx1, float by1) in boxes)
+                if (!DsPixels)
                 {
-                    if (x0 < bx1 && x1 > bx0 && y0 < by1 && y1 > by0) { over = true; break; }
+                    ClipTri(t, new Vector2[] { new(r.X0, r.Y0), new(r.X1, r.Y0), new(r.X1, r.Y1), new(r.X0, r.Y1) }, tris);
+                    return;
                 }
-                if (!over) continue;
-                if (t.TextureId >= 0) t.TextureId = OpaqueTexels(t.TextureId);
-                t.Z = TrailZ + 1;
-                tris.Add(t);
+                bool top = t.A.Y + t.B.Y + t.C.Y >= 0; // (as DsRaster picks the screen)
+                UiVertex a = DsRaster(new UiVertex { X = r.X0, Y = r.Y0 }, top), b = DsRaster(new UiVertex { X = r.X1, Y = r.Y1 }, top);
+                int before = tris.Count;
+                ClipTri(DsRaster(t), new Vector2[] { new(a.X, a.Y), new(b.X, a.Y), new(b.X, b.Y), new(a.X, b.Y) }, tris);
+                for (int k = before; k < tris.Count; k++) rastered.Add(k);
             }
+            foreach (var rect in Disjoint(boxes))
+            {
+                // where a solid polygon (every texel opaque: the popup's ApopupBG) was drawn again, all that lies in front
+                // of it draws again whole; elsewhere only opaque texels hide the trail (a lit button's glass doesn't), and as
+                // the test is by bounding box it keeps to rectangular solids
+                var solids = new List<(float X0, float Y0, float X1, float Y1)>();
+                List<(float X0, float Y0, float X1, float Y1)>? solidArea = null;
+                foreach (int i in near)
+                {
+                    WidgetTri t = tris[i];
+                    var bounds = Bounds(t);
+                    if (!Overlap(bounds, rect)) continue;
+                    float z0 = t.Z;
+                    t.Z = TrailZ + 1 + z0;
+                    if (solids.Count > 0 && solids.Any(s => Overlap(s, bounds)))
+                    {
+                        solidArea ??= Disjoint(solids);
+                        foreach (var piece in solidArea) Emit(t, piece);
+                    }
+                    if (t.A.A < 1) continue;
+                    if (t.TextureId < 0 || Solid(t.TextureId))
+                    {
+                        var b = (MathF.Max(bounds.X0, rect.X0), MathF.Max(bounds.Y0, rect.Y0),
+                            MathF.Min(bounds.X1, rect.X1), MathF.Min(bounds.Y1, rect.Y1));
+                        solids.Add(b);
+                        solidArea = null;
+                    }
+                    if (t.TextureId >= 0) t.TextureId = OpaqueTexels(t.TextureId);
+                    Emit(t, rect);
+                }
+            }
+        }
+
+        private readonly Dictionary<int, bool> _solid = new();
+
+        // every texel opaque
+        private bool Solid(int id)
+        {
+            if (_solid.TryGetValue(id, out bool solid)) return solid;
+            byte[] rgba = Textures[id].Rgba;
+            solid = true;
+            for (int i = 3; i < rgba.Length && solid; i += 4) solid = rgba[i] == 255;
+            _solid[id] = solid;
+            return solid;
+        }
+
+        // the union of the boxes as rectangles that don't overlap (a translucent polygon drawn twice would blend twice)
+        private static List<(float X0, float Y0, float X1, float Y1)> Disjoint(List<(float X0, float Y0, float X1, float Y1)> boxes)
+        {
+            float[] xs = boxes.SelectMany(b => new[] { b.X0, b.X1 }).Distinct().OrderBy(v => v).ToArray();
+            float[] ys = boxes.SelectMany(b => new[] { b.Y0, b.Y1 }).Distinct().OrderBy(v => v).ToArray();
+            var output = new List<(float, float, float, float)>();
+            for (int r = 0; r + 1 < ys.Length; r++)
+            {
+                float cy = (ys[r] + ys[r + 1]) / 2;
+                int run = -1; // a row's covered cells joined into one rectangle
+                for (int c = 0; c + 1 < xs.Length; c++)
+                {
+                    float cx = (xs[c] + xs[c + 1]) / 2;
+                    bool covered = boxes.Any(b => cx > b.X0 && cx < b.X1 && cy > b.Y0 && cy < b.Y1);
+                    if (covered && run < 0) run = c;
+                    if (!covered && run >= 0)
+                    {
+                        output.Add((xs[run], ys[r], xs[c], ys[r + 1]));
+                        run = -1;
+                    }
+                }
+                if (run >= 0) output.Add((xs[run], ys[r], xs[^1], ys[r + 1]));
+            }
+            return output;
         }
 
         // a texture with only its opaque texels (the rest fully clear)
@@ -1004,7 +1106,6 @@ namespace MphRecomp.FirstHunt
             {
                 FhMenuItem old = items[_highlight];
                 page.Play(State(GameRow(old) >= 0 ? $"client_start_G{GameRow(old) + 1}_dehi" : old.StateBase + "_dehi"));
-                Sound?.Invoke(1);
             }
             _highlight = index;
             if (_screen == FhMenuData.HostStart)
@@ -1036,7 +1137,9 @@ namespace MphRecomp.FirstHunt
                 {
                     page.Play(State(b + "_hi"));
                 }
-                Sound?.Invoke(0);
+                // one sound per move, the lit button's (cart 0x20442bc / 0x2044754 / 0x20434b4): 1 on a BACK, else 0;
+                // none for the button left
+                Sound?.Invoke(IsBack(b) ? 1 : 0);
                 if (_screen == FhMenuData.Configuration && items[index].Label.StartsWith("type"))
                 {
                     _configImage = ControlTypeOf(items[index].Label);
@@ -1243,6 +1346,20 @@ namespace MphRecomp.FirstHunt
             else _hidden.Add(node);
         }
 
+        // the title's Movie hex: the cart's touch circle is radius 5 at (40,151), a stylus point in the middle of the 32x32
+        // hiddenHex quad (24..56, 136..168); a finger takes well past the hex (radius 32: the title's controls are drawn
+        // small, ~7 mm for radius 16 on the Odin, owner 11-13 "still too small"). title_touch's box (to y 119) sorts first,
+        // so the corner they share stays START's
+        private bool Hit(FhMenuItem item, float x, float y)
+        {
+            if (_screen == FhMenuData.Title && item.StateBase == "title_movie")
+            {
+                float dx = x - item.X0, dy = y + item.Y0;
+                return dx * dx + dy * dy <= 32 * 32;
+            }
+            return item.Contains(x, y);
+        }
+
         private static bool IsBack(string b) => b.EndsWith("_back") || b.EndsWith("_cancel") || b.EndsWith("_quit") || b == "popup_no";
 
         // the stylus in bottom-screen pixels (0..256, 0..192 down): touching a button selects it
@@ -1253,12 +1370,25 @@ namespace MphRecomp.FirstHunt
             _stylusAt = new Vector2(x, -y);
             if (_phase != Phase.Idle)
             {
-                // (a touch on the title as it opens starts at once: the whole title is the button, no waiting out its opening)
+                // (a touch on the title as it opens starts at once: the whole title is the button, no waiting out its opening;
+                // the Movie hex takes its own touch then too, its popup up instead of the main menu: the open runs ~2 s, and a
+                // tap on the hex in it started the game, owner 11-13 "it acts like I'm pressing touch here to start")
                 if (_phase == Phase.Opening && _screen == FhMenuData.Title && down && !_touchDown)
                 {
                     _touchDown = true;
                     _running = null;
                     _phase = Phase.Idle;
+                    IReadOnlyList<FhMenuItem> titleItems = _screens[_screen].Items;
+                    foreach (int i in Buttons())
+                    {
+                        if (titleItems[i].StateBase == "title_movie" && Hit(titleItems[i], x, y))
+                        {
+                            _touchPressed = true;
+                            HighlightItem(-1);
+                            Press(i);
+                            return;
+                        }
+                    }
                     Open(FhMenuData.MainMenu);
                     return;
                 }
@@ -1269,7 +1399,7 @@ namespace MphRecomp.FirstHunt
             IReadOnlyList<FhMenuItem> items = _screens[_screen].Items;
             foreach (int i in Buttons())
             {
-                if (items[i].Contains(x, y))
+                if (Hit(items[i], x, y))
                 {
                     over = i;
                     break;
@@ -1409,7 +1539,7 @@ namespace MphRecomp.FirstHunt
                     cells.Add((at.X - 28, at.Y - 37, at.X + 36, at.Y + 28));
                 }
                 TrailCells(tris, cursors, rastered);
-                Occlude(tris, scene, cells, CartTrailZ);
+                Occlude(tris, scene, cells, CartTrailZ, rastered);
             }
             if (frame)
             {

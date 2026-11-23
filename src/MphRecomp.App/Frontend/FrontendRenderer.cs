@@ -43,12 +43,28 @@ internal sealed class FrontendRenderer : IGlScreen
     // cached; set by GameActivity
     public string? HdRoot { get; set; }
     public string? CacheDir { get; set; }
+    // CONTROLS > TOUCH > EDIT TOUCH LAYOUT's opener (GameActivity: the Android touch layout editor); null hides the row
+    public Action? EditTouchLayout { get; set; }
     MenuSamusRender? _menuSamus;
     int _menuArtVersion;
     // IMPORT GAMES' pictures of imported models (ImportItemRender.cs; Importer menu visual design's, reached in 2026-10-08)
     readonly ImportItemRender _importRender = new();
     // the character + skin picker's pictures (CharacterPictureRender.cs; Character + skin picker (D9)'s, reached in 2026-10-08)
     readonly CharacterPictureRender _characterRender = new();
+    // LOOK > MENUS ARENA BACKGROUND (MenuArenaBackdrop.cs): the live arena behind the menus; dropped before anything that
+    // starts a game (one MphRead scene at a time) and made again a while after the menus come back
+    MenuArenaBackdrop? _arenaBackdrop;
+    bool _arenaBackdropFailed;
+    // (on its own clock: _clock restarts with the surface and after each movie, which pushed a hold back by its length)
+    double _arenaBackdropHoldUntil;
+    bool _arenaBackdropAway; // a game was started from the menus: the next resume is a return from it
+    readonly Random _arenaRng = new();
+    // the hunters' models and effects read ahead on a worker (StepPrewarm), so the first match loads like a later one
+    Task? _prewarm;
+    CancellationTokenSource? _prewarmCancel;
+    double _prewarmBegun;
+    static bool s_prewarmDone; // (or a game was started: from then on its own loads are kept)
+    static double HoldClock => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
 
     // settingsPath: the recomp settings (RECOMP SETTINGS under Options); modsDir: the installed mods (MODS);
     // savesDir: the campaign's saves (the file select's files A/B/C)
@@ -74,10 +90,14 @@ internal sealed class FrontendRenderer : IGlScreen
 
     public void OnSurfaceCreated()
     {
+        // an arena background a game began as it left (MenuArenaBackdrop.BeginEarly) finishes before the front end loads
+        // (one MphRead scene at a time; the first frame waits for it anyway)
+        if (MenuArenaBackdrop.EarlyPending) MphRecomp.Campaign.CampaignHost.WaitMenuBackdrop();
         // a new context: the program names a match's context linked are gone (the HD Samus backdrop, the character
         // pictures and the import renders drew nothing after a match until the app restarted, 2026-10-17)
         CampaignGlCache.Reset();
         _drawer.Init();
+        DropArenaBackdrop(); // (its GL objects were the old context's; the next frame makes a new one)
         _presenter?.ResetGl();
         if (_session == null && _error == null)
         {
@@ -90,6 +110,10 @@ internal sealed class FrontendRenderer : IGlScreen
                 _session = FrontendSession.Load(Paths.FileSystem, settingsPath: _settingsPath, modsDir: _modsDir, savesDir: _savesDir);
                 _session.Log = m => Log.Info("MPHFrontend", m);
                 _session.Request = OnRequest;
+                // START's lead-in: a local match builds on a worker meanwhile (Campaign/MatchPrebuild.cs)
+                _session.Multiplayer.LeadInSetup = OnLeadIn;
+                _session.Multiplayer.LeadInFinish = MatchPrebuild.Wait;
+                _session.Recomp.EditTouchLayout = EditTouchLayout;
                 _sfx = new GameSfxPlayer();
                 _sfx.LoadTables();
                 // the front end steps sound scripts every DS frame (60 Hz; BizHawk, USA rev 1: ADVENTURE_MODE_SCR's
@@ -147,7 +171,7 @@ internal sealed class FrontendRenderer : IGlScreen
     void StepMenuSamus(FrontendSession session)
     {
         // public builds too since 2026-10-07 (owner: "include that"; the Beta 1 hold kept the DS picture)
-        if (HdRoot == null || CacheDir == null || !session.Settings.MenuArtHd) return;
+        if (HdRoot == null || CacheDir == null || !session.Settings.MenuArtHd || _prewarm != null) return;
         // a new "menu art" pick (FrontendSession.MenuArtVersion): drawn again once the one in hand is finished
         if (_menuSamus is { Done: true } && _menuArtVersion != session.MenuArtVersion) _menuSamus = null;
         if (_menuSamus == null)
@@ -166,9 +190,14 @@ internal sealed class FrontendRenderer : IGlScreen
         GLES30.GlClear(GLES30.GlColorBufferBit);
         FrontendSession? session = _session;
         if (session == null) return;
+        ThreadAllocProbe.Report("render"); // dev probe: allocations by thread, every 10 s (Diagnostics/ThreadAllocProbe.cs)
         double now = _clock.Elapsed.TotalSeconds;
         double dt = now - _last;
         _last = now;
+        long frameStart = Stopwatch.GetTimestamp();
+        if (_backFrames > 0) _backFrameDt = dt;
+        // (as OnSurfaceCreated: a build a game began as it left is done before the queued page start reads MphRead)
+        if (MenuArenaBackdrop.EarlyPending) MphRecomp.Campaign.CampaignHost.WaitMenuBackdrop();
         if (_movie != null)
         {
             UpdateMenuMusic(null, session); // never overlap the intro movie's own audio
@@ -197,9 +226,17 @@ internal sealed class FrontendRenderer : IGlScreen
                 audio.OnSfxTestEnded();
             }
         }
-        StepMenuSamus(session);
-        _importRender.Step(_width, _height);
-        _characterRender.Step(_width, _height);
+        StopPrewarmIfNeeded(session);
+        // (a match building during START's lead-in has MphRead: these wait for the menus' next visit)
+        bool leadIn = MatchPrebuild.Holding;
+        if (!leadIn) StepMenuSamus(session);
+        StepArenaBackdrop(session);
+        if (_prewarm == null && !leadIn) // (MphRead is one scene at a time: these wait for a prewarm still going)
+        {
+            _importRender.Step(_width, _height);
+            _characterRender.Step(_width, _height);
+        }
+        if (!leadIn) StartPrewarm(session);
         try
         {
             session.Update(dt);
@@ -236,8 +273,23 @@ internal sealed class FrontendRenderer : IGlScreen
             _music?.ResetFade();
         }
         UpdateMenuMusic(DesiredMenuMusic(session), session);
+        if (_arenaBackdrop != null && session.ArenaBackdrop)
+        {
+            _arenaBackdrop.Draw(dt, _width, _height, session.Menu.Page?.Index ?? -1, _drawer);
+            GLES30.GlViewport(0, 0, _width, _height);
+        }
         _drawer.Draw(session.DrawList, _width, _height, false); // (owner 2026-10-26: always the sharp menu art, SMOOTH MENUS row removed)
+        if (_backFrames > 0)
+        {
+            _backFrames--;
+            Log.Info("MPHMenu", $"back from a game, frame {4 - _backFrames}: {_backFrameDt * 1000:0} ms since the last,"
+                + $" {Stopwatch.GetElapsedTime(frameStart).TotalMilliseconds:0} ms of work");
+        }
     }
+
+    // the menus' first frames back from a game, timed (where a hitch on the way back goes, owner 11-21)
+    int _backFrames;
+    double _backFrameDt;
 
     // Boot/logo music the way the game picks it: each page's music comes from the ROM's page table (IDS.DAT +0,
     // MenuSounds.PageMusic), id 0 = keep what plays. The logos: P0/P1 (the Nintendo logo) have none, P2 (PRESENTS)
@@ -384,8 +436,9 @@ internal sealed class FrontendRenderer : IGlScreen
     // when CampaignActivity starts, same as when the whole app backgrounds)
     // The menus' theme (SEQ 43 CHUTNEY) gives way to the player's own song (RecompSettings.MenuMusic: a Prime song
     // imported from their discs, or "shuffle": another each start; docs/PRIME_MUSIC.md) on the music player's stream
-    // player. A choice is resolved once, so a shuffle keeps its song for the run. A song list's play box
-    // (RecompMenus.PreviewSong, owner 2026-10-29) plays its song in place of either until it's paused or the list is left.
+    // player; a shuffle draws from MENU SONGS (MenuHiddenSongs). A choice is resolved once, so a shuffle keeps its song
+    // for the run. A song list's play box (RecompMenus.PreviewSong, owner 2026-10-29) plays its song in place of either
+    // until it's paused or the list is left.
     Track? _menuSong, _menuSongPlaying;
     string? _menuSongChoice, _badPreview;
 
@@ -395,7 +448,7 @@ internal sealed class FrontendRenderer : IGlScreen
         if (choice != _menuSongChoice)
         {
             _menuSongChoice = choice;
-            _menuSong = MusicLibrary.Resolve(choice, Path.GetDirectoryName(_settingsPath), session.Settings.HiddenSongs, null, new Random());
+            _menuSong = MusicLibrary.Resolve(choice, Path.GetDirectoryName(_settingsPath), session.Settings.MenuHiddenSongs(), null, new Random());
         }
         return _menuSong;
     }
@@ -469,6 +522,8 @@ internal sealed class FrontendRenderer : IGlScreen
     // which cut both dead (C1 2026-10-24, owner: "the music does a hard cut and I'd like it to fade")
     public void Dispose()
     {
+        StopPrewarm("the menus closed");
+        DropArenaBackdrop();
         _presenter?.Stop();
         _movie?.Dispose();
         _movie = null;
@@ -527,17 +582,204 @@ internal sealed class FrontendRenderer : IGlScreen
     {
         _pauseGeneration++;
         _intoFading = false;
+        _music?.DropFadedQueue(); // (before ResetFade: the buffer written during the fade out is silence)
         _music?.ResetFade();
         if (_currentTune is { Stream: false } && _music != null)
         {
             _music.Play(_music.Volume);
         }
         _sfx?.SetPaused(false);
+        // back from a game: the arena loads as soon as the game's scene is gone (CampaignRenderer.GameOpen; Android's
+        // CampaignActivity drops it as it pauses to finish), not after a timed hold (owner 11-21: the 2 s hold left the menu
+        // up on Samus, then loaded)
+        if (_arenaBackdropAway) _arenaBackdropHoldUntil = 0;
+    }
+
+    const double ArenaBackdropRequestHold = 5;
+    // a game whose Shutdown never came (it shouldn't happen): the arena loads anyway after this
+    const double ArenaBackdropGameWait = 3;
+    double _arenaBackdropGameSeen = -1;
+
+    // a game's scene still holds MphRead (one scene at a time): the arena waits for its Shutdown
+    bool GameSceneOpen()
+    {
+        if (!CampaignRenderer.GameOpen)
+        {
+            _arenaBackdropGameSeen = -1;
+            return false;
+        }
+        if (_arenaBackdropGameSeen < 0) _arenaBackdropGameSeen = HoldClock;
+        if (HoldClock - _arenaBackdropGameSeen < ArenaBackdropGameWait) return true;
+        if (_arenaBackdropGameSeen > 0) Log.Warn("MPHMenu", $"arena background: a game still open after {ArenaBackdropGameWait} s, loading anyway");
+        _arenaBackdropGameSeen = 0;
+        return false;
+    }
+
+    // GL thread, each menu frame (setting on, not the in-game pause, else dropped): the arena's room starts building on
+    // a worker from the first menu frame, whatever the startup screens do (owner 11-21: "everything is just sitting
+    // waiting to be handed off"); it's taken once built, its GPU copies go up while the startup screens are still on,
+    // and it shows from the title on (the Samus art meanwhile, if the build isn't done yet). Pages past the title
+    // read MphRead, so leaving it waits for a build still going (one scene at a time).
+    void StepArenaBackdrop(FrontendSession session)
+    {
+        int page = session.Menu.Page?.Index ?? 0;
+        bool keep = session.Settings.MenuArenaBackdrop && !session.Paused;
+        bool show = keep && page >= 13;
+        // the still held since a game started (OnRequest) goes once the menus are back from it (ResumeAudio) or the start
+        // failed (the hold ran out): the next arena loads in its place, this frame
+        if (_arenaBackdrop is { Frozen: true } && _arenaBackdropAway && HoldClock >= _arenaBackdropHoldUntil) DropArenaBackdrop();
+        if (!keep || (_arenaBackdrop != null && !_arenaBackdrop.Alive))
+        {
+            if (!keep) MenuArenaBackdrop.DropEarly();
+            if (_arenaBackdrop != null) DropArenaBackdrop();
+            if (!keep) _arenaBackdropFailed = false; // (turned off and on again: another try)
+        }
+        else if (_arenaBackdrop == null && !_arenaBackdropFailed && HoldClock >= _arenaBackdropHoldUntil && _width > 0
+            && !GameSceneOpen())
+        {
+            _arenaBackdropAway = false;
+            var sw = Stopwatch.StartNew();
+            _arenaBackdrop = MenuArenaBackdrop.Prepare(Path.GetDirectoryName(_settingsPath), session.Textures, _arenaRng);
+            _arenaBackdropFailed = _arenaBackdrop == null;
+            if (_arenaBackdrop != null)
+            {
+                _arenaBackdrop.BeginLoad(_filesDir, _width, _height);
+                _arenaBackdropBegun = _clock.Elapsed.TotalSeconds;
+                Log.Info("MPHMenu", $"arena background {_arenaBackdrop.Arena} loading from page {page} ({sw.ElapsedMilliseconds} ms)");
+                // begun on the title or past it (back from a game, no startup screens): taken in this frame, so the menu's
+                // first frame has the arena, never a frame of Samus before it (owner 11-21)
+                if (page >= 13) TakeArenaBackdrop(page);
+            }
+        }
+        else if (_arenaBackdrop is { Loading: true } && (_arenaBackdrop.LoadDone || page > 13))
+        {
+            TakeArenaBackdrop(page);
+        }
+        else if (_arenaBackdrop is { IsLive: true } && !show)
+        {
+            _arenaBackdrop.Warm(); // (its first shown frame then has nothing to upload)
+        }
+        session.ArenaBackdrop = show && _arenaBackdrop is { IsLive: true };
+    }
+
+    // GL thread: the arena's room taken from its worker (waited for, if it's still building) and made live
+    void TakeArenaBackdrop(int page)
+    {
+        if (_arenaBackdrop is not { Loading: true }) return;
+        if (_arenaBackdrop.TookEarly || page > 13) _backFrames = 4; // (time the frames that follow)
+        var sw = Stopwatch.StartNew();
+        bool waited = !_arenaBackdrop.LoadDone;
+        string arena = _arenaBackdrop.Arena;
+        if (!_arenaBackdrop.GoLive(_arenaRng))
+        {
+            DropArenaBackdrop();
+            _arenaBackdropFailed = true;
+        }
+        Directory.SetCurrentDirectory(_filesDir);
+        Log.Info("MPHMenu", $"arena background {(_arenaBackdrop != null ? arena : arena + " failed")} live on page {page},"
+            + $" {(_clock.Elapsed.TotalSeconds - _arenaBackdropBegun) * 1000:0} ms after it began"
+            + $" (taken in {sw.ElapsedMilliseconds} ms{(waited ? ", waited for the worker" : "")})");
+        _last = _clock.Elapsed.TotalSeconds; // (a wait or the HD finish isn't a frame's time)
+    }
+
+    double _arenaBackdropBegun;
+
+    // Faster first match (11-21, SceneSetup.HostPrewarmHunterResources): while the menus show no MphRead page (the startup
+    // screens and the title) and nothing else has MphRead (no arena background, the HD Samus picture finished, no game
+    // yet), a worker parses the 8 hunters' models and effects and decodes their textures; Read keeps them, so the first
+    // match's room load finds them as a later match does. Best effort, never waited for: leaving the title, a request or
+    // the arena background setting cancels it before its next model (what it read stays kept). The look-alike and colour
+    // sets go on first (HunterColours.Install, as the match's own skins do), or the match would drop what it read
+    void StartPrewarm(FrontendSession session)
+    {
+        if (_prewarm is { IsCompleted: true } done)
+        {
+            bool ran = done.Status == TaskStatus.RanToCompletion;
+            if (ran || done.Exception?.InnerException is not OperationCanceledException) s_prewarmDone = true;
+            Log.Info("MPHMenu", ran ? $"hunters read ahead in {(HoldClock - _prewarmBegun) * 1000:0} ms"
+                : $"hunters read ahead: {done.Exception?.InnerException?.Message ?? "stopped"}");
+            _prewarm = null;
+            _prewarmCancel?.Dispose();
+            _prewarmCancel = null;
+            return;
+        }
+        if (_prewarm != null || s_prewarmDone || !PrewarmAllowed(session) || _arenaBackdrop != null) return;
+        if (_menuSamus is { Done: false }) return;
+        var cts = _prewarmCancel = new CancellationTokenSource();
+        CancellationToken ct = cts.Token;
+        _prewarmBegun = HoldClock;
+        _prewarm = Task.Factory.StartNew(() =>
+        {
+            try { Thread.CurrentThread.Priority = ThreadPriority.BelowNormal; } catch (Exception) { }
+            MphRecomp.Multiplayer.HunterColours.Install();
+            SceneSetup.HostPrewarmHunterResources(ct);
+        }, ct, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+    }
+
+    static bool PrewarmAllowed(FrontendSession session) =>
+        (session.Menu.Page?.Index ?? 0) <= 13 && session.Menu.PendingPage <= 13 && !session.Paused
+        && !session.Settings.MenuArenaBackdrop;
+
+    void StopPrewarmIfNeeded(FrontendSession session)
+    {
+        if (_prewarm != null && !PrewarmAllowed(session)) StopPrewarm($"page {session.Menu.Page?.Index}");
+    }
+
+    // cancelled and waited for (at most the model it's on): MphRead is the caller's from here
+    void StopPrewarm(string why)
+    {
+        if (_prewarm == null) return;
+        var sw = Stopwatch.StartNew();
+        _prewarmCancel?.Cancel();
+        try { _prewarm.Wait(); } catch (AggregateException) { }
+        if (!_prewarm.IsCompletedSuccessfully)
+        {
+            Log.Info("MPHMenu", $"hunters read ahead: stopped by {why} after {(HoldClock - _prewarmBegun) * 1000:0} ms"
+                + $" (waited {sw.ElapsedMilliseconds} ms)");
+        }
+        else
+        {
+            s_prewarmDone = true;
+            Log.Info("MPHMenu", $"hunters read ahead in {(HoldClock - _prewarmBegun) * 1000:0} ms (taken by {why})");
+        }
+        _prewarm = null;
+        _prewarmCancel?.Dispose();
+        _prewarmCancel = null;
+        _last = _clock.Elapsed.TotalSeconds; // (a wait isn't a frame's time)
+    }
+
+    void DropArenaBackdrop()
+    {
+        _arenaBackdrop?.Dispose();
+        _arenaBackdrop = null;
+        if (_session != null) _session.ArenaBackdrop = false;
+    }
+
+    // GL thread, START's tap (MultiplayerMenu.LeadInSetup; null: that start failed): the match builds on a worker while the
+    // lead-in plays (MatchPrebuild). MphRead is the worker's from here: the hunters' read-ahead stops, and the arena
+    // background's scene goes, its last blurred picture held still under the lead-in (MenuArenaBackdrop.Freeze)
+    void OnLeadIn(string? line)
+    {
+        if (line == null)
+        {
+            MatchPrebuild.Drop("the start failed");
+            if (_arenaBackdrop is { Frozen: true }) DropArenaBackdrop(); // (a new one loads for the lobby)
+            return;
+        }
+        if (MatchPrebuild.Dirs == null) return; // (a shell that doesn't take one)
+        StopPrewarm("START's lead-in");
+        _arenaBackdrop?.Freeze();
+        MatchPrebuild.Begin(line, _width, _height);
     }
 
     // on the GL thread (the session raises requests from inside its tick)
     void OnRequest(FrontendRequest r)
     {
+        // a match built for the lead-in is the match screen's only for its own start
+        if (MatchPrebuild.Holding && !(r.Kind == FrontendRequestKind.StartMatch && r.Arg == MatchPrebuild.Line))
+        {
+            MatchPrebuild.Drop($"request {r.Kind}");
+        }
         if (r.Kind == FrontendRequestKind.PlayMovie && r.Arg != null)
         {
             if (StartMovie(r.Arg))
@@ -547,6 +789,22 @@ internal sealed class FrontendRenderer : IGlScreen
                 Log.Info("MPHAudio", $"logo end (movie start): our tick {_session?.Frame} (vanilla ~{FlashTickTarget})");
             }
             return;
+        }
+        StopPrewarm($"request {r.Kind}");
+        // a game starts (or the pause's tools open over one): its scene needs MphRead to itself
+        if (r.Kind is not (FrontendRequestKind.CheckUpdates or FrontendRequestKind.OnlineRules or FrontendRequestKind.ShareCrashLog
+            or FrontendRequestKind.ShareLog or FrontendRequestKind.ShareReplay or FrontendRequestKind.SaveLog
+            or FrontendRequestKind.ExportDsSave or FrontendRequestKind.ControlsDone or FrontendRequestKind.QuitPressed))
+        {
+            // the arena's scene goes, its last blurred picture held still under the menus until they leave (as START's
+            // lead-in does: a start with none, TRY CONTROLS, showed the Samus art until the game came up; owner 11-22)
+            if (_arenaBackdrop is { CanHold: true }) _arenaBackdrop.Freeze();
+            else DropArenaBackdrop();
+            s_prewarmDone = true;
+            // (the menus go behind the game within it; ResumeAudio holds it again on the way back. A start that fails
+            // leaves the menus up: the arena comes back after this)
+            _arenaBackdropHoldUntil = HoldClock + ArenaBackdropRequestHold;
+            _arenaBackdropAway = true;
         }
         RequestSink?.Invoke(r);
     }

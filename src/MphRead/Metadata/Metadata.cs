@@ -905,9 +905,9 @@ namespace MphRead
             /* 22 */ "pick_wpn_missile",
             // recomp: the Pirate Blaster pickup (placeholder model until the Pickups track's art)
             /* 23 */ "pick_wpn_blaster", // recomp: built by the host (Read.HostBuildModel), else pick_wpn_all
-            // recomp: 24 = the Hyper Beam's, 25 = the Paralyzer's (placeholder models)
+            // recomp: 24 = the Hyper Beam's, 25 = the Paralyzer's (placeholder model)
 
-            /* 24 */ "pick_wpn_all",
+            /* 24 */ "pick_wpn_hyper", // recomp: built by the host (Read.HostBuildModel), else pick_wpn_all
             /* 25 */ "pick_wpn_all"
         };
 
@@ -1596,26 +1596,40 @@ namespace MphRead
 
         // Host (recomp): rooms registered at run time (imported Echoes arenas), looked up after the ROM's own table by
         // name or by their own RoomMetadata.Id (1001+, past the ROM's ids; RoomEntity.Setup gives the scene that id)
-        private static readonly List<RoomMetadata> _hostRooms = new List<RoomMetadata>();
+        // (copy on write: the replay list's warm-up thread registers the arenas while the menus do, and two writers on one
+        // List left a null slot that crashed the front end's load, owner 2026-11-20; readers keep the array they read)
+        private static readonly object _hostRoomsLock = new object();
+        private static volatile RoomMetadata[] _hostRooms = [];
         public static IReadOnlyList<RoomMetadata> HostRooms => _hostRooms;
+
+        // Host (recomp): held while a host's arenas are (re)registered, so two threads don't register at once
+        public static object HostRoomLock => _hostRoomsLock;
 
         public static void AddHostRoom(RoomMetadata meta)
         {
-            int index = _hostRooms.FindIndex(r => r.Name == meta.Name);
-            if (index >= 0)
+            lock (_hostRoomsLock)
             {
-                _hostRooms[index] = meta;
-            }
-            else
-            {
-                _hostRooms.Add(meta);
+                var rooms = new List<RoomMetadata>(_hostRooms);
+                int index = rooms.FindIndex(r => r.Name == meta.Name);
+                if (index >= 0)
+                {
+                    rooms[index] = meta;
+                }
+                else
+                {
+                    rooms.Add(meta);
+                }
+                _hostRooms = rooms.ToArray();
             }
         }
 
         // Host (recomp): a registered room whose files are gone (an imported arena cleared on IMPORT GAMES)
         public static void RemoveHostRoom(string name)
         {
-            _hostRooms.RemoveAll(r => r.Name == name);
+            lock (_hostRoomsLock)
+            {
+                _hostRooms = _hostRooms.Where(r => r.Name != name).ToArray();
+            }
         }
 
         public static (RoomMetadata?, int) GetRoomByName(string name)
@@ -1624,17 +1638,18 @@ namespace MphRead
             {
                 return (metadata, _roomIds.IndexOf(i => i == metadata.Name));
             }
-            int host = _hostRooms.FindIndex(r => r.Name == name);
+            RoomMetadata[] hostRooms = _hostRooms;
+            int host = Array.FindIndex(hostRooms, r => r.Name == name);
             if (host >= 0)
             {
-                return (_hostRooms[host], _hostRooms[host].Id);
+                return (hostRooms[host], hostRooms[host].Id);
             }
             return (null, -1);
         }
 
         public static RoomMetadata? GetRoomById(int id, bool noThrow = false)
         {
-            if (id >= _roomIds.Count && _hostRooms.Find(r => r.Id == id) is RoomMetadata hostRoom)
+            if (id >= _roomIds.Count && Array.Find(_hostRooms, r => r.Id == id) is RoomMetadata hostRoom)
             {
                 return hostRoom;
             }
@@ -2850,6 +2865,11 @@ namespace MphRead
                 // recomp: the Pirate Blaster's pickup (item 23) when no host builds its own: the affinity pickup
                 new(
                     "pick_wpn_blaster",
+                    new ModelMetadata("pick_wpn_all", animation: false)
+                ),
+                // recomp: the Hyper Beam's pickup (item 24) when no host builds its own: the affinity pickup
+                new(
+                    "pick_wpn_hyper",
                     new ModelMetadata("pick_wpn_all", animation: false)
                 ),
                 new(

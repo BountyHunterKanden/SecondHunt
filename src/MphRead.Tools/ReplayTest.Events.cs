@@ -120,6 +120,10 @@ namespace MphRead
                             + (p.Health == 0 ? $"  DEATH kills [{String.Join(",", GameState.Kills.Take(count))}]"
                                 + $" streaks [{String.Join(",", GameState.KillStreak.Take(count))}]" : ""));
                     }
+                    else if (p.Health > lastHealth[i] && lastHealth[i] > 0)
+                    {
+                        Console.WriteLine($"  {t} GAIN {Who(i)} {lastHealth[i]} -> {p.Health}");
+                    }
                     lastHealth[i] = p.Health;
                 }
                 // the watched seat's hit-direction indicator

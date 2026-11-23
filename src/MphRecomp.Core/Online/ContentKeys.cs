@@ -10,6 +10,7 @@ namespace MphRecomp.Online
     public static class ContentKeys
     {
         public const string Hunter = "hunter", Weapon = "weapon", Mode = "mode", Arena = "arena";
+        // alt-form kills before 2026-11-11 (one key for every hunter's; still shown for older rows): each hunter's own since
         public const string AltForm = "alt_form";
 
         public sealed record Entry(string Key, string Name, bool Vanilla, int Order);
@@ -40,7 +41,23 @@ namespace MphRecomp.Online
             new("omega_cannon", "OMEGA CANNON", true, 8), new(AltForm, "ALT FORM", true, 9),
             new("pirate_blaster", "PIRATE BLASTER", false, 10), new("hyper_beam", "HYPER BEAM", false, 11),
             new("paralyzer", "PARALYZER", false, 12),
+            new("morph_ball", "MORPH BALL", true, 13), new("stinglarva", "STINGLARVA", true, 14),
+            new("triskelion", "TRISKELION", true, 15), new("lockjaw", "LOCKJAW", true, 16),
+            new("vhoscythe", "VHOSCYTHE", true, 17), new("dialanche", "DIALANCHE", true, 18),
+            new("halfturret", "HALFTURRET", true, 19), new("scout_drone", "SCOUT DRONE", false, 20),
         };
+
+        // a hunter key's alt form (its alt-form kills' weapon key): Samus's suits and characters roll the Morph Ball, the
+        // Trooper flies Weavel's split as the Scout Drone (Characters.cs); a hunter without one (Guardian) keeps "alt_form"
+        private static readonly Dictionary<string, string> AltForms = new()
+        {
+            ["samus"] = "morph_ball", ["dark_samus"] = "morph_ball", ["zero_suit_samus"] = "morph_ball",
+            ["phazon_suit"] = "morph_ball", ["beta_phazon_suit"] = "morph_ball", ["kanden"] = "stinglarva",
+            ["trace"] = "triskelion", ["sylux"] = "lockjaw", ["noxus"] = "vhoscythe", ["spire"] = "dialanche",
+            ["weavel"] = "halfturret", ["trooper"] = "scout_drone",
+        };
+
+        public static string AltFormKey(string hunterKey) => AltForms.GetValueOrDefault(hunterKey, AltForm);
 
         // HunterLicense.ModeIndex's groups (a team mode counts with its solo mode, as on the license)
         private static readonly string[] ModeKeys =

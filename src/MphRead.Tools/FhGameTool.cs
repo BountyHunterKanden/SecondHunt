@@ -71,9 +71,12 @@ namespace MphRead
             case "layers": MenuLayers(only); break;
             case "boxes": MenuBoxes(only ?? "main_menu"); break;
             case "frontend": FrontendWalk(); break;
+            case "movietap": MovieTap(); break;
+            case "popupdrag": PopupDrag(); break;
             case "lobby": LobbyWalk(); break;
             case "drag": MenuDrag(only ?? "main_menu"); break;
             case "wide": MenuWide(only); break;
+            case "popup": MenuPopup(int.Parse(only ?? "0")); break;
             case "nodes": MenuNodes(only ?? "frame"); break;
             case "nodeframes": MenuNodeFrames(only ?? "lightningL"); break;
             case "texanims": TexAnims(); break;
@@ -182,9 +185,12 @@ namespace MphRead
             string outDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "firsthunt_hud"));
             Directory.CreateDirectory(outDir);
             Console.WriteLine($"HUD loaded: {FirstHuntHud.Loaded}");
+            // FH_WIDE=WxH: another screen shape (1920x1080)
+            int[] wh = (Environment.GetEnvironmentVariable("FH_WIDE") ?? "1920x1080").Split('x').Select(int.Parse).ToArray();
+            string size = wh[0] == 1920 && wh[1] == 1080 ? "" : $"_{wh[0]}x{wh[1]}";
             foreach (string room in new[] { "Level SP Regulator", "Level SP Survivor", "Level SP Morphball" })
             {
-                using CampaignHost host = CampaignHost.StartFirstHunt(room, collectDrawItems: true, viewWidth: 1920, viewHeight: 1080);
+                using CampaignHost host = CampaignHost.StartFirstHunt(room, collectDrawItems: true, viewWidth: wh[0], viewHeight: wh[1]);
                 PlayerEntity me = PlayerEntity.Main;
                 var press = new CampaignInput { SelectWeapon = BeamType.None, Buttons = CampaignButtons.Shoot | CampaignButtons.Jump };
                 for (int f = 0; f < 900 && !(me.Health > 0 && me.LoadFlags.TestFlag(LoadFlags.Active)); f++) host.Step(f % 2 == 0 ? press : Idle);
@@ -192,8 +198,8 @@ namespace MphRead
                 string name = room.Split(' ')[^1].ToLowerInvariant();
                 void Shot(string tag)
                 {
-                    string file = Path.Combine(outDir, $"{name}_{tag}.png");
-                    CampaignSim.RenderHud(host.Scene, 1920, 1080, file);
+                    string file = Path.Combine(outDir, $"{name}_{tag}{size}.png");
+                    CampaignSim.RenderHud(host.Scene, wh[0], wh[1], file);
                     Console.WriteLine($"  {room} {tag}: {host.Scene.HudItemCount} items, health {me.Health}, ammo {me.FirstHuntAmmoPool}, clock {FirstHuntMission.Clock} -> {file}");
                 }
                 Shot("start");
@@ -1966,11 +1972,31 @@ namespace MphRead
                         Kills = new[] { 7, 5, 3, 1 }, Deaths = new[] { 2, 4, 5, 5 }, Points = new[] { 7, 5, 3, 1 },
                         Ranks = new[] { 0, 1, 2, 3 }
                     } : null);
+                // FH_OPEN=1: the page's opening, every 2nd tick for 60 ticks
+                if (Environment.GetEnvironmentVariable("FH_OPEN") == "1")
+                {
+                    string dir = Path.Combine(outDir, $"open_{sc.Name}_{tag}");
+                    Directory.CreateDirectory(dir);
+                    for (int t = 0; t < 60; t++)
+                    {
+                        if (t % 2 == 0) { using var img = Draw(); img.SaveAsPng(Path.Combine(dir, $"f{t:000}.png")); }
+                        Tick();
+                    }
+                }
                 for (int t = 0; t < 300 && fe.Busy; t++) Tick();
                 for (int t = 0; t < 90; t++) Tick();
                 using (var idle = Draw()) idle.SaveAsPng(Path.Combine(outDir, $"{sc.Name}_{tag}.png"));
                 fe.Pad(FhPad.Down);
-                for (int t = 0; t < 60; t++) Tick();
+                for (int t = 0; t < 60; t++)
+                {
+                    // FH_OPEN=1: the move's first 40 ticks too
+                    if (t % 2 == 0 && t < 40 && Environment.GetEnvironmentVariable("FH_OPEN") == "1")
+                    {
+                        using var img = Draw();
+                        img.SaveAsPng(Path.Combine(outDir, $"open_{sc.Name}_{tag}", $"m{t:000}.png"));
+                    }
+                    Tick();
+                }
                 using (var lit = Draw()) lit.SaveAsPng(Path.Combine(outDir, $"{sc.Name}_{tag}_hi.png"));
                 if (Environment.GetEnvironmentVariable("FH_ANIM") == "1")
                 {
@@ -2011,11 +2037,125 @@ namespace MphRead
             Console.WriteLine($"-> {outDir}");
         }
 
+        // popup `type` (the cart's table at 0x207ab04, 20 bytes each) over the title, opening and settled, at FH_WIDE=WxH
+        static void MenuPopup(int type)
+        {
+            for (int t = 0; t < 0x13; t++)
+            {
+                int at = 0x207ab04 + t * 20;
+                Console.WriteLine($"  popup {t,2}: " + string.Join(" ", Enumerable.Range(0, 5).Select(k => $"{FirstHuntRules.ReadArm9Int(at + k * 4) ?? -1:x}")));
+            }
+            var pm = new FhMenuModel("popup");
+            string outDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "firsthunt_menu", "wide"));
+            Directory.CreateDirectory(outDir);
+            int[] wh = (Environment.GetEnvironmentVariable("FH_WIDE") ?? "1920x1080").Split('x').Select(int.Parse).ToArray();
+            string save = Path.Combine(Path.GetTempPath(), "fhwide.sav");
+            File.Delete(save);
+            var fe = new FhFrontend(save);
+            var layout = new FhScreenLayout { Wide = true };
+            layout.Resize(wh[0], wh[1]);
+            var list = new MphRecomp.Frontend.UiDrawList(fe.Textures);
+            int ticks = 0;
+            void Shot(string name)
+            {
+                var tris = new System.Collections.Generic.List<MphRecomp.Frontend.WidgetTri>();
+                fe.Evaluate(tris);
+                list.Clear();
+                layout.Build(fe, tris, list, ticks / 60.0);
+                using var img = FrontendTool.RasterCanvas(list, wh[0], wh[1]);
+                img.SaveAsPng(Path.Combine(outDir, name));
+            }
+            fe.Show(FhMenuData.Title);
+            for (int t = 0; t < 300 && fe.Busy; t++) { fe.Tick(); ticks++; }
+            fe.OpenPopup(type, null, null);
+            for (int t = 0; t < 8; t++) { fe.Tick(); ticks++; }
+            Shot($"popup{type}_open.png");
+            for (int t = 0; t < 120; t++) { fe.Tick(); ticks++; }
+            Shot($"popup{type}.png");
+            Console.WriteLine($"-> {outDir}");
+        }
+
         static bool SpinWait(Func<bool> done, int ms)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (!done() && sw.ElapsedMilliseconds < ms) System.Threading.Thread.Sleep(5);
             return done();
+        }
+
+        // the movie popup under a dragged stylus: tap the hex, lift, then drag across the popup; frames to
+        // extract_out/firsthunt_menu/wide/drag_*.png
+        static void PopupDrag()
+        {
+            string outDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "extract_out", "firsthunt_menu", "wide"));
+            Directory.CreateDirectory(outDir);
+            string save = Path.Combine(Path.GetTempPath(), "fhpopupdrag.sav");
+            File.Delete(save);
+            var fe = new FhFrontend(save);
+            fe.Save.Flags |= MphRecomp.FirstHunt.FirstHuntSave.MovieUnlocked;
+            var layout = new FhScreenLayout { Wide = true };
+            layout.Resize(1920, 1080);
+            var list = new MphRecomp.Frontend.UiDrawList(fe.Textures);
+            int ticks = 0;
+            void Shot(string name)
+            {
+                var tris = new System.Collections.Generic.List<MphRecomp.Frontend.WidgetTri>();
+                fe.Evaluate(tris);
+                list.Clear();
+                layout.Build(fe, tris, list, ticks / 60.0);
+                using var img = FrontendTool.RasterCanvas(list, 1920, 1080);
+                img.SaveAsPng(Path.Combine(outDir, name));
+            }
+            void Run(int n) { for (int i = 0; i < n; i++) { fe.Tick(); ticks++; } }
+            fe.Start();
+            Run(240);
+            fe.Touch(true, 40, 151);
+            Run(1);
+            fe.Touch(false, 40, 151);
+            Run(120);
+            Console.WriteLine($"  [{fe.ScreenName}] after the hex tap");
+            Shot("drag_00_idle.png");
+            // down in the popup's middle, then across NO, YES and off
+            (float x, float y)[] path = { (128, 100), (110, 120), (100, 141), (128, 141), (156, 141), (190, 141), (200, 100), (128, 60) };
+            fe.Touch(true, path[0].x, path[0].y);
+            Run(1);
+            for (int k = 1; k < path.Length; k++)
+            {
+                for (int step = 1; step <= 6; step++)
+                {
+                    float t = step / 6f;
+                    fe.Touch(true, path[k - 1].x + (path[k].x - path[k - 1].x) * t, path[k - 1].y + (path[k].y - path[k - 1].y) * t);
+                    Run(1);
+                }
+                Run(4);
+                Console.WriteLine($"  at {path[k]}: highlight {fe.Highlight}");
+                Shot($"drag_{k:00}.png");
+            }
+            fe.Touch(false, path[^1].x, path[^1].y);
+            Run(30);
+            Shot("drag_99_lifted.png");
+            Console.WriteLine($"  [{fe.ScreenName}] lifted -> {outDir}");
+        }
+
+        // the title's Movie hex by touch: the movie unlocked, taps at (40,151) at points through the title's open
+        static void MovieTap()
+        {
+            string save = Path.Combine(Path.GetTempPath(), "fhmovietap.sav");
+            File.Delete(save);
+            foreach ((int wait, float tx, float ty) in new[] { (0, 40f, 151f), (30, 40f, 151f), (60, 40f, 151f), (120, 40f, 151f), (240, 40f, 151f), (600, 40f, 151f), (0, 128f, 92f), (240, 128f, 92f), (0, 128f, 160f) })
+            {
+                var fe = new FhFrontend(save);
+                fe.Save.Flags |= MphRecomp.FirstHunt.FirstHuntSave.MovieUnlocked;
+                fe.Start();
+                int idleAt = -1;
+                for (int i = 0; i < wait; i++) { fe.Tick(); if (idleAt < 0 && !fe.Busy) idleAt = i; }
+                bool busy = fe.Busy;
+                fe.Touch(true, tx, ty);
+                fe.Tick();
+                fe.Touch(false, tx, ty);
+                for (int i = 0; i < 400 && fe.Busy; i++) fe.Tick();
+                fe.Tick();
+                Console.WriteLine($"  tap ({tx},{ty}) wait {wait}: idle at {idleAt}, busy at tap {busy} -> {fe.ScreenName}");
+            }
         }
 
         static void FrontendWalk()

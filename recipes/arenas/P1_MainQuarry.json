@@ -1,0 +1,11 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "pak": "metroid5.pak",
+  "nav": "2026-11-21: the bots' graph is built with ArenaNav's human scan (fine floor scan, footing, long on-foot jumps); re-import to get it",
+  "pakSha1": "00b67ea763983fc13960a10e6847690374c578fc",
+  "scale": 0.5925926,
+  "crane": "the booth console swings the crane, drawn as the animated crane 00020020 in its three parts posed from both rotate clips (wire + magnet swing); its first swing breaks wall 00020017 when the magnet touches it (MainQuarryCrane); crane/wall sounds + the clips' clank (3539), wall dust + pieces + shake, Prime crate fx (prime1_fx); stacked crates break with the one below (Dead>Deactivate)",
+  "crates": [],
+  "pads": []
+}

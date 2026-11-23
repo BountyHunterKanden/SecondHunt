@@ -80,18 +80,21 @@ namespace MphRecomp.Frontend
                 return;
             }
             bool you = seat.Kind == SeatKind.You;
-            HunterDisc(seat, Mx(cx + 20), My(cy + 16), Mw(120), tag);
+            // (a host's bot card: a smaller picture with its arrows either side, the words moved over, LEVEL under them and
+            // REMOVE where the check goes; OnlineMenus.LobbyBots.cs)
+            bool botBoxes = host && seat.Kind == SeatKind.Bot && seat.Index >= 0;
+            float tx = botBoxes ? BotCard(true).TextX : 165;
+            if (botBoxes) HunterDisc(seat, Mx(cx + BotCard(true).X), My(cy + BotCard(true).Y), Mw(BotCard(true).D), tag);
+            else HunterDisc(seat, Mx(cx + 20), My(cy + 16), Mw(120), tag);
             string name = seat.Card != null ? StreamerPrivacy.Display(seat.Card.Name, seat.Card.Tag) : StreamerPrivacy.Name(seat.Player?.Nickname ?? "", seat.Kind == SeatKind.You);
-            TextS(Fit(name.ToLowerInvariant(), 15), Mx(cx + 165), My(cy + 18), 0, White, tag, SizeM);
+            TextS(Fit(name.ToLowerInvariant(), 15), Mx(cx + tx), My(cy + 18), 0, White, tag, SizeM);
             string what = seat.Player != null ? HunterWord(seat.Player) : "";
             if (seat.Host) what += (what.Length > 0 ? "   " : "") + "host";
-            if (choosing) TextS("choosing a hunter...", Mx(cx + 165), My(cy + 64), 0, Cyan, tag, SizeX);
-            else if (away) TextS("on the results...", Mx(cx + 165), My(cy + 64), 0, OnGrey, tag, SizeX);
-            else TextS(what, Mx(cx + 165), My(cy + 64), 0, Orange, tag, SizeX);
+            if (choosing) TextS("choosing a hunter...", Mx(cx + tx), My(cy + 64), 0, Cyan, tag, SizeX);
+            else if (away) TextS("on the results...", Mx(cx + tx), My(cy + 64), 0, OnGrey, tag, SizeX);
+            else TextS(what, Mx(cx + tx), My(cy + 64), 0, Orange, tag, SizeX);
             // (a team game's TEAM box takes the card's bottom right: the short words)
             bool teams = (_hosting ?? _joined)?.Net.Settings is MatchSettings ms && MatchSettings.IsTeamMode(ms.Mode);
-            // (a host's bot card: LEVEL there and REMOVE where the check goes, OnlineMenus.LobbyBots.cs; release 0.2.0 F2)
-            bool botBoxes = host && seat.Kind == SeatKind.Bot && seat.Index >= 0;
             string third = you ? (host ? "" : teams ? "tap to change" : "tap to change hunter") // (the host's: EDIT RULES, GAME panel)
                 : seat.Kind != SeatKind.Bot || botBoxes ? "" : host ? $"bot level {seat.Player!.BotLevel + 1}" : "bot";
             if (third.Length > 0) TextS(third, Mx(cx + 165), My(cy + 102), 0, you ? Pale : OnGrey, tag, SizeX);

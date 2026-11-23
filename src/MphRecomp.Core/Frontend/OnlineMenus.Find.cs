@@ -284,11 +284,13 @@ namespace MphRecomp.Frontend
                 _findEv = null;
                 if (_onlineMenu?.Page?.Index == s_onVote) _onlineMenu.GoTo(s_onFind);
                 else Redraw();
+                if (f.Reason == "restart" && PartyLeader) _lostSearch = true; // (searches again after the reconnect: OnlineMenus.Reconnect.cs)
                 if (f.Reason != "you") Import.Popup?.Inform(f.Reason switch
                 {
                     "party" => "your party changed.\n\nthe search stopped.",
                     "host" => "the host didn't open the game.\n\nsearch again?",
                     "left" => "a player left.\n\nthe search stopped.",
+                    "restart" => "the server restarts for an update soon.\n\nthe search stopped. it starts again once the server is back.",
                     _ => "the search stopped.",
                 });
                 break;
@@ -739,9 +741,9 @@ namespace MphRecomp.Frontend
             {
                 TextS(s_findNearby ? "players close to you first, wider as you wait." : "anyone, anywhere, at once.", Mx(130), My(630), 0, Pale, st, SizeM);
                 TextS(Fit(FindModesLine(), 54), Mx(130), My(674), 0, Pale, st, SizeM);
-                string status = _connecting ? "connecting..." : !Live && _netError != null ? "offline: " + _netError
+                string status = Trying ? TryingText : !Live && _netError != null ? "offline: " + _netError
                     : !FindOn && Live ? "the server needs an update for find game." : "";
-                TextS(Fit(status, 44), Mx(130), My(720), 0, _connecting ? Cyan : Red, st, SizeX);
+                TextS(Fit(status, 44), Mx(130), My(720), 0, Trying ? Cyan : Red, st, SizeX);
             }
             else
             {

@@ -240,6 +240,10 @@ namespace SecondHunt.Server
                 {
                     throw new OnlineException("mods", "the mods can't change once players have joined");
                 }
+                if (g.MatchHost != null && info.MaxPlayers != g.Info.MaxPlayers)
+                {
+                    TellSeats(g.MatchHost, info.MaxPlayers);
+                }
                 g.Info = info;
                 foreach (string m in g.Slots.Values)
                 {
@@ -292,7 +296,12 @@ namespace SecondHunt.Server
                 {
                     throw new OnlineException("started", "that game already started");
                 }
-                if (g.Full)
+                // a full game takes an invited player all the same (owner 2026-11-22, issue 19: "a player replaces a bot and isnt
+                // refused"): PLAYERS grows by one for them, up to 8, and a bot makes way when the match is at 8 (the match
+                // host's Build cuts its last bots). A player without an invite still gets "full" ("players without an invite
+                // should not just be able to join a lobby where the player count is already full and expand the player count")
+                bool grow = g.Full && g.Invited.Contains(me) && g.Slots.Count < RelayWire.MaxPlayers;
+                if (g.Full && !grow)
                 {
                     throw new OnlineException("full", "that game is full");
                 }
@@ -322,6 +331,16 @@ namespace SecondHunt.Server
                 }
                 FindCancel(me, "joining");
                 LeaveGame(me);
+                if (grow)
+                {
+                    g.Info.MaxPlayers = g.Slots.Count + 1;
+                    // (before the joiner hears back: its JOIN reaches the match host after this line)
+                    if (g.MatchHost != null)
+                    {
+                        TellSeats(g.MatchHost, g.Info.MaxPlayers);
+                    }
+                    Console.WriteLine($"game {g.Id}: invited player joins a full game: {g.Info.MaxPlayers} players now");
+                }
                 int slot = Enumerable.Range(1, RelayWire.MaxSlots - 1).First(s => !g.Slots.ContainsKey(s));
                 Relay.Member member = _relay.AddMember(g.Room, slot);
                 g.Slots[slot] = me;
@@ -330,7 +349,7 @@ namespace SecondHunt.Server
                 Store.Player joiner = _store.Get(me)!;
                 foreach (string m in g.Slots.Values.Where(m => m != me))
                 {
-                    Push(m, new MemberEvent { GameId = g.Id, Player = Card(joiner, m), Slot = slot, Joined = true });
+                    Push(m, new MemberEvent { GameId = g.Id, Player = Card(joiner, m), Slot = slot, Joined = true, MaxPlayers = g.Info.MaxPlayers });
                 }
                 foreach (string m in g.Slots.Values)
                 {
@@ -490,7 +509,8 @@ namespace SecondHunt.Server
         }
 
         // the websocket closed: a lobby is left; a started match keeps the player (the relay carries it), and the game ends
-        // when its relay room goes quiet or the host takes everyone back to the lobby; the party is left either way
+        // when its relay room goes quiet or the host takes everyone back to the lobby; the party is left either way (but the
+        // player stays invited to it)
         private void Disconnected(string me)
         {
             lock (_gamesLock)
@@ -506,7 +526,11 @@ namespace SecondHunt.Server
                     // game ends when its relay room goes quiet)
                     MigrateHost(g);
                 }
-                PartyLeave(me);
+                // (0.10.3: a party that lives on keeps the dropped member invited, so the app's reconnect joins it again)
+                if (_partyOf.TryGetValue(me, out Party? party) && PartyLeave(me) && _parties.ContainsKey(party.Id))
+                {
+                    party.Invited.Add(me);
+                }
                 _pings.TryRemove(me, out _);
             }
         }

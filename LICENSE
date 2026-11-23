@@ -26,17 +26,19 @@ in full effect.
 
 This license covers only the original Second Hunt source code, art, and
 documents that were authored by the copyright holder and first published in
-this repository on or after October 20, 2026 (the "software" referred to in the
-PolyForm terms below).
+this repository after the v0.3.6-beta release, that is, from the commit "Second
+Hunt is closed source now" (`d08df55`, October 20, 2026) onward (the "software"
+referred to in the PolyForm terms below).
 
 It does **not** apply to, and does **not** restrict, any of the following, each
 of which remains under its own license:
 
 - **MphRead**, by NoneGiven, and the files in this repository derived from it,
   which are under the MIT License — kept verbatim in `LICENSE-MphRead`.
-- **Second Hunt code first published before October 20, 2026**, which was
-  released under the MIT License and stays MIT for everyone who received it;
-  publishing under this license does not and cannot revoke it.
+- **Second Hunt code first published before that commit**, up to and
+  including the v0.3.6-beta release (tag `v0.3.6-beta`, October 20, 2026),
+  which was released under the MIT License and stays MIT for everyone who
+  received it; publishing under this license does not and cannot revoke it.
 - **Third-party components**, which remain under their own licenses as listed
   in `THIRD_PARTY_NOTICES.md`.
 

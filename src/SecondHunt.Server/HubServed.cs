@@ -112,7 +112,7 @@ namespace SecondHunt.Server
         public ServedConfig Served { get; set; } = new();
         // no new served games (before an update: the running ones play on); new games are player-hosted meanwhile. On while
         // the drain file next to the database is there (SecondHuntServer admin drain on), or set here
-        public bool Draining { get => _draining || DrainFile.Length > 0 && File.Exists(DrainFile); set => _draining = value; }
+        public bool Draining { get => _draining || _restart != null || DrainFile.Length > 0 && File.Exists(DrainFile); set => _draining = value; }
         private bool _draining;
         public string DrainFile { get; set; } = "";
         // (the health line's tail: served games now / the cap, and draining)
@@ -389,6 +389,18 @@ namespace SecondHunt.Server
             try
             {
                 mh.Process.StandardInput.WriteLine($"left {slot}");
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
+            {
+            }
+        }
+
+        // the owner changed PLAYERS (UpdateGame): the match host's people cap follows (an older match host ignores the line)
+        private static void TellSeats(MatchHostProcess mh, int seats)
+        {
+            try
+            {
+                mh.Process.StandardInput.WriteLine($"seats {seats}");
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
             {

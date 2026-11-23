@@ -8,7 +8,8 @@ namespace MphRecomp.Frontend
     // The ADVANCED box's two recomp rules (owner 2026-10-10): EXTRA PICKUPS (the Pirate Blaster) and EXTRA CHARACTERS
     // (TROOPER, DARK SAMUS), ExtraRules. Two rows copied from the box's FRIENDLY FIRE row, added once per menu file on every
     // rules page (28-34): the box's rows move up into a 20 px pitch (radar 132, damage 112, ff 92, pickups 72, characters
-    // 52), AVAILABLE WEAPONS under them and its OK to the box's right. The top screen's ADVANCED summary gets a 5th line.
+    // 52), AVAILABLE WEAPONS under them and its OK at their lower right, under the rows' boxes; the frame grows around
+    // them as it's drawn (FitAdvancedBox). The top screen's ADVANCED summary gets a 5th line.
     // The rules are this player's own (kept in extra_rules.json); a joiner sees the host's.
     // EXTRA ARENAS (owner 2026-10-10, N28): a third row under them, only on a device that has imported arenas (ExtraArenas) when
     // the menus are bound. Five rows fill the box, so with it the title and rows go up 16 px and AVAILABLE WEAPONS 4 down
@@ -19,7 +20,7 @@ namespace MphRecomp.Frontend
         // the box's rows' new box centres (text space, y up) and the ROM's (radar 132, damage 108.2, ff 82.8)
         private const float DamageBoxY = 112, FriendlyFireBoxY = 92, PickupsBoxY = 72, CharactersBoxY = 52;
         private const float RomDamageBoxY = 108.2f, RomFriendlyFireBoxY = 82.8f;
-        private const float WeaponsLabelDy = -26, WeaponsValueDy = -29, BoxOkDx = 103, ArenasLift = 16;
+        private const float WeaponsLabelDy = -26, WeaponsValueDy = -29, BoxOkDx = 89, BoxOkDy = -3, ArenasLift = 16;
         private const float RomBoxTitleX = 128, RomBoxTitleY = 150;
         // the top screen's ADVANCED lines (create-page y): the ROM's four, closer, and ours under them
         private static readonly float[] AdvancedRomY = { 233, 221, 210, 199 };
@@ -212,7 +213,7 @@ namespace MphRecomp.Frontend
             Move(page, weapons.Label, 0, WeaponsLabelDy + up - down);
             Move(page, weapons.Value, 0, WeaponsValueDy + up - down);
             Move(page, weapons.Box, 0, WeaponsValueDy + up - down);
-            Move(page, ok, BoxOkDx, 0);
+            Move(page, ok, BoxOkDx, BoxOkDy);
             // the box shows and hides the new rows with its own (ev 2 / ev A)
             MenuItem box = page.Items[popup];
             var links = box.Links.ToList();
@@ -238,6 +239,90 @@ namespace MphRecomp.Frontend
             page.AddItem(n => SoundsLike(RecompMenus.Clone(last, n, 0, AdvancedY[^1] - AdvancedRomY[^1], stringId: summary,
                 links: Array.Empty<MenuLink>(), actions: Array.Empty<MenuAction>()), last.Index));
             for (int r = 0; r < rom.Length; r++) Move(page, rom[r], 0, AdvancedY[r] - AdvancedRomY[r]);
+        }
+
+        // The ADVANCED box's frame fitted to what it holds (player report 2026-11-12: "the box is too small and everything
+        // is squished in and popping out"). Our rows fill more than the ROM's frame (x 40..216, y_up 24..164), and the frame
+        // shares its item with the box's full-screen catcher (116), so it was stretched to the whole canvas while its rows
+        // keep the touch screen's shape: at 20:9 and wider the title sat on its top edge and AVAILABLE WEAPONS hung out under
+        // it. Each frame its edges move out to its rows' bounds plus a margin (the 9-slice keeps its border), even about the
+        // screen's middle; one reaching the tabs covers them to the screen's top (their labels aren't drawn). FrontendSession
+        // places the frame with the touch screen, as its rows. Returns the box's item, or -1 when it isn't up.
+        private const float BoxPadX = 6, BoxPadBottom = 5, BoxPadTop = 10, BoxTabsY = -23, BoxScreenTop = -1;
+        private MenuPage? _fitPage;
+        private int _fitBox = -1;
+        private readonly HashSet<int> _fitContent = new();
+
+        public int FitAdvancedBox(MenuEngine menu, List<WidgetTri> tris)
+        {
+            if (!Bound || menu.Page is not MenuPage page) return -1;
+            if (page != _fitPage)
+            {
+                _fitPage = page;
+                _fitContent.Clear();
+                _fitBox = FindItem(page, it => HasWidget(_file!, it, "popup"));
+                if (_fitBox >= 0)
+                {
+                    foreach (MenuLink l in page.Items[_fitBox].Links)
+                    {
+                        if (l.Target != _fitBox) _fitContent.Add(l.Target);
+                    }
+                }
+            }
+            int box = _fitBox;
+            if (box < 0 || menu.ItemState(box) == MenuState.Hidden) return -1;
+            // the frame as drawn (its triangles short of the catcher's) and the box's shown rows, title and OK
+            float fx0 = float.MaxValue, fy0 = float.MaxValue, fx1 = float.MinValue, fy1 = float.MinValue;
+            float cx0 = float.MaxValue, cy0 = float.MaxValue, cx1 = float.MinValue, cy1 = float.MinValue;
+            for (int t = 0; t < tris.Count; t++)
+            {
+                WidgetTri tri = tris[t];
+                float x0 = MathF.Min(tri.A.X, MathF.Min(tri.B.X, tri.C.X)), x1 = MathF.Max(tri.A.X, MathF.Max(tri.B.X, tri.C.X));
+                float y0 = MathF.Min(tri.A.Y, MathF.Min(tri.B.Y, tri.C.Y)), y1 = MathF.Max(tri.A.Y, MathF.Max(tri.B.Y, tri.C.Y));
+                if (x1 - x0 >= 250 && y1 - y0 >= 185) continue;
+                if (tri.Item == box)
+                {
+                    (fx0, fy0, fx1, fy1) = (MathF.Min(fx0, x0), MathF.Min(fy0, y0), MathF.Max(fx1, x1), MathF.Max(fy1, y1));
+                }
+                else if (_fitContent.Contains(tri.Item) && menu.ItemState(tri.Item) != MenuState.Hidden)
+                {
+                    (cx0, cy0, cx1, cy1) = (MathF.Min(cx0, x0), MathF.Min(cy0, y0), MathF.Max(cx1, x1), MathF.Max(cy1, y1));
+                }
+            }
+            if (fx0 > fx1 || cx0 > cx1) return box;
+            float mid = (fx0 + fx1) / 2, half = MathF.Max(mid - cx0, cx1 - mid) + BoxPadX;
+            float tx0 = MathF.Min(fx0, mid - half), tx1 = MathF.Max(fx1, mid + half);
+            float ty0 = MathF.Min(fy0, cy0 - BoxPadBottom), ty1 = MathF.Max(fy1, cy1 + BoxPadTop);
+            bool overTabs = ty1 > BoxTabsY;
+            if (overTabs) ty1 = BoxScreenTop;
+            float midY = (fy0 + fy1) / 2;
+            UiVertex Fit(UiVertex v)
+            {
+                v.X += v.X < mid ? tx0 - fx0 : tx1 - fx1;
+                v.Y += v.Y < midY ? ty0 - fy0 : ty1 - fy1;
+                return v;
+            }
+            int keep = 0;
+            for (int t = 0; t < tris.Count; t++)
+            {
+                WidgetTri tri = tris[t];
+                if (tri.Item == box)
+                {
+                    float w = MathF.Max(tri.A.X, MathF.Max(tri.B.X, tri.C.X)) - MathF.Min(tri.A.X, MathF.Min(tri.B.X, tri.C.X));
+                    float h = MathF.Max(tri.A.Y, MathF.Max(tri.B.Y, tri.C.Y)) - MathF.Min(tri.A.Y, MathF.Min(tri.B.Y, tri.C.Y));
+                    if (w < 250 || h < 185) (tri.A, tri.B, tri.C) = (Fit(tri.A), Fit(tri.B), Fit(tri.C));
+                }
+                // a text over the frame that isn't the box's (the tabs' labels): texts draw above every widget
+                else if (overTabs && tri.Item > 0 && tri.Item < page.Items.Count && page.Items[tri.Item].IsText
+                    && !_fitContent.Contains(tri.Item))
+                {
+                    float x = (tri.A.X + tri.B.X + tri.C.X) / 3, y = (tri.A.Y + tri.B.Y + tri.C.Y) / 3;
+                    if (x > tx0 && x < tx1 && y > ty0 && y < ty1) continue;
+                }
+                tris[keep++] = tri;
+            }
+            tris.RemoveRange(keep, tris.Count - keep);
+            return box;
         }
     }
 }

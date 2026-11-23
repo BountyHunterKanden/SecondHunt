@@ -657,6 +657,16 @@ namespace MphRead
                         {
                             errors.Add($"{names[k]}: snapshot LastBeam 0x{sent[k]:x2}, want 0x{wantBeam[k]:x2}");
                         }
+                        // the stats (2026-11-12): the drone's shots and laser are alt-form kills (SCOUT DRONE), not Power Beam kills
+                        if (k < 3)
+                        {
+                            int alt = GameState.AltDamageCount[1], power = GameState.BeamKills[1, 0], wantAlt = k < 2 ? 1 : 0;
+                            Console.WriteLine($"  stats: alt-form kills {alt}, Power Beam kills {power}");
+                            if (alt != wantAlt || power != 1 - wantAlt)
+                            {
+                                errors.Add($"{names[k]}: alt-form kills {alt}, Power Beam kills {power}, want {wantAlt}, {1 - wantAlt}");
+                            }
+                        }
                     }
                     string? text = KilledBy();
                     Console.WriteLine($"{side}, {names[k]}: health {p0.Health}, message {text ?? "(none)"}"

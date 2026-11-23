@@ -352,7 +352,7 @@ namespace MphRead
                 Fail($"round trip: speed {sent.ThrowSpeed} -> {got.ThrowSpeed}, push {sent.ThrowPush} -> {got.ThrowPush}");
             for (int i = 0; i < seats; i++) if (i != seat && read.Seats[i].HasThrow != snap.Seats[i].HasThrow) Fail($"seat {i}: a launch it wasn't sent");
             // an older host: the same bytes up to World, no throws block -- the same snapshot, no launch
-            for (int i = 0; i < seats; i++) snap.Seats[i].HasThrow = false;
+            for (int i = 0; i < seats; i++) { snap.Seats[i].HasThrow = false; snap.Seats[i].HasDeathPose = false; } // (nor the ragdolls block after it)
             var plain = new byte[snap.Size];
             int plainLength = snap.Write(plain);
             if (!plain.AsSpan(0, plainLength - 1).SequenceEqual(bytes.AsSpan(0, plainLength - 1))) Fail("the bytes before the throws block changed");
@@ -377,6 +377,8 @@ namespace MphRead
                 Vector3 moved = doll.Pos[PlayerRagdoll.Chest] - doll.Prev[PlayerRagdoll.Chest];
                 if ((moved - death.ThrowSpeed).Length < 1e-4f) Fail("the doll took the speed but not the push");
             }
+            // the same body on every device online: the host's pose at death and where its body rests (RagdollNetTest.cs)
+            fails += RagdollNetTest.Check(host, seat, input);
             // a replay watching this (non-main) seat: the follow cam follows its body to the respawn (a replay's deaths are
             // its own sim's, so a fresh life and a sim kill)
             for (int f = 0; f < 900 && p.Health <= 0; f++) { p.RespawnTimer = 0; host.Step(input); }

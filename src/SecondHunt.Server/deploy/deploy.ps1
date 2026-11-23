@@ -7,6 +7,8 @@
 #   .\deploy.ps1 -Server root@203.0.113.5 -Imports <folder>   also the imported arenas served matches can run (Echoes: the
 #       in-app importer's output, Tools -importcheck arenas all --out <folder> --mp2 <retail disc>): its arenas/ and
 #       import/mp2.json, without textures or sounds (a match host draws nothing), go to /var/lib/secondhunt/gamedata/imports
+#   -DrainCap 600   (server 0.10.3) before the restart, drain.sh tells everyone the server restarts, takes nothing new and waits
+#       for the running matches to end, at most this many seconds (+30); -NoDrain restarts at once (as before 0.10.3)
 param(
     [Parameter(Mandatory = $true)][string]$Server,
     [switch]$Setup,
@@ -14,6 +16,8 @@ param(
     [string]$GameData = "",
     [string]$GameKey = "AMHE1",
     [string]$Imports = "",
+    [switch]$NoDrain,
+    [int]$DrainCap = 600,
     [string]$Key = "$HOME\.ssh\secondhunt_deploy"
 )
 $ErrorActionPreference = 'Stop'
@@ -86,6 +90,16 @@ if ($LASTEXITCODE -ne 0) { throw 'copying the admin tool failed' }
 # a Windows checkout (core.autocrlf) gives admin.sh CRLF endings and its "bash\r" shebang won't run, so strip them on the server
 ssh @ssh $Server 'sed -i "s/\r$//" /usr/local/bin/secondhunt-admin; chmod 755 /usr/local/bin/secondhunt-admin; chmod 644 /opt/secondhunt/words.txt; test -f /opt/secondhunt/words_owner.txt || echo "# Second Hunt: words to block on top of the LDNOOBW list (one per line; *word = also inside longer words; -word = allow a list entry)" > /opt/secondhunt/words_owner.txt; chmod 644 /opt/secondhunt/words_owner.txt'
 if ($LASTEXITCODE -ne 0) { throw 'setting up the word files failed' }
-ssh @ssh $Server 'chmod 755 /opt/secondhunt/SecondHuntServer.new /opt/secondhunt/SecondHuntMatchHost.new && mv -f /opt/secondhunt/SecondHuntServer.new /opt/secondhunt/SecondHuntServer && mv -f /opt/secondhunt/SecondHuntMatchHost.new /opt/secondhunt/SecondHuntMatchHost && systemctl daemon-reload && systemctl restart secondhunt && sleep 3 && systemctl --no-pager --lines=5 status secondhunt && curl -fsS http://127.0.0.1:8080/v1/health'
+# the restart drain (0.10.3, drain.sh): the running matches finish first; the drain file goes right before the restart
+# (an owner's own "drain on" is put back), so the new server starts normal
+$undrain = ''
+if (-not $NoDrain) {
+    scp @ssh "$here\drain.sh" "${Server}:/root/secondhunt-drain.sh"
+    if ($LASTEXITCODE -ne 0) { throw 'copying drain.sh failed' }
+    ssh @ssh $Server "sed -i 's/\r$//' /root/secondhunt-drain.sh; bash /root/secondhunt-drain.sh $DrainCap"
+    if ($LASTEXITCODE -ne 0) { throw 'the drain failed (nothing was restarted): ssh in and look at /v1/health' }
+    $undrain = 'if [ -f /var/lib/secondhunt/drain.keep ]; then mv -f /var/lib/secondhunt/drain.keep /var/lib/secondhunt/drain; else rm -f /var/lib/secondhunt/drain; fi; '
+}
+ssh @ssh $Server ($undrain + 'chmod 755 /opt/secondhunt/SecondHuntServer.new /opt/secondhunt/SecondHuntMatchHost.new && mv -f /opt/secondhunt/SecondHuntServer.new /opt/secondhunt/SecondHuntServer && mv -f /opt/secondhunt/SecondHuntMatchHost.new /opt/secondhunt/SecondHuntMatchHost && systemctl daemon-reload && systemctl restart secondhunt && sleep 3 && systemctl --no-pager --lines=5 status secondhunt && curl -fsS http://127.0.0.1:8080/v1/health')
 if ($LASTEXITCODE -ne 0) { throw 'the server did not come up: ssh in and run journalctl -u secondhunt' }
 Write-Host "deployed; from outside: $(if ($Domain) { "https://$Domain/v1/health" } else { 'http://<server ip>/v1/health' })"

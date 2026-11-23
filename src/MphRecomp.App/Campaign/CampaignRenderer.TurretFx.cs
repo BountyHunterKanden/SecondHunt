@@ -477,23 +477,45 @@ internal sealed partial class CampaignRenderer
             int n = 0;
             Vector3 C(float x, float z) => Vector3.TransformPosition(new Vector3(x, 0, z), m.Transform);
             Quad(ref n, vp, C(-0.5f, -0.5f), C(0.5f, -0.5f), C(-0.5f, 0.5f), C(0.5f, 0.5f), m.Color, uv: m.Uv);
-            DrawRun(m.Texture, m.Additive, n);
+            DrawRun(m.Texture, m.Additive, n, alphaFrom: m.AlphaFrom);
         }
         GLES30.GlPolygonOffset(0, 0);
         GLES30.GlDisable(GLES30.GlPolygonOffsetFill);
     }
 
     // DrawSkins (MatchSkins.cs), additive pass, after DrawDroneFx: the slot's arcs' lines (as DrawHyperFx draws them), the shots
-    void DrawTurretFx(Scene scene, SuitPass pass)
+    // hyper: only the Hyper Beam's squares (DroneFxLive.Graded), drawn inside its grade after DrawDroneFx(hyper), as Corruption
+    // draws its charge's PMUS arcs after the alpha-blended core (Dolphin FIFO: core, arcs, lines, ORNT); drawn before it, the
+    // core's (1 - alpha) dimmed them and the grade missed them
+    void DrawTurretFx(Scene scene, SuitPass pass, bool hyper = false)
     {
         if (pass != SuitPass.Additive || _host == null || scene != _host.Scene) return;
         _turretLines.Clear();
-        _turretHeldArc?.Elec.Collect(_turretLines);
-        _turretBombArc?.Elec.Collect(_turretLines);
+        if (!hyper)
+        {
+            _turretHeldArc?.Elec.Collect(_turretLines);
+            _turretBombArc?.Elec.Collect(_turretLines);
+        }
         _turretSquares.Clear();
-        if (_turretFx != null) foreach (DroneFxLive f in _fxLive) f.Sys.CollectModels(_turretSquares);
+        // (the Shooting Gallery's effects, and the Retro-rules ones in any arena: the Hyper Beam's flashes and wall marks)
+        // (smooth frames / aim view: an effect riding a seat is carried with it, as DrawDroneFx carries its billboards; else
+        // the Hyper Beam's charge lightning trails behind the cannon while turning)
+        foreach (DroneFxLive f in _fxLive)
+        {
+            if (_turretFx == null && !f.Sys.Lib.RetroRules || f.Graded != hyper) continue;
+            int from = _turretSquares.Count;
+            f.Sys.CollectModels(_turretSquares);
+            Matrix4 carry = SmoothCarry(f.P ?? f.Carry, scene);
+            if (carry == Matrix4.Identity) continue;
+            for (int k = from; k < _turretSquares.Count; k++)
+            {
+                RetroModelParticle m = _turretSquares[k];
+                m.Transform *= carry;
+                _turretSquares[k] = m;
+            }
+        }
         _turretSquares.RemoveAll(m => m.Model != 0 || m.Color.W <= 0.002f);
-        if (_turretLines.Count == 0 && _turretShots.Count == 0 && _turretSquares.Count == 0 || !FxGl()) return;
+        if (_turretLines.Count == 0 && (hyper || _turretShots.Count == 0) && _turretSquares.Count == 0 || !FxGl()) return;
         Vector3 cam = scene.CameraPosition;
         Matrix4 vp = scene.ViewMatrix * scene.PerspectiveMatrix;
         Matrix4 view = scene.ViewMatrix;
@@ -503,7 +525,6 @@ internal sealed partial class CampaignRenderer
         GLES30.GlBindVertexArray(_fxVao);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _fxVbo);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
-        GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_fxProg, "uTex"), 0);
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(false);
@@ -541,7 +562,7 @@ internal sealed partial class CampaignRenderer
             }
             if (n > 0) DrawRun(tex, additive: true, n, white: tex == 0 || FxTexture(tex) is not int id || id == 0);
         }
-        DrawTurretShots(vp, right, new Vector3(view.M12, view.M22, view.M32));
+        if (!hyper) DrawTurretShots(vp, right, new Vector3(view.M12, view.M22, view.M32));
         DrawTurretSquares(vp);
         GLES30.GlDepthMask(true);
         GLES30.GlUseProgram(_program);

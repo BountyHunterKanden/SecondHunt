@@ -319,6 +319,7 @@ namespace MphRead
                 input.Buttons = !fire ? CampaignButtons.None : !p.IsAltForm ? CampaignButtons.Shoot
                     : near <= 1.5f ? CampaignButtons.AltAttack : CampaignButtons.None;
                 host.Step(input);
+                CampaignSim.WaitRoomLoad(host, input.Move); // room-load frames don't count (CampaignRoomLoadWait.cs)
                 everOpen |= door.Flags.TestFlag(DoorFlags.ShotOpen) || door.Flags.TestFlag(DoorFlags.Open);
                 if (trace && door.Flags != lastFlags)
                 {

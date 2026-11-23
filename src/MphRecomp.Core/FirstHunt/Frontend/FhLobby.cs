@@ -42,12 +42,7 @@ namespace MphRecomp.FirstHunt
         // the lobby's session ends (BYE to the other devices)
         public static void End()
         {
-            LanSession? lan = LanSession.Current;
-            if (lan != null)
-            {
-                lan.Dispose();
-                LanSession.Current = null;
-            }
+            LanSession.EndCurrent(); // (one still sending its last match's replay is let go of: the match screen ends it)
         }
 
         public static LanSession Host(int arena, string name)

@@ -28,7 +28,7 @@ namespace MphRecomp.Multiplayer.Net
             var list = new List<EnemyInstanceEntity>();
             foreach (EntityBase e in scene.Entities)
             {
-                if (e is EchoesCrateEntity or EchoesBreakableEntity or MiningPlazaPillarEntity or MiningPlazaGateEntity or MiningPlazaCrateEntity) list.Add((EnemyInstanceEntity)e);
+                if (e is EchoesCrateEntity or EchoesBreakableEntity or MiningPlazaPillarEntity or MiningPlazaGateEntity or MiningPlazaCrateEntity or MainQuarryCraneEntity) list.Add((EnemyInstanceEntity)e);
             }
             list.Sort((a, b) => a.Id.CompareTo(b.Id));
             return list;
@@ -60,6 +60,7 @@ namespace MphRecomp.Multiplayer.Net
                     MiningPlazaPillarEntity pl => (!pl.Fallen, false, pl.Breaks),
                     MiningPlazaGateEntity gt => (!gt.Opened, false, 0),
                     MiningPlazaCrateEntity sc => (sc.Up, sc.Flash, sc.Breaks),
+                    MainQuarryCraneEntity cr => (cr.WallUp, false, cr.Swings),
                     _ => (false, false, 0)
                 };
                 w.States[i] = (byte)((up ? Up : 0) | (hit ? Hit : 0) | ((breaks & 63) << 2));
@@ -80,6 +81,7 @@ namespace MphRecomp.Multiplayer.Net
                 else if (list[i] is EchoesBreakableEntity b) b.NetApply(up, hit, breaks);
                 else if (list[i] is MiningPlazaPillarEntity pl) pl.NetApply(up, hit, breaks);
                 else if (list[i] is MiningPlazaGateEntity gt) gt.NetApply(up, hit, breaks);
+                else if (list[i] is MainQuarryCraneEntity cr) cr.NetApply(up, hit, breaks);
                 else if (list[i] is MiningPlazaCrateEntity sc) sc.NetApply(up, hit, breaks);
             }
             if (Turret != null) TurretOf(scene)?.NetApply(Turret);

@@ -76,7 +76,7 @@ Nothing from any game ships with Second Hunt.
 - Bring a campaign file over from your DS save (story and logbook, with a backup of the file it replaces), or export
   yours back out to play on a DS or an emulator. Your Hunter License comes over on its own, with IMPORT LICENSE.
 - UNLOCKS ALL and LOGBOOK SCANS ALL switches, if you just want to look around
-- ALT FORM HOP: Jump hops any alt form up to bomb jump height, so every hunter can get where Samus can,
+- ALT FORM HOP: the ALT HOP button (L1 on a controller, which then hops without boosting, A still boosts; X on a keyboard) hops any alt form up to bomb jump height, so every hunter can get where Samus can,
   and morph ball doors open for every hunter.
 
 ## Replays

@@ -228,7 +228,11 @@ namespace SecondHunt.Server
                     sender.WindowPackets = 0;
                     sender.WindowBytes = 0;
                 }
-                if (++sender.WindowPackets > PacketsPerSecond || (sender.WindowBytes += data.Length) > BytesPerSecond)
+                byte to = data[9];
+                // keepalives skip the cap: they forward nothing, and a busy 8-seat host's would otherwise go
+                // unanswered and make its RelayTransport rebuild the socket every 3 s
+                if (to != RelayWire.KeepAlive
+                    && (++sender.WindowPackets > PacketsPerSecond || (sender.WindowBytes += data.Length) > BytesPerSecond))
                 {
                     continue;
                 }
@@ -239,7 +243,6 @@ namespace SecondHunt.Server
                 Room room = sender.Room;
                 room.LastActive = now;
                 Interlocked.Exchange(ref sender.LastSeen, now);
-                byte to = data[9];
                 if (to == RelayWire.KeepAlive)
                 {
                     Send(new[] { RelayWire.Magic, RelayWire.KeepAlive }, 2, sender.EndPoint);

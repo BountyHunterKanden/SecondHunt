@@ -1,0 +1,23 @@
+{
+  "game": "mp2",
+  "discId": "G2ME01",
+  "paks": [
+    {
+      "name": "Metroid4.pak",
+      "sha1": "c215ec11904d67ff9d239f154a8fafaaeea84568"
+    },
+    {
+      "name": "AudioGrp.pak",
+      "sha1": "8d0282eec11ea74288772bd4b7ee795ca913bab1"
+    }
+  ],
+  "ancs": "09ed9cde",
+  "char": "Grenchler",
+  "type": "GRCH",
+  "area": "7e0be699",
+  "instance": "1002007f",
+  "sfx": {
+    "lookup": "b7c1b3a7",
+    "group": [ "62c4c7c8" ]
+  }
+}

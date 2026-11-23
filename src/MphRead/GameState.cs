@@ -310,7 +310,8 @@ namespace MphRead
             if (MatchState == MatchState.InProgress)
             {
                 // todo: process dialogs or something for 1P
-                // todo: update SFX
+                // recomp: the game's in-progress sound update (rev 1 ARM9 0x2055510-0x20555BC) is the last-minute music
+                // tempo and the ALARM countdown, both done further down
                 for (int i = 0; i < scene.MessageQueue.Count; i++)
                 {
                     MessageInfo message = scene.MessageQueue[i];
@@ -340,7 +341,8 @@ namespace MphRead
                     {
                         MatchTime = 0;
                         CameraSequence.Current?.End();
-                        // todo: stop music/SFX, state bits/disconnect message?
+                        // todo: state bits/disconnect message?
+                        // recomp: music/SFX: MatchTime 0 takes the match end below, which stops them as the game does
                     }
                 }
                 if (HostModeTick != null) HostModeTick(scene); else ModeState(scene);
@@ -444,10 +446,18 @@ namespace MphRead
                     scene.SetFade(FadeType.None, length: 0, overwrite: true);
                     _stateChanged = true;
                     _matchEndTime = scene.GlobalElapsedTime;
+                    // recomp: the game's match end (rev 1 ARM9 0x205547C) stops every sample channel at once, sourceless
+                    // one-shots included (0x2072488 -> 0x207256C(0)), then the free SFX scripts (0x206F4C8), the 3D
+                    // sources (0x2074448), the voice stream queue (0x2070B6C, cut with no fade) and the player's long
+                    // SFX (0x21041A8). 1P also fades the free stream over 15 frames (0x207206C(15)); our one stream
+                    // queue is already cut. Audio only, so match state and replays don't change.
                     Sfx.Instance.StopFreeSfxScripts();
-                    Sfx.Instance.StopAllSound();
+                    Sfx.Instance.StopAllSound(force: !PlayerEntity.HostFirstHunt);
+                    if (!PlayerEntity.HostFirstHunt)
+                    {
+                        Sfx.Instance.StopStreams(0);
+                    }
                     PlayerEntity.Main.StopLongSfx();
-                    // sfxtodo: stop more kinds of SFX? fade for 1P mode?
                     if (!GameState.SinglePlayer && !PlayerEntity.HostFirstHunt)
                     {
                         Music.PlaySeq(SeqId.TIMEOUT);
@@ -760,7 +770,8 @@ namespace MphRead
                             scene.SetFade(FadeType.FadeOutWhite, length: 20 / 30f, overwrite: true, AfterFade.EnterShip);
                         }
                         Music.Stop(fadeTime: 20 / 30f);
-                        // todo: fade SFX
+                        // recomp: no SFX fade here in the game either (rev 1): its yes branch only stops the music over 20
+                        // frames and plays RETURN_TO_SHIP_YES; the room's sounds end with the scene
                         Sfx.Instance.PlaySample((int)SfxId.RETURN_TO_SHIP_YES, source: null, loop: false,
                             noUpdate: false, recency: -1, sourceOnly: false, cancellable: false);
                     }
@@ -1449,6 +1460,8 @@ namespace MphRead
 
         private static StorySave _cleanStorySave = null!;
         public static StorySave StorySave { get; private set; } = null!;
+
+
 
         // for hosts that own save persistence (Menu.SaveSlot 0): adopt a story save after the scene is constructed
         // and before the room is added, and make it the clean (continue-from) snapshot too

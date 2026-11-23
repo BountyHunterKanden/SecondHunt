@@ -26,6 +26,11 @@ namespace MphRecomp.Campaign
         // a texture's size (a flipbook's tiles need it)
         public void SetTextureSize(uint id, int w, int h) => _texSize[id] = (w, h);
         public (int W, int H)? TextureSize(uint id) => _texSize.TryGetValue(id, out (int, int) s) ? s : null;
+        // Corruption effects run by Retro's own rules, as Echoes' are (RetroParticleSystem.Retro; the Hyper Beam's)
+        public bool RetroRules;
+        // Prime 1 effects by Retro's own rules too, plus their LINE particles and ICTS/IITS/IDTS child systems
+        // (RetroParticleSystem.P1; the Prime 1 arena effects, Arenas/Prime1Fx.cs, 2026-11-16)
+        public bool Prime1Rules;
 
         // every "<hex id>.part" in a folder (what Import/Effects/BodyFx.cs writes; mp3: Corruption's, HyperFx.cs)
         public static RetroParticles Load(string dir, bool mp3 = false, bool echoes = false)
@@ -69,11 +74,24 @@ namespace MphRecomp.Campaign
         public uint Texture;        // TXTR id
         public Vector4 Uv;          // u0, v0, u1, v1 of the texture (v 0: its top row); all zero: the whole texture
         public bool Additive;
+        // Corruption (Mp3Rules): PBDM's blend and the bloom it marks (RetroBlends.Mp3); Default: Additive says
+        public RetroBlend Blend;
+        public float Glow;
         public bool DepthWrite;
+        public readonly RetroBlend Mode => Blend != RetroBlend.Default ? Blend : Additive ? RetroBlend.Add : RetroBlend.Alpha;
         // ORNT (Echoes effects): the sprite runs along Fore (world, its full length: the particle's direction times its
         // size; the texture's u), Width (ROTA, else 1) times Fore x the camera's forward across it (v); zero: a billboard
         public Vector3 Fore;
         public float Width;
+        // LINE (Corruption, RetroRules): a strip from Position to LineEnd (world), LineWidthPx pixels wide on a 448-line
+        // screen, the tile's (u0, v0) at the start and (u1, v1) at the end on both edges; zero: not a line
+        public Vector3 LineEnd;
+        public float LineWidthPx;
+        // Corruption (Mp3Rules) ALSC (main.dol 0x80363e60: GXSetTevSwapMode(0, 0, ALSC + 1)): the texture's alpha read
+        // from its red (1), green (2) or blue (3); 0: its own alpha
+        public byte AlphaFrom;
+        // Corruption SORT: drawn back to front among its run (same blend, texture and AlphaFrom)
+        public bool Sorted;
     }
 
     // one model particle to draw (PMDL): its CMDL, placed by Transform (effect space = the model's own space -> world, row
@@ -88,6 +106,7 @@ namespace MphRecomp.Campaign
         public bool Additive;
         public uint Texture;
         public Vector4 Uv;
+        public byte AlphaFrom; // as RetroBillboard's
     }
 
     public sealed class RetroParticleSystem
@@ -95,6 +114,7 @@ namespace MphRecomp.Campaign
         sealed class Particle
         {
             public Vector3 Pos, Vel;    // world (Follow: effect space)
+            public Vector3 PrevPos;     // Pos before this frame's move (LINE)
             public int Age, Life;
             public readonly Dictionary<Part.Elem, float> Init = new(ReferenceEqualityComparer.Instance);
         }
@@ -107,10 +127,11 @@ namespace MphRecomp.Campaign
         readonly List<RetroParticleSystem> _kids = new();
         readonly RetroParticleSystem? _parent;
         float _remainder;
-        int _frame;
+        int _frame, _made;
         bool _emitting = true;
 
         public uint Id { get; }
+        public RetroParticles Lib => _lib;
         // effect space -> world; set every frame for an effect riding a bone (Follow or not: new particles start there)
         public Matrix4 Transform;
         // true: the whole system moves with Transform (Prime's "continuous system"); false: particles stay where born
@@ -162,7 +183,10 @@ namespace MphRecomp.Campaign
                 {
                     if (s.Frame >= _frame) return false;
                 }
-                return _frame >= SysInt("PSLT", Int32.MaxValue);
+                int pslt = SysInt("PSLT", Int32.MaxValue);
+                // Prime 1: the IDTS children start on frame PSLT
+                if (P1 && _part["IDTS"] is Part.Elem idts && idts.Id != 0 && _frame <= pslt) return false;
+                return _frame >= pslt;
             }
         }
 
@@ -194,6 +218,7 @@ namespace MphRecomp.Campaign
                     _kids.Add(new RetroParticleSystem(_lib, kid, s.Part, Transform, Follow, _rand, this));
                 }
             }
+            if (P1) ChildSystems();
             foreach (RetroParticleSystem k in _kids) k.Transform = Transform;
             // age and move the live ones, then add this frame's new ones
             for (int i = _live.Count - 1; i >= 0; i--)
@@ -208,7 +233,14 @@ namespace MphRecomp.Campaign
                     Free(p);
                     continue;
                 }
-                p.Vel += ModVelocity(p);
+                p.Vel += ModVelocity(p, out bool kill);
+                if (kill)
+                {
+                    _live.RemoveAt(i);
+                    Free(p);
+                    continue;
+                }
+                p.PrevPos = p.Pos;
                 p.Pos += p.Vel;
             }
             if (Emitting && _frame < SysInt("PSLT", Int32.MaxValue))
@@ -224,12 +256,34 @@ namespace MphRecomp.Campaign
             _frame++;
         }
 
+        // Prime 1's child systems (CElementGen's ICTS / IITS / IDTS): ICTS, NCSY of them on frame CSSD; IITS, one every
+        // PISY frames from frame SISY while emitting; IDTS, NDSY of them as the emission ends (frame PSLT)
+        void ChildSystems()
+        {
+            if (_part["ICTS"] is Part.Elem icts && _frame == SysInt("CSSD", 0)) AddKids(icts.Id, SysInt("NCSY", 1));
+            int pslt = SysInt("PSLT", Int32.MaxValue);
+            if (_part["IITS"] is Part.Elem iits && Emitting && _frame < pslt)
+            {
+                int sisy = SysInt("SISY", 0), pisy = Math.Max(1, SysInt("PISY", 1));
+                if (_frame >= sisy && (_frame - sisy) % pisy == 0) AddKids(iits.Id, 1);
+            }
+            if (_part["IDTS"] is Part.Elem idts && _frame == pslt) AddKids(idts.Id, SysInt("NDSY", 1));
+        }
+
+        void AddKids(uint id, int n)
+        {
+            if (id == 0 || id == UInt32.MaxValue || _lib.Get(id) is not Part kid) return;
+            for (int i = 0; i < Math.Min(n, 16); i++) _kids.Add(new RetroParticleSystem(_lib, kid, id, Transform, Follow, _rand, this));
+        }
+
         void Emit()
         {
             Particle p = NewParticle();
             var c = new Ctx(p, _frame, 1);
-            p.Life = Math.Max(1, EvalInt(_part["LTME"], c, 1));
+            // Corruption keeps a 0 lifetime (drawn on its birth frame only)
+            p.Life = Math.Max(Mp3Rules ? 0 : 1, EvalInt(_part["LTME"], c, 1));
             c.Life = p.Life;
+            _made++;
             Vector3 pos = Vector3.Zero, vel = Vector3.Zero;
             Part.Elem? em = _part["EMTR"];
             if (em != null)
@@ -286,6 +340,8 @@ namespace MphRecomp.Campaign
                 p.Pos = Vector3.TransformPosition(pos, Transform);
                 p.Vel = Vector3.TransformVector(vel, Transform);
             }
+            // as if it had moved here: a LINE shows its length from its first frame
+            p.PrevPos = p.Pos - p.Vel;
             _live.Add(p);
         }
 
@@ -295,7 +351,7 @@ namespace MphRecomp.Campaign
         {
             if (_live.Count >= SysInt("MAXP", 256)) return;
             Particle p = NewParticle();
-            p.Pos = at;
+            p.Pos = p.PrevPos = at;
             p.Life = Math.Max(1, life);
             _live.Add(p);
         }
@@ -304,7 +360,7 @@ namespace MphRecomp.Campaign
 
         void Free(Particle p)
         {
-            p.Pos = p.Vel = Vector3.Zero;
+            p.Pos = p.Vel = p.PrevPos = Vector3.Zero;
             p.Age = p.Life = 0;
             p.Init.Clear();
             _free.Push(p);
@@ -324,17 +380,20 @@ namespace MphRecomp.Campaign
 
         static readonly string[] ModTags = { "PSVM", "VEL1", "VEL2", "VEL3", "VEL4" };
 
-        // PSVM / VEL1-4: the constant, gravity and wind kinds (the others are left out)
-        Vector3 ModVelocity(Particle p)
+        // PSVM / VEL1-4: the constant, gravity and wind kinds, and Corruption's IMPL / SWRL / SPHV (the others are left
+        // out); kill = an implosion took the particle
+        Vector3 ModVelocity(Particle p, out bool kill)
         {
+            kill = false;
             Vector3 d = Vector3.Zero;
             Ctx c = Of(p);
+            Matrix4? inv = null;
             foreach (string tag in ModTags)
             {
                 Part.Elem? m = _part[tag];
                 if (m == null) continue;
                 // CHAN (CMVETimeChain): the first until the switch frame, then the second
-                for (int n = 0; _part.Echoes && m != null && m.Kind == "CHAN" && n < 8; n++) m = c.Frame < EvalInt(m.Kid(2), c, 0) ? m.Kid(0) : m.Kid(1);
+                for (int n = 0; Retro && m != null && m.Kind == "CHAN" && n < 8; n++) m = c.Frame < EvalInt(m.Kid(2), c, 0) ? m.Kid(0) : m.Kid(1);
                 if (m == null) continue;
                 Vector3 v;
                 switch (m.Kind)
@@ -349,6 +408,18 @@ namespace MphRecomp.Campaign
                         v = (w - cur) * f;
                         break;
                     }
+                    case "IMPL" or "SWRL" or "SPHV" when Mp3Rules:
+                    {
+                        // on the velocity so far (Retro runs VEL1-4 in turn on one velocity), in the system's own space
+                        // (unscaled, as Retro's particle space: the effect's placement is applied when drawn)
+                        inv ??= Follow ? Matrix4.Identity : Transform.Inverted();
+                        Vector3 lp = Vector3.TransformPosition(p.Pos, inv.Value);
+                        Vector3 lv = Vector3.TransformVector(p.Vel + d, inv.Value);
+                        Vector3 nv = lv;
+                        if (Mp3Mod(m, c, ref nv, lp)) kill = true;
+                        v = nv - lv;
+                        break;
+                    }
                     default: continue;
                 }
                 d += Follow ? v : Vector3.TransformVector(v, Transform);
@@ -356,28 +427,103 @@ namespace MphRecomp.Campaign
             return d;
         }
 
+        // Corruption's pulls (PrimeDecomp CModVectorElement: CMVEImplosion, CMVESwirl, CMVESphereVolume) on a velocity at a
+        // position; true = the particle dies (inside an implosion's inner radius)
+        bool Mp3Mod(Part.Elem m, Ctx c, ref Vector3 vel, Vector3 pos)
+        {
+            switch (m.Kind)
+            {
+                case "IMPL":
+                {
+                    // toward the point by a fixed amount within maxMag; inside minMag (when enabled) it dies
+                    Vector3 dv = EvalVec(m.Kid(0), c) - pos;
+                    float dist = dv.Length;
+                    if (dist > EvalReal(m.Kid(2), c, 0)) return false;
+                    if (m.Kid(4)?.B == true && dist < EvalReal(m.Kid(3), c, 0)) return true;
+                    if (dist == 0) return false;
+                    vel += EvalReal(m.Kid(1), c, 0) * (dv / dist);
+                    return false;
+                }
+                case "SWRL":
+                {
+                    // round the helix axis (point, binormal): the velocity along the axis plus the tangential speed times
+                    // the axis cross the way to it, blended in by the filter gain
+                    Vector3 a = EvalVec(m.Kid(0), c), b = EvalVec(m.Kid(1), c);
+                    Vector3 toOrigin = a - pos;
+                    Vector3 toHelix = toOrigin - Vector3.Dot(toOrigin, b) * b;
+                    float gain = EvalReal(m.Kid(2), c, 0), tangential = EvalReal(m.Kid(3), c, 0);
+                    vel = (b * Vector3.Dot(b, vel) + Vector3.Cross(b, toHelix) * tangential) * gain + (1 - gain) * vel;
+                    return false;
+                }
+                case "SPHV":
+                {
+                    // the inner modifier only inside the sphere (it can't kill: its result is dropped)
+                    float r = EvalReal(m.Kid(1), c, 0);
+                    if (m.Kid(2) is Part.Elem inner && (pos - EvalVec(m.Kid(0), c)).LengthSquared < r * r)
+                    {
+                        Mp3Mod(inner, c, ref vel, pos);
+                    }
+                    return false;
+                }
+            }
+            return false;
+        }
+
         // the billboards to draw this frame (children included)
         public void Collect(List<RetroBillboard> into)
         {
             Part.Elem? tex = _part["TEXR"];
-            if (tex != null && tex.Id != 0 && _live.Count > 0)
+            // RDOP (PrimeDecomp CElementGen::Render, on by default): off = no sprites, so a PMUS system draws only its
+            // squares; LINE systems draw their lines either way. Corruption only
+            bool noSprites = Mp3Rules && !_part.Flag("LINE") && _part["RDOP"] is Part.Elem rdop && !rdop.B;
+            if (tex != null && tex.Id != 0 && _live.Count > 0 && !noSprites)
             {
                 float scale = Transform.Row0.Xyz.Length;
                 // Corruption: PBDM, a blend mode (0 alpha, else a glow: added)
                 bool additive = _part.Flag("AAPH") || _part["PBDM"] is Part.Elem bm && bm.Kind == "CNST" && bm.I != 0;
+                (RetroBlend blend, float glow) = Mp3Rules && _part["PBDM"] is Part.Elem bm3 && bm3.Kind == "CNST"
+                    ? RetroBlends.Mp3(bm3.I) : (RetroBlend.Default, 0f);
                 bool zbuf = _part.Flag("ZBUF");
-                bool oriented = _part.Echoes && _part.Flag("ORNT");
+                byte alphaFrom = AlphaFrom();
+                bool sorted = Mp3Rules && _part.Flag("SORT");
+                bool oriented = Retro && _part.Flag("ORNT");
+                // LINE (PrimeDecomp CElementGen::RenderLines): from the particle to LENG times its last move ahead (FXLL: times
+                // its direction), WIDT pixels wide; SIZE and ROTA unused. Corruption and Prime1Rules (Echoes keeps its sprites)
+                bool line = (Mp3Rules || P1) && _part.Flag("LINE");
                 Part.Elem? pofsE = _part["POFS"];
                 FlipbookSetup(tex, out int tilesX, out int tiles, out Vector4 tileSize, out Vector2 stride, out int cycle, out bool loop);
                 foreach (Particle p in _live)
                 {
                     var c = Of(p);
-                    float size = EvalReal(_part["SIZE"], c, 0.1f);
-                    if (size <= 0.0005f) continue;
+                    float size = line ? 0 : EvalReal(_part["SIZE"], c, 0.1f);
+                    if (!line && size <= 0.0005f) continue;
                     Vector4 col = EvalColor(_part["COLR"], c);
                     if (col.W <= 0.002f) continue;
                     Vector3 pos = Follow ? Vector3.TransformPosition(p.Pos, Transform) : p.Pos;
                     if (pofsE != null) pos += Vector3.TransformVector(EvalVec(pofsE, c), Transform);
+                    if (line)
+                    {
+                        Vector3 d = p.Pos - p.PrevPos;
+                        if (_part.Flag("FXLL") && d.LengthSquared > 1e-12f) d.Normalize();
+                        d *= EvalReal(_part["LENG"], c, 1);
+                        into.Add(new RetroBillboard
+                        {
+                            Position = pos,
+                            LineEnd = pos + (Follow ? Vector3.TransformVector(d, Transform) : d),
+                            LineWidthPx = MathF.Max(0.01f, EvalReal(_part["WIDT"], c, 1)),
+                            Color = col,
+                            Texture = tex.Id,
+                            Uv = tiles > 0 ? Flipbook(p.Age, tilesX, tiles, tileSize, stride, Cycle(tex, c, cycle), loop)
+                                : tex.Kind == "TEXP" ? AtlasFrame(tex, c) : default,
+                            Additive = additive,
+                            Blend = blend,
+                            Glow = glow,
+                            DepthWrite = zbuf,
+                            AlphaFrom = alphaFrom,
+                            Sorted = sorted,
+                        });
+                        continue;
+                    }
                     // ORNT (PrimeDecomp CElementGen::RenderParticles): along the velocity, else the last move, else +Z
                     Vector3 fore = Vector3.Zero;
                     if (oriented)
@@ -398,12 +544,20 @@ namespace MphRecomp.Campaign
                         Uv = tiles > 0 ? Flipbook(p.Age, tilesX, tiles, tileSize, stride, Cycle(tex, c, cycle), loop)
                             : tex.Kind == "TEXP" ? AtlasFrame(tex, c) : default,
                         Additive = additive,
+                        Blend = blend,
+                        Glow = glow,
                         DepthWrite = zbuf,
+                        AlphaFrom = alphaFrom,
+                        Sorted = sorted,
                     });
                 }
             }
             foreach (RetroParticleSystem k in _kids) k.Collect(into);
         }
+
+        // ALSC (Corruption, main.dol 0x80363e60): 0-2 take the texture's alpha from its red, green or blue (swap table
+        // ALSC + 1: RGBR, RGBG, RGBB); 3 or none, its own alpha. As RetroBillboard.AlphaFrom (1-3; 0: its own)
+        byte AlphaFrom() => Mp3Rules && _part["ALSC"] is Part.Elem al && al.Kind == "CNST" && al.I is >= 0 and <= 2 ? (byte)(al.I + 1) : (byte)0;
 
         // the model particles (PMDL), as Metaforce's CElementGen::RenderModels: each at its position plus PMOP (in the
         // system's turn), turned by PMRT (degrees: Z, then Y, then X about the turned axes) and scaled by PMSC, in the
@@ -420,6 +574,7 @@ namespace MphRecomp.Campaign
             {
                 uint squareTex = 0;
                 Vector4 squareUv = new(0, 0, 1, 1);
+                Part.Elem? ownTile = null;
                 if (square && _part["TEXR"] is Part.Elem tex && tex.Id is not (0 or UInt32.MaxValue))
                 {
                     squareTex = tex.Id;
@@ -427,10 +582,20 @@ namespace MphRecomp.Campaign
                     Particle first = _live[0];
                     if (tiles > 0) squareUv = Flipbook(first.Age, tilesX, tiles, tileSize, stride, Cycle(tex, Of(first), cycle), loop);
                     else if (tex.Kind == "TEXP") squareUv = AtlasFrame(tex, Of(first));
+                    // Corruption (main.dol 0x8036203c): a square whose UV isn't constant draws its own particle's tile
+                    // (kept beside its ADVs), not the first particle's
+                    if (Mp3Rules && tex.Kind == "TEXP") ownTile = tex;
                 }
                 if (square && squareTex == 0) { foreach (RetroParticleSystem k in _kids) k.CollectModels(into); return; }
-                bool additive = _part.Flag("PMAB"), worldAxes = _part.Flag("PMOO");
+                // Corruption: MBDM, the models' blend mode (0 alpha, else added), as PBDM for the sprites
+                bool additive = _part.Flag("PMAB") || Mp3Rules && _part["MBDM"] is Part.Elem mb && mb.Kind == "CNST" && mb.I != 0;
+                bool worldAxes = _part.Flag("PMOO");
                 Part.Elem? pmop = _part["PMOP"], pmrt = _part["PMRT"], pmsc = _part["PMSC"], pmcl = _part["PMCL"];
+                // Corruption PMOV (main.dol 0x803628a0): the model looks along it (LookAt from 0 to it, up +Z: its +Y on
+                // it), after PMRT; in the system's own space (a world velocity, not following, is taken back into it)
+                Part.Elem? pmov = Mp3Rules ? _part["PMOV"] : null;
+                Matrix4 unturn = pmov != null && !Follow ? Matrix4.Invert(Transform.ClearTranslation()) : Matrix4.Identity;
+                byte alphaFrom = AlphaFrom();
                 // the system's turn and scale (effect -> world, no move); PMOO: its scale only
                 Matrix4 turn = Transform.ClearTranslation();
                 if (worldAxes) turn = Matrix4.CreateScale(Transform.Row0.Xyz.Length);
@@ -441,21 +606,40 @@ namespace MphRecomp.Campaign
                     Matrix4 local = Matrix4.CreateScale(sc)
                         * Matrix4.CreateRotationX(MathHelper.DegreesToRadians(r.X))
                         * Matrix4.CreateRotationY(MathHelper.DegreesToRadians(r.Y))
-                        * Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(r.Z))
-                        * Matrix4.CreateTranslation(pmop != null ? EvalVec(pmop, c) : Vector3.Zero);
+                        * Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(r.Z));
+                    if (pmov != null)
+                    {
+                        Vector3 v = EvalVec(pmov, c);
+                        if (!Follow) v = Vector3.TransformVector(v, unturn);
+                        if (LookAlong(v) is Matrix4 look) local *= look;
+                    }
+                    local *= Matrix4.CreateTranslation(pmop != null ? EvalVec(pmop, c) : Vector3.Zero);
                     Vector3 at = Follow ? Vector3.TransformPosition(p.Pos, Transform) : p.Pos;
                     into.Add(new RetroModelParticle
                     {
                         Model = square ? 0 : pmdl!.Id,
                         Texture = squareTex,
-                        Uv = squareUv,
+                        Uv = ownTile != null ? AtlasFrame(ownTile, c) : squareUv,
                         Transform = local * turn * Matrix4.CreateTranslation(at),
                         Color = pmcl != null ? EvalColor(pmcl, c) : Vector4.One,
                         Additive = additive,
+                        AlphaFrom = alphaFrom,
                     });
                 }
             }
             foreach (RetroParticleSystem k in _kids) k.CollectModels(into);
+        }
+
+        // Retro's CTransform::LookAt (0 -> v, up +Z) as a turn (row vectors): +X right (v x up), +Y along v, +Z up; none
+        // when v is (nearly) zero or along +Z
+        static Matrix4? LookAlong(Vector3 v)
+        {
+            if (v.LengthSquared < 1e-12f) return null;
+            Vector3 look = v.Normalized(), right = Vector3.Cross(look, Vector3.UnitZ);
+            if (right.LengthSquared < 1e-8f) return null;
+            right.Normalize();
+            Vector3 up = Vector3.Cross(right, look);
+            return new Matrix4(new Vector4(right, 0), new Vector4(look, 0), new Vector4(up, 0), Vector4.UnitW);
         }
 
         // ATEX (Metaforce's CUVEAnimTexture): the texture cut into tiles (stride apart, tile-sized), counted from its
@@ -481,13 +665,15 @@ namespace MphRecomp.Campaign
         }
 
         // TEXP (Corruption): the texture cut into tiles (its two ints wide / high), the tile its real picks, counted from
-        // the top-left along the row
+        // the top-left along the row. Mp3Rules: the real spans all the tiles 0..1 (main.dol 0x803e0660: tile =
+        // trunc(real * tiles), clamped), so the lightning's IRND(0,1) PAP1 picks any of its 16 bolts
         Vector4 AtlasFrame(Part.Elem tex, Ctx c)
         {
             if (_lib.TextureSize(tex.Id) is not (int w, int h) || w <= 0 || h <= 0) return default;
             int tw = Math.Max(1, EvalInt(tex.Kid(0), c, w)), th = Math.Max(1, EvalInt(tex.Kid(1), c, h));
             int cols = Math.Max(1, w / tw), rows = Math.Max(1, h / th);
-            int tile = Math.Clamp((int)EvalReal(tex.Kid(2), c, 0), 0, cols * rows - 1);
+            float pick = EvalReal(tex.Kid(2), c, 0);
+            int tile = Math.Clamp((int)(Mp3Rules ? pick * cols * rows : pick), 0, cols * rows - 1);
             float u0 = tile % cols * tw / (float)w, v0 = tile / cols * th / (float)h;
             return new Vector4(u0, v0, u0 + tw / (float)w, v0 + th / (float)h);
         }
@@ -499,6 +685,19 @@ namespace MphRecomp.Campaign
             float[] k = e.Keys!;
             int n = k.Length / width;
             if (n == 0) return 0;
+            if (Mp3Rules)
+            {
+                // Corruption's own lookup (main.dol: real 0x803b6f7c, int 0x80378054; the int one truncates): key =
+                // trunc((v - start) * keys per unit), wrapped from the loop start past the end or held at the last; a
+                // blend toward the next key only between the ends, by the driver distance past the key, clamped 0..1
+                float d = EvalReal(e.Kid(0), c, 0) - e.KeyStart;
+                int j = Math.Max(0, (int)(d * e.F));
+                if (!e.Loop) j = Math.Min(j, n - 1);
+                else if (j >= n) j = n - e.LoopStart > 0 ? (j - e.LoopStart) % (n - e.LoopStart) + e.LoopStart : n - 1;
+                if (j <= 0 || j >= n - 1) return k[j * width + comp];
+                float t = Math.Clamp(d - j / e.F, 0, 1);
+                return (1 - t) * k[j * width + comp] + t * k[(j + 1) * width + comp];
+            }
             float span = e.F > 1e-6f ? e.F : n - 1;
             float x = Math.Clamp(EvalReal(e.Kid(0), c, 0) / span, 0, 1) * (n - 1);
             int i = Math.Min((int)x, n - 1);
@@ -535,8 +734,16 @@ namespace MphRecomp.Campaign
         // a particle's context. Retro's frame-keyed KEYE (CREKeyframeEmitter, not percent) reads the emitter's own time
         // (CParticleGlobals m_EmitterTime: the generator's frame), whatever the particle's age; done for Echoes' effects
         // (the Shooting Gallery turret's: its lift rings stretch once as the lift starts, not each time a ring is
-        // replaced), the Prime 1 / Corruption ones keep the particle's age as before
-        Ctx Of(Particle p) => new(p, p.Age, p.Life) { Emitter = _part.Echoes ? _frame : -1 };
+        // replaced) and the Hyper Beam's (Retro), the other Prime 1 / Corruption ones keep the particle's age as before
+        Ctx Of(Particle p) => new(p, p.Age, p.Life) { Emitter = Retro ? _frame : -1 };
+
+        // Retro's own rules (ORNT, frame-keyed KEYE, CHAN, ANGC's +Z cone, CIRC): Echoes' effects, and Corruption's where
+        // the library asks for them (RetroParticles.RetroRules: the Hyper Beam's); the others keep what they were tuned
+        // with. Mp3Rules alone (LINE, MBDM): only those Corruption ones
+        bool Retro => _part.Echoes || Mp3Rules || P1;
+        bool Mp3Rules => _part.Mp3 && _lib.RetroRules;
+        // Prime 1 effects in a library that asks for Retro's rules (RetroParticles.Prime1Rules)
+        bool P1 => !_part.Echoes && !_part.Mp3 && _lib.Prime1Rules;
 
         float Rnd() => (float)_rand.NextDouble();
 
@@ -614,9 +821,9 @@ namespace MphRecomp.Campaign
                 case "ILPT": return (int)(Math.Max(0, EvalInt(e.Kid(0), c, 0)) / 100f * c.Life + 0.5f);
                 case "IMPL": return EvalInt(e.Kid(0), c, 0);
                 case "KEYF": return (int)KeyedBy(e, c);
-                // CRETimeChain's kinds: the first until the switch frame, then the second (Echoes effects only for now: the
-                // other games' effects were tuned without it)
-                case "CHAN" when _part.Echoes: return c.Frame < EvalInt(e.Kid(2), c, 0) ? EvalInt(e.Kid(0), c, 0) : EvalInt(e.Kid(1), c, 0);
+                // CRETimeChain's kinds: the first until the switch frame, then the second (Retro: the other effects were
+                // tuned without it)
+                case "CHAN" when Retro: return c.Frame < EvalInt(e.Kid(2), c, 0) ? EvalInt(e.Kid(0), c, 0) : EvalInt(e.Kid(1), c, 0);
             }
             return dflt;
         }
@@ -653,13 +860,15 @@ namespace MphRecomp.Campaign
                 case "VXTR": return EvalVec(e.Kid(0), c).X;
                 case "VYTR": return EvalVec(e.Kid(0), c).Y;
                 case "VZTR": return EvalVec(e.Kid(0), c).Z;
-                case "CEXT": return EvalInt(e.Kid(0), c, 0);
+                // Corruption: the system's external variable n (set only by scripts; none here: 0)
+                case "CEXT": return Mp3Rules ? 0 : EvalInt(e.Kid(0), c, 0);
                 case "PSLL": case "PRLW": return c.Frame;
-                case "CHAN" when _part.Echoes: return c.Frame < EvalInt(e.Kid(2), c, 0) ? EvalReal(e.Kid(0), c, 0) : EvalReal(e.Kid(1), c, 0);
+                case "CHAN" when Retro: return c.Frame < EvalInt(e.Kid(2), c, 0) ? EvalReal(e.Kid(0), c, 0) : EvalReal(e.Kid(1), c, 0);
                 // Corruption
                 case "KEYF": return KeyedBy(e, c);
                 case "KPIN": return HasInitial(e, c, out float kv) ? kv : KeepInitial(e, c, EvalReal(e.Kid(0), c, 0)); // its value at birth
-                case "GTCP": return LiveParticles;
+                // Corruption: the particles this system has made so far (CElementGen +0x308; the one being made isn't counted)
+                case "GTCP": return Mp3Rules ? _made : LiveParticles;
                 // a particle's advanced value n (ADVn, kept per particle: its IRNDs once at birth)
                 case "PAP1": case "PAP2": case "PAP3": case "PAP4": case "PAP5": case "PAP6": case "PAP7": case "PAP8":
                     return c.P != null && _part[AdvTags[e.Kind[3] - '1']] is Part.Elem adv ? EvalReal(adv, c, 0) : 0;
@@ -679,7 +888,7 @@ namespace MphRecomp.Campaign
                 case "SUB_": return EvalVec(e.Kid(0), c) - EvalVec(e.Kid(1), c);
                 case "MULT": return EvalVec(e.Kid(0), c) * EvalVec(e.Kid(1), c);
                 case "RTOV": return new Vector3(EvalReal(e.Kid(0), c, 0));
-                case "CHAN" when _part.Echoes: return c.Frame < EvalInt(e.Kid(2), c, 0) ? EvalVec(e.Kid(0), c) : EvalVec(e.Kid(1), c);
+                case "CHAN" when Retro: return c.Frame < EvalInt(e.Kid(2), c, 0) ? EvalVec(e.Kid(0), c) : EvalVec(e.Kid(1), c);
                 case "PULS": return PulseA(e, c) ? EvalVec(e.Kid(2), c) : EvalVec(e.Kid(3), c);
                 case "ANGC":
                 {
@@ -688,9 +897,9 @@ namespace MphRecomp.Campaign
                     float xr = EvalReal(e.Kid(2), c, 0), yr = EvalReal(e.Kid(3), c, 0), mag = EvalReal(e.Kid(4), c, 0);
                     float ax = MathHelper.DegreesToRadians(xb + xr * (Rnd() - 0.5f));
                     float az = MathHelper.DegreesToRadians(yb + yr * (Rnd() - 0.5f));
-                    // Echoes: Retro's own cone about +Z (PrimeDecomp CVEAngleCone: (-sin y cos x, sin x, cos x cos y)); the
+                    // Retro: its own cone about +Z (PrimeDecomp CVEAngleCone: (-sin y cos x, sin x, cos x cos y)); the
                     // others keep the +Y cone they were tuned with
-                    if (_part.Echoes) return new Vector3(-MathF.Sin(az) * MathF.Cos(ax), MathF.Sin(ax), MathF.Cos(ax) * MathF.Cos(az)) * mag;
+                    if (Retro) return new Vector3(-MathF.Sin(az) * MathF.Cos(ax), MathF.Sin(ax), MathF.Cos(ax) * MathF.Cos(az)) * mag;
                     float y = mag * MathF.Cos(ax), z = mag * MathF.Sin(ax);
                     return new Vector3(-y * MathF.Sin(az), y * MathF.Cos(az), z);
                 }
@@ -703,8 +912,9 @@ namespace MphRecomp.Campaign
                     if (len < 1e-6f) return Vector3.Zero;
                     return Vector3.Normalize(dir / len + RandomDir() * Math.Clamp(spread, 0, 1)) * len;
                 }
+                case "PVEL" when Mp3Rules: return c.P?.Vel ?? Vector3.Zero; // the particle's velocity
                 case "RNDV": return RandomDir() * EvalReal(e.Kid(0), c, 0); // Corruption: a random direction this long
-                case "CIRC" when _part.Echoes:
+                case "CIRC" when Retro:
                 {
                     // CVECircle: a point on a ring about the centre, in the plane across the normal, at the angle constant +
                     // linear x frame (degrees) and the radius (Shooting Gallery's column bolts: 2.5 up, 70 degrees on per
@@ -756,6 +966,14 @@ namespace MphRecomp.Campaign
                 case "ADD_": return EvalColor(e.Kid(0), c) + EvalColor(e.Kid(1), c);
                 case "SUB_": return EvalColor(e.Kid(0), c) - EvalColor(e.Kid(1), c);
                 case "VRTC": return new Vector4(EvalVec(e.Kid(0), c), EvalReal(e.Kid(1), c, 1));
+                case "MDAO": { Vector4 m = EvalColor(e.Kid(0), c); m.W *= EvalReal(e.Kid(1), c, 1); return m; }
+                case "KPIN" when e.Kids.Length == 4:   // Echoes: the colour at birth, kept per particle
+                {
+                    if (HasInitial(e, c, out float r) && HasInitial(e.Kid(1)!, c, out float g) && HasInitial(e.Kid(2)!, c, out float b) && HasInitial(e.Kid(3)!, c, out float a)) return new Vector4(r, g, b, a);
+                    Vector4 v = EvalColor(e.Kid(0), c);
+                    KeepInitial(e, c, v.X); KeepInitial(e.Kid(1)!, c, v.Y); KeepInitial(e.Kid(2)!, c, v.Z); KeepInitial(e.Kid(3)!, c, v.W);
+                    return v;
+                }
             }
             return Vector4.One;
         }

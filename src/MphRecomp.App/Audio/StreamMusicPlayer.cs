@@ -4,6 +4,7 @@ using MphRecomp.App.Platform;
 using MphRecomp.Arenas;
 using MphRecomp.Import.Retro;
 using MphRecomp.PrimeMusic;
+using MphRecomp.Holiday;
 
 namespace MphRecomp.App;
 
@@ -26,7 +27,11 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, Syst
         public long Delay; // frames of silence before it starts
         public bool Leaving; // fading out: dropped at level 0
         public bool Repeat; // a song that doesn't loop starts over at its end (a match's or the menu's song)
+        public required int LoopStart, LoopEnd; // the looped range (a reader's Position jumps from LoopEnd to LoopStart)
+        public HolidayBells.Voices? Bells; // HOLIDAY MODE's sleigh bells on this song's grid
     }
+
+    readonly float[] _bellMix = new float[ChunkFrames * 2];
 
     readonly object _gate = new();
     readonly List<Voice> _voices = new(); // under _gate
@@ -89,6 +94,10 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, Syst
                 Step = fadeIn > 0 ? 1f / (fadeIn * rate) : 0,
                 Delay = (long)(delay * rate),
                 Repeat = repeat,
+                LoopStart = stream.Loops ? stream.LoopStart : 0,
+                LoopEnd = stream.Loops ? stream.LoopEnd : int.MaxValue,
+                Bells = (HolidayBells.For(stream) ?? (stream is Rs03Music rs ? HolidayBells.For(rs.Stream) : null)) is HolidayBells.Song song
+                    ? new HolidayBells.Voices(song) : null,
             });
             if (!_hostPaused) _track?.Play();
             _wake.Set();
@@ -133,6 +142,15 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, Syst
             _hostPaused = false;
             if (_voices.Count > 0) _track?.Play();
             _resume.Set();
+        }
+    }
+
+    // GameMusicPlayer.DropFadedQueue: while paused, what the track holds was written during the fade out (silence)
+    public void DropQueued()
+    {
+        lock (_gate)
+        {
+            if (_hostPaused && _track != null) _track.Flush();
         }
     }
 
@@ -218,7 +236,10 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, Syst
             }
             if (f < ChunkFrames)
             {
+                long p0 = v.Reader.Position;
+                float level0 = v.Level;
                 int n = v.Reader.Read(_pcm, ChunkFrames - f);
+                if (v.Bells != null && n > 0) MixBells(v, p0, f, n, level0);
                 int ch = v.Channels;
                 const float Scale = 1f / 32768;
                 for (int k = 0; k < n; k++)
@@ -245,6 +266,29 @@ internal sealed class StreamMusicPlayer : ArenaMusic.IOutput, IMusicOutput, Syst
             }
         }
         return ChunkFrames;
+    }
+
+    // the voice's bells over the frames it just read from stream position p0 (split where it jumped back to the loop
+    // start), into _mix from frame f, under the voice's fade
+    void MixBells(Voice v, long p0, int f, int n, float level)
+    {
+        HolidayBells.Voices bells = v.Bells!;
+        long a = p0;
+        int done = 0;
+        while (done < n)
+        {
+            int part = (int)System.Math.Min(n - done, System.Math.Max(1, v.LoopEnd - a));
+            bells.Times(a / (double)_rate, (a + part) / (double)_rate, f + done, _rate);
+            done += part;
+            a = a + part >= v.LoopEnd ? v.LoopStart : a + part;
+        }
+        // the bell clock is this chunk's mix frames (0 = the chunk's first frame), so ringing bells carry over chunks
+        // through Mix's own offsets
+        System.Span<float> span = _bellMix.AsSpan(0, ChunkFrames * 2);
+        span.Clear();
+        bells.Mix(span, 0, _rate, level, clamp: false);
+        bells.Shift(ChunkFrames);
+        for (int k = 0; k < span.Length; k++) _mix[k] += span[k];
     }
 
     void Write(IPcmTrack track, int count, int cuts)

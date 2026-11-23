@@ -24,26 +24,27 @@ Second Hunt is **source-available** software — the source is published to be
 read, studied, and built for personal use, but it is **not open source** and is
 not licensed for redistribution.
 
-Second Hunt's own code was published here under the MIT License up to October 20,
-2026. Copies of that code keep that license, and this change cannot revoke it.
-From October 20, 2026 on, the original Second Hunt code, art, and documents
-authored by the copyright holder are Copyright (c) 2026 BountyHunterKanden, all
-rights reserved, and are published under the **PolyForm Strict License 1.0.0**
-(with an additional permission for personal modification), as set out in the
-root `LICENSE` file. You may read, build, and privately modify that code for
-your own personal, noncommercial use; you may not redistribute it in source or
-modified form, and you may not redistribute builds of it except the official
-unmodified releases.
+Second Hunt's own code was published here under the MIT License up to and
+including the v0.3.6-beta release (October 20, 2026). Copies of that code keep
+that license, and this change cannot revoke it. From the commit "Second Hunt is
+closed source now" (`d08df55`, later that same day) on, the original Second Hunt
+code, art, and documents authored by the copyright holder are Copyright (c) 2026
+BountyHunterKanden, all rights reserved, and are published under the **PolyForm
+Strict License 1.0.0** (with an additional permission for personal
+modification), as set out in the root `LICENSE` file. You may read, build, and
+privately modify that code for your own personal, noncommercial use; you may not
+redistribute it in source or modified form, and you may not redistribute builds
+of it except the official unmodified releases.
 
-The upstream MphRead code (`LICENSE-MphRead`), the pre-October-20-2026 Second
-Hunt code, and the third-party libraries (`THIRD_PARTY_NOTICES.md`) are **not**
+The upstream MphRead code (`LICENSE-MphRead`), the Second Hunt code published
+up to v0.3.6-beta, and the third-party libraries (`THIRD_PARTY_NOTICES.md`) are **not**
 restricted by that license and stay under their own permissive licenses.
 
 **Which license covers which file.** A file that was authored by the copyright
-holder and first added on or after October 20, 2026 is under the root `LICENSE`.
-A file that comes from upstream MphRead, or was modified from an upstream file,
-keeps its MIT notice and is under `LICENSE-MphRead`. A file first published here
-before October 20, 2026 stays MIT. Files that embed third-party code carry an
+holder and first added after v0.3.6-beta (from `d08df55` on) is under the root
+`LICENSE`. A file that comes from upstream MphRead, or was modified from an
+upstream file, keeps its MIT notice and is under `LICENSE-MphRead`. A file first
+published here up to and including v0.3.6-beta stays MIT. Files that embed third-party code carry an
 inline attribution header naming the source and its license (for example
 `src/MphRecomp.Core/Import/Retro/Anim.cs` and `.../Lzo1x.cs`).
 

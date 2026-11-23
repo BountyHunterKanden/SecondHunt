@@ -91,6 +91,7 @@ namespace MphRecomp.Frontend
             Add("xc", s.ExtraCharacters);
             // a gameplay mod's mode (MatchSettings.ModMode), offline matches only: never written with a net role
             if (net == null && s.ModMode != null) parts.Add("mm=" + Uri.EscapeDataString(s.ModMode));
+            if (net == null && s.SideView) parts.Add("sv=1"); // dev side view (MultiplayerMenu.SideView.cs), offline only
             foreach (MatchPlayer p in s.Players)
             {
                 parts.Add(string.Create(ci, $"p={p.Hunter},{p.Recolor},{p.Team},{(p.Bot ? 1 : 0)},{(p.Remote ? 1 : 0)},{p.BotLevel},")
@@ -130,6 +131,7 @@ namespace MphRecomp.Frontend
                 case "xp": s.PirateBlaster = Bool(); break;
                 case "xc": s.ExtraCharacters = Bool(); break;
                 case "mm": s.ModMode = Uri.UnescapeDataString(value); break;
+                case "sv": s.SideView = Bool(); break;
                 case "net": break; // NetRole
                 case "p":
                 {

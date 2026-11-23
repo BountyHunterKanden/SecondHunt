@@ -781,15 +781,21 @@ namespace MphRecomp.Replay
         public sealed class KeyframeLoader
         {
             readonly KeyframeBase _base;
+            readonly KeyframeMap? _map; // (instant seek always) another process's walk, matched by name; null = this walk
+            readonly int _baseCount; // the writing copy's step-0 object count (ids from here on are made after step 0)
             readonly Dictionary<int, object> _made = new();
             readonly HashSet<object> _loaded = new(ReferenceEqualityComparer.Instance);
+            readonly HashSet<object> _fresh = new(ReferenceEqualityComparer.Instance); // prepared step-0 objects made fresh here
+            FieldInfo? _field; // (the refusal names it) the field being read
             BinaryReader _r = null!;
             Type[] _types = Array.Empty<Type>();
             static readonly Dictionary<(Type, int), MethodInfo> _methods = new();
 
-            public KeyframeLoader(KeyframeBase b)
+            public KeyframeLoader(KeyframeBase b, KeyframeMap? map = null)
             {
                 _base = b;
+                _map = map;
+                _baseCount = map?.PreparedObjects ?? b.ObjectCount;
             }
 
             public int Step { get; private set; }
@@ -803,7 +809,10 @@ namespace MphRecomp.Replay
                 if (_r.ReadUInt32() != KeyframeMagic || _r.ReadInt32() != KeyframeVersion) return "not a keyframe of this version";
                 int step = _r.ReadInt32();
                 int deltaFrom = _r.ReadInt32();
-                if (_r.ReadInt32() != _base.ObjectCount || _r.ReadInt32() != _base.LeafCount || _r.ReadUInt64() != _base.Signature)
+                int objects = _r.ReadInt32(), leaves = _r.ReadInt32();
+                ulong signature = _r.ReadUInt64();
+                if (_map != null ? objects != _map.PreparedObjects || leaves != _map.PreparedLeaves
+                    : objects != _base.ObjectCount || leaves != _base.LeafCount || signature != _base.Signature)
                 {
                     return "the match started differently here (step-0 walk differs)";
                 }
@@ -816,8 +825,13 @@ namespace MphRecomp.Replay
                     if (t == null) return "unknown type " + name;
                     _types[i] = t;
                 }
-                if (deltaFrom < 0) _made.Clear();
+                if (deltaFrom < 0)
+                {
+                    _made.Clear();
+                    _fresh.Clear();
+                }
                 _loaded.Clear();
+                _field = null;
                 int declared = _r.Read7BitEncodedInt();
                 var found = new HashSet<object>(ReferenceEqualityComparer.Instance);
                 for (int i = 0; i < declared; i++)
@@ -858,12 +872,20 @@ namespace MphRecomp.Replay
                     _made[id] = o;
                 }
                 int statics = _r.Read7BitEncodedInt();
-                if (statics != _staticFields.Count) return "a different set of static fields";
+                if (statics != (_map?.Statics.Length ?? _staticFields.Count)) return "a different set of static fields";
                 var staticValues = new object?[statics];
-                for (int i = 0; i < statics; i++) staticValues[i] = ReadValue(_staticFields[i].FieldType);
                 for (int i = 0; i < statics; i++)
                 {
-                    if (!_staticFields[i].IsInitOnly) _staticFields[i].SetValue(null, staticValues[i]);
+                    _field = _map?.Statics[i] ?? _staticFields[i];
+                    staticValues[i] = ReadValue(_field.FieldType);
+                }
+                for (int i = 0; i < statics; i++)
+                {
+                    // (a static only the prepared copy walks: read past, left as this copy has it)
+                    if (_map != null ? _map.SetStatic[i] : !_staticFields[i].IsInitOnly)
+                    {
+                        (_map?.Statics[i] ?? _staticFields[i]).SetValue(null, staticValues[i]);
+                    }
                 }
                 LastSkipped = 0;
                 while (true)
@@ -889,14 +911,38 @@ namespace MphRecomp.Replay
                 return null;
             }
 
-            object Obj(int id) => id < _base.ObjectCount ? _base.Obj(id) : _made[id];
+            object Obj(int id)
+            {
+                if (id >= _baseCount) return _made[id];
+                if (_map == null) return _base.Obj(id);
+                if (_map.Objects[id] is object o) return o;
+                // (a step-0 object only the prepared copy has, an array grown to another length here...) made fresh, the
+                // keyframe fills it like one made after step 0
+                if (!_made.TryGetValue(id, out o!))
+                {
+                    o = _map.ObjectLengths[id] is int[] lengths
+                        ? Array.CreateInstance(_map.ObjectTypes[id].GetElementType()!, lengths)
+                        : RuntimeHelpers.GetUninitializedObject(_map.ObjectTypes[id]);
+                    _made[id] = o;
+                    _fresh.Add(o);
+                }
+                return o;
+            }
+
+            Type? _array; // (or, between fields) the array whose elements are being read
+
+            string Where => _field != null ? $"{_field.DeclaringType?.Name}.{_field.Name}"
+                : _array != null ? $"a {_array.Name}'s element" : "a keyframe record";
 
             void ReadContents(object o)
             {
                 Type t = o.GetType();
                 TypeInfo info = Info(t);
+                _array = null;
                 if (o is Array array)
                 {
+                    _field = null;
+                    _array = t;
                     if (_r.ReadByte() == 1)
                     {
                         if (id0(o)) LastSkipped++;
@@ -920,6 +966,7 @@ namespace MphRecomp.Replay
                             }
                             object? v = ReadValue(e);
                             if (v != Keep) array.SetValue(v, index);
+                            else if (_fresh.Contains(o)) throw new InvalidDataException($"{Where}: file data kept in a {t.Name} this copy doesn't have");
                         }
                         return;
                     }
@@ -935,6 +982,7 @@ namespace MphRecomp.Replay
                         {
                             object? v = ReadRef();
                             if (v != Keep) refs[i] = v;
+                            else if (_fresh.Contains(o)) throw new InvalidDataException($"{Where}: file data kept in a {t.Name} this copy doesn't have");
                         }
                         return;
                     }
@@ -945,9 +993,11 @@ namespace MphRecomp.Replay
                 object?[]? current = null;
                 for (int j = 0; j < values.Length; j++)
                 {
+                    _field = info.Fields[j];
                     values[j] = ReadValue(info.Fields[j].FieldType);
                     if (values[j] == Keep)
                     {
+                        if (_fresh.Contains(o)) throw new InvalidDataException($"{Where}: file data kept in a {t.Name} this copy doesn't have");
                         if (current == null)
                         {
                             current = new object?[values.Length];
@@ -999,7 +1049,12 @@ namespace MphRecomp.Replay
                 case 1:
                     return Obj(_r.Read7BitEncodedInt());
                 case 2:
-                    return _base.Leaves[_r.Read7BitEncodedInt()];
+                {
+                    int leaf = _r.Read7BitEncodedInt();
+                    if (_map == null) return _base.Leaves[leaf];
+                    return _map.Leaves[leaf]
+                        ?? throw new InvalidDataException($"{Where} holds a {_map.LeafTypes[leaf].Name} this copy doesn't have");
+                }
                 case 3:
                     return _r.ReadString();
                 case 4:

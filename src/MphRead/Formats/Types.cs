@@ -78,6 +78,9 @@ namespace MphRead
         // recomp: at most one of its polygon ID's fragments per pixel in the front layer, the DS rule within the ID itself
         // (LayeredDraw.DrawFrontLayerItems); the cloaked first-person gun (PlayerDraw)
         public bool HostOneLayer { get; set; }
+        // recomp: part of the first-person gun's view (the gun, its smoke and its muzzle effects, PlayerDraw +
+        // PlayerSmoothFx.cs): the host draws it with the default FOV's projection whatever its FOV setting
+        public bool HostViewmodel { get; set; }
 
         public RenderItem()
         {

@@ -11,7 +11,7 @@ namespace MphRecomp.FirstHunt
     // it fading in and out at random spots; the touch screen's controls in the middle, without their own background; the
     // top screen's description band (the page's 3D up there) at the bottom; the frame's lightning on the canvas's edges.
     // The stylus trail lights the grid anywhere on the canvas. Pages whose top screen is the content (the score tables,
-    // the lobby's cards, the control type, the name editor's help) show it as a panel beside the controls. The title is one
+    // the lobby's cards, the control type, the name editor's help) show it on the canvas beside the controls (owner 11-12: one screen, no panel). The title is one
     // picture (owner, 2026-10-14: combined, not a panel): its logo picture large, centred, undimmed and on the canvas's foot, faded into
     // the grid, the touch screen's button and copyright under it.
     public sealed class FhScreenLayout
@@ -33,12 +33,18 @@ namespace MphRecomp.FirstHunt
             "title", "records", "host_start", "configuration", "edit_name_2", "training_hi_score", "multi_hi_score",
         };
 
-        // pages whose top-screen picture is its content (the control types' drawings and words, the name editor's help, the
-        // logo): the canvas takes the main menu's picture instead of that one blown up behind its own panel
         // pages whose score table goes on the canvas itself, beside the controls, on one screen (owner, 2026-10-21): the
         // header strip across the top as the one-screen pages', the table without its own picture, no box
-        private static readonly HashSet<string> ScorePages = new() { "training_hi_score", "multi_hi_score" };
+        // and the other content pages the same way (owner 11-12: records and the name editor "not hybrid one screen yet"):
+        // each one's content columns on the top screen, and whether its picture is that content (drawn with it)
+        private static readonly Dictionary<string, (float Left, float Right, bool Picture)> ScorePages = new()
+        {
+            ["training_hi_score"] = (24, 224, false), ["multi_hi_score"] = (4, 254, false), ["records"] = (24, 224, false),
+            ["edit_name_2"] = (0, 256, true), ["configuration"] = (0, 256, true), ["host_start"] = (0, 256, false),
+        };
 
+        // pages whose top-screen picture is its content (the control types' drawings and words, the name editor's help, the
+        // logo): the canvas takes the main menu's picture instead of that one blown up behind it
         private static readonly HashSet<string> BorrowArt = new() { "title", "configuration", "edit_name_2" };
         private readonly List<WidgetTri> _art = new();
 
@@ -99,7 +105,7 @@ namespace MphRecomp.FirstHunt
                 // one unit = a DS pixel of a 240-tall canvas (320 wide at the least)
                 float u = MathF.Min(_h / 240, _w / 320);
                 _title = page == "title" && !TitlePanel;
-                _split = page != null && ScorePages.Contains(page) && !ScorePanel;
+                _split = page != null && ScorePages.ContainsKey(page) && !ScorePanel;
                 _panel = page != null && PanelPages.Contains(page) && !_title && !_split;
                 if (_title)
                 {
@@ -121,8 +127,8 @@ namespace MphRecomp.FirstHunt
                     // screen columns 14-246) side by side, 8 DS pixels apart, clear of the lightning on each edge; both
                     // screens' tops on the canvas's, as the one-screen pages' touch screen (its header strip up top, the
                     // table's head just under it and the moving top line, 12 rows down)
-                    bool multi = page == "multi_hi_score";
-                    float table0 = multi ? 4 : 24, table1 = multi ? 254 : 224, drop = 12;
+                    (float table0, float table1, _) = ScorePages[page!];
+                    const float drop = 12;
                     const float ctl0 = 14, ctl1 = 246, gap = 8;
                     float span = table1 - table0 + gap + ctl1 - ctl0;
                     float s = Snap(MathF.Min(0.95f * u, (_w - 52 * u) / span));
@@ -173,13 +179,19 @@ namespace MphRecomp.FirstHunt
             float a = MathF.Max(_w / 256, _h / 192);
             var art = new Rect((_w - 256 * a) / 2, (_h - 192 * a) / 2, a);
             List<WidgetTri> picture = tris;
+            bool mainArt = menus.PageName == "main_menu";
             if (_title) TitleArt(list, tris);
             else if (BorrowArt.Contains(menus.PageName))
             {
                 _art.Clear();
                 menus.EvaluateBackdrop("main_menu", _art);
                 picture = _art;
+                mainArt = true;
             }
+            // the main menu's picture: its top on the canvas's, the crop all from its foot, so Samus's head (rows 2-25 at
+            // the top right) shows whole on a canvas wider than 4:3 (owner 11-12: "you should be able to see all of samus
+            // head"); still covering the canvas (no smaller: its width already just fills a wide one)
+            if (mainArt) art = new Rect(art.X, 0, a);
             if (!_title)
             {
                 foreach (WidgetTri t in picture)
@@ -207,6 +219,14 @@ namespace MphRecomp.FirstHunt
                 {
                     string node = menus.NodeOf(t.Item).Node;
                     if (node.StartsWith("frameBar") || node.StartsWith("lightning") || node.StartsWith("headerBar")) continue;
+                }
+                if (tag == FhMenuData.Popup + 1 && menus.NodeOf(t.Item).Node == "bgOverlay")
+                {
+                    // the popup's dimming of the whole touch screen: the whole canvas (not a 4:3 block of it)
+                    UiVertex Stretch(UiVertex v) { v.X = v.X / 256 * _w; v.Y = -v.Y / 192 * _h; return v; }
+                    list.Clip = UiRect.None;
+                    list.Triangle(t.TextureId, t.WrapS, t.WrapT, UiBlend.Alpha, Stretch(t.A), Stretch(t.B), Stretch(t.C));
+                    continue;
                 }
                 // (the page's buttons grow past their screen's box when pressed: only the frame's pieces stay clipped to it)
                 list.Clip = tag == FhFrontend.TagFrame ? _bottom.Clip : UiRect.None;
@@ -237,8 +257,8 @@ namespace MphRecomp.FirstHunt
                 }
                 else if (_split)
                 {
-                    // (its picture is the canvas's already)
-                    if (tag == FhFrontend.TagBackdrop || tag == FhFrontend.TagFrame) continue;
+                    // (its picture is the canvas's already, unless the picture is the content)
+                    if (tag == FhFrontend.TagFrame || tag == FhFrontend.TagBackdrop && !ScorePages[menus.PageName].Picture) continue;
                     list.Clip = _top.Clip;
                     Draw(list, t, _top, true, UiBlend.Alpha);
                 }
@@ -259,11 +279,14 @@ namespace MphRecomp.FirstHunt
         // the description box's sides, built like its top: the top's cross-section (flashTopBig's glow outside, borderBigTop's
         // lines inside: v 0 outer to 1 inner on both) laid down each side from the bottom's outer edge to the top's, the lines'
         // plain stretch (column 2 of the 256-wide strip), mitred into the bars at the corners, the bars carried out over the
-        // corners on the same diagonal; so the box reads as one frame (owner 10-30: "the sides should look exactly like the tops")
+        // corners on the same diagonal; so the box reads as one frame (owner 10-30: "the sides should look exactly like the tops").
+        // The sides' lines come with the bars' lines and their glow with the bars' glow (which fades in a few frames after the
+        // lines on each page and description change): the box never shows without its sides (owner 11-12: "it assembles itself")
+        private (float yOut, float vOut, float yIn, float vIn) _flashTopRows = (139, -0.05f, 130, 0.95f), _flashBottomRows = (51, 0.04f, 62, 1.04f);
+
         private void BandSides(UiDrawList list, Dictionary<string, WidgetTri> bars)
         {
-            if (!bars.TryGetValue("flashTopBig", out WidgetTri flashTop) || !bars.TryGetValue("borderBigTop", out WidgetTri borderTop)
-                || !bars.TryGetValue("borderBigBottom", out WidgetTri borderBottom) || !bars.TryGetValue("flashBottomBig", out WidgetTri flashBottom))
+            if (!bars.TryGetValue("borderBigTop", out WidgetTri borderTop) || !bars.TryGetValue("borderBigBottom", out WidgetTri borderBottom))
             {
                 return;
             }
@@ -274,10 +297,17 @@ namespace MphRecomp.FirstHunt
                 foreach (UiVertex v in new[] { t.B, t.C }) { if (v.Y < lo.Y) lo = v; if (v.Y > hi.Y) hi = v; }
                 return top ? (hi.Y, hi.V, lo.Y, lo.V) : (lo.Y, lo.V, hi.Y, hi.V);
             }
-            var ft = Rows(flashTop, true);
+            // (the glow's rows: the last seen, the band's own before that)
+            bool glow = bars.TryGetValue("flashTopBig", out WidgetTri flashTop) & bars.TryGetValue("flashBottomBig", out WidgetTri flashBottom);
+            if (glow)
+            {
+                _flashTopRows = Rows(flashTop, true);
+                _flashBottomRows = Rows(flashBottom, false);
+            }
+            var ft = _flashTopRows;
+            var fb = _flashBottomRows;
             var bt = Rows(borderTop, true);
             var bb = Rows(borderBottom, false);
-            var fb = Rows(flashBottom, false);
             float topOut = ft.yOut, topIn = bt.yIn, botOut = fb.yOut, botIn = bb.yIn;
             float flashW = ft.yOut - ft.yIn, width = topOut - topIn;
             const float u = 2.5f / 256;
@@ -290,12 +320,15 @@ namespace MphRecomp.FirstHunt
                 float TopY(float x) => topOut - (topOut - topIn) * (x - outX) / (edge - outX);
                 float BotY(float x) => botOut + (botIn - botOut) * (x - outX) / (edge - outX);
                 // the bars over the corners: glow, then lines
-                Corner(list, flashTop, ft.yOut, ft.vOut, ft.yIn, ft.vIn, TopX, edge, u);
-                Corner(list, flashBottom, fb.yOut, fb.vOut, fb.yIn, fb.vIn, BotX, edge, u);
+                if (glow)
+                {
+                    Corner(list, flashTop, ft.yOut, ft.vOut, ft.yIn, ft.vIn, TopX, edge, u);
+                    Corner(list, flashBottom, fb.yOut, fb.vOut, fb.yIn, fb.vIn, BotX, edge, u);
+                }
                 Corner(list, borderTop, bt.yOut, bt.vOut, bt.yIn, bt.vIn, TopX, edge, u);
                 Corner(list, borderBottom, bb.yOut, bb.vOut, bb.yIn, bb.vIn, BotX, edge, u);
                 // the side: the top's glow, then its lines
-                Side(list, flashTop, outX, edge + dir * (width - flashW), ft.vOut, ft.vIn, TopY, BotY, u);
+                if (glow) Side(list, flashTop, outX, edge + dir * (width - flashW), ft.vOut, ft.vIn, TopY, BotY, u);
                 Side(list, borderTop, edge + dir * (width - flashW), edge, bt.vOut, bt.vIn, TopY, BotY, u);
             }
         }

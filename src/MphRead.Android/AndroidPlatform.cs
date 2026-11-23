@@ -21,6 +21,7 @@ internal static class AndroidPlatform
         AppLog.Sink = (level, tag, message) =>
         {
             AndroidFileLog.Write(level, tag, message); // (first: the file log's logcat copy skips this line's echo)
+            (tag, message) = AndroidFileLog.ForLogcat(tag, message); // (a tagged line: area tag, "[a,b] message")
             switch (level)
             {
             case AppLog.Level.Debug: AndroidLog.Debug(tag, message); break;
@@ -34,8 +35,10 @@ internal static class AndroidPlatform
         AppLog.Info("MPHLog", $"{context.PackageName} on Android {Android.OS.Build.VERSION.Release} ({Android.OS.Build.Model}), "
             + $"process {Android.OS.Process.MyPid()}, log file {AndroidFileLog.Path ?? "(none)"}");
         AppPlatform.Audio = new AndroidAudioOutput(context);
+        MphRead.Rumble.Output = new AndroidRumble(context); // OPTIONS > RUMBLE PAK's motor (AndroidRumble.cs)
         AppPlatform.DecodeImage = DecodeImage;
         AppPlatform.EncodePng = EncodePng;
+        AppPlatform.SaveScreenshot = (rgba, w, h, name) => AndroidScreenshots.Save(context, rgba, w, h, name); // photo mode
         AppPlatform.CacheDir = context.FilesDir!.AbsolutePath;
         AppPlatform.RuntimeStat = name => Int64.TryParse(Android.OS.Debug.GetRuntimeStat(name), out long v) ? v : 0;
         ReplayPrepService.Install(context); // replay keyframes made in the :replayprep process (fast seeking)
@@ -112,8 +115,9 @@ internal sealed class GlScreenRenderer : Java.Lang.Object, GLSurfaceView.IRender
     public void OnDrawFrame(IGL10? gl) => _screen.OnDrawFrame();
 }
 
-// The shared mixers' PCM tracks (GameAudio.cs, MoviePresenter.cs) as AudioTracks in streaming mode: the Game usage with
-// the content type the track plays, at least the platform's minimum buffer, the low-latency path for the SFX mixer.
+// The shared mixers' PCM tracks (GameAudio.cs, MoviePresenter.cs) as AudioTracks in streaming mode: the Media usage with
+// the content type the track plays, at least the platform's minimum buffer, the low-latency path for the SFX mixer
+// (filled only a few device bursts ahead, more if it underruns).
 internal sealed class AndroidAudioOutput : IAudioOutput
 {
     public int NativeRate { get; }
@@ -146,9 +150,12 @@ internal sealed class AndroidAudioOutput : IAudioOutput
             PcmUsage.Movie => AudioContentType.Movie,
             _ => AudioContentType.Sonification,
         };
+        // usage media, not game: with LE Audio earbuds (the Odin + Pixel Buds Pro 2, owner 2026-11-20) our game-usage
+        // tracks ran ~1.5 s behind on the primary output while Fruity Prime's single media-usage track sat at ~0.12 s;
+        // the volume slider is the same media stream either way
         AudioTrack.Builder builder = new AudioTrack.Builder()
             .SetAudioAttributes(new AudioAttributes.Builder()
-                .SetUsage(AudioUsageKind.Game)!
+                .SetUsage(AudioUsageKind.Media)!
                 .SetContentType(content)!
                 .Build()!)
             .SetAudioFormat(new AudioFormat.Builder()
@@ -161,38 +168,143 @@ internal sealed class AndroidAudioOutput : IAudioOutput
         {
             builder.SetPerformanceMode(AudioTrackPerformanceMode.LowLatency);
         }
-        return new Track(builder.SetTransferMode(AudioTrackMode.Stream).Build(), bytes / frameBytes);
+        AudioTrack track = builder.SetTransferMode(AudioTrackMode.Stream).Build();
+        int frames = bytes / frameBytes;
+        // The low-latency (sfx) track is filled only as far ahead as the mixer asks, two device bursts, whatever the
+        // platform's minimum is. That minimum covers the output's whole latency, and on Bluetooth it is huge: 21142
+        // frames (440 ms) on the owner's Odin, 23064 (480 ms) on finRatman's realme GT 8 Pro (2026-11-21 log, fast
+        // path granted, 921 ms total behind the game). The capacity stays at that minimum so the fill level can grow:
+        // the Track adds a burst on every underrun, so a device whose output pulls in bigger blocks settles where it
+        // stops crackling instead of at one size picked for every phone. The mixer thread blocks on a full buffer,
+        // so the fill level is how far our sound runs behind the game
+        int growFrames = 0;
+        if (lowLatency)
+        {
+            growFrames = Math.Max(1, bufferFrames / 2);
+            if (bufferFrames < frames)
+            {
+                int set = track.SetBufferSizeInFrames(bufferFrames);
+                if (set > 0)
+                {
+                    frames = set;
+                }
+            }
+        }
+        return new Track(track, frames, channels, growFrames);
     }
 
     public void RaiseThreadPriority() => Android.OS.Process.SetThreadPriority(Android.OS.ThreadPriority.UrgentAudio);
 
+    // SetVolume is a gain on the samples as they're written, not AudioTrack.setVolume: Android's playback capture (the
+    // screen recorder) taps a track's audio before the mixer applies the track's volume, so music muted in the game was
+    // silent on the device but recorded at full volume (owner 2026-11-14). A gain change is heard once the audio
+    // already queued has played (the track's buffer: 0.25 s in a game, 1 s in the menus)
     sealed class Track : IPcmTrack
     {
         readonly AudioTrack _track;
-        readonly int _bufferFrames;
+        readonly int _channels;
+        readonly int _growFrames; // 0: a fixed-size track
+        int _underruns;
+        int _settle; // writes left before underruns count again: a track (re)started from empty underruns once
+        volatile float _gain = 1;
+        float _written = 1; // the gain the last write ended on: a change ramps from it across the next write (no click)
+        bool _wrote; // a new track starts at its gain (no ramp down from full on a muted track's first write)
+        float[]? _floats;
+        short[]? _shorts;
 
-        public Track(AudioTrack track, int bufferFrames)
+        public Track(AudioTrack track, int bufferFrames, int channels, int growFrames)
         {
             _track = track;
-            _bufferFrames = bufferFrames;
+            _channels = channels;
+            _growFrames = growFrames;
+            _settle = 8;
+        }
+
+        // after each write on the mixer thread: grow the fill level by a burst when the output ran dry since the last
+        // check (one JNI read of a counter in shared memory)
+        int Grow(int written)
+        {
+            if (_growFrames == 0)
+            {
+                return written;
+            }
+            int underruns = _track.UnderrunCount;
+            if (_settle > 0)
+            {
+                _settle--;
+                _underruns = underruns;
+                return written;
+            }
+            if (underruns > _underruns)
+            {
+                _underruns = underruns;
+                int size = _track.BufferSizeInFrames;
+                if (size < _track.BufferCapacityInFrames)
+                {
+                    int set = _track.SetBufferSizeInFrames(size + _growFrames);
+                    AppLog.Info("MPHAudio", $"sfx track underran ({underruns} so far): buffer {size} -> {set} frames");
+                }
+            }
+            return written;
         }
 
         public int Write(float[] data, int offset, int count, bool blocking)
-            => _track.Write(data, offset, count, blocking ? WriteMode.Blocking : WriteMode.NonBlocking);
+        {
+            WriteMode mode = blocking ? WriteMode.Blocking : WriteMode.NonBlocking;
+            float gain = _gain;
+            if (gain == 1 && _written == 1)
+            {
+                _wrote = true;
+                return Grow(_track.Write(data, offset, count, mode));
+            }
+            if (_floats == null || _floats.Length < count) _floats = new float[count];
+            float from = _wrote ? _written : gain;
+            _wrote = true;
+            int frames = Math.Max(1, count / _channels);
+            for (int i = 0; i < count; i++)
+            {
+                _floats[i] = data[offset + i] * (from + (gain - from) * Math.Min(1f, (i / _channels + 1) / (float)frames));
+            }
+            _written = gain;
+            return Grow(_track.Write(_floats, 0, count, mode));
+        }
 
         public int Write(short[] data, int offset, int count, bool blocking)
-            => _track.Write(data, offset, count, blocking ? WriteMode.Blocking : WriteMode.NonBlocking);
+        {
+            WriteMode mode = blocking ? WriteMode.Blocking : WriteMode.NonBlocking;
+            float gain = _gain;
+            if (gain == 1 && _written == 1)
+            {
+                _wrote = true;
+                return Grow(_track.Write(data, offset, count, mode));
+            }
+            if (_shorts == null || _shorts.Length < count) _shorts = new short[count];
+            float from = _wrote ? _written : gain;
+            _wrote = true;
+            int frames = Math.Max(1, count / _channels);
+            for (int i = 0; i < count; i++)
+            {
+                _shorts[i] = (short)(data[offset + i] * (from + (gain - from) * Math.Min(1f, (i / _channels + 1) / (float)frames)));
+            }
+            _written = gain;
+            return Grow(_track.Write(_shorts, 0, count, mode));
+        }
 
-        public void Play() => _track.Play();
+        public void Play()
+        {
+            _settle = 8;
+            _track.Play();
+        }
+
         public void Pause() => _track.Pause();
         public void Stop() => _track.Stop();
         public void Flush() => _track.Flush();
         public void Release() => _track.Release();
         public bool IsPlaying => _track.PlayState == PlayState.Playing;
         public long PlaybackHeadPosition => (uint)_track.PlaybackHeadPosition;
-        public void SetVolume(float gain) => _track.SetVolume(gain);
+        public void SetVolume(float gain) => _gain = Math.Clamp(gain, 0, 1);
 
-        public string Describe() => $"buffer {_bufferFrames} frames, performanceMode {_track.PerformanceMode} "
+        public string Describe() => $"buffer {_track.BufferSizeInFrames} of {_track.BufferCapacityInFrames} frames, performanceMode {_track.PerformanceMode} "
             + "(LowLatency=1 means the fast path was granted)";
     }
 }

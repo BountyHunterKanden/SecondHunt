@@ -99,6 +99,9 @@ namespace MphRead
             public bool Strafe;
             public float Rejoin; // rejoin=<s>: the last joiner vanishes then (no BYE) and comes back as a restarted app
             public float RejoinWait = 2;
+            // askrejoin=1 with rejoin= and served=hub (11-22, the owner's C run): the rejoiner quits as the app's QUIT does,
+            // asking for the recording so far (its cut-short copy, checked), and its restarted app must get the whole match's
+            public bool AskRejoin;
             public float Wifi; // wifi=<s>: the last joiner's network goes away then, for WifiWait s, and comes back
             public float WifiWait = 15;
             public bool Uplink; // uplink=1: wifi= loses only the joiner's sends
@@ -106,6 +109,11 @@ namespace MphRead
             public bool TurnDead; // turndead=1 (with turn= and wifi=): the joiner's TURN sends stay lost after the network is back
             public bool Again; // -onlinejoin: this process is that restarted app
             public string? Code; // its identity (backup code)
+            // served=hub invite=1 (owner 2026-11-22): the owner opens the game one seat short, so it's full without the last
+            // joiner; the last joiner befriends the owner (inviter=<code>), is invited, and joins once the game is full: an
+            // invited player grows a full game (HubGames.JoinGame), a bot making way at 8
+            public bool Invite;
+            public string? Inviter;
             public string? Turn; // turn=local: a TURN server here (TurnTestServer) + our server's --turn-static; turn=hub
             public float TurnKill; // turnkill=<s>: the local TURN server goes away then (every device must fall back to the relay)
             // -onlinejoin
@@ -125,6 +133,7 @@ namespace MphRead
             public bool AltFixOff; // altfix=0: guests correct a ball's height as before (ClientPrediction.AltHeightFix)
             public bool Ball; // ball=1 (2026-10-19, alt form bouncing online): the joiners play in alt form (morph, then roll at their target)
             public bool? Replays; // served=hub replays=0|1 (default on): each joiner gets the match host's recording, played back exact (OnlineServedReplay.cs)
+            public bool? Live; // live=0|1 (default on with replays): the match host streams it in as it's made, each joiner's mirror ends whole (LIVE joiner N: OK); live=0 for a hub whose match host is older than 11-21
             public bool Gap; // served=hub gap=1 (docs/FRUITY_PORT.md Step 2a): the path-gap check (OnlineGapTest.cs)
             public bool FruityP1; // served=hub fruity=1 (docs/FRUITY_PORT.md P1): the match host runs Fruity Prime's movement sync
             public string? Seek; // seek=<ItemType> (0.2.0 pickups bake): joiner 1 walks to that item and logs its weapons + UA
@@ -170,6 +179,7 @@ namespace MphRead
                 case "looks": o.Looks = value != "0"; break;
                 case "chars": o.Chars = value != "0"; break;
                 case "replays": o.Replays = value != "0"; break;
+                case "live": o.Live = value != "0"; break;
                 case "ball": o.Ball = value != "0"; break;
                 case "duel": if (value is "runner" or "shooter") o.DuelRole = value; else o.Duel = value != "0"; break;
                 case "push": o.Push = value != "0"; break;
@@ -178,7 +188,7 @@ namespace MphRead
                 case "fruitypin": ClientPosition.Pin = value != "0"; break; // 0 = no pin (A/B)
                 case "fruityhold": ClientPosition.Hold = value != "0"; break;
                 case "fruitypinafter": ClientPosition.PinAfterMode = Int32.Parse(value, CultureInfo.InvariantCulture); break;
-                case "fruity": o.FruityP1 = value != "0"; break; // Fruity Prime's P1 movement sync, served=hub only (Net/FruitySync.cs)
+                case "fruity": o.FruityP1 = value != "0"; break; // Fruity Prime's sync (Net/FruitySync.cs): served=hub on the match host, else on this host
                 case "fruitylatest": NetMatchSession.LatestInputOnly = value != "0"; break;
                 case "fruitycorrect": ClientPrediction.FruityCorrect = value != "0"; o.Fwd += " fruitycorrect=" + value; break;
                 case "smoothfp": RemoteSmoothing.FruityRead = value != "0"; o.Fwd += " smoothfp=" + value; break; // 0 = the arrival-clock read point (A/B)
@@ -197,6 +207,7 @@ namespace MphRead
                 case "strafe": o.Strafe = value != "0"; break;
                 case "rejoin": o.Rejoin = Single.Parse(value, CultureInfo.InvariantCulture); break;
                 case "rejoinwait": o.RejoinWait = Single.Parse(value, CultureInfo.InvariantCulture); break;
+                case "askrejoin": o.AskRejoin = value != "0"; o.Fwd += " askrejoin=" + value; break;
                 case "wifi": o.Wifi = Single.Parse(value, CultureInfo.InvariantCulture); break;
                 case "wifiwait": o.WifiWait = Single.Parse(value, CultureInfo.InvariantCulture); break;
                 case "uplink": o.Uplink = value != "0"; break;
@@ -204,13 +215,23 @@ namespace MphRead
                 case "stale": o.Stale = value != "0"; break;
                 case "again": o.Again = value != "0"; break;
                 case "code": o.Code = value; break;
+                case "invite": o.Invite = value != "0"; break;
+                case "inviter": o.Inviter = value; break;
                 case "turn": o.Turn = value; break;
                 case "turnkill": o.TurnKill = Single.Parse(value, CultureInfo.InvariantCulture); break;
                 case "maxrewind": LagCompensation.MaxRewind = Int32.Parse(value); break;
                 case "character": o.Character = value; break;
                 case "skin": o.Skin = value; break;
                 case "colour": o.Colour = Int32.Parse(value); break;
-                case "seek": o.Seek = value; break;
+                case "seek": o.Seek = value; if (value.Equals("OmegaCannon", StringComparison.OrdinalIgnoreCase)) o.Fwd += " omegashots=1"; break;
+                case "omegashots": _omegaShots = value != "0"; break;
+                case "omegablast": PlayerEntity.NetOmegaBlastOff = value == "0"; o.Fwd += " omegablast=" + value; break; // (0: a client's Omega copy flies on as before 11-22) // (every joiner: seat 1's Omega Cannon shots in its scene)
+                case "seekfire": _seekFire = value != "0"; o.Fwd += " seekfire=" + value; break; // seek= with FIRE held all the way (a PC player's held fire)
+                case "seekkeep": _seekKeep = value != "0"; o.Fwd += " seekkeep=" + value; break; // seekkeep=0: the guest's copy left where it was, so only the host's take gives it (ItemSync: not TakenByLocal)
+                case "seekspawn": _seekSpawn = value != "0"; o.Fwd += " seekspawn=" + value; break; // seek=OmegaCannon spawned under the guest (owner 11-13: no gun switch online): the host spawns and gives it in one step, so the guest never sees the item; the guest stands and fires it away
+                case "seekrise": _seekRise = value != "0"; o.Fwd += " seekrise=" + value; break; // seek= met while the gun rises after the ball (Discord 2026-11-12): the guest stands, in and out of the ball; the host puts its copy down only then
+                case "raise": _raise = value != "0"; break; // raise=0: this side's MatchSettings.PickupEquipRaise off (the host: the 0.5.0 match host's pickup equip)
+                case "jraise": o.Fwd += " raise=" + value; break; // jraise=0: the joiners' side off (a 0.5.0 app)
                 default: throw new ArgumentException($"unknown option {arg}");
                 }
             }
@@ -467,11 +488,15 @@ namespace MphRead
                 Wait(online.DisposeAsync().AsTask().ContinueWith(_ => 0));
                 return;
             }
+            // fruity=1 here too: this host plays the match host's part with Fruity Prime's sync on (seek= needs the host here)
+            if (o.FruityP1 && net.Settings != null) net.Settings.FruitySync = true;
             net.SendStart();
             Wait(online.RequestAsync<OkMsg>(new StartGameReq { Started = true }));
             MatchSettings settings = net.Settings!;
+            _seekSeat = SeekSeat(settings);
             settings.HitClaims = o.Claims ? null : false;
             settings.ClientPosition = o.Positions ? null : false;
+            if (_raise != null) settings.PickupEquipRaise = _raise;
             Console.WriteLine("host: seats " + string.Join(", ", settings.Players.Select((p, i) =>
                 $"{i}:{p.Hunter}{(p.Recolor > 0 ? $"/{p.Recolor}" : "")}{(p.Bot ? " bot" : p.Remote ? $" {p.Nickname}" : " local")}")));
             CampaignHost host = CampaignHost.StartMatch(settings);
@@ -494,17 +519,61 @@ namespace MphRead
                 SampleExtras(settings.Players.Count);
                 if (o.Seek != null && settings.Players.Count > 1)
                 {
-                    SeekLog("host seat 1", host, PlayerEntity.Players[1]);
+                    for (int s = _seekRise && o.Served ? 0 : _seekSeat; s < (_seekRise ? settings.Players.Count : _seekSeat + 1); s++) SeekLog("host seat " + s, host, PlayerEntity.Players[s]);
+                    OmegaShotLog("host", host);
                     // the item put down where the joiner stands (every 10 s), so it walks into it
-                    PlayerEntity j = PlayerEntity.Players[1];
-                    if (host.Frame % 600 == 300 && j.Health > 0)
+                    PlayerEntity j = PlayerEntity.Players[_seekSeat];
+                    // seekrise: only while a joiner's gun rises after the ball (UpDown on foot, the 2 s after it; any seat)
+                    bool rising = false;
+                    for (int s = o.Served ? 0 : 1; _seekRise && s < settings.Players.Count && s < _seekBallFrame.Length; s++)
                     {
+                        PlayerEntity p = PlayerEntity.Players[s];
+                        if (p.IsAltForm || p.IsMorphing) _seekBallFrame[s] = host.Frame;
+                        if (!rising && p.GunAnimation == GunAnimation.UpDown && !p.IsAltForm && !p.IsMorphing && p.Health > 0
+                            && host.Frame - _seekBallFrame[s] < 120)
+                        {
+                            rising = true;
+                            j = p;
+                        }
+                    }
+                    if (_seekSpawn)
+                    {
+                        // the Omega Cannon's spawner under the guest, back in 2 s once it has none (kept off while it has one)
+                        foreach (ItemSpawnEntity sp in host.Scene.GetItemSpawnEntities())
+                        {
+                            if (sp.Data.ItemType != ItemType.OmegaCannon) continue;
+                            if (j.Health == 0) break;
+                            if (sp.Item != null) sp.Item.Position = j.Position + new Vector3(0, 0.65f, 0); // (the one up at the start: a seen pickup)
+                            sp.Position = j.Position;
+                            (ushort cool, ushort count) = sp.HostSpawnState;
+                            bool has = j.AvailableWeapons[BeamType.OmegaCannon];
+                            if (sp.Item == null && (has ? cool < 120 : cool > 120))
+                            {
+                                sp.HostSpawnState = ((ushort)120, count);
+                            }
+                            if (sp.Item == null && !has && cool == 1)
+                            {
+                                Console.WriteLine($"SEEK host frame {host.Frame}: OmegaCannon spawns under seat {j.SlotIndex}");
+                            }
+                            break;
+                        }
+                    }
+                    else if ((_seekRise ? rising && host.Frame - _seekPutFrame > 300 : host.Frame % 600 == 300) && j.Health > 0)
+                    {
+                        _seekPutFrame = host.Frame;
                         foreach (ItemInstanceEntity it in host.Scene.GetItemInstanceEntities())
                         {
                             if (!String.Equals(it.ItemType.ToString(), o.Seek, StringComparison.OrdinalIgnoreCase)) continue;
                             it.Position = j.Position + new Vector3(0, 0.65f, 0);
-                            Console.WriteLine($"SEEK host frame {host.Frame}: {it.ItemType} put at seat 1 {j.Position}");
+                            Console.WriteLine($"SEEK host frame {host.Frame}: {it.ItemType} put at seat {j.SlotIndex} {j.Position} gun={j.GunAnimation} alt={(j.IsAltForm ? 1 : 0)}");
                             break;
+                        }
+                    }
+                    else if (_seekRise && host.Frame - _seekPutFrame > 10)
+                    {
+                        foreach (ItemInstanceEntity it in host.Scene.GetItemInstanceEntities())
+                        {
+                            if (String.Equals(it.ItemType.ToString(), o.Seek, StringComparison.OrdinalIgnoreCase)) it.Position = j.Position + new Vector3(0, 50, 0);
                         }
                     }
                 }
@@ -587,11 +656,14 @@ namespace MphRead
             Console.WriteLine($"host: claims ({(o.Claims ? "on" : "off")}, {host.ClaimsApplied} applied) " + HitClaims.HostLine());
             Console.WriteLine($"host: positions ({(o.Positions ? "on" : "off")}, {o.Hz} Hz, {host.PositionsApplied} taken, client-run pushes: {host.PushSpeedsTaken} speeds taken, {host.PushHeldFrames} held frames kept) " + ClientPosition.HostLine());
             lines.Add($"POSITIONS {host.PositionsApplied}");
+            Console.WriteLine($"host: pickup claims ({host.PickupsApplied} handed over) " + PickupClaims.HostLine());
+            lines.Add($"PICKUPCLAIMS {host.PickupsApplied}");
             Console.WriteLine("host: lag " + host.LagStatsLine(reset: false));
             lines.Add("HITS " + string.Join(",", net.RemoteSeats.Select(s => $"{s}:{PlayerEntity.NetBeamHits[s]}")));
             Console.WriteLine("host: inputs " + string.Join(", ", net.RemoteSeats.Select(s => $"seat {s} {net.InputsFrom(s)}"))
                 + (driver.SeatsGone > 0 ? $", {driver.SeatsGone} seat(s) dropped" : ""));
             Console.WriteLine($"host: rejoins {net.Rejoins}, dropped seats back {driver.SeatsBack}");
+            Console.WriteLine($"host: lives (Fruity P4, {(FruitySync.On ? "on" : "off")}): stale-life packets dropped {net.LifeDrops}, neutral inputs at a new life {host.LifeHolds}");
             lines.Add("SEATSGONE " + driver.SeatsGone);
             lines.Add("REJOINS " + net.Rejoins);
             lines.Add("SEATSBACK " + driver.SeatsBack);
@@ -892,6 +964,8 @@ namespace MphRead
             if (!o.Again && o.Owner == 0)
             {
                 GamesMsg list = Wait(online.RequestAsync<GamesMsg>(new ListGamesReq()));
+                // game=first: the first open game not started yet (a phone's lobby, which shows no id on screen)
+                if (o.Game == "first" && list.Games.FirstOrDefault(g => !g.Started) is GameCard open) o.Game = open.Id;
                 GameCard? card = list.Games.FirstOrDefault(g => g.Id == o.Game);
                 Console.WriteLine($"joiner {o.Index}: {online.Me}, {list.Games.Count} open game(s), "
                     + (card == null ? $"game {o.Game} NOT listed" : $"{card.Id} by {card.Host} ({card.Players}/{card.Info.MaxPlayers})"));
@@ -905,6 +979,33 @@ namespace MphRead
                     closed.Set();
                 }
             };
+            // inviter=<code> (served=hub invite=1): befriend the owner, wait for its invite, then join once the game is full
+            if (o.Inviter != null && !o.Again)
+            {
+                var invited = new ManualResetEventSlim();
+                online.EventReceived += m =>
+                {
+                    if (m is InviteEvent inv && inv.Game.Id == o.Game)
+                    {
+                        invited.Set();
+                    }
+                };
+                Wait(online.RequestAsync<OkMsg>(new AddReq { Code = o.Inviter }));
+                if (!invited.Wait(30000))
+                {
+                    Console.WriteLine($"joiner {o.Index}: FAIL no invite came");
+                    return;
+                }
+                var full = Stopwatch.StartNew();
+                GameCard? card = null;
+                while (full.ElapsedMilliseconds < 60000)
+                {
+                    card = Wait(online.RequestAsync<GamesMsg>(new ListGamesReq())).Games.FirstOrDefault(g => g.Id == o.Game);
+                    if (card == null || card.Players >= card.Info.MaxPlayers) break; // (a full game leaves the list: HubGames.Joinable)
+                    Thread.Sleep(250);
+                }
+                Console.WriteLine($"joiner {o.Index}: invited; the game is " + (card == null ? "full (off the list)" : $"{card.Players}/{card.Info.MaxPlayers}") + ", joining");
+            }
             // a restarted app asks for "my started game" (no id): the server gives it its slot back with a new token
             GameMsg game = o.Owner > 0 && !o.Again ? OwnServedGame(o, online)
                 : Wait(online.RequestAsync<GameMsg>(new JoinGameReq { GameId = o.Again ? "" : o.Game, Version = VersionKey, Served = true }));
@@ -958,12 +1059,14 @@ namespace MphRead
                     return;
                 }
                 int seat = net.Settings!.LocalSeat;
+                _seekSeat = SeekSeat(net.Settings);
                 Console.WriteLine($"joiner {o.Index}: {net.Status}");
+                if (_raise != null) net.Settings.PickupEquipRaise = _raise;
                 CampaignHost host = CampaignHost.StartMatch(net.Settings);
                 // replays=1: the app guest's side of the replay link (OnlineServedReplay.cs; not a rejoin; the leaver asks for
                 // the recording so far as it leaves, as the app does)
-                using JoinerReplay? replay = o.Replays == true && o.Rejoin == 0 && o.Wifi == 0 && !o.Again
-                    ? JoinerReplay.Begin(net, o.Index, seat, me, name) : null;
+                using JoinerReplay? replay = o.Replays == true && o.Wifi == 0 && (o.Rejoin == 0 && !o.Again || o.AskRejoin)
+                    ? JoinerReplay.Begin(net, o.Index, seat, me, name, live: o.Live != false) : null;
                 if (o.Looks)
                 {
                     Console.WriteLine(SeatLooksTest.Looks(net.Settings));
@@ -1021,6 +1124,7 @@ namespace MphRead
                     if (_pushDuel) PushWatch(host, o.Index);
                     SampleExtras(net.Settings.Players.Count);
                     if (o.Seek != null) SeekLog($"joiner {o.Index}", host, host.Player);
+                    if (_omegaShots) OmegaShotLog($"joiner {o.Index}", host); // (11-22: every joiner, the shooter's too)
                     int health = host.Player.Health;
                     // (only around the return: a drop to no health later on is play, a real death; a seat the host spawns
                     // again at once, a held FIRE, never shows no health here at all)
@@ -1054,6 +1158,12 @@ namespace MphRead
                 }
                 if (o.Rejoin > 0 && !o.Again)
                 {
+                    // askrejoin=1: its cut-short copy first, as the app's QUIT asks for it
+                    if (o.AskRejoin && replay != null)
+                    {
+                        replay.AskCutShort(host.Frame);
+                        replay.Finish();
+                    }
                     // rejoin=: gone without a word (no BYE, no LeaveGame) as a crash, then the app starts again
                     net.Vanish();
                     Console.WriteLine($"joiner {o.Index}: VANISHED at frame {host.Frame}, back in {o.RejoinWait:0.#} s");
@@ -1112,8 +1222,14 @@ namespace MphRead
                 }
                 Console.WriteLine($"joiner {o.Index}: own beam hits seen here {PlayerEntity.NetBeamHits[seat]}");
                 Console.WriteLine($"SAWHITS {seat}:{PlayerEntity.NetBeamHits[seat]}");
+                // Fruity P2 (b): each seat's shots fired here (this device's own; the others' puppets), of those the host's
+                // shot events, the host's events dropped unfired, taken from the snapshots, and the newest host number taken
+                Console.WriteLine($"SEATSHOTS {seat} " + string.Join(" ", Enumerable.Range(0, Math.Min(PlayerEntity.PlayerCount, 16)).Select(s =>
+                    $"{s}:{PlayerEntity.NetShotsFired[s]}/{PlayerEntity.NetShotEventsFired[s]}/{PlayerEntity.NetShotEventsDropped[s]}"
+                    + $"/{PlayerEntity.NetShotEventsTaken[s]}/{PlayerEntity.NetShotNewest(s)}")));
                 Console.WriteLine($"joiner {o.Index}: " + HitClaims.GuestLine());
                 Console.WriteLine($"CLAIMSUNHEARD {seat}:{HitClaims.Unheard}");
+                Console.WriteLine($"joiner {o.Index}: " + PickupClaims.GuestLine());
                 Console.WriteLine(Scores(net.Settings.Players.Count, host.Scene));
                 // (the order from the points as they stand, as the next frame's board and MatchResults.Capture have it: the
                 // last snapshot can land after this device's last UpdateState, two tied seats then left in their old order)
@@ -1450,13 +1566,76 @@ namespace MphRead
         // a joiner's player: hunt the nearest opponent it can see in its own scene (as MatchNetLoop's)
         // seek=: the nearest item of that type, walked to (no shooting); and each change of a seat's Pirate Blaster, weapon
         // and UA logged (the guest's blaster pickup: release 0.2.0)
+        private static bool _seekFire;
+        private static bool _seekKeep = true;
+        private static bool _seekRise;
+        private static bool _seekSpawn;
+        private static long _seekItemFrame = -1000;
+        private static bool _seekHad;
+        private static bool? _raise;
+        private static long _seekPutFrame = -1000;
+        private static readonly long[] _seekBallFrame = Enumerable.Repeat(-1000L, 8).ToArray();
+
         private static CampaignInput SeekBrain(CampaignHost host, string seek)
         {
             var input = new CampaignInput { SelectWeapon = BeamType.None };
+            if (_seekFire && host.Frame % 60 < 56) input.Buttons = CampaignButtons.Shoot; // (let go 4 frames a second: a fresh press)
             PlayerEntity me = host.Player;
+            if (_seekFire && me.Health > 0 && me.HostRingOmegaShown && me.CurrentWeapon != BeamType.OmegaCannon
+                && host.Frame % 60 == 58)
+            {
+                input.SelectWeapon = BeamType.OmegaCannon; // the ring's middle pick, as on PC (only when the ring shows it)
+            }
+            if (_seekSpawn)
+            {
+                // seekspawn: this device's spawner under the player too (the unseen pickup's reach), standing, FIRE held (the
+                // Omega Cannon spent, for the next); each Omega gained logged with when this device last had the item
+                foreach (ItemSpawnEntity sp in host.Scene.GetItemSpawnEntities())
+                {
+                    if (sp.Data.ItemType == ItemType.OmegaCannon && me.Health > 0) sp.Position = me.Position;
+                }
+                foreach (ItemInstanceEntity it in host.Scene.GetItemInstanceEntities())
+                {
+                    if (it.ItemType == ItemType.OmegaCannon && (it.Position - me.Position).LengthSquared < 4 * 4) _seekItemFrame = host.Frame;
+                }
+                bool has = me.AvailableWeapons[BeamType.OmegaCannon];
+                if (has && !_seekHad)
+                {
+                    long ago = host.Frame - _seekItemFrame;
+                    Console.WriteLine($"SEEK guest frame {host.Frame}: Omega gained, {(ago > 60 ? "UNSEEN (no item here)" : $"item seen {ago} frames before")}, weapon={me.CurrentWeapon} gun={me.GunAnimation}");
+                }
+                _seekHad = has;
+                var stand = new CampaignInput { SelectWeapon = BeamType.None };
+                if (host.Frame % 60 < 56) stand.Buttons = CampaignButtons.Shoot;
+                if (me.Health > 0 && me.HostRingOmegaShown && me.CurrentWeapon != BeamType.OmegaCannon && host.Frame % 60 == 58)
+                {
+                    stand.SelectWeapon = BeamType.OmegaCannon;
+                }
+                return stand;
+            }
+            if (_seekKeep && seek.Equals("OmegaCannon", StringComparison.OrdinalIgnoreCase) && me.Health > 0)
+            {
+                // this device's copy of the item kept under the player (the host puts its own there every 10 s), so the
+                // host's take is this player's own, as for a player who walked onto it (ItemSync.TakenByLocal)
+                // (seekrise: only while the gun rises on foot after the ball, else out of reach overhead)
+                bool reach = !_seekRise || me.GunAnimation == GunAnimation.UpDown && !me.IsAltForm && !me.IsMorphing;
+                foreach (ItemInstanceEntity it in host.Scene.GetItemInstanceEntities())
+                {
+                    if (it.ItemType == ItemType.OmegaCannon) it.Position = me.Position + new Vector3(0, reach ? 0.65f : 50, 0);
+                }
+            }
             if (me.Health == 0)
             {
                 input.Buttons = CampaignButtons.Shoot;
+                return input;
+            }
+            if (_seekRise)
+            {
+                // standing: into the ball at 0, out at 60, 3 s on foot (the gun rises 40 frames after leaving it), no FIRE
+                if (host.Frame % 240 == 0 && !me.IsAltForm && !me.IsMorphing || host.Frame % 240 == 60 && me.IsAltForm)
+                {
+                    input.Buttons = CampaignButtons.Morph;
+                }
                 return input;
             }
             ItemInstanceEntity? target = null;
@@ -1488,15 +1667,105 @@ namespace MphRead
         }
 
         private static readonly Dictionary<string, string> _seekLast = new();
+        private static readonly Dictionary<string, bool> _seekSwitch = new();
         private static int _seekLines;
 
         private static void SeekLog(string who, CampaignHost host, PlayerEntity p)
         {
-            string state = $"blaster={(p.AvailableWeapons[BeamType.PirateBlaster] ? 1 : 0)} weapon={p.CurrentWeapon} ua={p.HostAmmo(0)} missiles={p.HostAmmo(1)}";
+            string state = $"blaster={(p.AvailableWeapons[BeamType.PirateBlaster] ? 1 : 0)} weapon={p.CurrentWeapon} ua={p.HostAmmo(0)} missiles={p.HostAmmo(1)}"
+                + $" omega={(p.AvailableWeapons[BeamType.OmegaCannon] ? 1 : 0)} slot3={p.HostThirdSlotWeapon} ring={(p.HostRingOmegaShown ? 1 : 0)}";
+            // (the gun's Switch clip when the weapon changes: owner 11-13, the Omega Cannon pickup showed none online)
+            bool switching = p.GunAnimation == GunAnimation.Switch;
+            if (_seekSwitch.TryGetValue(who, out bool was) && was != switching && switching)
+            {
+                Console.WriteLine($"SEEK {who} frame {host.Frame}: gun Switch, weapon={p.CurrentWeapon}");
+            }
+            _seekSwitch[who] = switching;
             if (_seekLast.TryGetValue(who, out string? last) && last == state) return;
             _seekLast[who] = state;
             if (++_seekLines <= 200) Console.WriteLine($"SEEK {who} frame {host.Frame}: {state}");
         }
+
+        // seek=OmegaCannon: each Omega Cannon shot of seat 1 as this device's scene fires it (a victim's view of the shooter:
+        // post-0.5.1 "the shooter sees the Omega Cannon but the victims don't")
+        private static bool _omegaShots;
+        private static readonly HashSet<BeamProjectileEntity> _omegaShotsBefore = new(ReferenceEqualityComparer.Instance);
+        private static readonly HashSet<BeamProjectileEntity> _omegaShotsNow = new(ReferenceEqualityComparer.Instance);
+        public static int OmegaShotsSeen { get; private set; }
+
+        private static void OmegaShotLog(string who, CampaignHost host)
+        {
+            _omegaShotsNow.Clear();
+            foreach (BeamProjectileEntity b in host.Scene.GetBeamProjectileEntities())
+            {
+                if (b.Owner != PlayerEntity.Players[_seekSeat] || b.Beam != BeamType.OmegaCannon) continue;
+                _omegaShotsNow.Add(b);
+                if (!_omegaShotsBefore.Contains(b))
+                {
+                    OmegaShotsSeen++;
+                    Console.WriteLine($"OMEGASHOT {who} frame {host.Frame}: seat {_seekSeat}'s Omega Cannon shot #{OmegaShotsSeen}{(PlayerEntity.Players[_seekSeat].Health == 0 ? " (shooter dead)" : "")}");
+                }
+            }
+            // (11-22) each shot's end here: how long it flew, and this device's own player then (a late blast after its
+            // death or respawn = the white flash the owner saw on a guest)
+            foreach (BeamProjectileEntity b in _omegaShotsBefore)
+            {
+                if (_omegaShotsNow.Contains(b)) continue;
+                long born = _omegaShotBorn.TryGetValue(b, out long f) ? f : host.Frame;
+                _omegaShotBorn.Remove(b);
+                PlayerEntity me = host.Player;
+                long sinceDeath = _omegaOwnDeath >= 0 ? host.Frame - _omegaOwnDeath : -1;
+                Console.WriteLine($"OMEGASHOTEND {who} frame {host.Frame}: flew {host.Frame - born} frames, own hp {me.Health}"
+                    + (sinceDeath >= 0 ? $", {sinceDeath} frames after own death" : "") + $", blasts at the host's word {PlayerEntity.NetOmegaBlasts}");
+            }
+            foreach (BeamProjectileEntity b in _omegaShotsNow)
+            {
+                _omegaShotBorn.TryAdd(b, host.Frame);
+            }
+            if (host.Player.Health == 0 && _omegaOwnHp > 0) _omegaOwnDeath = host.Frame;
+            _omegaOwnHp = host.Player.Health;
+            _omegaShotsBefore.Clear();
+            _omegaShotsBefore.UnionWith(_omegaShotsNow);
+            if (who == "host") return;
+            // a victim's view: seat 1's weapon as its puppet here, and its other shots for 3 s after a change to or from the cannon
+            PlayerEntity p1 = PlayerEntity.Players[_seekSeat];
+            string state = $"weapon={p1.CurrentWeapon} omega={(p1.AvailableWeapons[BeamType.OmegaCannon] ? 1 : 0)} hp={p1.Health}";
+            if (state != _omegaPuppetState)
+            {
+                Console.WriteLine($"OMEGAPUPPET {who} frame {host.Frame}: seat {_seekSeat} {state}");
+                if (_omegaPuppetState.Contains("OmegaCannon") != state.Contains("OmegaCannon")) _omegaPuppetChange = host.Frame;
+                _omegaPuppetState = state;
+            }
+            _omegaOtherNow.Clear();
+            foreach (BeamProjectileEntity b in host.Scene.GetBeamProjectileEntities())
+            {
+                if (b.Owner != p1 || b.Beam == BeamType.OmegaCannon) continue;
+                _omegaOtherNow.Add(b);
+                if (!_omegaOtherBefore.Contains(b) && host.Frame - _omegaPuppetChange < 180)
+                {
+                    Console.WriteLine($"OMEGAPUPPET {who} frame {host.Frame}: seat {_seekSeat} shot {b.Beam}");
+                }
+            }
+            _omegaOtherBefore.Clear();
+            _omegaOtherBefore.UnionWith(_omegaOtherNow);
+        }
+
+        private static string _omegaPuppetState = "";
+        private static readonly Dictionary<BeamProjectileEntity, long> _omegaShotBorn = new();
+        private static long _omegaOwnDeath = -1;
+        private static int _omegaOwnHp;
+
+        // the seeker's seat (joiner 1, "PC 1"): the host seats joiners in the order they join, so under lag it isn't always seat 1
+        private static int _seekSeat = 1;
+
+        private static int SeekSeat(MatchSettings settings)
+        {
+            int i = settings.Players.FindIndex(p => p.Nickname == "PC 1" || p.Nickname?.StartsWith("PC 1#") == true);
+            return i < 0 ? 1 : i;
+        }
+        private static long _omegaPuppetChange = Int64.MinValue / 2;
+        private static readonly HashSet<BeamProjectileEntity> _omegaOtherBefore = new(ReferenceEqualityComparer.Instance);
+        private static readonly HashSet<BeamProjectileEntity> _omegaOtherNow = new(ReferenceEqualityComparer.Instance);
 
         // ball=1: the joiner morphs once it's up and stays in alt form (the prediction summary then measures a rolling ball)
         private static bool _ballBrain;

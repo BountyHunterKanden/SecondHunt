@@ -1,0 +1,14 @@
+{
+  "game": "mp1",
+  "discId": "GM8E01",
+  "pak": "Metroid3.pak",
+  "nav": "2026-11-21: the bots' graph is built with ArenaNav's human scan (fine floor scan, footing, long on-foot jumps); re-import to get it",
+  "pakSha1": "9981f8273bd1cd0b71789419850889560d0a3ceb",
+  "audioPak": "AudioGrp.pak",
+  "audioPakSha1": "157e0841155cc7b699176dd7afc746c7048dbc28",
+  "miscPak": "MiscData.pak",
+  "miscPakSha1": "eb29b0c055f852db4ec163bc2441e4f449db27df",
+  "scale": 0.5925926,
+  "crates": [],
+  "pads": []
+}

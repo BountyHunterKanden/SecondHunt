@@ -45,7 +45,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
 
     public void StartPressed()
     {
-        if (_paused)
+        if (PhotoOpen)
+        {
+            _backPressed = true; // Start leaves photo mode, as B (CampaignRenderer.PhotoMode.cs)
+        }
+        else if (_paused)
         {
             _paused = false; // Start leaves the gun-adjust pause
         }
@@ -70,6 +74,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (!_backPressed) return;
         _backPressed = false;
         if (PauseMenu?.IsOpen == true) PauseMenu.Press(MenuKeys.B);
+        else if (PhotoOpen) ClosePhoto(reopenMenu: true); // back to the pause menu (CampaignRenderer.PhotoMode.cs)
         else if (_paused) _paused = false;
         else if (ShipOpen) _shipBackTap = true; // ShipInput reads it as one B press (CampaignShip.cs)
         else if (MapOpen) CloseMap();
@@ -106,9 +111,17 @@ internal sealed partial class CampaignRenderer : IGlScreen
     public void ReloadAimFromSettings()
     {
         var s = MphRecomp.Config.RecompSettings.Load(SettingsPath);
+        LoadRenderScale(s); // RENDER SCALE (CampaignRenderScale.cs)
         _aimScale = 0.5f + Math.Clamp(s.GameSensitivity, 1, 15) / 16f;
         _aimLevel = Math.Clamp(s.GameSensitivity, 1, 15);
         MphRead.Entities.PlayerEntity.HostRagdollShown = s.DeathAnimation == "ragdoll"; // DEATH's RAGDOLL look, live (PlayerRagdoll.cs)
+        MphRead.Entities.PlayerEntity.HostVisLog ??= msg => Log.Info("MPHVis", msg); // another player in view not drawn (PlayerVisLog.cs)
+        PlayLog.Muted ??= () => ReplayPlaying; // gameplay lines in the log, tagged (PlayLog.cs, docs/LOGS.md)
+        PlayLog.Start();
+        MphRecomp.Holiday.HolidaySnow.Apply(s.HolidayMode); // HOLIDAY MODE's snow, live (Core Holiday/HolidaySnow.cs)
+        MphRecomp.Holiday.HolidayBells.Apply(); // its sleigh bells' outdoor check, after the snow's frame (Core Music/HolidayBells.cs)
+        try { MphRecomp.Holiday.HolidayGround.CacheRoot = AppPlatform.CacheDir; } catch (Exception) { } // the ground snow's saved copies, and every arena's built ahead in the background (HolidayGround.Prebuild)
+        MphRecomp.Holiday.HolidayGround.Prebuild();
         MphRead.Entities.PlayerEntity.HostDeathOrbs = s.DeathVanillaOrbs; // DEATH's VANILLA ORBS, live (PlayerDeathAnim.cs)
         MphRead.Entities.PlayerEntity.HostFittedIce = 0; // the DS hunters wear vanilla's ice shell; stand-in and HD bodies keep their fitted shells (owner 2026-11-09: no fitted ice, no ICE row; PlayerFittedIce.cs)
         MphRead.Entities.PlayerEntity.HostDeathFollow = s.DeathAnimation == "ragdoll"; // RAGDOLL's follow cam, part of it (owner 2026-11-09; PlayerDeathCam.cs)
@@ -129,10 +142,13 @@ internal sealed partial class CampaignRenderer : IGlScreen
         ApplyCameraSetting(s);
         // SETTINGS > LOOK > DISPLAY (CampaignSmoothFrames.cs); off in a public build (owner 2026-10-18: not in the next release)
         _smoothFrames = s.SmoothFrames && !MphRecomp.Config.RecompSettings.PublicBuild;
+        // the charge shake held over the in-between step (PlayerCamera.cs): off in the fixes-only release until the owner has checked it
+        CameraInfo.HostHoldShake = !MphRecomp.Config.RecompSettings.PublicBuild;
         // SETTINGS > LOOK > VIEW "aim view" (CampaignLookAhead.cs); public builds too
         _aimView = s.AimView ?? "instant";
         // CONTROLS > AIM > MOVE "stick curve" (Core Input/StickCurve.cs): a part tilt of the move stick walks and rolls gentler
         _stickCurveModern = s.StickCurve != MphRecomp.Input.StickCurve.Classic;
+        LoadStickShape(s); // CONTROLS > AIM > STICKS and the hold-or-toggle rows (CampaignRenderer.StickShape.cs)
         // the control customizer's buttons (OPTIONS > CONTROLS, the ship's OPTIONS; Config/ControlBinds.cs)
         _padBinds.Load(s);
         if (_gyroButton != s.GyroButton) _gyroToggledOff = false; // (a new GYRO BUTTON mode starts with the gyro on)
@@ -176,7 +192,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         float scale = touch ? MphRecomp.Input.ZoomAim.TouchStickScale(_aimScale, _touchSens, AimZoomed)
             : MphRecomp.Input.ZoomAim.PadScale(_aimScale, AimZoomed);
         bool invertX = touch ? _touchInvertX : _aimInvertX, invertY = touch ? _touchInvertY : _aimInvertY;
-        return new((invertX ? -pad.Rx : pad.Rx) * AimSpeed * scale, (invertY ? -pad.Ry : pad.Ry) * AimSpeed * scale * (touch ? _touchStickY : _aimY));
+        (float rx, float ry) = ShapedAim(pad, touch); // the controller's AIM CURVE (CampaignRenderer.StickShape.cs)
+        return new((invertX ? -rx : rx) * AimSpeed * scale, (invertY ? -ry : ry) * AimSpeed * scale * (touch ? _touchStickY : _aimY));
     }
 
     bool AimZoomed => _host?.Player?.EquipInfo.Zoomed == true;
@@ -611,21 +628,31 @@ internal sealed partial class CampaignRenderer : IGlScreen
         _bodyCut = cut;
     }
 
-    // THIRD PERSON (RECOMP SETTINGS "camera"): render only. MphRead's camera, aim, HUD and logic stay first person; the scene is drawn from
+    // THIRD PERSON (RECOMP SETTINGS "camera"): MphRead's camera, HUD and logic stay first person (the aim doesn't: below); the scene is drawn from
     // a point behind, above and right of Samus's eye with the same rotation (Scene.HostCameraOffset: view, billboards,
     // culling), pulled in where the room's collision is closer. Off in the morph ball (MphRead's own third person),
-    // in-game cutscenes and the ship.
+    // in-game cutscenes and the ship. CAMERA SIDE (RecompSettings.ThirdPersonLeft) puts it over the left shoulder instead;
+    // TpSide went 0.5 -> 0.75 so the body sits more to the side of the reticle (owner 2026-11-12). The aim is true
+    // (PlayerHostAim.cs): shots go where the camera's reticle points, not to the eye's point 60 units out. The campaign,
+    // bot matches and LAN (owner 2026-11-13); the sim rebuilds the camera from _tpAimCode, sent with the next step's input
+    // (CampaignInput.TrueAim), with the same function (PlayerEntity.HostThirdPersonOffset), so replays and LAN stay exact.
+    // RoomEntity's draw walk starts in the camera's own room part (HostCameraNodeRef), so a camera backed through a
+    // doorway no longer loses the rooms round it.
     volatile bool _thirdPerson;
+    volatile bool _tpLeft;
     float _tpDist;
-    const float TpBack = 2.4f, TpUp = 0.35f, TpSide = 0.5f, TpMargin = 0.3f;
+    ushort _tpAimCode; // the next step's CampaignInput.TrueAim: 0 = vanilla aim (first person, held in, dev cams, online)
 
     // RECOMP SETTINGS' camera (Select's toggle until 2026-10-03; Select = map now): the campaign's "camera" row, a match's
     // "match camera" row (owner 2026-10-17; bot and LAN matches; online is first person only, SetThirdPerson, owner 2026-10-10
     // N23); a dev solo run: always (SoloArena.cs). CampaignLaunch runs it again once ConfigureMatch has said it's a match.
     public void ReloadCameraFromSettings() => ApplyCameraSetting(MphRecomp.Config.RecompSettings.Load(SettingsPath));
 
-    void ApplyCameraSetting(MphRecomp.Config.RecompSettings s) =>
+    void ApplyCameraSetting(MphRecomp.Config.RecompSettings s)
+    {
+        _tpLeft = s.ThirdPersonLeft;
         SetThirdPerson((_matchSettings != null ? s.MatchThirdPerson : s.ThirdPerson) || _solo && !_soloFirstPerson);
+    }
 
     public void SetThirdPerson(bool on)
     {
@@ -642,6 +669,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         Scene scene = _host!.Scene;
         PlayerEntity p = _host.Player;
         PlayerEntity.HostOutsideHead = false; // (a replay's cams set their own: PlaceReplayView)
+        _tpAimCode = 0; // (set below: the player's own third person only)
+        if (UpdateSideViewCam(scene, p)) return; // dev side view's camera (SideViewArena.cs)
         if (UpdateBotDemoCam(scene)) return; // a dev bot demo's watch camera (BotStuckToggle.cs)
         if (UpdateSoloOrbit(scene, p)) return; // a dev solo run's orbit camera (SoloArena.cs; R3)
         if (UpdateReplayCamera(scene, p)) return; // replay spectator cams: seat switch / free cam (MatchReplay.cs; R4)
@@ -654,29 +683,23 @@ internal sealed partial class CampaignRenderer : IGlScreen
             scene.HostCameraOffset = Vector3.Zero;
             return;
         }
+        // true aim (PlayerHostAim.cs): the campaign, bot matches, LAN and dev solo runs (owner 2026-11-20); not online (first person anyway),
+        // First Hunt, or a replay's playback (its inputs carry the recorded codes). The solo orbit cam returns above, so aims vanilla
+        // (nor the fixes-only release: a public build aims vanilla until the owner has checked true aim)
+        bool trueAim = !PlayerEntity.HostFirstHunt && !ReplayPlaying && _netSession is not MphRecomp.Multiplayer.Net.NetMatchSession
+            && !RecompSettings.PublicBuild;
         // a full room load (a portal, a checkpoint respawn) makes a new main player whose camera is all zeros until it
         // spawns: nothing to offset yet. Inverting that gave NaN, which _tpDist's easing then kept forever (black screen)
-        if (!(MathF.Abs(p.CameraInfo.ViewMatrix.Determinant) > 1e-3f))
+        if (!PlayerEntity.HostThirdPersonOffset(scene, p.CameraInfo.SteadyView, _tpLeft, ref _tpDist, out Vector3 offset)) // (unshaken: the charge shake turns the view, not the camera)
         {
             _tpDist = float.MaxValue; // straight out again once it has a camera
             scene.HostCameraOffset = Vector3.Zero;
+            if (trueAim) _tpAimCode = PlayerEntity.HostTrueAimCode(_tpLeft, _tpDist); // (the step snaps it out, as the app does)
             return;
         }
-        Matrix4 cam = p.CameraInfo.ViewMatrix.Inverted(); // rows: right, up, back, position
-        Vector3 eye = cam.Row3.Xyz;
-        Vector3 want = cam.Row2.Xyz.Normalized() * TpBack + cam.Row1.Xyz.Normalized() * TpUp + cam.Row0.Xyz.Normalized() * TpSide;
-        float len = want.Length;
-        Vector3 dir = want / len;
-        float allowed = len;
-        CollisionResult res = default;
-        if (CollisionDetection.CheckBetweenPoints(eye, eye + dir * (len + TpMargin), TestFlags.Players, scene, ref res))
-        {
-            allowed = Math.Clamp(res.Distance * (len + TpMargin) - TpMargin, 0, len);
-        }
-        // snap in toward a wall, ease back out
-        _tpDist = allowed < _tpDist ? allowed : _tpDist + (allowed - _tpDist) * 0.15f;
-        scene.HostCameraOffset = dir * _tpDist;
+        scene.HostCameraOffset = offset; // (snapped in toward a wall, eased back out)
         PlayerEntity.HostOutsideHead = true; // no helmet frame round a view from behind her (owner 2026-10-27)
+        if (trueAim) _tpAimCode = PlayerEntity.HostTrueAimCode(_tpLeft, _tpDist); // the next step eases from this one's distance
     }
 
     // ---------------------------------------------------------------- GL objects
@@ -719,7 +742,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         _u.Clear();
         _hu.Clear();
         _hudSpriteTex.Clear();
-        CampaignGlCache.Reset();
+        if (!_menuBackdrop) CampaignGlCache.Reset(); // (the menus' arena backdrop shares the menus' context: FrontendRenderer resets it)
         SuitIce.Reset(); // the fitted ice shells (SuitIce.cs)
         _gun?.ResetGl();
         _suit?.ResetGl();
@@ -736,10 +759,14 @@ internal sealed partial class CampaignRenderer : IGlScreen
         MapGlReset(); // CampaignMap.cs
         ReplayHudGlReset(); // MatchReplay.cs: the playback HUD bar (R4)
         VoiceHudGlReset(); // MatchVoiceHud.cs: the speaking pop-up (voice C4)
+        SpeedrunGlReset(); // SpeedrunTimer.cs
         ViewGlReset(); // CampaignView.cs
         ArenaGlReset(); // CampaignArena.cs
-        _program = Link(SceneShaderSource.EsVertex, SceneShaderSource.EsFragment);
-        _hudProgram = Link(HudVertexShader, HudFragmentShader);
+        // (the saved binaries: a match's start and the menus' arena backdrop skip the compile + link, CampaignGlCache)
+        _program = CampaignGlCache.Program(SceneShaderSource.EsVertex, SceneShaderSource.EsFragment, "scene") is int sp and not 0
+            ? sp : Link(SceneShaderSource.EsVertex, SceneShaderSource.EsFragment);
+        _hudProgram = CampaignGlCache.Program(HudVertexShader, HudFragmentShader, "hud") is int hp and not 0
+            ? hp : Link(HudVertexShader, HudFragmentShader);
         {
             var hid = new int[1];
             GLES30.GlGenVertexArrays(1, hid, 0); _hudVao = hid[0];
@@ -816,7 +843,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
         _width = width;
         _height = height;
         GLES30.GlViewport(0, 0, width, height);
-        if (_host == null && _error == null && !ShipOpen)
+        if (_prebuilt)
+        {
+            FinishPrebuilt(width, height); // a match built during START's lead-in (CampaignRenderer.Prebuild.cs)
+        }
+        else if (_host == null && _error == null && !ShipOpen)
         {
             try
             {
@@ -837,10 +868,13 @@ internal sealed partial class CampaignRenderer : IGlScreen
                         collectDrawItems: true, viewWidth: width, viewHeight: height, character: _character);
                     StartDevEscape();
                 }
-                Log.Info("MPHCampaign", $"started {_room} in {sw.ElapsedMilliseconds} ms ({width}x{height})");
+                Log.Info("MPHCampaign", $"started {_room} in {sw.ElapsedMilliseconds} ms ({width}x{height})"
+                    + (_host?.Match != null ? $": {CampaignHost.MatchLoadTimes}" : ""));
+                long finishStart = sw.ElapsedMilliseconds;
                 FinishGearLoad();
                 FinishSkinLoads();
                 FinishArenaHdNow(); // an Echoes arena opens finished, no stand-in first (CampaignArena.cs)
+                Log.Info("MPHCampaign", $"gear, skins and arena finished in {sw.ElapsedMilliseconds - finishStart} ms");
             }
             catch (Exception ex)
             {
@@ -869,6 +903,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
     public void OnDrawFrame()
     {
         _frame++;
+        if (LeaveFrame()) return; // QUIT's YES pressed: handing over to the menus (CampaignRenderer.LeaveForMenus.cs)
         CpuMark(0); // dev cpusplit (CampaignRenderer.CpuSplit.cs)
         // the in-ship menu's OPTIONS may have changed the aim settings: reload them when it closes
         if (_aimShipWasOpen && !ShipOpen) ReloadAimFromSettings();
@@ -904,8 +939,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
             while (_pauseInput.TryDequeue(out _)) { }
         }
         ReassertSfxHost(); // CampaignAudio.cs
-        UpdateAudioPause(_paused || menuOpen || ReplayHeld); // a replay paused by the viewer (MatchReplay.cs)
+        UpdateAudioPause(_paused || menuOpen || ReplayHeld || PhotoOpen); // a replay paused by the viewer (MatchReplay.cs)
         MapFrame(); // Select's pause map opens / closes (CampaignMap.cs)
+        MenuShotPickFrame(); // the menu shot picker opens photo mode by itself (CampaignRenderer.MenuShotPick.cs)
         CpuMark(1);
         if (ShipOpen)
         {
@@ -916,6 +952,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             _accum = 0; // the game waits under the map, as vanilla's pause screen
             MapInput();
+        }
+        else if (PhotoOpen)
+        {
+            _accum = 0; // the game waits under photo mode's free camera (CampaignRenderer.PhotoMode.cs)
+            PhotoInput((float)dt);
         }
         else if (_paused)
         {
@@ -946,7 +987,11 @@ internal sealed partial class CampaignRenderer : IGlScreen
                     try
                     {
                         DevStartAtStep(); // dev startat (CampaignDevStartAt.cs)
-                        NetStep(BuildInput()); // _host.Step (which also ticks Sfx.Update), plus a LAN match's networking (MatchSession.cs)
+                        CampaignInput input = BuildInput();
+                        DevWalkInput(ref input); // dev doorwalk (CampaignRenderer.RoomWarm.cs)
+                        input.TrueAim = _tpAimCode; // the third-person camera's true aim (PlayerHostAim.cs; UpdateThirdPerson)
+                        NetStep(input); // _host.Step (which also ticks Sfx.Update), plus a LAN match's networking (MatchSession.cs)
+                        SpeedrunStep(); // the speedrun timer's in-game time, one 60 Hz step (SpeedrunTimer.cs; display only)
                         SoloFlyStep(); // a dev solo run's fly mode puts the player back where it flies (SoloFly.cs)
                     }
                     finally
@@ -1013,7 +1058,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         CpuMark(2);
         TalkWithoutSteps();
         UpdateGear(); // the suit / gun GL objects, a few per frame, and a suit change's swap
-        MovieUpdate(_paused || menuOpen ? 0 : dt); // in-game cutscenes (CampaignMovie.cs)
+        MovieUpdate(_paused || menuOpen || PhotoOpen ? 0 : dt); // in-game cutscenes (CampaignMovie.cs)
+        SpeedrunFrame(frameInterval, dt, menuOpen); // the speedrun timer's real time + ship/movie time (SpeedrunTimer.cs)
         var draw = Stopwatch.StartNew();
         long drawAlloc = GC.GetAllocatedBytesForCurrentThread();
         GpuTimerBegin();
@@ -1027,6 +1073,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             SmoothEnd(smoothScene);
         }
+        PhotoCapture(); // a screenshot of the picture so far, no overlays or menus (CampaignRenderer.PhotoMode.cs)
+        LeaveCapture(); // QUIT's YES pressed: this picture stays up while the game hands over (CampaignRenderer.LeaveForMenus.cs)
         CpuMark(CpuSegOverlays);
         // the in-ship menu / take-off movie (CampaignShip.cs); the control customizer opened from its OPTIONS shows over
         // it, the ship darkened a lot under it (owner 2026-10-05: it stays in the ship; drawn plain it was too busy)
@@ -1036,12 +1084,17 @@ internal sealed partial class CampaignRenderer : IGlScreen
             if (PauseMenu?.IsOpen == true) DrawShipDim();
         }
         if (MapOpen) MapDraw(); // Select's pause map (CampaignMap.cs)
-        if (ReplayPlaying) ReplayHudDraw(_width, _height); // the playback bar (MatchReplay.cs; R4)
+        if (PhotoOpen) { } // photo mode's own help instead (PhotoHudDraw below)
+        else if (ReplayPlaying) ReplayHudDraw(_width, _height); // the playback bar (MatchReplay.cs; R4)
         else VoiceHudDraw(_width, _height); // who is speaking, online (MatchVoiceHud.cs; voice C4)
+        if (!PhotoOpen) SpeedrunDraw(_width, _height); // the speedrun timer, a HUD editor element (SpeedrunTimer.cs)
+        PhotoHudDraw(_width, _height); // photo mode's help, a screenshot's saved note (CampaignRenderer.PhotoMode.cs)
         if (PauseMenu?.IsOpen == true)
         {
             PauseMenu.Draw(_width, _height);
         }
+        // new rooms' meshes/textures up ahead of their first draw, after this frame's (CampaignRenderer.RoomWarm.cs)
+        if (!MovieShowing && ViewScene is Scene warmScene) RoomWarmGl(warmScene);
         GpuTimerEnd();
         _drawMs = draw.Elapsed.TotalMilliseconds;
         _paceDrawAlloc += GC.GetAllocatedBytesForCurrentThread() - drawAlloc;
@@ -1055,7 +1108,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         if (--_statusCountdown <= 0)
         {
             _statusCountdown = 30;
-            StatusSink?.Invoke(WithModToast(Status()));
+            StatusSink?.Invoke(WithReplayNotice(WithModToast(Status())));
         }
         int room = _host?.RoomId ?? -1;
         if (room != _evictRoom)
@@ -1235,6 +1288,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
     CampaignInput BuildInput()
     {
         _ringOpen = false; // (set again below while the ring is up)
+        _lookStick = _lookInput = false; // (the aim preview's: set again below when the step's aim comes in; CampaignLookAhead.cs)
         PadState pad = Pad;
         PlayerEntity p = _host!.Player;
         bool a = pad[PadButton.A], b = pad[PadButton.B], r1 = pad[PadButton.R1];
@@ -1320,6 +1374,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
             // weapon ring stays shut there when they share it (docs/SPIDER_BALL.md, owner 2026-11-06)
             bool spiderForm = PlayerEntity.HostSpiderBall && p.IsAltForm && !p.HostScoutDrone;
             if (spiderForm && binds.Shares(ControlBinds.WeaponMenu, ControlBinds.Spider)) menuHeld = false;
+            if (PlayerEntity.SideViewOn) menuHeld = false; // recomp: side view (SideViewArena.cs): no ring, its button is the aim stance
             // (owner 2026-10-14) the weapon menu and scan on the same button (L2 by default): with the scan visor on it scans,
             // no ring (and no tap zoom); a hold that started scanning stays a scan until it's let go, even if the visor goes
             // off. The quick press's zoom is the zoom function's, when it shares the button (L2 by default)
@@ -1348,6 +1403,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
             else if (!orbit && !_weaponRing.StickAimHeld)
             {
                 input.AimDelta = StickAim(pad);
+                _lookStick = true;
             }
             if (droneForm)
             {
@@ -1365,11 +1421,16 @@ internal sealed partial class CampaignRenderer : IGlScreen
                 {
                     buttons |= CampaignButtons.Shoot;
                 }
-                if (binds.Held(ControlBinds.Jump))
+                // (owner 2026-11-12) in the campaign's alt forms with the hop on, a jump button that is ALT HOP too (L1 by
+                // default) only hops: A boosts samus's ball, L1 hops it, never both on one press
+                if (p.IsAltForm && p.AltHopActive
+                    ? binds.HeldUnless(ControlBinds.Jump, ControlBinds.AltHop) : binds.Held(ControlBinds.Jump))
                 {
                     buttons |= CampaignButtons.Jump | CampaignButtons.Boost;
                 }
-                if (spiderForm && (binds.Held(ControlBinds.Spider) || TouchSpiderOn)) buttons |= CampaignButtons.Spider;
+                // (hold or toggle, CONTROLS > BUTTONS "spider ball mode"; CampaignRenderer.StickShape.cs)
+                if (SpiderButton(spiderForm, spiderForm && binds.Held(ControlBinds.Spider)) || spiderForm && TouchSpiderOn) buttons |= CampaignButtons.Spider;
+                if (binds.Held(ControlBinds.AltHop)) buttons |= CampaignButtons.AltHop; // (the campaign's alt-form hop, PlayerAltHop.cs)
                 if (binds.Held(ControlBinds.Morph)) // (the Trooper's morph = his drone)
                 {
                     buttons |= CampaignButtons.Morph;
@@ -1412,6 +1473,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             // the first on-device layout, kept for reference
             if (!orbit) input.AimDelta = StickAim(pad);
+            _lookStick = !orbit;
             if (r2) buttons |= CampaignButtons.Shoot;
             if (a) buttons |= CampaignButtons.Jump | CampaignButtons.Boost;
             if (b) buttons |= CampaignButtons.Morph;
@@ -1448,10 +1510,15 @@ internal sealed partial class CampaignRenderer : IGlScreen
         _heldFromDialog &= input.Buttons;
         input.Buttons &= ~_heldFromDialog;
         input.AimDelta += PointerAim(mouseAim);
+        // the aim preview: the mouse aims while what came in went to the aim (not the weapon menu's pick), the last word kept
+        // while it is still
+        if (km == null) _lookMouse = true;
+        else if (pointer != System.Numerics.Vector2.Zero) _lookMouse = mouseAim == pointer;
         input.AimDelta += stylusAim;
         System.Numerics.Vector2 gyro = GyroAimDelta(); // gyro aim, added to the stick's (CampaignGyro.cs)
         TraceInput(pad, input.AimDelta, gyro);
         input.AimDelta += gyro;
+        _lookInput = true;
         DevCaptureInput(ref input, p); // dev --es morphat / holdfrom (SoloArena.cs)
         TryStep(ref input, p); // TRY CONTROLS: every weapon, full ammo (SoloArena.cs)
         SoloFlyInput(pad, ref input, p); // a dev solo run's fly mode: L3 + jump (SoloFly.cs)
@@ -1625,6 +1692,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlBlendFunc(GLES30.GlSrcAlpha, GLES30.GlOneMinusSrcAlpha);
         SetMatrix(U("u_projection"), scene.PerspectiveMatrix);
+        BeginViewmodelProjection(scene); // MPH's gun at the default FOV's framing (CampaignView.cs)
         SetMatrix(U("u_view"), scene.ViewMatrix);
         GLES30.GlUniform1i(U("u_fogOn"), scene.FogEnabled ? 1 : 0);
         Vector4 fog = scene.FogColor;
@@ -1705,7 +1773,9 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlDepthFunc(GLES30.GlLess);
         if (viewWarp) EndViewWarp(scene); // the Panini warp onto the screen, under the HUD (CampaignView.cs)
         GpuMark(GpuSegHud);
-        if (!ShipOpen) DrawHud(scene); // the cockpit view under the in-ship menu has no HUD (CampaignShip.cs)
+        if (!ShipOpen && !PhotoOpen && !_menuBackdrop) DrawDisruption(scene); // a disrupting hit's wobble, under the HUD (CampaignRenderer.Disruption.cs)
+        if (!ShipOpen && !PhotoOpen && !_menuBackdrop) DrawHud(scene); // the cockpit view under the in-ship menu has no HUD (CampaignShip.cs)
+        if (PlayerEntity.SideViewOn) DrawSideViewBubbles(scene); // side view's bubbles over the HUD's rings (SideView/SideViewArena.cs)
         if (!ShipOpen && !PlayerEntity.HostNoViewer) DrawTurretHud(scene); // Shooting Gallery's turret seat HUD (CampaignRenderer.TurretHud.cs)
         if (!ShipOpen && !PlayerEntity.HostNoViewer) DrawGrappleHud(scene); // the Echoes grapple point icon (CampaignRenderer.GrappleHud.cs)
         GLES30.GlBindVertexArray(0);
@@ -1722,16 +1792,20 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GLES30.GlBindVertexArray(_hudVao);
         GLES30.GlUniform1f(HU("view_width"), _width);
         GLES30.GlUniform1f(HU("view_height"), _height);
+        DrawWhiteout(); // the death white-out, over the world and under the HUD (the prompt stays readable)
         GLES30.GlUniform4f(HU("fade_color"), 0, 0, 0, 0);
         GLES30.GlBindSampler(0, _samplers[0]);
         GLES30.GlBindSampler(1, _samplers[0]);
         bool maskBound = false;
         int hudItems = scene.HudItemCount; // (a replay's HIDE hides only its own bar, owner 2026-10-27; free cam records none)
         bool reticleMoves = LookReticleShift(scene, out float reticleDx, out float reticleDy); // the aim view (CampaignLookAhead.cs)
+        bool hudLayout = HudLayoutPrepare(scene); // the custom HUD (CampaignRenderer.HudLayout.cs; dev only)
         for (int i = 0; i < hudItems; i++)
         {
             Scene.HostHudItem item = scene.GetHudItem(i);
             if (MapLiftsHelmet(item, scene)) continue; // the PRIME map draws the helmet itself, unblurred (CampaignMap.cs)
+            float l = item.Left, r = item.Right, t = item.Top, b = item.Bottom, a = item.Alpha;
+            if (hudLayout && !HudLayoutItem(i, ref l, ref r, ref t, ref b, ref a)) continue; // (hidden)
             bool textured;
             if (item.SpriteIndex >= 0)
             {
@@ -1753,13 +1827,13 @@ internal sealed partial class CampaignRenderer : IGlScreen
                 GlNative.ActiveTexture(GLES30.GlTexture0);
             }
             GlNative.Uniform1i(HU("use_mask"), mask && maskBound ? 1 : 0);
-            GlNative.Uniform1f(HU("alpha"), item.Alpha);
+            GlNative.Uniform1f(HU("alpha"), a);
             if (reticleMoves && i == scene.HostReticleItem)
             {
-                DrawHudQuad(item.Left + reticleDx, item.Right + reticleDx, item.Top + reticleDy, item.Bottom + reticleDy);
+                DrawHudQuad(l + reticleDx, r + reticleDx, t + reticleDy, b + reticleDy);
                 continue;
             }
-            DrawHudQuad(item.Left, item.Right, item.Top, item.Bottom);
+            DrawHudQuad(l, r, t, b);
         }
         float fade = PlayerEntity.HostNoViewer ? 0 : scene.HostFadeAmount; // a replay's free cam: not the main player's eyes
         if (fade > 0)
@@ -1770,6 +1844,43 @@ internal sealed partial class CampaignRenderer : IGlScreen
         }
         GLES30.GlUseProgram(_program);
         GLES30.GlEnable(GLES30.GlDepthTest);
+    }
+
+    // The death white-out (GameState's death countdown -> PlayerHud.BeginWhiteout): white bands spread up and down from the
+    // screen's middle with the edges dimmed, the whole screen turns white, then fades to black for the continue prompt.
+    // MphRead's desktop renderer does it in its shift shader over the world (Renderer.cs, white_table: one value per DS
+    // scan line of 192, white_fac); here the same table as one fade quad per run of equal lines, before the HUD's sprites
+    // as there. Only while it runs (about 1.7 s), so nothing per frame otherwise.
+    void DrawWhiteout()
+    {
+        PlayerEntity owner = PlayerEntity.HudOwner;
+        if (PlayerEntity.HostNoViewer || owner.HudWhiteoutState == -1) return;
+        float fac = owner.HudWhiteoutFactor;
+        if (fac == 0) return;
+        float[] table = PlayerEntity.HudWhiteoutTable;
+        int start = 0;
+        for (int line = 1; line <= table.Length; line++)
+        {
+            if (line < table.Length && table[line] == table[start]) continue;
+            float v = table[start], c, a;
+            if (fac < 0) // the last stage: the table is the screen's grey level
+            {
+                c = Math.Clamp(v, 0, 1);
+                a = 1;
+            }
+            else // the shader's lerp to white (factor >= 0) or to black (< 0)
+            {
+                float k = v * fac;
+                c = k >= 0 ? 1 : 0;
+                a = Math.Min(Math.Abs(k), 1);
+            }
+            if (a > 0)
+            {
+                GLES30.GlUniform4f(HU("fade_color"), c, c, c, a);
+                DrawHudQuad(-1, 1, 1 - start / 96f, 1 - line / 96f); // line 0 = the top
+            }
+            start = line;
+        }
     }
 
     void DrawHudQuad(float left, float right, float top, float bottom)
@@ -1922,6 +2033,8 @@ internal sealed partial class CampaignRenderer : IGlScreen
             SetMatrix(U("u_bones"), item.Transform);
         }
         SmoothItemView(item, scene); // its entity carried on (CampaignSmoothFrames.cs)
+        bool viewmodel = _vmProjOn && item.HostViewmodel;
+        if (viewmodel) SetMatrix(U("u_projection"), _vmProj); // MPH's gun at the default FOV's framing (CampaignView.cs)
         SetMatrix(U("u_billboard"), item.BillboardMode == BillboardMode.Sphere ? scene.ViewInvRotMatrix
             : item.BillboardMode == BillboardMode.Cylinder ? scene.ViewInvRotYMatrix : Matrix4.Identity);
         // DoMaterial
@@ -1986,6 +2099,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         {
             DrawQuad(item);
         }
+        if (viewmodel) SetMatrix(U("u_projection"), scene.PerspectiveMatrix);
     }
 
     // the render items drawn from the frame's dynamic vertex buffer (UploadQuads) instead of a mesh. Multi-segment trails
@@ -2438,7 +2552,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
             GLES30.GlGetFloatv(GLES30.GlAliasedLineWidthRange, range, 0);
             _lineWidthMax = Math.Max(1, range[1]);
         }
-        GLES30.GlLineWidth(Math.Clamp(_height / 192f, 1, _lineWidthMax));
+        GLES30.GlLineWidth(Math.Clamp(_height * SceneLineScale / 192f, 1, _lineWidthMax)); // RENDER SCALE: 1 at 100%
         GlNative.BindVertexArray(gpu.LineVao);
         GlNative.DrawArrays(GLES30.GlLines, 0, gpu.LineCount);
         GLES30.GlLineWidth(1);
@@ -2457,7 +2571,7 @@ internal sealed partial class CampaignRenderer : IGlScreen
         }
         long upload = Stopwatch.GetTimestamp();
         (Model model, Mesh m, bool isRoom) = scene.HostMeshes[listId - 1];
-        float[] verts = DsDisplayList.Decode(model, m, isRoom);
+        float[] verts = TakePredecoded(model, m, isRoom) ?? DsDisplayList.Decode(model, m, isRoom); // decoded ahead on a worker (CampaignRenderer.RoomWarm.cs)
         gpu = new GpuMesh { Count = verts.Length / DsDisplayList.Stride, LastUsed = _frame };
         if (gpu.Count > 0)
         {
@@ -2656,7 +2770,33 @@ internal sealed partial class CampaignRenderer : IGlScreen
         GlNative.UniformMatrix4(location, 1, _mtx);
     }
 
+    // games made by CampaignLaunch.Create whose Shutdown hasn't run: their scene still holds MphRead (one scene at a time),
+    // so the menus' arena background doesn't start loading until this is 0 (FrontendRenderer.StepArenaBackdrop)
+    static int s_gamesOpen;
+    public static bool GameOpen => System.Threading.Volatile.Read(ref s_gamesOpen) > 0;
+    bool _countedAsGame, _shutDown;
+
+    internal void CountAsGame()
+    {
+        if (_countedAsGame) return;
+        _countedAsGame = true;
+        System.Threading.Interlocked.Increment(ref s_gamesOpen);
+    }
+
+    // once (Android's CampaignActivity calls it as it pauses to finish, so the scene is gone before the menus come
+    // back, and again from OnDestroy)
     public void Shutdown()
+    {
+        if (_shutDown) return;
+        _shutDown = true;
+        try { ShutdownOnce(); }
+        finally
+        {
+            if (_countedAsGame) System.Threading.Interlocked.Decrement(ref s_gamesOpen);
+        }
+    }
+
+    void ShutdownOnce()
     {
         EndReplay(complete: false); // MatchReplay.cs: a match left early keeps its recording, marked incomplete
         MphRecomp.Mods.LiveMods.Detach(); // the game's mods stop and keep their saved values (CampaignLaunch.Create)

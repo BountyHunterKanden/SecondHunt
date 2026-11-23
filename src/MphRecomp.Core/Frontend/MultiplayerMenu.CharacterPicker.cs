@@ -95,7 +95,10 @@ namespace MphRecomp.Frontend
 
         // (an extra character also needs the ADVANCED box's EXTRA CHARACTERS: MultiplayerMenu.ExtraRules.cs)
         private bool SlotOpen(int slot) => slot < HunterOrder.Length ? HunterOpen(HunterOrder[slot])
-            : (SlotCharacter(slot)!.HasOriginal || ShownCharacters) && SkinsOf(SlotCharacter(slot)!).Count > 0;
+            : (SlotCharacter(slot)!.HasOriginal || (BotPicking ? s_botExtras : ShownCharacters)) && SkinsOf(SlotCharacter(slot)!).Count > 0;
+
+        // whose look SELECT HUNTER starts from: this player's, or the bot's it was opened for (BeginBotPick)
+        private (Hunter Hunter, string? Skin) PickerLook => BotPicking ? s_botLook : (_setup.MyHunter, _setup.MySkin);
 
         // the skin a slot shows before (or without) a choice: this player's last one for that character, else its first
         private string? DisplaySkin(int slot)
@@ -104,10 +107,10 @@ namespace MphRecomp.Frontend
             if (c == null) return null;
             List<string> skins = SkinsOf(c);
             if (skins.Count == 0) return null;
-            if (Characters.Of(_setup.MyHunter, _setup.MySkin) == c && _setup.MySkin != null
-                && skins.Contains(_setup.MySkin, StringComparer.OrdinalIgnoreCase))
+            (Hunter lookHunter, string? lookSkin) = PickerLook;
+            if (Characters.Of(lookHunter, lookSkin) == c && lookSkin != null && skins.Contains(lookSkin, StringComparer.OrdinalIgnoreCase))
             {
-                return _setup.MySkin;
+                return lookSkin;
             }
             return skins[0];
         }
@@ -322,6 +325,11 @@ namespace MphRecomp.Frontend
         {
             string? s = Characters.IsOriginal(skin) ? null : skin;
             string? character = Characters.IdFor(hunter, s);
+            if (BotPicking) // (an online host's bot: its pick goes to the lobby, this player's look stays)
+            {
+                BotPicked(menu, hunter, s, character);
+                return;
+            }
             _setup.MyHunter = hunter;
             _setup.MySkin = s;
             _setup.MyCharacter = character;
@@ -780,7 +788,7 @@ namespace MphRecomp.Frontend
             List<string> skins = SkinsOf(c);
             Seat st = _setup.Seats[seat];
             string? current = seat == 0 && menu.Page!.Index is HunterPage or JoinHunterPage
-                ? (Characters.Of(_setup.MyHunter, _setup.MySkin) == c ? _setup.MySkin ?? Characters.Original : null)
+                ? (Characters.Of(PickerLook.Hunter, PickerLook.Skin) == c ? PickerLook.Skin ?? Characters.Original : null)
                 : Characters.Of(st.Hunter, st.Skin) == c ? st.Skin ?? Characters.Original : null;
             int focus = current == null ? 0 : Math.Max(0, skins.FindIndex(x => x.Equals(current, StringComparison.OrdinalIgnoreCase)));
             bool lobby = menu.Page!.Index is LobbyPage or JoinLobbyPage;

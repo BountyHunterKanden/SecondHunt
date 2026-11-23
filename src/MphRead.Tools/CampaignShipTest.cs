@@ -393,11 +393,21 @@ namespace MphRead
             RunLanding(host, 1000);
             host.Player.TakeDamage(9999, DamageFlags.IgnoreInvuln, null, null);
             int f = 0;
+            // the death white-out the host draws (CampaignRenderer.DrawWhiteout): bands grow white from the middle (state 1),
+            // then the whole screen fades white to black (state 2) before the prompt
+            int whiteStart = -1, whiteFull = -1;
+            bool midWhite = false;
             for (; f < 900 && !(host.DialogPaused && host.Dialog == DialogType.YesNo); f++)
             {
                 host.Step(default);
+                int ws = host.Player.HudWhiteoutState;
+                if (ws >= 0 && whiteStart < 0) whiteStart = f;
+                if (ws == 1 && PlayerEntity.HudWhiteoutTable[95] >= 1 && PlayerEntity.HudWhiteoutTable[0] < 1) midWhite = true;
+                if (ws == 2 && whiteFull < 0) whiteFull = f;
             }
             Check($"death shows the continue prompt (frame {f})", host.DialogPaused && host.Dialog == DialogType.YesNo);
+            Check($"death white-out runs before it (starts frame {whiteStart}, white from the middle {midWhite}, full screen frame {whiteFull})",
+                whiteStart >= 0 && midWhite && whiteFull > whiteStart && whiteFull < f);
             for (int i = 0; i < 600 && !host.Ended; i++)
             {
                 host.Step(new CampaignInput { DialogButton = i % 10 == 0 ? HostDialogButton.No : HostDialogButton.None });

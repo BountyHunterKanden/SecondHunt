@@ -11,7 +11,7 @@ namespace MphRecomp.Campaign
     // bolt's shape is worked out once, when it is born, and kept for its life: a curve from its IEMT point to its FEMT
     // point (the emitters' velocities its control points), SSEG points along it at jittered steps, then pushed sideways
     // by a midpoint fractal (AMPL, AMPD) that zigzags the whole bolt in one random plane. It is drawn as up to three
-    // lines over its points, LWDn wide in 480-line pixels, LCLn coloured by its age (3: the wide glow, 1: the thin
+    // lines over its points, LWDn wide in pixels of Corruption's 640x448 frame, LCLn coloured by its age (3: the wide glow, 1: the thin
     // bright core). A bolt keeps its shape (its own seed) and its start in effect space, so it rides along as Transform
     // moves. Spawn adds one whose end the caller places and holds on a world point (Dark Samus's Hyper Ball: arcs to the
     // surfaces around it and to its targets, as Corruption's code adds them; CampaignRenderer.HyperFx.cs).

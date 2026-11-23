@@ -8,8 +8,10 @@ using MphRecomp.PrimeMusic;
 //   - IMPORT GAMES: a game's MUSIC tile (RecompMenus.ImportGamePage.cs) opens its song list: IMPORT ALL, then a row a song
 //     by area (A imports it, its X deletes it), DELETE ALL for every imported song of the game.
 //   - SECOND HUNT SETTINGS > SOUND: MATCH MUSIC and MENU MUSIC open the song browser to pick ARENA / ORIGINAL, SHUFFLE or a
-//     song; the music picker switch (the rules pages' MUSIC row, MultiplayerMenu.MatchMusic.cs); SONG LIST opens the same
-//     browser to turn songs off: a game, an area (MusicCatalog) or one song. An off song never shows in a picker or a shuffle.
+//     song; the music picker switch (the rules pages' MUSIC row, MultiplayerMenu.MatchMusic.cs); ARENA SONGS and MENU SONGS
+//     open the same browser to turn songs off: a game, an area (MusicCatalog) or one song. Two lists over the same songs
+//     (owner 2026-11-13): a song off in ARENA SONGS never shows in the match pickers or shuffle, one off in MENU SONGS
+//     never in MENU MUSIC's.
 //   The browser: games -> a game's areas -> an area's songs, the same three pages for the three uses. Turning off is
 //   checkboxes (owner 2026-10-29: not a left / right picker), and each song has a play / pause box to hear it first.
 namespace MphRecomp.Frontend
@@ -20,12 +22,15 @@ namespace MphRecomp.Frontend
         private string _songGame = "mp1";
         private bool _songsReturn; // back from the song list: the game page with the MUSIC tile focused
 
-        // what the browser is open for: turning songs on and off, or picking the match or menu music
-        private enum SongPick { Hide, Match, Menu }
+        // what the browser is open for: turning songs on and off in the match or menu list, or picking the match or menu music
+        private enum SongPick { HideArena, HideMenu, Match, Menu }
         private SongPick _songPick;
+        private bool Hiding => _songPick is SongPick.HideArena or SongPick.HideMenu;
+        // the off songs of the list the browser is on: the menus' for MENU MUSIC and MENU SONGS, else the matches'
+        private List<string> HiddenList => _songPick is SongPick.Menu or SongPick.HideMenu ? _settings.MenuHiddenSongs() : _settings.HiddenSongs;
         // opened from a rules page's MUSIC box (owner 2026-10-29: the lobby's picker is this same list): the page to go back to
         private int _songLobbyBack = -1;
-        private const int SongsBack = 1017; // SONG LIST's back: SOUND, or that rules page
+        private const int SongsBack = 1017; // the song browser's back: SOUND, or that rules page
         private string _browseGame = "mp1", _browseArea = "";
 
         // the song a song list is playing to hear it (its play / pause box; FrontendRenderer.UpdateMenuMusic plays it in
@@ -121,7 +126,7 @@ namespace MphRecomp.Frontend
 
         // ---- SECOND HUNT SETTINGS ----
 
-        private List<Track> ShownSongs() => MusicLibrary.Shown(ImportRoot, _settings.HiddenSongs);
+        private List<Track> ShownSongs() => MusicLibrary.Shown(ImportRoot, HiddenList);
 
         private const float MusicValueWidth = 52; // the value box's text (measured on -fecanvas: "P1 TALLO" fits)
 
@@ -180,11 +185,20 @@ namespace MphRecomp.Frontend
                 },
                 new()
                 {
-                    Label = "song\nlist",
-                    Description = imported == 0 ? "the songs you import show here: turn off the ones you never want in the pickers and shuffles."
-                        : $"turn off songs, areas or games you never want in the pickers and shuffles. {ShownSongs().Count} of {imported} on.",
+                    Label = "arena\nsongs",
+                    Description = imported == 0 ? "the songs you import show here: turn off the ones you never want in your matches."
+                        : $"the songs match music and the match shuffle pick from. {MusicLibrary.Shown(ImportRoot, _settings.HiddenSongs).Count} of {imported} on.",
                     Value = () => "OPEN",
-                    Step = _ => OpenSongBrowser(SongPick.Hide),
+                    Step = _ => OpenSongBrowser(SongPick.HideArena),
+                    Action = true
+                },
+                new()
+                {
+                    Label = "menu\nsongs",
+                    Description = imported == 0 ? "the songs you import show here: turn off the ones you never want in the menus."
+                        : $"the songs menu music and the menu shuffle pick from. {MusicLibrary.Shown(ImportRoot, _settings.MenuHiddenSongs()).Count} of {imported} on.",
+                    Value = () => "OPEN",
+                    Step = _ => OpenSongBrowser(SongPick.HideMenu),
                     Action = true
                 },
             };
@@ -197,7 +211,10 @@ namespace MphRecomp.Frontend
             if (_songFilterRows == null) return;
             _songPick = pick;
             _songLobbyBack = -1;
-            _songFilterRows.Title = pick switch { SongPick.Match => "MATCH MUSIC", SongPick.Menu => "MENU MUSIC", _ => "SONG LIST" };
+            _songFilterRows.Title = pick switch
+            {
+                SongPick.Match => "MATCH MUSIC", SongPick.Menu => "MENU MUSIC", SongPick.HideMenu => "MENU SONGS", _ => "ARENA SONGS"
+            };
             _stepMenu?.GoTo(_songFilterRows.Page);
         }
 
@@ -235,35 +252,39 @@ namespace MphRecomp.Frontend
             && (page == _songFilterRows?.Page || page == _songGameRows?.Page || page == _songAreaRows?.Page);
 
         // the songs a page lists: every imported one to turn off, the ones still on to pick from
-        private List<Track> BrowseSongs() => _songPick == SongPick.Hide ? MusicLibrary.Imported(ImportRoot) : ShownSongs();
+        private List<Track> BrowseSongs() => Hiding ? MusicLibrary.Imported(ImportRoot) : ShownSongs();
 
         private string OnCount(IEnumerable<Track> songs)
         {
             List<Track> list = songs.ToList();
-            return $"{list.Count(t => !_settings.HiddenSongs.Contains(t.Id))}/{list.Count}";
+            List<string> hidden = HiddenList;
+            return $"{list.Count(t => !hidden.Contains(t.Id))}/{list.Count}";
         }
 
         // ON, OFF or SOME for a group, and its switch: anything on turns it all off, else all on (every song of the
         // group, imported or not, so one imported later keeps the group's choice)
         private string GroupValue(List<Track> songs)
         {
-            int on = songs.Count(t => !_settings.HiddenSongs.Contains(t.Id));
+            List<string> hidden = HiddenList;
+            int on = songs.Count(t => !hidden.Contains(t.Id));
             return on == songs.Count ? "ON" : on == 0 ? "OFF" : "SOME";
         }
 
         private void GroupStep(List<Track> songs, IEnumerable<string> ids)
         {
-            bool anyOn = songs.Any(t => !_settings.HiddenSongs.Contains(t.Id));
+            List<string> hidden = HiddenList;
+            bool anyOn = songs.Any(t => !hidden.Contains(t.Id));
             foreach (string id in ids.ToList()) SetHidden(id, anyOn);
         }
 
-        // one song on or off. Never a repeat in HiddenSongs: a group switch used to add a song already hidden again, and
-        // one Remove then left it hidden (owner 2026-10-29, "toggling the all ... breaks the rest of the checkmarks");
-        // a repeat saved by that build is cleared by the RemoveAll
+        // one song on or off in the browser's list. Never a repeat in it: a group switch used to add a song already hidden
+        // again, and one Remove then left it hidden (owner 2026-10-29, "toggling the all ... breaks the rest of the
+        // checkmarks"); a repeat saved by that build is cleared by the RemoveAll
         private void SetHidden(string id, bool hidden)
         {
-            _settings.HiddenSongs.RemoveAll(x => x == id);
-            if (hidden) _settings.HiddenSongs.Add(id);
+            List<string> list = HiddenList;
+            list.RemoveAll(x => x == id);
+            if (hidden) list.Add(id);
         }
 
         // the first page: (picking) the game's own music and shuffle, then a row a game
@@ -271,7 +292,7 @@ namespace MphRecomp.Frontend
         {
             var rows = new List<RowModel>();
             List<Track> songs = BrowseSongs();
-            if (_songPick != SongPick.Hide)
+            if (!Hiding)
             {
                 bool menu = _songPick == SongPick.Menu;
                 string none = MusicLibrary.Imported(ImportRoot).Count == 0 ? " import songs in import games to pick one." : "";
@@ -286,7 +307,8 @@ namespace MphRecomp.Frontend
                 rows.Add(new RowModel
                 {
                     Label = "shuffle",
-                    Description = (menu ? "another song each time" : "another song each match") + ", from the songs you have on in song list.",
+                    Description = menu ? "another song each time, from the songs you have on in menu songs."
+                        : "another song each match, from the songs you have on in arena songs.",
                     Value = () => Choice == MusicLibrary.Shuffle ? "PICKED" : "PICK",
                     Step = _ => Pick(MusicLibrary.Shuffle),
                     Disabled = () => ShownSongs().Count == 0,
@@ -301,11 +323,11 @@ namespace MphRecomp.Frontend
                 rows.Add(new RowModel
                 {
                     Label = SongLabel(name),
-                    Description = _songPick == SongPick.Hide
+                    Description = Hiding
                         ? $"{of.Count} songs {(game == HuntersMusic.Kind ? "from your " + name + " rom" : "imported from " + name)}, {OnCount(of).Split('/')[0]} on. a: go through them by area."
                         : $"{of.Count} songs from {name}. a: go through them by area."
                             + (MusicLibrary.Find(Choice) is Track p && p.Game == game ? $" picked now: {MusicLibrary.ShortTitle(p)}." : ""),
-                    Value = () => _songPick == SongPick.Hide ? OnCount(of) : MusicLibrary.Find(Choice)?.Game == game ? "PICKED" : "OPEN",
+                    Value = () => Hiding ? OnCount(of) : MusicLibrary.Find(Choice)?.Game == game ? "PICKED" : "OPEN",
                     Step = _ => OpenBrowseGame(game),
                     Action = true
                 });
@@ -323,12 +345,16 @@ namespace MphRecomp.Frontend
 
         // a game's page: (turning off) the whole game, then a row an area
         // an ALL SONGS row's hint for its value; a turns all of them off when any is on, else all on
-        private static string GroupHint(string value, string what, bool later) => value switch
+        private string GroupHint(string value, string what, bool later)
         {
-            "ON" => what + " is in the pickers and shuffles. a: turn them all off.",
-            "SOME" => what + " at once: some are off now. a: turn them all off.",
-            _ => what + " is out of the pickers and shuffles" + (later ? ", songs you import later too" : "") + ". a: turn them all on."
-        };
+            string uses = _songPick == SongPick.HideMenu ? "menu music and its shuffle" : "match music and its shuffle";
+            return value switch
+            {
+                "ON" => what + " is in " + uses + ". a: turn them all off.",
+                "SOME" => what + " at once: some are off now. a: turn them all off.",
+                _ => what + " is out of " + uses + (later ? ", songs you import later too" : "") + ". a: turn them all on."
+            };
+        }
 
         private List<RowModel> BrowseAreaRows()
         {
@@ -336,7 +362,7 @@ namespace MphRecomp.Frontend
             string game = _browseGame, name = GameLongName(game);
             List<Track> songs = BrowseSongs().Where(t => t.Game == game).ToList();
             if (songs.Count == 0) return rows;
-            if (_songPick == SongPick.Hide)
+            if (Hiding)
                 rows.Add(new RowModel
                 {
                     Label = "all\nsongs",
@@ -355,10 +381,10 @@ namespace MphRecomp.Frontend
                 rows.Add(new RowModel
                 {
                     Label = SongLabel(area),
-                    Description = AreaWords(game, area) + (_songPick == SongPick.Hide
+                    Description = AreaWords(game, area) + (Hiding
                         ? $" {of.Count} songs, {OnCount(of).Split('/')[0]} on. a: open."
                         : $" {of.Count} songs. a: open."),
-                    Value = () => _songPick == SongPick.Hide ? OnCount(of) : of.Any(t => t.Id == Choice) ? "PICKED" : "OPEN",
+                    Value = () => Hiding ? OnCount(of) : of.Any(t => t.Id == Choice) ? "PICKED" : "OPEN",
                     Step = _ => OpenBrowseArea(area),
                     Action = true
                 });
@@ -381,7 +407,7 @@ namespace MphRecomp.Frontend
             string game = _browseGame, area = _browseArea;
             List<Track> songs = BrowseSongs().Where(t => t.Game == game && MusicCatalog.Of(t).Category == area).ToList();
             if (songs.Count == 0) return rows;
-            if (_songPick == SongPick.Hide && songs.Count > 1)
+            if (Hiding && songs.Count > 1)
                 rows.Add(new RowModel
                 {
                     Label = "all\nsongs",
@@ -395,17 +421,17 @@ namespace MphRecomp.Frontend
             foreach (Track t in songs)
             {
                 MusicCatalog.Entry e = MusicCatalog.Of(t);
-                rows.Add(_songPick == SongPick.Hide
+                rows.Add(Hiding
                     ? new RowModel
                     {
                         Label = SongLabel(e.Label),
                         Description = Cut($"{e.Where} a: on or off. x: play."),
-                        Value = () => _settings.HiddenSongs.Contains(t.Id) ? "OFF" : "ON",
+                        Value = () => HiddenList.Contains(t.Id) ? "OFF" : "ON",
                         Step = _ =>
                         {
-                            SetHidden(t.Id, !_settings.HiddenSongs.Contains(t.Id));
+                            SetHidden(t.Id, !HiddenList.Contains(t.Id));
                         },
-                        Check = () => !_settings.HiddenSongs.Contains(t.Id),
+                        Check = () => !HiddenList.Contains(t.Id),
                         Action = true,
                         Play = () => PreviewToggle(t),
                         Playing = () => PreviewSong == t.Id

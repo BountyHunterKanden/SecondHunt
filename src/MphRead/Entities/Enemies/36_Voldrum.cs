@@ -39,11 +39,10 @@ namespace MphRead.Entities.Enemies
             Vector3 facing = _spawner.Data.Header.FacingVector.ToFloatVector().Normalized();
             Vector3 up = FixParallelVectors(facing, Vector3.UnitY);
             // todo: see comment about this hack in Enemy35Entity
-            if (facing == Vector3.UnitY)
+            if (facing.X == 0 && facing.Z == 0) // recomp: straight down too, see Enemy35Entity
             {
-                Vector3 swap = facing;
                 facing = up;
-                up = swap;
+                up = Vector3.UnitY;
             }
             SetTransform(facing, up, _spawner.Data.Header.Position.ToFloatVector());
             Flags |= EnemyFlags.Visible;

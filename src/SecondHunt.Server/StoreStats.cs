@@ -19,7 +19,38 @@ namespace SecondHunt.Server
             Exec(@"CREATE TABLE IF NOT EXISTS stats(
                      code TEXT NOT NULL, cat TEXT NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL,
                      PRIMARY KEY(code, cat, key));
-                   CREATE INDEX IF NOT EXISTS stats_board ON stats(cat, key, value);");
+                   CREATE INDEX IF NOT EXISTS stats_board ON stats(cat, key, value);
+                   CREATE TABLE IF NOT EXISTS hub_hidden(code TEXT PRIMARY KEY, why TEXT NOT NULL, at INTEGER NOT NULL);");
+            using var cmd = Command("SELECT code FROM hub_hidden", Array.Empty<(string, object?)>());
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                _hubHidden.Add(r.GetString(0));
+            }
+        }
+
+        // 0.10.1: profiles kept off the Gaming Hub for good (dev builds, test tools, our own test devices; owner 2026-11-11):
+        // no stats, not in "online lately", and a match with one of them in it isn't counted for anyone
+        private readonly HashSet<string> _hubHidden = new();
+
+        public bool HubHidden(string code)
+        {
+            lock (_lock)
+            {
+                return _hubHidden.Contains(code);
+            }
+        }
+
+        public void HideFromHub(string code, string why)
+        {
+            lock (_lock)
+            {
+                if (_hubHidden.Add(code))
+                {
+                    Exec("INSERT OR IGNORE INTO hub_hidden(code, why, at) VALUES($c, $w, $t)", ("$c", code), ("$w", why), ("$t", UnixNow));
+                    Exec("DELETE FROM stats WHERE code = $c", ("$c", code));
+                }
+            }
         }
 
         // one seat of a finished match, checked by the hub (HubStats.cs)

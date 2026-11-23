@@ -39,6 +39,8 @@ namespace MphRecomp.Import.Retro
             public float[]? Keys;
             public bool Percent, Loop;
             public int LoopStart, LoopEnd;
+            // KEYF (Corruption): the driver value at the first key (F: keys per driver unit)
+            public float KeyStart;
             public Elem? Kid(int i) => i < Kids.Length ? Kids[i] : null;
             public override string ToString() => Kind;
         }
@@ -50,6 +52,7 @@ namespace MphRecomp.Import.Retro
         public readonly List<Spawn> Spawns = new();
         public int SpawnEndFrame;
         public bool Echoes { get; private set; }  // read from Echoes (RetroParticleSystem keys its KEYE by it)
+        public bool Mp3 { get; private set; }     // read from Corruption
 
         public Elem? this[string tag] => Props.TryGetValue(tag, out Elem? e) ? e : null;
         public bool Flag(string tag) => this[tag]?.B ?? false;
@@ -89,7 +92,7 @@ namespace MphRecomp.Import.Retro
             var r = new Reader(b) { Mp3 = mp3, Echoes = echoes };
             bool ext = mp3 || echoes;
             if (r.U32() != Magic) throw new InvalidDataException("not a particle generator (GPSM)");
-            var p = new Part { Echoes = echoes };
+            var p = new Part { Echoes = echoes, Mp3 = mp3 };
             while (true)
             {
                 string tag = r.Tag();
@@ -187,6 +190,79 @@ namespace MphRecomp.Import.Retro
             public uint Texture => this["TEXR"]?.Id ?? 0;
         }
 
+        // A decal (DPSC, "DPSM"): what a shot leaves on the wall it hits (a CRSC's DDCL), read like a PART: PrimeDecomp's
+        // CDecalDataFactory (same element grammar). Two quads (1 / 2: texture, colour, size, rotation, offset, life,
+        // additive) and an optional model (DM*). Prime's CDecal draws a quad +-SZE in the hit's XZ plane (+Y = the
+        // surface normal), its rotation (degrees about +Y) taken once, colour and size by the decal's age. Quad(n) gives
+        // that quad as a one-particle PMUS system, so RetroParticles runs and draws it. Added for the Hyper Beam's wall
+        // mark (Corruption ba67a110), 2026-11-13.
+        public sealed class Dpsc
+        {
+            public const uint Magic = 0x4450534D;   // "DPSM"
+            public readonly Dictionary<string, Elem?> Props = new(StringComparer.Ordinal);
+            public Elem? this[string tag] => Props.TryGetValue(tag, out Elem? e) ? e : null;
+
+            public static Dpsc Load(byte[] b, bool mp3 = false)
+            {
+                var r = new Reader(b) { Mp3 = mp3 };
+                if (r.U32() != Magic) throw new InvalidDataException("not a decal (DPSM)");
+                var d = new Dpsc();
+                while (true)
+                {
+                    string tag = r.Tag();
+                    if (tag == "_END") break;
+                    d.Props[tag] = tag switch
+                    {
+                        "1LFT" or "2LFT" or "DLFT" => r.Int(),
+                        "1SZE" or "1ROT" or "2SZE" or "2ROT" => r.Real(),
+                        "1OFF" or "2OFF" or "DMOP" or "DMRT" or "DMSC" => r.Vector(),
+                        "1CLR" or "2CLR" or "DMCL" => r.Color(),
+                        "1TEX" or "2TEX" => r.Texture(),
+                        "1ADD" or "2ADD" or "DMAB" or "DMOO" => r.Bool(),
+                        "DMDL" => r.Asset("CMDL"),
+                        _ when mp3 => r.Any(tag),
+                        _ => throw new InvalidDataException($"decal property {tag} at {r.O - 4:x} is not known"),
+                    };
+                }
+                return d;
+            }
+
+            public IEnumerable<(string Type, uint Id)> Dependencies()
+            {
+                foreach (string t in new[] { "1TEX", "2TEX" })
+                {
+                    if (this[t] is Elem e && e.Id is not (0 or UInt32.MaxValue)) yield return ("TXTR", e.Id);
+                }
+                if (this["DMDL"] is Elem m && m.Id is not (0 or UInt32.MaxValue)) yield return ("CMDL", m.Id);
+            }
+
+            // quad n (1 or 2) as a PMUS system: one particle at the effect origin for nLFT frames, a square of nTEX scaled
+            // 2 * nSZE across (PMUS corners are +-0.5), turned nROT about +Y, coloured nCLR; null when it has no texture
+            public Part? Quad(int n)
+            {
+                if (this[$"{n}TEX"] is not Elem tex || tex.Id is 0 or UInt32.MaxValue) return null;
+                static Elem R(float f) => new() { Cat = Cat.Real, Kind = "CNST", F = f };
+                static Elem I(int i) => new() { Cat = Cat.Int, Kind = "CNST", I = i };
+                Elem size = this[$"{n}SZE"] is Elem s ? new Elem { Cat = Cat.Real, Kind = "MULT", Kids = new Elem?[] { s, R(2) } } : R(2);
+                var p = new Part { Mp3 = true };
+                p.Props["PMUS"] = new Elem { Cat = Cat.Bool, Kind = "BOOL", B = true };
+                // a decal draws only its quads (CDecal), never the system's sprite (RDOP's default would add a SIZE 0.1
+                // billboard of nTEX, alpha-blended: quad 1's opaque-black glow showed as a dark square mid-mark)
+                p.Props["RDOP"] = new Elem { Cat = Cat.Bool, Kind = "BOOL", B = false };
+                p.Props["PMAB"] = new Elem { Cat = Cat.Bool, Kind = "BOOL", B = this[$"{n}ADD"]?.B ?? false };
+                p.Props["TEXR"] = tex;
+                p.Props["PMCL"] = this[$"{n}CLR"];
+                p.Props["PMSC"] = new Elem { Cat = Cat.Vector, Kind = "CNST", Kids = new Elem?[] { size, R(1), size } };
+                p.Props["PMRT"] = new Elem { Cat = Cat.Vector, Kind = "CNST", Kids = new Elem?[] { R(0), this[$"{n}ROT"] ?? R(0), R(0) } };
+                p.Props["PMOP"] = this[$"{n}OFF"];
+                p.Props["LTME"] = this[$"{n}LFT"] ?? I(1);
+                p.Props["MAXP"] = I(1);
+                p.Props["GRTE"] = R(1);
+                p.Props["PSLT"] = I(1);
+                return p;
+            }
+        }
+
         internal sealed class Reader
         {
             readonly byte[] _b;
@@ -224,9 +300,9 @@ namespace MphRecomp.Import.Retro
                 return e;
             }
 
-            // KEYF (Corruption): keys looked up by a driver element's value: a header (26 bytes; its last float = the
-            // driver value at the last key), the key count, the keys (floats, even in an int slot; a vector's 3 per key),
-            // then the driver
+            // KEYF (Corruption): keys looked up by a driver element's value: a header (26 bytes: mode 2, 0, loop byte, a
+            // byte, key count, loop start, the driver value at key 0, keys per driver unit), the key count again, the
+            // keys (int32 in an int slot, else floats; a vector's 3 per key), then the driver (a real element)
             Elem KeyF(Cat c, int width = 1)
             {
                 int st = O, hl = 0x16;
@@ -240,10 +316,17 @@ namespace MphRecomp.Import.Retro
                     }
                 }
                 var e = new Elem { Cat = c, Kind = "KEYF", F = Be.F32(_b, st + hl - 4) };
+                bool mp3 = Mp3 && hl == 0x1a;
+                if (mp3)
+                {
+                    e.Loop = _b[st + 8] != 0;
+                    e.LoopStart = Be.I32(_b, st + hl - 12);
+                    e.KeyStart = Be.F32(_b, st + hl - 8);
+                }
                 O = st + hl;
                 int n = I32();
                 e.Keys = new float[n * width];
-                for (int i = 0; i < e.Keys.Length; i++) e.Keys[i] = F32();
+                for (int i = 0; i < e.Keys.Length; i++) e.Keys[i] = mp3 && c == Cat.Int ? I32() : F32();
                 e.Kids = new[] { Real() };
                 return e;
             }
@@ -333,6 +416,7 @@ namespace MphRecomp.Import.Retro
                     case "KEYF" when Ext: return KeyF(Cat.Real);
                     case "KPIN" when Ext: return E(Cat.Real, k, Real());
                     case "GTCP" when Ext: return E(Cat.Real, k);
+                    case "TOCS" when Ext: return E(Cat.Real, k, Bool(), Int(), Int(), Int());   // Echoes, in a Splinter effect: shape read from the disc, meaning not known
                 }
                 throw new InvalidDataException($"real element {k} at {O - 4:x} is not known");
             }
@@ -356,6 +440,7 @@ namespace MphRecomp.Import.Retro
                     case "PLOC": case "PLCO": case "PVEL": case "PSOF": case "PSOU": case "PSOR": case "PSTR": return E(Cat.Vector, k);
                     case "CTVC": return E(Cat.Vector, k, Color());
                     case "RNDV" when Ext: return E(Cat.Vector, k, Real());
+                    case "PNCV" when Ext: return E(Cat.Vector, k);   // Echoes, no arguments (Splinter PMOV, under PMOO false)
                     case "KEYF" when Ext: return KeyF(Cat.Vector, 3);
                 }
                 throw new InvalidDataException($"vector element {k} at {O - 4:x} is not known");
@@ -376,6 +461,9 @@ namespace MphRecomp.Import.Retro
                     case "PCOL": return E(Cat.Color, k);
                     case "CFDL" or "MULT" or "ADD_" or "SUB_" when Ext: return E(Cat.Color, k, Color(), Color());
                     case "VRTC" when Ext: return E(Cat.Color, k, Vector(), Real());
+                    case "MDAO" when Ext: return E(Cat.Color, k, Color(), Real());   // Echoes: a colour with its alpha scaled
+                    // Echoes: the colour at birth, kept per particle (the three slots key its G, B, A beside R on the element)
+                    case "KPIN" when Ext: return E(Cat.Color, k, Color(), new Elem { Cat = Cat.Real, Kind = "SLOT" }, new Elem { Cat = Cat.Real, Kind = "SLOT" }, new Elem { Cat = Cat.Real, Kind = "SLOT" });
                 }
                 throw new InvalidDataException($"colour element {k} at {O - 4:x} is not known");
             }
@@ -459,12 +547,13 @@ namespace MphRecomp.Import.Retro
 
     // A Retro collision response table (CRSC, "CRSM"): the effects and sounds a weapon's hit plays per surface. Prime 1:
     // tagged entries, each "CNST" + an id (particle effects: PART, decals: DPSC, sounds: a sound id) until "_END". Only
-    // the default effect (DEFS) and its sound (DSFX) are used for now.
+    // the default effect (DEFS), its sound (DSFX) and its decal (DDCL) are used for now.
     public sealed class Crsc
     {
         public readonly Dictionary<string, uint> Ids = new(StringComparer.Ordinal);
         public uint DefaultEffect => Ids.TryGetValue("DEFS", out uint v) ? v : 0;
         public uint DefaultSound => Ids.TryGetValue("DSFX", out uint v) ? v : UInt32.MaxValue;
+        public uint DefaultDecal => Ids.TryGetValue("DDCL", out uint v) ? v : 0;  // a DPSC (Part.Dpsc)
 
         public static Crsc Load(byte[] b, bool mp3 = false)
         {

@@ -77,8 +77,8 @@ namespace MphRead
             }
             string room = args[1];
             bool list = args[2] == "list";
-            int entityId = list || args[2] == "all" || args[2] == "fields" || args[2] == "spawns" || args[2] == "hunt" || args[2] == "lock" ? -1 : Int32.Parse(args[2]);
-            int layer = args[2] == "hunt" || args[2] == "lock" ? (args.Length >= 5 ? Int32.Parse(args[4]) : 0) : args.Length >= 4 && Int32.TryParse(args[3], out int l) ? l : 0;
+            int entityId = list || args[2] == "all" || args[2] == "fields" || args[2] == "spawns" || args[2] == "hunt" || args[2] == "lock" || args[2] == "spawntrace" ? -1 : Int32.Parse(args[2]);
+            int layer = args[2] == "hunt" || args[2] == "lock" || args[2] == "spawntrace" ? (args.Length >= 5 ? Int32.Parse(args[4]) : 0) : args.Length >= 4 && Int32.TryParse(args[3], out int l) ? l : 0;
             bool logged = Array.IndexOf(args, "logged") > 0; // the entry is already in the logbook (e.g. a key picked up earlier)
             using CampaignHost host = CampaignHost.Start(room, collectDrawItems: true, viewWidth: 1920, viewHeight: 1080, setupSave: s =>
             {
@@ -205,6 +205,93 @@ namespace MphRead
                 Console.WriteLine($"  HUNT done (ended {host.Ended})");
                 return;
             }
+            if (args[2] == "spawntrace")
+            {
+                // -campaignscan <room> spawntrace <spawnerId> [layer] [frames]: stand Samus (kept alive) under an enemy spawner
+                // (SPAWNAT=x,y,z moves her from it before the floor drop) and print each change in the spawner's flags and counts,
+                // its model enemy (Enemy40) and the enemies it spawned
+                int spId = Int32.Parse(args[3]);
+                int frames = args.Length >= 6 ? Int32.Parse(args[5]) : 60 * 20;
+                host.Scene.TryGetEntity(spId, out EntityBase? spe);
+                var sp = (EnemySpawnEntity)spe!;
+                var bf = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+                System.Reflection.FieldInfo fAct = typeof(EnemySpawnEntity).GetField("_activeCount", bf)!;
+                System.Reflection.FieldInfo fSpawned = typeof(EnemySpawnEntity).GetField("_spawnedCount", bf)!;
+                System.Reflection.FieldInfo fCool = typeof(EnemySpawnEntity).GetField("_cooldownTimer", bf)!;
+                System.Reflection.FieldInfo fRange = typeof(EnemySpawnEntity).GetField("_rangeNodeRef", bf)!;
+                System.Reflection.FieldInfo fModels = typeof(EntityBase).GetField("_models", bf)!;
+                sp.GetPosition(out Vector3 spos);
+                var rn = (MphRead.Formats.Culling.NodeRef)fRange.GetValue(sp)!;
+                Console.WriteLine($"  STR {room} L{layer} spawner #{spId} {sp.Data.EnemyType} at {Fmt(spos)} node '{sp.Data.NodeName.MarshalString()}' range node {rn.PartIndex}/{rn.NodeIndex}/{rn.ModelIndex}"
+                    + $" activeDist {sp.Data.ActiveDistance.FloatValue:0.00} enemyActiveDist {sp.Data.EnemyActiveDistance.FloatValue:0.00} facing {Fmt(sp.Data.Header.FacingVector.ToFloatVector())} up {Fmt(sp.Data.Header.UpVector.ToFloatVector())} flags {sp.Flags}");
+                Vector3 standAt = spos;
+                string[] off = (Environment.GetEnvironmentVariable("SPAWNAT") ?? "").Split(',');
+                if (off.Length == 3)
+                    standAt += new Vector3(Single.Parse(off[0], System.Globalization.CultureInfo.InvariantCulture), Single.Parse(off[1], System.Globalization.CultureInfo.InvariantCulture), Single.Parse(off[2], System.Globalization.CultureInfo.InvariantCulture));
+                CollisionResult fl = default;
+                if (CollisionDetection.CheckBetweenPoints(standAt + new Vector3(0, 1, 0), standAt - new Vector3(0, 30, 0), TestFlags.None, host.Scene, ref fl))
+                    host.PlacePlayer(fl.Position + new Vector3(0, 0.05f, 0), Vector3.UnitZ);
+                string last = "";
+                int changes = 0, spawns = 0, prevSpawned = (int)fSpawned.GetValue(sp)!;
+                // SPAWNHIT=<frame>: on that frame the player deals the spawner model enough damage to destroy it
+                int hitAt = Int32.TryParse(Environment.GetEnvironmentVariable("SPAWNHIT"), out int ha) ? ha : -1;
+                EnemyInstanceEntity? model = null;
+                for (int i = 0; i < frames && !host.Ended; i++)
+                {
+                    p.Health = 799;
+                    if (i == hitAt && model != null)
+                    {
+                        model.TakeDamage(1000, p);
+                        Console.WriteLine($"  STR f{i} hit the spawner model for 1000");
+                    }
+                    host.Step(default);
+                    model = null;
+                    var kids = new System.Collections.Generic.List<string>();
+                    foreach (EntityBase e in host.Scene.Entities)
+                    {
+                        if (e is EnemyInstanceEntity ei && ei.Owner == sp)
+                        {
+                            if (ei.EnemyType == EnemyType.Spawner) model = ei;
+                            else
+                            {
+                                // a few movement fields by name when the enemy has them (Voldrum: aim steps toward its move target)
+                                string ex = "";
+                                foreach (string fn in new[] { "_state1", "_targetVec", "_aimAngleStep", "_aimSteps", "_moveTarget", "_speed" })
+                                {
+                                    for (Type? t = ei.GetType(); t != null; t = t.BaseType)
+                                    {
+                                        System.Reflection.FieldInfo? fi = t.GetField(fn, bf | System.Reflection.BindingFlags.DeclaredOnly);
+                                        if (fi == null) continue;
+                                        object? v = fi.GetValue(ei);
+                                        ex += $" {fn} {(v is Vector3 vv ? Fmt(vv) : v)}";
+                                        break;
+                                    }
+                                }
+                                kids.Add($"{ei.EnemyType}#{ei.Id} hp {ei.Health} at {Fmt(ei.Position)} facing {Fmt(ei.FacingVector)}{ex}");
+                            }
+                        }
+                    }
+                    string ms = "none";
+                    if (model != null)
+                    {
+                        var mm = (System.Collections.Generic.List<ModelInstance>)fModels.GetValue(model)!;
+                        ms = $"inv {model.Flags.TestFlag(EnemyFlags.Invincible)} hp {model.Health} anim {mm[0].AnimInfo.Index[0]} {mm[0].AnimInfo.Flags[0]}";
+                    }
+                    int spawned = (int)fSpawned.GetValue(sp)!;
+                    if (spawned > prevSpawned) spawns += spawned - prevSpawned;
+                    prevSpawned = spawned;
+                    string st = $"flags {sp.Flags} act {fAct.GetValue(sp)} spawned {spawned} cd {fCool.GetValue(sp)} | model {ms} | kids [{String.Join("; ", kids)}]"
+                        + $" | samus node {p.NodeRef.PartIndex}/{p.NodeRef.NodeIndex}/{p.NodeRef.ModelIndex} dist {Vector3.Distance(p.Position, spos):0.00} dy {spos.Y - p.Position.Y:0.00}";
+                    if (st != last)
+                    {
+                        changes++;
+                        if (changes <= 80 || hitAt >= 0 && i >= hitAt && i <= hitAt + 90) Console.WriteLine($"  STR f{i} {st}");
+                        last = st;
+                    }
+                }
+                Console.WriteLine($"  STR done: {changes} changes, {spawns} spawns in {frames} frames, samus at {Fmt(p.Position)}");
+                return;
+            }
             if (args[2] == "spawns")
             {
                 // every enemy spawner: hunters print their fixed id / chance; others spawn one enemy and print its scan id
@@ -237,7 +324,7 @@ namespace MphRead
                     {
                         res = $"error {ex.GetType().Name}";
                     }
-                    Console.WriteLine($"  SPN {room} L{layer} #{e.Id} {d.EnemyType} {res} active {d.Active != 0}");
+                    Console.WriteLine($"  SPN {room} L{layer} #{e.Id} {d.EnemyType} {res} active {d.Active != 0} facing {Fmt(d.Header.FacingVector.ToFloatVector())}");
                 }
                 return;
             }

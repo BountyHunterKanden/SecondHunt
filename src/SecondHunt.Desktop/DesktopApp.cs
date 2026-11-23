@@ -384,6 +384,7 @@ internal sealed class DesktopApp : IDisposable
 
     void OpenFrontend(int startPage)
     {
+        MatchPrebuild.Dirs = (DesktopPaths.Game, DesktopPaths.Root); // (START's lead-in builds the match: StartGame takes it)
         var front = new FrontendRenderer(DesktopPaths.Game, DesktopPaths.Settings, DesktopPaths.Mods, DesktopPaths.Saves)
         {
             StartPage = startPage,
@@ -465,7 +466,7 @@ internal sealed class DesktopApp : IDisposable
         }
     }
 
-    // RECOMP SETTINGS > SAVE LOG: this run's log as a report beside the crash reports, shown in Explorer
+    // RECOMP SETTINGS > SAVE LOG: this run's log saved to Downloads\Second Hunt, said on screen and shown in Explorer
     void ShareLog()
     {
         if (DesktopCrashLog.WriteLog() is not string path)
@@ -473,6 +474,7 @@ internal sealed class DesktopApp : IDisposable
             Note("The log couldn't be saved.");
             return;
         }
+        Note("Log saved to Downloads\\Second Hunt: " + Path.GetFileName(path), 6);
         DesktopCrashLog.Show(path);
     }
 
@@ -515,10 +517,13 @@ internal sealed class DesktopApp : IDisposable
     void StartGame(Dictionary<string, string> args)
     {
         while (_stack.Count > 0) Pop();
-        CampaignRenderer game = CampaignRenderer.Create(DesktopPaths.Game, DesktopPaths.Root, new LaunchArgs(args));
+        // a match from the lobby's START was built during its lead-in (MatchPrebuild.cs); anything else is made here
+        CampaignRenderer game = MatchPrebuild.Take(args.TryGetValue(MatchSetupText.ArgName, out string? setup) ? setup : null)
+            ?? CampaignRenderer.Create(DesktopPaths.Game, DesktopPaths.Root, new LaunchArgs(args));
         game.StatusSink = s => _status.Set(s);
         game.ShipSink = s => _panel.Set(s);
         game.ExitSink = () => Defer(ExitGame);
+        game.LeavesToMenus = true; // QUIT's YES hands over to the menus at once (CampaignRenderer.LeaveForMenus.cs)
         game.KeyboardMouse = _input.KeyboardMouse;
         game.Gyro = _input.Gyro;
         _input.Gyro.SetInGame(true);

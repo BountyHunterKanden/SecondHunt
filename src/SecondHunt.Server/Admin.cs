@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using MphRecomp.Online;
@@ -70,6 +71,10 @@ namespace SecondHunt.Server
   stats                       players, open reports, bans
   drain [on|off]              before a server update: while on, no new served games (new games are player-hosted, the
                               running ones play on); restart once the health line says served 0/..
+  drain restart [secs] [exit] before a deploy (server 0.10.3): tells everyone online the server restarts, ends every
+                              Find Game search, no new lobbies / searches / joins / served games; started matches play on
+                              until they end or secs pass (default 600), then /v1/health ends in ""drained"". exit = the
+                              server stops by itself once drained (systemd starts the binary in place). drain off calls it off
 <who> is a friend code (12 digits) or NAME#0421.";
 
         // the drain file: next to the database, so the running server sees it (Hub.Draining) without a network command
@@ -78,6 +83,20 @@ namespace SecondHunt.Server
         private static int Drain(string db, List<string> a, TextWriter o)
         {
             string file = DrainPath(db);
+            if (a.Count > 1 && a[1] == "restart")
+            {
+                int cap = 600;
+                if (a.Count > 2 && a[2] != "exit" && (!int.TryParse(a[2], NumberStyles.None, CultureInfo.InvariantCulture, out cap) || cap > 86400))
+                {
+                    o.WriteLine("usage: drain restart [secs] [exit]");
+                    return 1;
+                }
+                bool exit = a.Skip(2).Contains("exit");
+                File.WriteAllText(file, Hub.RestartLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), cap, exit));
+                o.WriteLine($"drain restart: started matches get up to {cap} s{(exit ? ", then the server stops (systemd starts it again)" : "")}; "
+                    + "watch /v1/health for \" drained\"; drain off calls it off");
+                return 0;
+            }
             if (a.Count > 1 && a[1] == "on")
             {
                 File.WriteAllText(file, DateTime.UtcNow.ToString("u") + "\n");
@@ -88,7 +107,7 @@ namespace SecondHunt.Server
             }
             else if (a.Count > 1)
             {
-                o.WriteLine("usage: drain [on|off]");
+                o.WriteLine("usage: drain [on|off|restart [secs] [exit]]");
                 return 1;
             }
             o.WriteLine(File.Exists(file) ? "drain on: no new served games (the running ones play on; see served N/M on /v1/health)"

@@ -22,7 +22,7 @@ using MphRecomp.Import.Switch;
 //   - It runs on a worker; Tick (the menu thread) shows its progress and its answer.
 namespace MphRecomp.Frontend
 {
-    public enum ImportPickKind { Disc, WiiKey, Folder, SwitchKeys, DsSave }
+    public enum ImportPickKind { Disc, WiiKey, Folder, SwitchKeys, DsSave, Profile }
 
     // what the platform's file picker is asked for
     public sealed record ImportPickRequest(ImportPickKind Kind, string GameId, string Title, string[] Extensions);
@@ -136,7 +136,10 @@ namespace MphRecomp.Frontend
 
         public static bool Offered(ImportItemInfo item) => (item.Kind != "guns" || OfferedGuns.Contains(item.Name, StringComparer.OrdinalIgnoreCase))
             && !(MphRecomp.Config.RecompSettings.PublicBuild && (item.Kind == "brawl"
-                || item.Name.Contains("ZeroSuit", StringComparison.OrdinalIgnoreCase) || PublicUnused.Contains(item.Id)));
+                || item.Kind == "enemies" // (enemy import: dev builds until there's a way to play against them)
+                || item.Name.Contains("ZeroSuit", StringComparison.OrdinalIgnoreCase) || PublicUnused.Contains(item.Id)
+                // a dev-only arena (EchoesArena.Def.Dev: the Main Quarry until the owner signs it off)
+                || item.Kind == "arenas" && MphRecomp.Arenas.EchoesArena.Find(item.Name)?.Dev == true));
 
         // the game's status and its items in the page's order (each suit's body, its ball, its arm cannon); null for a
         // game ImportService doesn't know
@@ -392,7 +395,7 @@ namespace MphRecomp.Frontend
 
         public string ItemDescription(string gameId, ImportItemInfo item)
         {
-            string what = item.Kind == "arenas" ? "an echoes multiplayer arena for your matches"
+            string what = item.Kind == "arenas" ? (MphRecomp.Arenas.EchoesArena.Find(item.Name)?.Game == "mp1" ? "a prime room as a multiplayer arena for your matches" : "an echoes multiplayer arena for your matches")
                 : item.Kind == "music" ? "the echoes arenas' music"
                 : IsSong(item) ? "a song for your matches and the main menu (recomp settings: match music, menu music)"
                 : item.Kind == "guns" ? "the first-person arm cannon" : IsBall(item) ? "the morph ball"
@@ -1648,6 +1651,7 @@ namespace MphRecomp.Frontend
             }
             Log?.Invoke("import: " + answer);
             StartKeptCheck();   // stopped by the run, or new copies: what's still due
+            if (task.IsCompletedSuccessfully) MphRecomp.Holiday.HolidayGround.Prebuild(again: true); // holiday mode: the new arenas' ground snow, built ahead
             if (_updating)
             {
                 // UPDATE ALL: the next disc (its busy box takes this one's place), or the end

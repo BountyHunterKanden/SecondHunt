@@ -114,11 +114,12 @@ namespace MphRead.Entities
                 }
                 if (GameState.SinglePlayer)
                 {
-                    if (CameraSequence.Current == null)
+                    // vanilla is silent when the field is already off (e.g. Elder Passage FF#39 on a portal arrival)
+                    if (_active && CameraSequence.Current == null)
                     {
                         PlayerEntity.Main.ForceFieldSfxTimer = 2 / 30f;
                     }
-                    else if (Sfx.ForceFieldSfxMute == 0 && _soundSource.CountPlayingSfx(SfxId.GEN_OFF) == 0)
+                    else if (_active && Sfx.ForceFieldSfxMute == 0 && _soundSource.CountPlayingSfx(SfxId.GEN_OFF) == 0)
                     {
                         _soundSource.PlayFreeSfx(SfxId.GEN_OFF);
                     }

@@ -52,6 +52,11 @@ namespace MphRecomp.Import
     //   arenas    22  2026-11-06: the spider ball's Echoes look (recipe "spiderFxPak": TestAnim.pak -> hd/spider_fx/, EchoesSpider.ImportFx)
     //                 and Spider Complex's loop sound (its recipe now lists AudioGrp.pak)
     //   bodies     2  2026-10-19: the Scout Drone bodies' Prime deploy alert (fx/sfx_632.wav; MusyX Loop renders its four beeps)
+    //   (bodies    3  2026-11-13, dev builds only (vc 665): made all 12 bodies stale for one body's change. Retired: an item
+    //                 stamped 3 counts as 2 (Retired below). That change, the Hyper Beam's Corruption wall marks, now makes only
+    //                 its own item stale: recipes/bodies/MP3DarkSamus.json names the decal, "hyperfx": { "decal": ... }.)
+    // A change that only one recipe's items need goes in that recipe instead (its text is hashed: ImportRecipe.Sha1), so
+    // nothing else is rebuilt.
     public static class ImporterVersions
     {
         static readonly Dictionary<string, int> Kinds = new(StringComparer.Ordinal)
@@ -63,6 +68,16 @@ namespace MphRecomp.Import
             ["music"] = 1,
         };
 
+        // numbers only dev builds ever stamped, and the current number they stand for
+        static readonly Dictionary<(string Kind, int Stamp), int> Retired = new()
+        {
+            [("bodies", 3)] = 2,
+        };
+
         public static int For(string kind) => Kinds.TryGetValue(kind, out int v) ? v : 1;
+
+        // an item's importer stamp is today's for its kind (or a retired number standing for it)
+        public static bool Matches(string kind, int stamp) =>
+            stamp == For(kind) || Retired.TryGetValue((kind, stamp), out int now) && now == For(kind);
     }
 }

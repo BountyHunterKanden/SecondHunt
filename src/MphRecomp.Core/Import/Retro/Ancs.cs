@@ -43,6 +43,7 @@ namespace MphRecomp.Import.Retro
             public int Version;
             public readonly List<(string Name, MetaAnim Anim)> Anims = new();
             public readonly List<(uint Anim, uint Evnt)> Resources = new();
+            public int EventsAt = -1;   // Echoes: where its inline event sets start (EchoesEvents.Read)
         }
 
         public readonly List<Character> Characters = new();
@@ -266,6 +267,7 @@ namespace MphRecomp.Import.Retro
                 uint nh = r.U32();
                 for (uint i = 0; i < nh; i++) { r.U32(); Trans(r); }
             }
+            if (echoes) set.EventsAt = r.O;
             if (!echoes)
             {
                 uint nr = r.U32();

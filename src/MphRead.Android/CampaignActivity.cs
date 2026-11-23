@@ -36,7 +36,8 @@ public class CampaignActivity : Activity
         string ext = GetExternalFilesDir(null)?.AbsolutePath ?? FilesDir!.AbsolutePath;
         string settingsPath = System.IO.Path.Combine(ext, "recomp_settings.json");
         var args = new LaunchArgs(key => Intent?.GetStringExtra(key));
-        _renderer = CampaignRenderer.Create(FilesDir!.AbsolutePath, ext, args);
+        // a match from the lobby's START was built during its lead-in (MatchPrebuild.cs); anything else is made here
+        _renderer = MatchPrebuild.Take(args.Get(MatchSetupText.ArgName)) ?? CampaignRenderer.Create(FilesDir!.AbsolutePath, ext, args);
         _view = new GLSurfaceView(this);
         _view.SetEGLContextClientVersion(3);
         // stencil: MphRead's translucency passes sort overlapping translucent surfaces with it
@@ -77,9 +78,15 @@ public class CampaignActivity : Activity
         // auto|on|off (a match's --es touch overrides it), re-read whenever the pause menu resumes
         MatchTouchOverlay touch = MatchTouchOverlay.Attach(this, root, _renderer, Intent, settingsPath);
         pause.Resumed += () => RunOnUiThread(touch.ReloadSettings);
+        // CONTROLS > TOUCH > EDIT TOUCH LAYOUT (TouchLayoutEditor.cs): this game's layout, over the paused game
+        pause.EditTouchLayout += () => RunOnUiThread(() => OpenTouchEditor(root, touch, settingsPath));
         SetContentView(root);
         HideSystemUi();
+        // a controller disconnecting releases what it held (PadRelease.cs)
+        _padRelease = PadRelease.Attach(this, _renderer.Pad);
     }
+
+    PadRelease? _padRelease;
 
     TextView? _panel; // the centred text panel (the ship's save prompt, game over, a match's results)
 
@@ -119,11 +126,20 @@ public class CampaignActivity : Activity
             panel.Text = text;
             panel.Visibility = text.Length == 0 ? ViewStates.Gone : ViewStates.Visible;
         });
+        // leaving goes to the main menus (not First Hunt's): QUIT's YES hands over to them at once (CampaignRenderer.LeaveForMenus.cs)
+        _renderer.LeavesToMenus = Intent?.GetStringExtra("fhmenu") == null;
         _renderer.ExitSink = () => RunOnUiThread(() =>
         {
             // a First Hunt game started from its own menus (FirstHuntActivity) goes back to them
             if (Intent?.GetStringExtra("fhmenu") == null)
                 StartActivity(new Intent(this, typeof(MainActivity)).AddFlags(ActivityFlags.ClearTop | ActivityFlags.SingleTop));
+            Finish();
+        });
+        // dev --es replayselftest: the match's saved replay opened in its place, seeked at once (MatchReplaySelfTest.cs)
+        _renderer.SelfTestReplaySink = path => RunOnUiThread(() =>
+        {
+            StartActivity(new Intent(this, typeof(CampaignActivity)).PutExtra("replay", path).PutExtra("replayselftest", "seek")
+                .PutExtra("gun", Intent?.GetStringExtra("gun")));
             Finish();
         });
         _renderer.ChatBoxRequested = () => RunOnUiThread(ShowChatBox); // an online match's typed chat (MatchChat.cs)
@@ -196,21 +212,29 @@ public class CampaignActivity : Activity
         edit.RequestFocus();
     }
 
-    protected override void OnPause() { base.OnPause(); _view.OnPause(); _renderer.PauseAudio(); }
+    // leaving (home, the recents screen, a dialog activity on top) releases every held stick / button, as Desktop's
+    // DesktopInput.Release: Android sends no key-up for a button still down when it pauses (PadRelease.cs)
+    protected override void OnPause()
+    {
+        base.OnPause(); _view.OnPause(); _renderer.PauseAudio(); _renderer.Pad.Clear(); MphRecomp.Frontend.FrontendSession.CloudFlush("app paused");
+        // leaving for good: the game's scene goes now, with its GL thread paused, not in OnDestroy, which Android runs
+        // after the menus are back (owner 11-21: the arena background loaded under the match's teardown, its sound
+        // shut down under it, and Samus showed). The next activity's OnResume waits for this
+        if (IsFinishing) _renderer.Shutdown();
+    }
     protected override void OnResume() { base.OnResume(); _view.OnResume(); _renderer.ResumeAudio(); }
-    protected override void OnDestroy() { _renderer.Shutdown(); _renderer.DisposeAudio(); base.OnDestroy(); }
+    protected override void OnDestroy() { _padRelease?.Detach(); _renderer.Shutdown(); _renderer.DisposeAudio(); base.OnDestroy(); }
 
     public override void OnWindowFocusChanged(bool hasFocus)
     {
         base.OnWindowFocusChanged(hasFocus);
         if (hasFocus) HideSystemUi();
+        else _renderer.Pad.Clear(); // the notification shade, a system dialog: nothing stays held (PadRelease.cs)
     }
 
     void HideSystemUi() => Window!.DecorView.SystemUiVisibility = (StatusBarVisibility)(
         SystemUiFlags.ImmersiveSticky | SystemUiFlags.HideNavigation | SystemUiFlags.Fullscreen |
         SystemUiFlags.LayoutStable | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutFullscreen);
-
-    static float Dead(float v) => Math.Abs(v) < 0.15f ? 0f : v;
 
     int _menuHatX, _menuHatY, _menuStickX, _menuStickY;
     float _menuTrigL, _menuTrigR; // the triggers while the pause menu is open (the control customizer's capture)
@@ -252,8 +276,27 @@ public class CampaignActivity : Activity
 
     static int Step(float v, float threshold) => v >= threshold ? 1 : v <= -threshold ? -1 : 0;
 
+    // the touch layout editor, while it's up: nothing else takes input (Back = its CANCEL)
+    TouchLayoutEditor? _touchEditor;
+
+    void OpenTouchEditor(FrameLayout root, MatchTouchOverlay touch, string settingsPath)
+    {
+        if (_touchEditor != null) return;
+        TouchLayoutEditor editor = null!;
+        editor = new TouchLayoutEditor(this, touch.Campaign, settingsPath, allowSwitch: false, saved =>
+        {
+            root.Post(() => root.RemoveView(editor)); // (not mid its own touch event)
+            _touchEditor = null;
+            _renderer.PauseMenuInput(p => p.EditDone()); // the pause menu again, its settings re-read
+            if (saved) touch.ReloadSettings();
+        });
+        _touchEditor = editor;
+        root.AddView(editor, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+    }
+
     public override bool OnGenericMotionEvent(MotionEvent? e)
     {
+        if (_touchEditor != null) return true;
         if (e != null && e.Source.HasFlag(InputSourceType.Joystick) && e.Action == MotionEventActions.Move)
         {
             if (_renderer.PauseMenuOpen)
@@ -287,12 +330,13 @@ public class CampaignActivity : Activity
                 return true;
             }
             PadState pad = _renderer.Pad;
-            pad.Lx = Dead(e.GetAxisValue(Axis.X));
-            pad.Ly = Dead(e.GetAxisValue(Axis.Y));
+            // each axis under its stick's dead zone is at rest (CONTROLS > AIM > STICKS, 15% by default; Core Input/StickShape.cs)
+            pad.Lx = MphRecomp.Input.StickShape.Left(e.GetAxisValue(Axis.X));
+            pad.Ly = MphRecomp.Input.StickShape.Left(e.GetAxisValue(Axis.Y));
             pad.RawRx = e.GetAxisValue(Axis.Z);
             pad.RawRy = e.GetAxisValue(Axis.Rz);
-            pad.Rx = Dead(pad.RawRx);
-            pad.Ry = Dead(pad.RawRy);
+            pad.Rx = MphRecomp.Input.StickShape.Right(pad.RawRx);
+            pad.Ry = MphRecomp.Input.StickShape.Right(pad.RawRy);
             pad.L2 = e.GetAxisValue(Axis.Ltrigger);
             pad.R2 = e.GetAxisValue(Axis.Rtrigger);
             // this Odin reports the D-pad as a HAT axis, not KEYCODE_DPAD_*
@@ -344,6 +388,11 @@ public class CampaignActivity : Activity
 
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
     {
+        if (_touchEditor != null)
+        {
+            if (e?.RepeatCount == 0 && keyCode is Keycode.Back or Keycode.Escape or Keycode.ButtonB) _touchEditor.Back();
+            return true;
+        }
         // the control customizer (from the ship's OPTIONS or RECOMP SETTINGS) waits for a controller button: every
         // press and release goes to it, held buttons make a combo (Select and R3 too since 2026-10-11), Back / Start keep the buttons as
         // they are
@@ -360,6 +409,11 @@ public class CampaignActivity : Activity
                 {
                     _renderer.PauseMenuInput(p => p.CancelCapture());
                 }
+            }
+            // volume, power, screenshot and other system keys still reach Android
+            if (keyCode is not (Keycode.ButtonSelect or Keycode.Back or Keycode.ButtonStart) && PadFor(keyCode) == null)
+            {
+                return base.OnKeyDown(keyCode, e);
             }
             return true;
         }
@@ -397,7 +451,9 @@ public class CampaignActivity : Activity
                 _renderer.ToggleGunMenu();
             }
         }
-        if (_renderer.PauseMenuOpen)
+        // only the controller buttons belong to the menu: volume, power, screenshot and other system keys still reach
+        // Android while paused (they used to be swallowed here, so the volume and screenshot keys did nothing)
+        if (_renderer.PauseMenuOpen && PadFor(keyCode) != null)
         {
             if (e?.RepeatCount == 0)
             {
@@ -461,6 +517,29 @@ public class CampaignActivity : Activity
             _renderer.PauseMenuInput(p => p.Touch(x, y, kind));
             return true;
         }
+        if (e != null && _renderer.PhotoOpen)
+        {
+            // photo mode (CampaignRenderer.PhotoMode.cs): every finger by its pointer id -- the left half moves, the right
+            // half looks, the pills on the right edge
+            switch (e.ActionMasked)
+            {
+            case MotionEventActions.Down:
+            case MotionEventActions.PointerDown:
+            case MotionEventActions.Up:
+            case MotionEventActions.PointerUp:
+                int i = e.ActionIndex;
+                int phase = e.ActionMasked is MotionEventActions.Down or MotionEventActions.PointerDown ? 0 : 2;
+                _renderer.PhotoTouch(e.GetX(i), e.GetY(i), phase, e.GetPointerId(i));
+                break;
+            case MotionEventActions.Move:
+                for (int p = 0; p < e.PointerCount; p++) _renderer.PhotoTouch(e.GetX(p), e.GetY(p), 1, e.GetPointerId(p));
+                break;
+            case MotionEventActions.Cancel:
+                for (int p = 0; p < e.PointerCount; p++) _renderer.PhotoTouch(e.GetX(p), e.GetY(p), 2, e.GetPointerId(p));
+                break;
+            }
+            return true;
+        }
         if (e != null && _renderer.MapOpen && e.ActionMasked is MotionEventActions.Down or MotionEventActions.Move or MotionEventActions.Up)
         {
             // the pause map (CampaignMap.cs): drags turn it, QUIT
@@ -520,6 +599,7 @@ public class CampaignActivity : Activity
 
     public override bool OnKeyUp(Keycode keyCode, KeyEvent? e)
     {
+        if (_touchEditor != null) return true;
         // a button let go while the customizer waits: the capture commits once every pressed button is up (combos)
         if (_renderer.PauseMenu?.CaptureDevice != null
             && (keyCode == Keycode.ButtonSelect ? PadButton.Select : PadFor(keyCode)) is PadButton released)

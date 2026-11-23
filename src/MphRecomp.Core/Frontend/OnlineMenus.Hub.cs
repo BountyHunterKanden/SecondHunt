@@ -170,7 +170,7 @@ namespace MphRecomp.Frontend
         private const float LdCardW = 420, LdCardH = 290;
         private static (float X, float Y) LdCardSpot(int c) => (100 + c % 4 * 430, 298 + c / 4 * 300);
         private static float LdScopeX(int s) => 1480 - (LdScopes.Length * 220 + (LdScopes.Length - 1) * 10) / 2f + s * 230;
-        private static float LicViewX(int v) => 100 + 345 * v;
+        private float LicViewX(int v) => (LicenseWide ? 450 : 100) + 345 * v; // (your own card: centred on its wide panel)
 
         // ---- showing ----
 
@@ -240,7 +240,13 @@ namespace MphRecomp.Frontend
         {
             bool on = HubOn;
             if (!on) _licView = 0;
-            foreach (int v in _liView) Show(menu, v, on);
+            foreach (int v in _liView)
+            {
+                Show(menu, v, on);
+                // the tabs' tap areas (made at the narrow place) follow LicViewX
+                if (LicenseWide) menu.SetItemTransform(v, 1, 0, 0, Mw(350), 0);
+                else menu.ClearItemTransform(v);
+            }
         }
 
         // ---- fetching (as FetchLicense) ----
@@ -603,7 +609,7 @@ namespace MphRecomp.Frontend
             if (second.Length > 0) TextS(Fit(second, 50), Mx(x), My(y + 60), 2, Pale, tag, SizeM);
         }
 
-        private (string, string)? HubOffline() => !Live ? (_connecting ? "connecting..." : "can't reach the server.", _netError ?? "") : null;
+        private (string, string)? HubOffline() => !Live ? (Trying ? TryingText : "can't reach the server.", _netError ?? "") : null;
 
         private void HubHeader(float x0, float x1, float y, string label, int tag)
         {
@@ -1183,7 +1189,7 @@ namespace MphRecomp.Frontend
             {
                 (string first, string second) = HubOffline() ?? (_statsError != null ? ("can't load these stats.", _statsError)
                     : s == null ? ("loading...", "") : ("no online matches yet.", "online matches count here."));
-                HubNote(first, second, 610, 480, tag);
+                HubNote(first, second, LicenseWide ? 960 : 610, 480, tag);
                 return true;
             }
             if (_licView == 1) DrawLicenseStats(s, tag);
@@ -1208,18 +1214,22 @@ namespace MphRecomp.Frontend
             long Total(string cat) => s.Totals.GetValueOrDefault(cat);
             // the rank band: the rank's star and name (from the star points), the world place on the points board, the
             // Overall Points
+            // the card's box: 104-1116, or 104-1816 on your own card's wide panel; four columns across it
+            const float L = 104;
+            float r = LicenseWide ? 1816 : 1116, w = r - L, pitch = (w + 4) / 4, cell = pitch - 4;
             long points = Total(HubCategory.Points);
             int level = HubRules.Level((int)Math.Clamp(Total(HubCategory.RankPoints), 0, HubRules.MaxPoints));
-            Fill(Mx(104), My(296), Mx(1116), My(396), 0, 0, 0, 0.45f, tag);
-            Box(Mx(104), My(296), Mx(1116), My(396), tag);
+            Fill(Mx(L), My(296), Mx(r), My(396), 0, 0, 0, 0.45f, tag);
+            Box(Mx(L), My(296), Mx(r), My(396), tag);
             HubRankStar(level, Mx(118), My(300), Mw(92), tag);
             bool ranked = s.Places.TryGetValue(HubCategory.Points, out int world);
             TextS("world rank", Mx(226), My(310), 0, Pale, tag, SizeX);
             TextS(ranked ? "#" + HubCount(world) : "--", Mx(226), My(340), 0, ranked ? Cyan : OnGrey, tag, SizeS);
-            TextS("rank", Mx(640), My(310), 2, Pale, tag, SizeX);
-            TextS(HubRankTitles[level], Mx(640), My(344), 2, Orange, tag, SizeM);
-            TextS("overall points", Mx(1100), My(310), 1, Pale, tag, SizeX);
-            TextS(HubCount(points), Mx(1100), My(340), 1, White, tag, SizeS);
+            float rankX = LicenseWide ? 960 : 640;
+            TextS("rank", Mx(rankX), My(310), 2, Pale, tag, SizeX);
+            TextS(HubRankTitles[level], Mx(rankX), My(344), 2, Orange, tag, SizeM);
+            TextS("overall points", Mx(r - 16), My(310), 1, Pale, tag, SizeX);
+            TextS(HubCount(points), Mx(r - 16), My(340), 1, White, tag, SizeS);
 
             // the totals
             (string Label, string Value)[] totals =
@@ -1231,9 +1241,9 @@ namespace MphRecomp.Frontend
             };
             for (int k = 0; k < totals.Length; k++)
             {
-                float x = 104 + k % 4 * 254, y = 404 + k / 4 * 70;
-                Fill(Mx(x), My(y), Mx(x + 250), My(y + 64), 0, 0, 0, 0.35f, tag);
-                Box(Mx(x), My(y), Mx(x + 250), My(y + 64), tag);
+                float x = L + k % 4 * pitch, y = 404 + k / 4 * 70;
+                Fill(Mx(x), My(y), Mx(x + cell), My(y + 64), 0, 0, 0, 0.35f, tag);
+                Box(Mx(x), My(y), Mx(x + cell), My(y + 64), tag);
                 TextS(totals[k].Label, Mx(x + 12), My(y + 6), 0, Pale, tag, SizeX);
                 TextS(totals[k].Value, Mx(x + 12), My(y + 32), 0, White, tag, SizeM);
             }
@@ -1241,29 +1251,29 @@ namespace MphRecomp.Frontend
             // kills in biped form against alt form, as a bar
             long biped = Total(HubCategory.BipedKills), alt = Total(HubCategory.AltKills), both = biped + alt;
             int bipedPct = both > 0 ? (int)(biped * 1000 / both) : 0;
-            TextS($"biped kills {HubCount(biped)}" + (both > 0 ? $" ({Pct(bipedPct)})" : ""), Mx(104), My(550), 0, Orange, tag, SizeX);
-            TextS($"alt form kills {HubCount(alt)}" + (both > 0 ? $" ({Pct(1000 - bipedPct)})" : ""), Mx(1116), My(550), 1, Cyan, tag, SizeX);
-            Fill(Mx(104), My(580), Mx(1116), My(602), 0, 0, 0, 0.5f, tag);
+            TextS($"biped kills {HubCount(biped)}" + (both > 0 ? $" ({Pct(bipedPct)})" : ""), Mx(L), My(550), 0, Orange, tag, SizeX);
+            TextS($"alt form kills {HubCount(alt)}" + (both > 0 ? $" ({Pct(1000 - bipedPct)})" : ""), Mx(r), My(550), 1, Cyan, tag, SizeX);
+            Fill(Mx(L), My(580), Mx(r), My(602), 0, 0, 0, 0.5f, tag);
             if (both > 0)
             {
-                float split = 104 + 1012f * biped / both;
-                if (biped > 0) Fill(Mx(104), My(580), Mx(split), My(602), Orange.R, Orange.G, Orange.B, 1, tag);
-                if (alt > 0) Fill(Mx(split), My(580), Mx(1116), My(602), Cyan.R, Cyan.G, Cyan.B, 1, tag);
+                float split = L + w * biped / both;
+                if (biped > 0) Fill(Mx(L), My(580), Mx(split), My(602), Orange.R, Orange.G, Orange.B, 1, tag);
+                if (alt > 0) Fill(Mx(split), My(580), Mx(r), My(602), Cyan.R, Cyan.G, Cyan.B, 1, tag);
             }
-            Box(Mx(104), My(580), Mx(1116), My(602), tag);
+            Box(Mx(L), My(580), Mx(r), My(602), tag);
 
             // the place on each board, with the value it's ranked by
-            HubHeader(104, 1116, 616, "your place on each board", tag);
+            HubHeader(L, r, 616, "your place on each board", tag);
             for (int k = 0; k < HubCategory.All.Length; k++)
             {
                 string cat = HubCategory.All[k];
-                float x = 104 + k % 4 * 254, y = 662 + k / 4 * 64;
-                Fill(Mx(x), My(y), Mx(x + 250), My(y + 58), 0, 0, 0, 0.35f, tag);
-                Box(Mx(x), My(y), Mx(x + 250), My(y + 58), tag);
+                float x = L + k % 4 * pitch, y = 662 + k / 4 * 64;
+                Fill(Mx(x), My(y), Mx(x + cell), My(y + 58), 0, 0, 0, 0.35f, tag);
+                Box(Mx(x), My(y), Mx(x + cell), My(y + 58), tag);
                 TextS(HubShortNames[k], Mx(x + 12), My(y + 4), 0, Pale, tag, SizeX);
                 bool placed = s.Places.TryGetValue(cat, out int place);
                 TextS(placed ? "#" + HubCount(place) : "--", Mx(x + 12), My(y + 27), 0, placed ? Cyan : OnGrey, tag, SizeM);
-                TextS(HubValue(cat, Total(cat)), Mx(x + 238), My(y + 30), 1, White, tag, SizeX);
+                TextS(HubValue(cat, Total(cat)), Mx(x + cell - 12), My(y + 30), 1, White, tag, SizeX);
             }
         }
 
@@ -1276,6 +1286,11 @@ namespace MphRecomp.Frontend
             };
             // whose skins: your own licence on your card, else theirs as uploaded
             HunterLicense? lic = _licCard != null && _licCard.Code == MeCard?.Code ? Multiplayer?.License ?? _licLicense : _licLicense;
+            if (LicenseWide)
+            {
+                DrawWideFavourites(favs, lic, tag);
+                return;
+            }
             for (int f = 0; f < favs.Length; f++)
             {
                 float x = 104 + f % 2 * 509, y = 296 + f / 2 * 250;
@@ -1304,6 +1319,42 @@ namespace MphRecomp.Frontend
                     HubPicture(cat, top[k].Key, Mx(x + 14), My(ty - 3), Mw(30), tag, lic);
                     TextS(Fit(FavName(cat, top[k].Key), 20), Mx(x + 54), My(ty), 0, White, tag, SizeX);
                     TextS(Pct((int)(top[k].Value * 1000L / Math.Max(1, total))), Mx(x + 489), My(ty), 1, Pale, tag, SizeX);
+                }
+            }
+        }
+
+        // your own card's FAVOURITES on its wide panel (104-1816): the four side by side, each a tall box with the
+        // favourite's picture big and centred, its name, % and count under it, then the next two
+        private void DrawWideFavourites((string Title, string Cat, Dictionary<string, int> Counts)[] favs, HunterLicense? lic, int tag)
+        {
+            const float L = 104, W = 1712, Top = 296, H = 490, Pic = 180;
+            float pitch = (W + 4) / favs.Length, bw = pitch - 4;
+            for (int f = 0; f < favs.Length; f++)
+            {
+                float x = L + f * pitch, y = Top, mid = x + bw / 2;
+                Fill(Mx(x), My(y), Mx(x + bw), My(y + H), 0, 0, 0, 0.35f, tag);
+                Box(Mx(x), My(y), Mx(x + bw), My(y + H), tag);
+                HubHeader(x + 4, x + bw - 4, y + 4, favs[f].Title, tag);
+                string cat = favs[f].Cat, unit = cat == ContentKeys.Weapon ? "kills" : "matches";
+                long total = favs[f].Counts.Values.Sum(v => (long)v);
+                List<KeyValuePair<string, int>> top = favs[f].Counts.Where(kv => kv.Value > 0)
+                    .OrderByDescending(kv => kv.Value).ThenBy(kv => KnownOrder(cat, kv.Key)).Take(3).ToList();
+                if (top.Count == 0)
+                {
+                    TextS("--", Mx(mid), My(y + 200), 2, OnGrey, tag, SizeM);
+                    continue;
+                }
+                HubPicture(cat, top[0].Key, Mx(mid - Pic / 2), My(y + 60), Mw(Pic), tag, lic);
+                TextS(Fit(FavName(cat, top[0].Key), 17), Mx(mid), My(y + 256), 2, White, tag, SizeM);
+                TextS(Pct((int)(top[0].Value * 1000L / Math.Max(1, total))), Mx(mid), My(y + 294), 2, Cyan, tag, SizeS);
+                string of = $"{HubCount(top[0].Value)} of {HubCount(total)} {unit}";
+                TextS(of.Length <= 24 ? of : $"{HubCount(top[0].Value)} {unit}", Mx(mid), My(y + 338), 2, Pale, tag, SizeX);
+                for (int k = 1; k < top.Count; k++)
+                {
+                    float ty = y + 352 + 46 * k;
+                    HubPicture(cat, top[k].Key, Mx(x + 16), My(ty - 7), Mw(38), tag, lic);
+                    TextS(Fit(FavName(cat, top[k].Key), 17), Mx(x + 64), My(ty), 0, White, tag, SizeX);
+                    TextS(Pct((int)(top[k].Value * 1000L / Math.Max(1, total))), Mx(x + bw - 16), My(ty), 1, Pale, tag, SizeX);
                 }
             }
         }

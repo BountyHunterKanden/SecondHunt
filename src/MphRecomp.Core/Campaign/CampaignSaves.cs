@@ -144,7 +144,11 @@ namespace MphRecomp.Campaign
             {
                 MarkHuntersUnlocked();
             }
+            Saved?.Invoke(slot);
         }
+
+        // after any slot's save (CLOUD SAVE pushes: FrontendSession)
+        public static event Action<int>? Saved;
 
         // Before a DS save import replaces a file: a copy of it in before_import/, named by slot and time, that no later save
         // touches (the .bak above goes with the slot's next save; 10-31, a player lost a file that way). Null = the slot

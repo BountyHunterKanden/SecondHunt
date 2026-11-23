@@ -44,7 +44,6 @@ internal sealed partial class CampaignRenderer
         GLES30.GlBindVertexArray(_fxVao);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _fxVbo);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
-        GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_fxProg, "uTex"), 0);
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(false);

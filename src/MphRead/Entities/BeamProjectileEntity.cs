@@ -117,6 +117,18 @@ namespace MphRead.Entities
             {
                 return true;
             }
+            // recomp (11-22): a match client's Omega Cannon shot blows up at the host's word, not seconds later on its own
+            // (a late white flash after a respawn; PlayerNetConfirm.cs NetOmegaBlastNow). As its lifespan's end below.
+            if (Beam == BeamType.OmegaCannon && PlayerEntity.NetClient && Owner is PlayerEntity netOwner && netOwner.NetOmegaBlastNow())
+            {
+                CollisionResult blast = default;
+                blast.Plane = new Vector4(-Direction);
+                blast.Position = Position;
+                SpawnCollisionEffect(blast, noSplat: true);
+                OnCollision(blast, colWith: null);
+                PlayBeamHitSfx();
+                return true;
+            }
             bool firstFrame = Age == 0;
             if (Flags.TestFlag(BeamFlags.Continuous) && Age > 0)
             {
@@ -158,6 +170,16 @@ namespace MphRead.Entities
                     Velocity /= 4f;
                 }
             }
+            else if (HyperWind)
+            {
+                // recomp: a charged Hyper Beam shot's Corruption flight (BeamHyperWind.cs), from the frame after it's made, as
+                // Corruption's (made at the LBEAM locator in the player's update, after the frame's Think pass: main.dol
+                // 0x8027351c -> 0x80273f40 -> 0x8018b0c4 / 0x80071268), so it sits on the muzzle its first frame
+                if (!firstFrame)
+                {
+                    StepHyperWind();
+                }
+            }
             else
             {
                 Position += Velocity;
@@ -187,7 +209,7 @@ namespace MphRead.Entities
                     }
                 }
             }
-            if (!Flags.TestFlag(BeamFlags.Continuous) || firstFrame)
+            if ((!Flags.TestFlag(BeamFlags.Continuous) || firstFrame) && !(HyperWind && firstFrame)) // recomp: unmoved, nothing to hit
             {
                 CheckCollision();
             }
@@ -419,7 +441,12 @@ namespace MphRead.Entities
                     ? Vector3.Zero : PlayerEntity.NetLagShift(Owner, player);
                 Vector3 back = BackPosition - lagShift;
                 Vector3 front = Position - lagShift;
-                if (player.IsAltForm)
+                if (player.HostCrawling)
+                {
+                    // recomp: Brawl Zero Suit Samus's army crawl, her standing cylinder laid flat (PlayerCrawl.cs)
+                    hitPlayer = player.CrawlHit(back, front, radii, ref playerRes);
+                }
+                else if (player.IsAltForm)
                 {
                     if (player.Hunter == Hunter.Kanden)
                     {
@@ -614,7 +641,10 @@ namespace MphRead.Entities
                                 player.TakeDamage(wholeDamage, damageFlags, damageDir, this);
                                 HostHitPush?.Invoke(this, player, -1);
                             }
-                            if (Flags.TestFlag(BeamFlags.LifeDrain) && Owner.Type == EntityType.Player)
+                            // recomp (11-13): a match client takes its health from the host's snapshots, so it doesn't drain
+                            // itself (the host does, and its own claims drain there too). Draining here ran the client's health
+                            // ahead, and each snapshot then read as a hit on the Shock Coil user (hurt flash and sound, uneven heal).
+                            if (Flags.TestFlag(BeamFlags.LifeDrain) && Owner.Type == EntityType.Player && !PlayerEntity.NetClient)
                             {
                                 var ownerPlayer = (PlayerEntity)Owner;
                                 if (!ownerPlayer.IsPrimeHunter && ownerPlayer.TeamIndex != player.TeamIndex)
@@ -1004,7 +1034,9 @@ namespace MphRead.Entities
                         CollisionResult discard = default;
                         // recomp: where a remote shooter saw this player (online host lag compensation; else where it is)
                         Vector3 playerPos = player.Position + PlayerEntity.NetLagShift(Owner, player);
-                        float dist = Vector3.Distance(playerPos, Position);
+                        float dist = player.HostCrawling // recomp: to her laid-down body (PlayerCrawl.cs)
+                            ? player.CrawlDistance(Position, playerPos - player.Position)
+                            : Vector3.Distance(playerPos, Position);
                         // recomp: a host rule's reach to the player's bounds (Echoes' turret shot), else the centre's
                         float reach = HostSplashDistance?.Invoke(this, player, playerPos) ?? dist;
                         // todo?: wifi conditions
@@ -1505,7 +1537,21 @@ namespace MphRead.Entities
                     }
                 }
             }
-            for (int i = 0; i < equip.Beams.Length; i++)
+            // recomp: a player's pool is MphRead's 16, then the charged Hyper Beam's own slots (HyperBeam.StreamPool: its stream
+            // fires every other frame and flies up to 80); its shots take only those, everything else only the 16, as before
+            int start = 0, end = equip.Beams.Length;
+            if (end == PlayerEntity.BeamPool + HyperBeam.StreamPool)
+            {
+                if (HyperBeam.InStreamPool(equip))
+                {
+                    start = PlayerEntity.BeamPool;
+                }
+                else
+                {
+                    end = PlayerEntity.BeamPool;
+                }
+            }
+            for (int i = start; i < end; i++)
             {
                 BeamProjectileEntity beam = equip.Beams[i];
                 if (beam.Lifespan <= 0)
@@ -1518,7 +1564,7 @@ namespace MphRead.Entities
                     return beam;
                 }
             }
-            return equip.Beams[^1];
+            return equip.Beams[end - 1];
         }
 
         public static BeamResultFlags Spawn(EntityBase owner, EquipInfo equip, Vector3 position, Vector3 direction,
@@ -1918,6 +1964,12 @@ namespace MphRead.Entities
                 }
                 beam.Velocity = velocity;
                 beam.Acceleration = acceleration;
+                // recomp: a charged Hyper Beam shot flies Corruption's curl (BeamHyperWind.cs), seeded by its shot event and stream
+                beam.HyperWind = false;
+                if (weapon.Beam == BeamType.HyperBeam && flags.TestFlag(BeamFlags.Charged))
+                {
+                    beam.StartHyperWind(owner is PlayerEntity shooter ? shooter.HyperWindShotSeed(position) : HyperReleaseSeed(-1, (int)MathF.Round(position.X * 16), (int)MathF.Round(position.Z * 16)));
+                }
                 if (beam.DrawFuncId == 3)
                 {
                     beam.Flags |= BeamFlags.HasModel;

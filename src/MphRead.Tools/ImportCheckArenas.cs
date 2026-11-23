@@ -238,10 +238,17 @@ namespace MphRead
                 w.WriteEndArray();
             }
 
-            string pakSha1 = Sha1("Metroid6.pak");
+            var pakSha1 = new Dictionary<string, string>();   // per pak (Main Gyro Chamber is in Metroid5.pak)
             string? audioSha1 = null, hudSha1 = null;   // AudioGrp.pak: only for an arena with the turret (its sounds)
             foreach (EchoesArena.Def d in EchoesArena.All)
             {
+                // the Prime 1 rooms' recipes are written by hand (game mp1, GM8E01, a "crane" note that re-stales an import):
+                // this writer only knows the Echoes disc, so it leaves them alone
+                if (d.Game != "mp2")
+                {
+                    Console.WriteLine($"  [SKIP] {d.Key}: a {d.Game} room (its recipe is kept as it is)");
+                    continue;
+                }
                 string json = Path.Combine(refRoot, "_archives", d.Archive, "arena.json");
                 if (!File.Exists(json))
                 {
@@ -251,8 +258,9 @@ namespace MphRead
                 EchoesArena.Info info = JsonSerializer.Deserialize<EchoesArena.Info>(File.ReadAllText(json))!;
                 Save(Path.Combine(repo, "recipes", EchoesArena.ImportKind, d.Key + ".json"), w =>
                 {
-                    w.WriteString("pak", "Metroid6.pak");
-                    w.WriteString("pakSha1", pakSha1);
+                    w.WriteString("pak", d.Pak);
+                    if (!pakSha1.TryGetValue(d.Pak, out string? sha)) pakSha1[d.Pak] = sha = Sha1(d.Pak);
+                    w.WriteString("pakSha1", sha);
                     w.WriteNumber("scale", info.Scale);
                     if (info.Turret != null)
                     {

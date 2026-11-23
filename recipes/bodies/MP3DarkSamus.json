@@ -23,6 +23,7 @@
     "7f305ff98ff689fb"
   ],
   "char": "DarkSamus",
+  "note": "hyper.cfg sounds carry each CSMP's loop start (2026-11-14): the charge-ready and stream hums loop from their own loop points",
   "skip": [
     "b_dash_left_dark_samus",
     "b_dash_right_dark_samus"
@@ -39,9 +40,14 @@
     "contacts": "0c581c8ba10d4429",
     "fire": "04f4f7c2c217a6e0",
     "chargefire": "5cec3a793be7b616",
+    "chargeloop": "74887ad42ed2a25a",
+    "chargeready": "88b530f154c766de",
+    "streamloop": "f205f3d73d438be0",
+    "hit": "be548d438a07849a",
     "ballloop": "2b91ce7603b3abd1",
     "ballimpact": "1c1a8eba57ecf57f",
     "ballbolts": "d6558a90ff59e86a",
-    "ballparams": "248eaae62c74481e"
+    "ballparams": "248eaae62c74481e",
+    "decal": "f50234704f659560"
   }
 }

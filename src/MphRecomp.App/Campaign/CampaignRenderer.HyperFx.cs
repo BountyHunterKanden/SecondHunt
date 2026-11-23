@@ -39,7 +39,7 @@ internal sealed partial class CampaignRenderer
         public Elsc? Spikes, Bolts;
         public float[]? Odds;                  // PhazonBallParams: the blue arcs' odds by distance
         public HyperFx.Config Cfg = null!;
-        public readonly Dictionary<string, List<(short[] Pcm, int Rate, float Volume)>> Sounds = new(StringComparer.Ordinal);
+        public readonly Dictionary<string, List<(short[] Pcm, int Rate, float Volume, int LoopStart)>> Sounds = new(StringComparer.Ordinal);
     }
 
     sealed class HyperSeat
@@ -84,10 +84,10 @@ internal sealed partial class CampaignRenderer
                 }
                 foreach ((string role, var list) in cfg.Sounds)
                 {
-                    var l = new List<(short[], int, float)>();
-                    foreach ((int n, float vol, bool _) in list)
+                    var l = new List<(short[], int, float, int)>();
+                    foreach ((int n, float vol, bool _, int _, int _, int loopStart) in list)
                     {
-                        if (MusyX.ReadWav(Path.Combine(dir, HyperFx.SoundFile(role, n)), out int rate) is short[] pcm && pcm.Length > 0) l.Add((pcm, rate, vol));
+                        if (MusyX.ReadWav(Path.Combine(dir, HyperFx.SoundFile(role, n)), out int rate) is short[] pcm && pcm.Length > 0) l.Add((pcm, rate, vol, loopStart));
                     }
                     if (l.Count > 0) lib.Sounds[role] = l;
                 }
@@ -140,7 +140,7 @@ internal sealed partial class CampaignRenderer
                 }
                 if (p.HostOwnHyperBallSfx && lib.Sounds.TryGetValue("ballloop", out var hum))
                 {
-                    seat.Hum = _sfx!.PlayPcmLoop(hum[0].Pcm, hum[0].Rate, HyperSfxVolume * hum[0].Volume, seat.Sound);
+                    seat.Hum = _sfx!.PlayPcmLoop(hum[0].Pcm, hum[0].Rate, HyperSfxVolume * hum[0].Volume, seat.Sound, hum[0].LoopStart);
                 }
                 seat.Area = 0;
                 Array.Clear(seat.RedWait);
@@ -381,12 +381,11 @@ internal sealed partial class CampaignRenderer
         Matrix4 view = scene.ViewMatrix;
         var right = new Vector3(view.M11, view.M21, view.M31);
         var up = new Vector3(view.M12, view.M22, view.M32);
-        float pxToWorld = 2f / 528f / MathF.Max(1e-3f, scene.PerspectiveMatrix.M22); // a 528-line pixel at distance 1
+        float pxToWorld = 2f / 448f / MathF.Max(1e-3f, scene.PerspectiveMatrix.M22); // a pixel of Corruption's 640x448 frame at distance 1 (GX line width is in EFB pixels; FIFO viewport 640x448, as DroneFx linePx)
         GLES30.GlUseProgram(_fxProg);
         GLES30.GlBindVertexArray(_fxVao);
         GLES30.GlBindBuffer(GLES30.GlArrayBuffer, _fxVbo);
         GLES30.GlActiveTexture(GLES30.GlTexture0);
-        GLES30.GlUniform1i(GLES30.GlGetUniformLocation(_fxProg, "uTex"), 0);
         GLES30.GlEnable(GLES30.GlBlend);
         GLES30.GlEnable(GLES30.GlDepthTest);
         GLES30.GlDepthMask(false);
@@ -414,7 +413,7 @@ internal sealed partial class CampaignRenderer
             i = j;
         }
         // the lightning as Corruption draws it (MP3 main.dol RenderLines 0x803a2a14, BLDM 1): hard-edged lines LWDn pixels
-        // wide on its 528-line framebuffer, each LCLn's colour added whole (One/One: no alpha scaling, all three lines at
+        // wide on its 640x448 framebuffer, each LCLn's colour added whole (One/One: no alpha scaling, all three lines at
         // full strength); a TEXR runs along the line only (the same texel across its width), times the colour
         _hyperLines.Sort((a, b) => a.Texture.CompareTo(b.Texture));
         for (int li = 0; li < _hyperLines.Count;)

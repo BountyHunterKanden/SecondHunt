@@ -201,6 +201,7 @@ namespace MphRecomp.Import
             Register(new Echoes.MusicImportKind());
             Register(new BrawlFx.BrawlFxImportKind());   // Brawl's Paralyzer effects (docs/BRAWL_PARALYZER.md)
             Register(new PrimeMusic.TrackImportKind());   // the Prime games' songs, one a recipe (docs/PRIME_MUSIC.md)
+            Register(new Enemies.EnemyImportKind());   // Retro enemies, one a recipe (docs/ENEMY_IMPORT.md E1: the Echoes Splinter)
         }
 
         public void Register(IImportKind kind) => _kinds[kind.Kind] = kind;
@@ -246,7 +247,7 @@ namespace MphRecomp.Import
                             it.Message = s.Message;
                             it.Status = s.Status switch
                             {
-                                "complete" => s.RecipeSha1 != r.Sha1 || s.Importer != ImporterVersions.For(r.Kind) ? ItemImportStatus.Stale
+                                "complete" => s.RecipeSha1 != r.Sha1 || !ImporterVersions.Matches(r.Kind, s.Importer) ? ItemImportStatus.Stale
                                     : Directory.Exists(ItemDir(r)) ? ItemImportStatus.Complete : ItemImportStatus.Missing,
                                 "hash-mismatch" => ItemImportStatus.HashMismatch,
                                 "failed" => ItemImportStatus.Failed,
@@ -389,7 +390,7 @@ namespace MphRecomp.Import
                     }
                     // an item the edition can't make, already made from the game's own disc: kept as it is
                     if (edition != null && !edition.Items.Contains(r.Id) && before != null && before.TryGetValue(r.Id, out var was)
-                        && was.Status == "complete" && was.RecipeSha1 == r.Sha1 && was.Importer == ImporterVersions.For(r.Kind)
+                        && was.Status == "complete" && was.RecipeSha1 == r.Sha1 && ImporterVersions.Matches(r.Kind, was.Importer)
                         && Directory.Exists(ItemDir(r)))
                     {
                         item.Status = ItemImportStatus.Complete; item.Message = $"kept: made from {def.Title} itself before";
@@ -528,6 +529,11 @@ namespace MphRecomp.Import
 
         static string Stamp(ImportRecipe r) => r.Sha1 + ":" + ImporterVersions.For(r.Kind);
 
+        // the kept files covered an item at this stamp: today's, or one with a retired importer number standing for it
+        static bool CoveredAt(ImportRecipe r, string? s) => s == Stamp(r) || s != null && s.StartsWith(r.Sha1 + ":", StringComparison.Ordinal)
+            && Int32.TryParse(s.AsSpan(r.Sha1.Length + 1), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out int n) && ImporterVersions.Matches(r.Kind, n);
+
         // after an import: keep the files the importers read, for every offered item and not only the ones this run made.
         // Items this run didn't make are read in a record-only run (output discarded), unless the files they declare
         // (IImportKind.Sources) fit the whole-file budget, in which case those are kept whole without running anything.
@@ -550,7 +556,7 @@ namespace MphRecomp.Import
                 var todo = new List<(ImportRecipe R, IImportKind Kind)>();
                 foreach (ImportRecipe r in KeptRecipes(def.Id, edition))
                 {
-                    if (attempted.Contains(r.Id) || (covered.TryGetValue(r.Id, out string? s) && s == Stamp(r))) continue;
+                    if (attempted.Contains(r.Id) || (covered.TryGetValue(r.Id, out string? s) && CoveredAt(r, s))) continue;
                     if (!_kinds.TryGetValue(r.Kind, out IImportKind? kind)) continue;
                     if (CheckSources(ctx, inner, def, edition, r, kind, sourceHashes) != null) continue;   // not this disc's item
                     todo.Add((r, kind));
@@ -666,7 +672,7 @@ namespace MphRecomp.Import
             return KeptRecipes(gameId, edition).Where(r =>
             {
                 string stamp = Stamp(r);
-                return _kinds.ContainsKey(r.Kind) && !(covered.TryGetValue(r.Id, out string? c) && c == stamp)
+                return _kinds.ContainsKey(r.Kind) && !(covered.TryGetValue(r.Id, out string? c) && CoveredAt(r, c))
                     && !(tried.TryGetValue(r.Id, out string? t) && (t == stamp + LacksMark || t == stamp + FailedMark));
             }).ToList();
         }

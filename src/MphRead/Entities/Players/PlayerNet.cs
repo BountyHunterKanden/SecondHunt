@@ -22,6 +22,11 @@ namespace MphRead.Entities
         // that is stale and is ignored until the client adopts the new view and echoes the new epoch
         public int NetAimEpoch { get; private set; }
 
+        // Fruity P4 (NetPlayerLifecycle's LifeId, docs/FRUITY_PORT.md): bumps at each spawn only (never 0), sent in the
+        // snapshot's lives block; a device stamps its inputs with the life it sees, and the host drops inputs stamped with
+        // a life the seat no longer has (NetMatchSession.Lives.cs)
+        public ushort NetLifeId { get; private set; }
+
         public float NetYaw => MathHelper.RadiansToDegrees(MathF.Atan2(_gunVec1.X, _gunVec1.Z));
         public float NetPitch => _aimY;
         public Vector3 NetAimVector => _gunVec1;
@@ -121,6 +126,7 @@ namespace MphRead.Entities
                 Yaw = NetYaw,
                 Pitch = NetPitch,
                 AimEpoch = (byte)NetAimEpoch,
+                LifeId = NetLifeId,
                 Health = (ushort)Math.Max(_health, 0),
                 Weapon = (sbyte)CurrentWeapon,
                 Weapons = (ushort)weapons,
@@ -134,7 +140,10 @@ namespace MphRead.Entities
                 // the ragdoll's launch while dead (the snapshot's throws block: a guest's body falls exactly as here)
                 HasThrow = _health == 0 && NetThrowSet,
                 ThrowSpeed = NetThrowSpeed,
-                ThrowPush = NetThrowPush
+                ThrowPush = NetThrowPush,
+                // the pose its ragdoll started from and, once the host's lies still, where (the ragdolls block)
+                HasDeathPose = _health == 0 && NetDeathPoseSet,
+                DeathPose = NetDeathPoseNow
             };
         }
 
@@ -208,6 +217,7 @@ namespace MphRead.Entities
             // (the counts here are 30 Hz snapshots' worth: NetApplyTicks / NetApplyScale, PlayerNetPosition.cs)
             bool mergedAhead = altNow && mergedHere && s.Health < _health && _netMergeAheadFrames < 30 * NetApplyScale;
             _netMergeAheadFrames = altNow && mergedHere ? _netMergeAheadFrames + NetApplyTicks : 0;
+            NetOmegaShotBeforeDeath(s, HostFirstHunt ? s.Weapons & (NetFhChargeBit - 1) : s.Weapons); // recomp (PlayerNetConfirm.cs)
             if (split || mergedAhead)
             {
             }
@@ -227,8 +237,10 @@ namespace MphRead.Entities
                 _netDamageTurret = s.LastBeam >= 0 && (s.LastBeam & NetTurretBeamBit) != 0;
                 _netDamageCharged = s.LastBeam >= 0 && (s.LastBeam & NetChargedBeamBit) != 0;
                 _netDamageThrow = s.HasThrow ? (s.ThrowSpeed, s.ThrowPush) : null;
+                _netDeathPose = s.HasDeathPose ? s.DeathPose : null;
                 _netDamageBeam = (BeamType)(s.LastBeam >= 0
                     ? s.LastBeam & ~(NetDroneBeamBit | NetTurretBeamBit | NetChargedBeamBit) : s.LastBeam);
+                if (_netDamageBeam == BeamType.OmegaCannon) _netDamageAttacker?.NetOmegaBlastDue(); // recomp (PlayerNetConfirm.cs)
                 // recomp: this device's own hits it already showed (PlayerNetPredict.cs): no second flash or HEADSHOT!
                 (bool predicted, bool predictedHead) = NetConfirmPredicted(_health - s.Health);
                 ushort flashBefore = _timeSinceDamage;
@@ -250,6 +262,7 @@ namespace MphRead.Entities
                     _netDamageTurret = false;
                     _netDamageCharged = false;
                     _netDamageThrow = null;
+                    _netDeathPose = null;
                 }
             }
             else if (s.Health > 0 && _health == 0 && (s.Flags & PlayerNetState.Spawned) != 0)
@@ -261,6 +274,11 @@ namespace MphRead.Entities
             if ((_health > 0 || s.Health == 0) && !(s.Health > _health && !altNow && Flags2.TestFlag(PlayerFlags2.Halfturret)) && !mergedAhead)
             {
                 _health = s.Health;
+            }
+            // recomp: the host's body at rest, for this device's body to ease onto (PlayerRagdollNet.cs)
+            if (NetClient && !NetRagdollRest && _health == 0 && s.HasDeathPose && s.DeathPose.HasRest)
+            {
+                NetRestFromHost(s.DeathPose);
             }
             int gained = 0;
             int heldBits = HostFirstHunt ? s.Weapons & (NetFhChargeBit - 1) : s.Weapons;
@@ -275,6 +293,13 @@ namespace MphRead.Entities
                 _availableWeapons[i] = held;
             }
             NetWeaponsGained(gained); // recomp: their charge (PlayerNetConfirm.cs)
+            // recomp (11-13): the snapshot has no weapon slots, so an Omega Cannon the confirmed pickup here didn't put in the
+            // third slot (one it missed, or one picked up firing the third slot's weapon: vanilla puts it nowhere) was
+            // in no slot here while the host had it there for the affinity button and the touch icon
+            if (NetClient && this == Main && _availableWeapons[BeamType.OmegaCannon] && _weaponSlots[2] != BeamType.OmegaCannon)
+            {
+                _weaponSlots[2] = BeamType.OmegaCannon;
+            }
             if (HostFirstHunt)
             {
                 for (int i = 0; i < 3; i++)
@@ -285,18 +310,34 @@ namespace MphRead.Entities
             _ammo[0] = s.Ammo0;
             _ammo[1] = s.Ammo1;
             // recomp: the host's snapshot drops the Omega Cannon after its shot (the client leaves that unequip to the host:
-            // PlayerInput.cs): replay it here so the third slot and the next weapon match the host's
+            // PlayerInput.cs): replay it here so the third slot and the next weapon match the host's. (11-13) A puppet keeps
+            // it until its relayed shot has run here (PlayerNetConfirm.cs NetOmegaHold)
+            bool omegaHeld = false;
             if (omegaSpent && NetClient && CurrentWeapon == BeamType.OmegaCannon && _health > 0 && s.Health > 0)
             {
                 _availableWeapons[BeamType.OmegaCannon] = true;
-                UnequipOmegaCannon();
+                omegaHeld = this != Main && NetOmegaHold();
+                if (omegaHeld)
+                {
+                    WeaponInfo omega = Weapons.Current[(int)BeamType.OmegaCannon];
+                    _ammo[omega.AmmoType] = Math.Max(_ammo[omega.AmmoType], omega.AmmoCost); // (the snapshot's is after the shot)
+                }
+                else
+                {
+                    UnequipOmegaCannon();
+                }
+            }
+            else
+            {
+                _netOmegaSpentFrame = -1;
             }
             // a puppet takes the host's weapon at once; the local player's own switch reaches the host a round trip
             // later, so only a mismatch that outlasts that is corrected
-            if (s.Weapon >= 0 && s.Weapon != (sbyte)CurrentWeapon && _health > 0)
+            if (s.Weapon >= 0 && s.Weapon != (sbyte)CurrentWeapon && _health > 0 && !omegaHeld)
             {
-                // recomp: nothing asked of the host from here: its weapon (pickup auto-equip, empty switch) is taken at once
-                if (pose || !NetWeaponPending || (_netWeaponMismatch += NetApplyTicks) > 30 * NetApplyScale)
+                // recomp: nothing asked of the host from here: its weapon (pickup auto-equip, empty switch) is taken at once.
+                // (11-13) NetWeaponPending is the local player's select: a puppet (smoothed: no pose) doesn't wait for it
+                if (pose || this != Main || !NetWeaponPending || (_netWeaponMismatch += NetApplyTicks) > 30 * NetApplyScale)
                 {
                     // recomp: the host's empty switch (this device leaves it to the host: PlayerProcess.cs) brings its
                     // AMMO DEPLETED! here, as the switch would have locally (owner report, 0.3.7: not always showing)
@@ -346,7 +387,7 @@ namespace MphRead.Entities
                 Speed = s.Speed;
                 _facingVector = s.Facing;
                 _upVector = s.Up;
-                NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, s.Position);
+                NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, s.Position, ref _netPartMisses);
                 return true;
             }
             return false;
@@ -370,7 +411,7 @@ namespace MphRead.Entities
             Speed = speed;
             _facingVector = facing;
             _upVector = up;
-            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, position);
+            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, position, ref _netPartMisses);
             HostRemoteYaw = yaw;
             HostRemotePitch = pitch;
         }
@@ -389,7 +430,7 @@ namespace MphRead.Entities
             Speed = s.Speed;
             _facingVector = s.Facing;
             _upVector = s.Up;
-            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, s.Position);
+            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, s.Position, ref _netPartMisses);
             return true;
         }
 
@@ -405,7 +446,7 @@ namespace MphRead.Entities
             Position = prev + delta;
             PrevPosition += delta;
             Speed += speedDelta;
-            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, Position);
+            NodeRef = NetSnapNodeRef(_scene, NodeRef, prev, Position, ref _netPartMisses);
         }
 
         // The room part after a network move from prev to cur. A step walks the portals it crossed, as the game does; a
@@ -416,12 +457,43 @@ namespace MphRead.Entities
         // A jump that isn't onto a spawn keeps the part it walked into while that part has geometry there: the lookup
         // alone was wrong on 6.9% of real play frames in Council Chamber (overlapping parts), so a lag correction there
         // drew the room black for that player (online Bounty, 10-15). -noderefsnaptest replay=<file>
+        // A step whose walked part has no geometry at the spot takes the lookup's part where that has geometry: a puppet's
+        // step-by-step walk never looked again, so once in a wrong part it stayed there and was drawn only while that part
+        // was in view (Stasis Bunker 11-18: Trace in part 7, standing where only part 3 has geometry, for minutes; gone as
+        // the other phone's camera turned). Where parts overlap (Harvester's 0/1/2) a wrong part still has geometry, so a
+        // walked part that is off its own portal planes (RoomEntity.PartHoldsSpot) for 5 s while the lookup's part holds
+        // the spot takes that one too; not sooner: real walks sit off their part's planes for up to ~3 s (Highground
+        // Expanded 7 vs 11). misses = that seat's run of such frames. -noderefsnaptest replay=<file> "puppet chain"
         public static NodeRef NetSnapNodeRef(Scene scene, NodeRef current, Vector3 prev, Vector3 cur)
+        {
+            int misses = 0;
+            return NetSnapNodeRef(scene, current, prev, cur, ref misses);
+        }
+
+        public static NodeRef NetSnapNodeRef(Scene scene, NodeRef current, Vector3 prev, Vector3 cur, ref int misses)
         {
             if (current.PartIndex != -1 && (cur - prev).LengthSquared <= 1)
             {
-                return scene.UpdateNodeRef(current, prev, cur);
+                NodeRef stepped = scene.UpdateNodeRef(current, prev, cur);
+                if (scene.PartHoldsSpot(stepped.PartIndex, cur, slack: 1))
+                {
+                    misses = 0;
+                    return stepped;
+                }
+                NodeRef there = scene.GetNodeRefContaining(cur);
+                if (there.PartIndex == stepped.PartIndex)
+                {
+                    return stepped;
+                }
+                if (!scene.PartHasGeometryAt(stepped.PartIndex, cur) && scene.PartHasGeometryAt(there.PartIndex, cur)
+                    || scene.PartHoldsSpot(there.PartIndex, cur) && ++misses >= 5 * 60)
+                {
+                    misses = 0;
+                    return there;
+                }
+                return stepped;
             }
+            misses = 0;
             if (NearestSpawnNodeRef(scene, cur) is { PartIndex: not -1 } spawn)
             {
                 return spawn;
@@ -437,6 +509,9 @@ namespace MphRead.Entities
             NodeRef at = scene.GetNodeRefContaining(cur);
             return at.PartIndex != -1 || current.PartIndex == -1 ? at : scene.UpdateNodeRef(current, prev, cur);
         }
+
+        // NetSnapNodeRef's run of frames this seat's walked part was off its own planes
+        private int _netPartMisses;
 
         // The room part for a spawn the host placed: the host spawns at a spawn point with that point's own (authored)
         // part, so the nearest one within a few units gives the same; elsewhere the part whose geometry is there
@@ -741,5 +816,12 @@ namespace MphRead.Entities
         public bool HasThrow;
         public Vector3 ThrowSpeed;
         public Vector3 ThrowPush;
+        // the ragdoll's start (and, once the host's lies still, its rest) while it's dead (not in the seat's bytes: the
+        // snapshot's ragdolls block)
+        public bool HasDeathPose;
+        public NetDeathPose DeathPose;
+        // Fruity P4: the seat's life and slot generation (not in the seat's bytes: the snapshot's lives block)
+        public ushort LifeId;
+        public ushort Generation;
     }
 }

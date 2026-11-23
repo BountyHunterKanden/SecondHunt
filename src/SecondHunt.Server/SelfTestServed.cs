@@ -89,6 +89,40 @@ namespace SecondHunt.Server
             GameMsg ja = await a.RequestAsync<GameMsg>(new JoinGameReq { GameId = id, Version = ServedVersion, Served = true });
             Check(ja.Game.Info.Served && ja.Relay.Slot is not 0 and not 1, $"served: a joiner gets its own slot ({ja.Relay.Slot})");
 
+            // a full game (owner 2026-11-22, issue 19): a player without an invite is turned away; an invited one gets in, PLAYERS
+            // grows by one and the match host is told before the joiner hears back (it cuts a bot when at 8: -onlinetest)
+            OnlineClient browser = await Connect(uri, OnlineIdentity.Create(), "Browser");
+            OnlineClient invitee = await Connect(uri, OnlineIdentity.Create(), "Invitee");
+            await Friends(o, invitee);
+            GameInfo two = Info(pub: true);
+            two.Served = true;
+            two.MaxPlayers = 2;
+            await o.RequestAsync<GameMsg>(new UpdateGameReq { Info = two });
+            Check(await ErrorOf(() => browser.RequestAsync<GameMsg>(new JoinGameReq { GameId = id, Version = ServedVersion, Served = true })) == "full",
+                "served: a full game turns away a player without an invite");
+            await o.RequestAsync<OkMsg>(new InviteReq { Code = invitee.Me.Code });
+            var grew = Next<MemberEvent>(o, e => e.Joined && e.Player.Code == invitee.Me.Code);
+            GameMsg ji = await invitee.RequestAsync<GameMsg>(new JoinGameReq { GameId = id, Version = ServedVersion, Served = true });
+            long grewBy = Environment.TickCount64 + 3000; // (the stand-in match host writes what it heard a moment later)
+            while (Environment.TickCount64 < grewBy && !ToldLines(told).Contains("seats 3")) await Task.Delay(20);
+            Check(ji.Game.Info.MaxPlayers == 3 && ji.Game.Players == 3 && ToldLines(told).Contains("seats 3") && (await grew)?.MaxPlayers == 3,
+                $"served: an invited player joins a full game and it grows to 3 (told: {string.Join(",", ToldLines(told))})");
+            Check(await ErrorOf(() => browser.RequestAsync<GameMsg>(new JoinGameReq { GameId = id, Version = ServedVersion, Served = true })) == "full",
+                "served: the grown game is full again for a player without an invite");
+            await invitee.RequestAsync<OkMsg>(new LeaveGameReq());
+            await browser.DisposeAsync();
+            await invitee.DisposeAsync();
+
+            // 0.10.2: the owner raises PLAYERS (EDIT RULES > WHO CAN JOIN): the card says so and the match host is told the cap
+            GameInfo more = Info(pub: true);
+            more.Served = true;
+            more.MaxPlayers = 6;
+            GameMsg mg = await o.RequestAsync<GameMsg>(new UpdateGameReq { Info = more });
+            long seatsBy = Environment.TickCount64 + 3000;
+            while (Environment.TickCount64 < seatsBy && !ToldLines(told).Contains("seats 6")) await Task.Delay(20);
+            Check(mg.Game.Info.MaxPlayers == 6 && mg.Game.Info.Served && ToldLines(told).Contains("seats 6"),
+                $"served: the owner's new PLAYERS reaches the match host (seats 6; it was told: {string.Join(",", ToldLines(told))})");
+
             // at the cap (1 here): the next ask is player-hosted as before
             GameMsg pg = await p.RequestAsync<GameMsg>(new HostGameReq { Info = info });
             Check(!pg.Game.Info.Served && pg.Relay.Slot == 0 && hub.MatchHostOf(pg.Game.Id) == null,

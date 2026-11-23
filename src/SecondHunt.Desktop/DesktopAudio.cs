@@ -36,25 +36,57 @@ internal sealed class DesktopAudio : IAudioOutput, IDisposable
     // the default output device, or null (no sound device: the game runs silent)
     public static DesktopAudio? TryOpen()
     {
-        try
+#if MPH_LINUX
+        // Linux: PulseAudio (PipeWire's pulse server on newer desktops), then ALSA
+        MiniAudioBackend[] backends = { MiniAudioBackend.PulseAudio, MiniAudioBackend.Alsa };
+#else
+        // Windows' own audio stack first (shared-mode WASAPI), the older ones only if it won't open
+        MiniAudioBackend[] backends = { MiniAudioBackend.Wasapi, MiniAudioBackend.DirectSound, MiniAudioBackend.WinMm };
+#endif
+        // dev: env SECONDHUNT_AUDIO_BACKEND=<name> (Wasapi, DirectSound, WinMm, ...) tries that one first, to compare them
+        if (Enum.TryParse(Environment.GetEnvironmentVariable("SECONDHUNT_AUDIO_BACKEND"), true, out MiniAudioBackend first))
         {
-            // Windows' own audio stack first (shared-mode WASAPI), the older ones only if it won't open
-            var engine = new MiniAudioEngine(new[] { MiniAudioBackend.Wasapi, MiniAudioBackend.DirectSound, MiniAudioBackend.WinMm });
-            var format = new AudioFormat { SampleRate = Rate, Channels = 2, Format = SampleFormat.F32 };
-            var config = new MiniAudioDeviceConfig { PeriodSizeInFrames = PeriodFrames };
-            AudioPlaybackDevice device = engine.InitializePlaybackDevice(null, format, config);
-            var mixer = new Mixer(engine, format);
-            device.MasterMixer.AddComponent(mixer);
-            device.Start();
-            Log.Info("MPHAudio", $"sound device: {device.Info?.Name ?? "default"}, {Rate} Hz, {PeriodFrames}-frame periods ({engine.ActiveBackend})");
-            return new DesktopAudio(engine, device, mixer);
+            backends = backends.Where(b => b != first).Prepend(first).ToArray();
         }
-        catch (Exception ex)
+        // each on its own engine: an engine given several only moves on when a backend won't load, not when its
+        // device won't open
+        var failed = new List<string>();
+        foreach (MiniAudioBackend backend in backends)
         {
-            Log.Error("MPHAudio", "no sound device, playing silent: " + ex.Message);
-            return null;
+            MiniAudioEngine? engine = null;
+            try
+            {
+                engine = new MiniAudioEngine(new[] { Native(backend) });
+                var format = new AudioFormat { SampleRate = Rate, Channels = 2, Format = SampleFormat.F32 };
+                var config = new MiniAudioDeviceConfig { PeriodSizeInFrames = PeriodFrames };
+                AudioPlaybackDevice device = engine.InitializePlaybackDevice(null, format, config);
+                var mixer = new Mixer(engine, format);
+                device.MasterMixer.AddComponent(mixer);
+                device.Start();
+                if (failed.Count > 0)
+                {
+                    Log.Warn("MPHAudio", "sound device: " + string.Join("; ", failed));
+                }
+                Log.Info("MPHAudio", $"sound device: {device.Info?.Name ?? "default"}, {Rate} Hz, {PeriodFrames}-frame periods ({Named(engine.ActiveBackend)})"
+                    + (Mixer.Mute ? ", muted (SECONDHUNT_AUDIO_MUTE)" : ""));
+                return new DesktopAudio(engine, device, mixer);
+            }
+            catch (Exception ex)
+            {
+                failed.Add($"{backend}: {ex.Message}");
+                try { engine?.Dispose(); } catch { }
+            }
         }
+        Log.Error("MPHAudio", "no sound device, playing silent: " + string.Join("; ", failed));
+        return null;
     }
+
+    // SoundFlow 1.4.1 hands its MiniAudioBackend values to miniaudio as they are, but its enum starts with Null where
+    // miniaudio's starts with WASAPI, so each value is miniaudio's next backend (its Wasapi is miniaudio's DirectSound,
+    // its DirectSound is WinMM, its PulseAudio is ALSA): ask for the one before, and name what opened by the one after.
+    // (Until 11-15 the Windows build asked for "Wasapi" and ran on DirectSound, logging Wasapi.)
+    internal static MiniAudioBackend Native(MiniAudioBackend backend) => (MiniAudioBackend)((int)backend - 1);
+    internal static MiniAudioBackend Named(MiniAudioBackend active) => (MiniAudioBackend)((int)active + 1);
 
     public IPcmTrack CreateTrack(int sampleRate, int channels, PcmFormat format, int bufferFrames, PcmUsage usage,
         bool lowLatency = false)
@@ -70,7 +102,7 @@ internal sealed class DesktopAudio : IAudioOutput, IDisposable
     public string Stats()
     {
         string s = $"{_mixer.FramesRendered} frames played ({_mixer.FramesRendered / (double)Rate:0.0} s), peak {_mixer.Peak:0.000}"
-            + (_mixer.LongestGapMs >= 100 ? $", device stalled {_mixer.LongestGapMs} ms" : "");
+            + (_mixer.LongestGapMs >= 100 ? $", device stalled {_mixer.LongestGapMs} ms" : $", longest gap {_mixer.LongestGapMs} ms");
         _mixer.Peak = 0;
         _mixer.LongestGapMs = 0;
         return s;
@@ -118,13 +150,14 @@ internal sealed class DesktopAudio : IAudioOutput, IDisposable
         public long FramesRendered;
         public float Peak;
         // (owner 11-05: the music skipped when a USB headset's mic opened) the longest wait between two device periods
+        // (Stopwatch, not TickCount64: that one steps in ~16 ms on Windows, so every gap read 16)
         public long LongestGapMs;
         long _lastCall;
 
         protected override void GenerateAudio(Span<float> buffer, int channels)
         {
-            long now = Environment.TickCount64;
-            if (_lastCall != 0) LongestGapMs = Math.Max(LongestGapMs, now - _lastCall);
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (_lastCall != 0) LongestGapMs = Math.Max(LongestGapMs, (now - _lastCall) * 1000 / System.Diagnostics.Stopwatch.Frequency);
             _lastCall = now;
             FramesRendered += buffer.Length / Math.Max(1, channels);
             buffer.Clear();
@@ -135,7 +168,12 @@ internal sealed class DesktopAudio : IAudioOutput, IDisposable
             }
             foreach (float v in buffer) Peak = Math.Max(Peak, Math.Abs(v));
             Dump(buffer, channels);
+            if (Mute) buffer.Clear();
         }
+
+        // dev: env SECONDHUNT_AUDIO_MUTE=1 opens the device and runs the mixer as usual but plays silence (the log's peak
+        // and SECONDHUNT_AUDIO_DUMP still get the real mix), for a session's test run that must not make sound
+        public static readonly bool Mute = Environment.GetEnvironmentVariable("SECONDHUNT_AUDIO_MUTE") == "1";
 
         // dev: env SECONDHUNT_AUDIO_DUMP=<file.wav> records the mix as played (48 kHz float WAV, its sizes rewritten
         // every second so a killed run still reads), for comparing the game's sound with an emulator capture

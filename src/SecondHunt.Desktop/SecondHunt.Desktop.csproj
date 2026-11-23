@@ -1,21 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The Windows app: a thin shell around MphRecomp.App (the front end, campaign and match screens, music and sound) with
+  <!-- The PC app (Windows, and Linux with MphLinux: see the Linux group below): a thin shell around MphRecomp.App (the front end, campaign and match screens, music and sound) with
        this platform's own parts: the window and its GL contexts, keyboard / mouse / gamepad, the sound device (miniaudio
        through SoundFlow), the first-launch ROM setup, the multiplayer lobby and the credits. A public build passes
        -p:MphPublic=true (docs/RELEASE.md); a normal build is the dev flavour (developer rows in RECOMP SETTINGS). -->
   <PropertyGroup>
-    <TargetFramework>net9.0-windows</TargetFramework>
-    <OutputType>WinExe</OutputType>
     <AssemblyName>SecondHunt</AssemblyName>
     <RootNamespace>SecondHunt.Desktop</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- the ROM file picker and GDI+ text for this host's own screens (lobby, credits, setup) -->
-    <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon>appicon.ico</ApplicationIcon>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
     <Product>Second Hunt</Product>
     <Description>Second Hunt</Description>
     <Copyright></Copyright>
@@ -27,16 +21,43 @@
     <DebugType>embedded</DebugType>
     <!-- as the Android app: the sim allocates steadily, so a concurrent collector keeps pauses off the frame -->
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
-    <!-- WFO0003 wants DPI set through Application.SetHighDpiMode, which only a Windows Forms app runs; this is a GLFW
-         window, so the manifest is the way (the file picker is the only Windows Forms part) -->
-    <NoWarn>$(NoWarn);WFO0003</NoWarn>
     <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
 
-  <ItemGroup>
+  <PropertyGroup Condition=" '$(MphLinux)' != 'true' ">
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <!-- the ROM file picker and GDI+ text for this host's own screens (lobby, credits, setup) -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>appicon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFO0003 wants DPI set through Application.SetHighDpiMode, which only a Windows Forms app runs; this is a GLFW
+         window, so the manifest is the way (the file picker is the only Windows Forms part) -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" '$(MphLinux)' != 'true' ">
     <!-- WinForms' implicit usings would bring Timer, Application, Color... into every file -->
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
+    <Compile Remove="Linux\**" />
+  </ItemGroup>
+
+  <!-- The Linux app (2026-11-15). The same code, with Linux's own parts under Linux/ in place of the Windows-only files:
+       EGL contexts for the screens (Linux/GlWindow.cs), the GDI+ text and drawing those screens use, drawn with
+       ImageSharp (Linux/Gdi/), zenity or kdialog for the file pickers and questions (Linux/LinuxDialogs.cs), and
+       PulseAudio / ALSA for sound. Built on Linux it's on by itself; on Windows -p:MphLinux=true (Publish-Linux.ps1).
+       Its obj and bin are obj/linux and bin/linux (Directory.Build.props). -->
+  <PropertyGroup Condition=" '$(MphLinux)' == 'true' ">
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <DefineConstants>$(DefineConstants);MPH_LINUX</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition=" '$(MphLinux)' == 'true' ">
+    <Compile Remove="GlWindow.cs;DataFolderChoice.cs;AudioOutputWindows.cs" />
+    <!-- the Windows build's own obj and bin sit in this folder too -->
+    <Compile Remove="obj\**;bin\**" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
   </ItemGroup>
 
   <!-- First-run compile hitches (2026-10-14, owner: dips at the Celestial Gateway spawn). A plain build is IL only, so
@@ -45,7 +66,8 @@
        public build (Publish-Windows.ps1) already did: the same step 5 ms, 20 methods. Costs ~6 s a rebuild. JIT stays
        available as a fallback, so nothing can break. -p:MphJitOnly=true skips it. -->
   <PropertyGroup>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition=" '$(MphLinux)' != 'true' ">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition=" '$(MphLinux)' == 'true' And '$(RuntimeIdentifier)' == '' ">linux-x64</RuntimeIdentifier>
     <SelfContained Condition=" '$(SelfContained)' == '' ">false</SelfContained>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
@@ -74,7 +96,11 @@
   <ItemGroup>
     <!-- SDL 3.4.14 (zlib, THIRD_PARTY_NOTICES.md), the official win-x64 build: gamepads and their gyro (Sdl3Pads.cs,
          DesktopGyro.cs). Next to SecondHunt.exe in the build and the release zip; without it pads go through GLFW. -->
-    <None Include="native\SDL3.dll" Link="SDL3.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="native\SDL3.dll" Link="SDL3.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+          Condition=" '$(MphLinux)' != 'true' " />
+    <!-- Linux: SDL 3 from the system (libsdl3-0 / sdl3), or a libSDL3.so.0 put in native/linux-x64 to ship with the app -->
+    <None Include="native\linux-x64\libSDL3.so.0" Link="libSDL3.so.0" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" Condition=" '$(MphLinux)' == 'true' And Exists('native\linux-x64\libSDL3.so.0') " />
   </ItemGroup>
 
 </Project>

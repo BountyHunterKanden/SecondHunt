@@ -27,7 +27,7 @@ namespace MphRecomp.Frontend
     {
         // our callback ids (the game's are below 1000)
         private const int OpenMods = 1000, OpenSettings = 1001;
-        private const int PauseResume = 1010, PauseSettings = 1011, PauseModSettings = 1012, PauseQuit = 1013, PauseChatCall = 1014, PauseQuitDesktop = 1015;
+        private const int PauseResume = 1010, PauseSettings = 1011, PauseModSettings = 1012, PauseQuit = 1013, PauseChatCall = 1014, PauseQuitDesktop = 1015, PausePhoto = 1016;
         private const int DeleteAllCall = 1020; // a rows page's DELETE ALL button (RowsPage.DeleteAll)
         // RowNext / RowPrev: A / Start and the touch arrows; RowRight / RowLeft: the D-pad (a value row steps, an
         // action row ignores it); RowTap: a tap on the value box (an action row runs; a value row ignores it); RowDelete:
@@ -69,8 +69,9 @@ namespace MphRecomp.Frontend
         public int ModsPage => _modsRows?.Page ?? -1;
         public int ModSettingsPage => _modSettingRows?.Page ?? -1;
         // the in-game pause menu's page: an online match's has CHAT (PauseChat, OnlineMenus.Chat.cs)
-        public int PausePage => PauseChat != null && _pauseChatPage >= 0 ? _pauseChatPage : _pausePage;
-        private int _pausePage = -1, _pauseChatPage = -1;
+        public int PausePage => PauseChat != null && _pauseChatPage >= 0 ? _pauseChatPage : InNetMatch && _pauseNetPage >= 0 ? _pauseNetPage : _pausePage;
+        // (_pausePage has PHOTO MODE under RESUME: campaign, bot matches, replays; a LAN match runs on under the menu, so its page has none)
+        private int _pausePage = -1, _pauseChatPage = -1, _pauseNetPage = -1;
         internal int PauseChatPageForTools => _pauseChatPage; // (MphRead.Tools -feflow FE_START=pausechat)
         public int ImportPage => _importRows?.Page ?? -1;
 
@@ -552,8 +553,9 @@ namespace MphRecomp.Frontend
             InstallMusicPages(controls); // a game's song list, RECOMP SETTINGS' song list (RecompMenus.Music.cs)
             InstallImportCards(); // IMPORT GAMES' page as five game cards (RecompMenus.ImportCards.cs)
 
-            _pausePage = BuildPausePage(controls, options, chat: false);
+            _pausePage = BuildPausePage(controls, options, chat: false, photo: !RecompSettings.PublicBuild); // (photo mode: after the fixes-only release)
             _pauseChatPage = BuildPausePage(controls, options, chat: true);
+            _pauseNetPage = BuildPausePage(controls, options, chat: false);
             AddOptionsButtons(options);
 
             InstallReplays(); // REPLAYS (RecompMenus.Replays.cs; the multiplayer menu's REPLAYS button)
@@ -600,6 +602,14 @@ namespace MphRecomp.Frontend
                     Step = _ => OpenMenuArt(),
                     Action = true
                 },
+                // owner 2026-11-20 (App MenuArenaBackdrop.cs)
+                new()
+                {
+                    Label = "arena\nbackground",
+                    Description = "on: a random arena from your games shows live behind the title screen, then blurred behind the menus, in place of samus. off: the menu art.",
+                    Value = () => _settings.MenuArenaBackdrop ? "ON" : "OFF",
+                    Step = _ => _settings.MenuArenaBackdrop = !_settings.MenuArenaBackdrop
+                },
                 // owner 2026-11-06 (FrontendSession.DrawSecondHuntLogo)
                 new()
                 {
@@ -607,6 +617,14 @@ namespace MphRecomp.Frontend
                     Description = "on: the second hunt logo shows under the game's logo on the main menu. off: only the game's logo.",
                     Value = () => _settings.SecondHuntLogo ? "ON" : "OFF",
                     Step = _ => _settings.SecondHuntLogo = !_settings.SecondHuntLogo
+                },
+                // owner 2026-11-20 (MphRecomp.Holiday.HolidaySnow)
+                new()
+                {
+                    Label = "holiday\nmode",
+                    Description = "snow falls in the open-air parts of every room. on: always. auto: from december 1 to january 6. off: never. only you see it.",
+                    Value = () => _settings.HolidayMode switch { "on" => "ON", "auto" => "AUTO", _ => "OFF" },
+                    Step = d => _settings.HolidayMode = Next(new[] { "off", "on", "auto" }, _settings.HolidayMode, d)
                 },
                 // owner 2026-11-07 (MphRecomp.Anim.DeathCollapse, PlayerRagdoll.cs; FIRST HUNT dev only, with it imported;
                 // RAGDOLL every build, owner 2026-11-09)
@@ -651,6 +669,16 @@ namespace MphRecomp.Frontend
                         + "off: each step's picture is shown until the next.",
                     Value = () => _settings.SmoothFrames ? "ON" : "OFF",
                     Step = _ => _settings.SmoothFrames = !_settings.SmoothFrames
+                },
+                // RENDER SCALE (GitHub issue #14, 2026-11-16): the 3D view's resolution; the HUD and menus stay sharp
+                // (CampaignRenderScale.cs). Takes effect after the pause menu
+                new()
+                {
+                    Label = "render\nscale",
+                    Description = "the 3d view's resolution as a share of your screen's. lower is softer but lighter on the "
+                        + "gpu; higher is sharper but heavier. the hud and menus always draw at full resolution.",
+                    Value = () => $"{_settings.RenderScale}%",
+                    Step = s => _settings.RenderScale = Next(RecompSettings.RenderScales, _settings.RenderScale, s)
                 },
                 // OPTIONS > AUDIO's volumes here too (owner 2026-10-17: "we should also get all the sound settings from the
                 // audio menu in here as well. the sfx volume, music volume, and quality"), steps 0-9 as that page's, heard
@@ -769,6 +797,14 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.ThirdPerson ? "THIRD" : "FIRST",
                     Step = _ => _settings.ThirdPerson = !_settings.ThirdPerson
                 },
+                // owner 2026-11-12: third person's shoulder (CampaignRenderer.UpdateThirdPerson)
+                new()
+                {
+                    Label = "camera\nside",
+                    Description = "third person's camera side, in the campaign and in matches: right sits the camera over your hunter's right shoulder, left over the left.",
+                    Value = () => _settings.ThirdPersonLeft ? "LEFT" : "RIGHT",
+                    Step = _ => _settings.ThirdPersonLeft = !_settings.ThirdPersonLeft
+                },
                 // multiplayer matches' own camera (owner 2026-10-17): bot and LAN matches; online is first person only
                 new()
                 {
@@ -805,7 +841,7 @@ namespace MphRecomp.Frontend
                 new()
                 {
                     Label = "alt form\nhop",
-                    Description = "on: in the campaign, jump hops any alt form up to bomb jump height. off: no hop, and the other hunters get helper jump pads instead.",
+                    Description = "on: in the campaign, the alt hop button (in controls) hops any alt form up to bomb jump height. off: no hop, and the other hunters get helper jump pads instead.",
                     Value = () => _settings.CampaignAltHop ? "ON" : "OFF",
                     Step = _ => _settings.CampaignAltHop = !_settings.CampaignAltHop
                 },
@@ -819,6 +855,8 @@ namespace MphRecomp.Frontend
                     Value = () => _settings.PrimeHud ? "PRIME" : "DS",
                     Step = _ => _settings.PrimeHud = !_settings.PrimeHud
                 },
+                // LOOK > HUD's editor: move, size, fade or hide each HUD part over the paused game (RecompMenus.HudEditor.cs)
+                HudEditorRow(),
                 // the campaign's radar on its own, every build (owner 2026-10-26: vanilla has it on the touch screen; the
                 // mini map above stays with the map work); a match's comes with the SHOW HUNTERS ON RADAR rule
                 new()
@@ -928,6 +966,24 @@ namespace MphRecomp.Frontend
                         if (to >= 0) _stepMenu?.GoTo(to);
                     },
                     Action = true
+                },
+                // rumble (owner 2026-11-17): OPTIONS > RUMBLE PAK's copy, the same setting (RecompMenus.Rumble.cs), greyed
+                // as that row is with no motor; turned on, the same preview buzz
+                new()
+                {
+                    Label = "rumble",
+                    Description = "on: the controller (or the phone) vibrates wherever the game's rumble pak did. greyed with nothing to vibrate.",
+                    Value = () => _settings.Rumble && MphRead.Rumble.Output != null ? "ON" : "OFF",
+                    Step = _ =>
+                    {
+                        if (MphRead.Rumble.Output == null) return;
+                        _settings.Rumble = !_settings.Rumble;
+                        SaveSettings();
+                        MphRead.Rumble.Enabled = _settings.Rumble;
+                        if (_settings.Rumble) MphRead.Rumble.Start(100, 10);
+                        else MphRead.Rumble.Stop();
+                    },
+                    Disabled = () => MphRead.Rumble.Output == null
                 },
                 // gyro aim (added by the gyro session with the owner's OK; the campaign reads these in CampaignGyro.cs)
                 new()
@@ -1292,6 +1348,9 @@ namespace MphRecomp.Frontend
                     Step = _ => AskDataFolderMove(),
                     Action = true
                 },
+                ExportProfileRow(), // APP > FILES: the profile pack (RecompMenus.Profile.cs, docs/PROFILE_SYNC.md Phase 1)
+                ImportProfileRow(),
+                CloudSaveRow(), // CLOUD SAVE (RecompMenus.Cloud.cs, docs/PROFILE_SYNC.md Phase 2)
                 // owner 2026-10-11: also checked once at launch in the background (ON by default), asking on the main menu
                 // only when an update is out (FrontendSession.TickLaunchCheck); OFF = only when CHECK is pressed
                 new()
@@ -1330,6 +1389,7 @@ namespace MphRecomp.Frontend
             // the Prime songs' rows under the music quality row (owner 2026-10-14, RecompMenus.Music.cs); public since the
             // 2026-10-29 rework (owner: "gate everything except music")
             rows.InsertRange(rows.FindIndex(r => r.Label == "music\nquality") + 1, MusicSettingRows());
+            rows.AddRange(SpeedrunSettingRows()); // CAMPAIGN > SPEEDRUN, dev builds (RecompMenus.Speedrun.cs)
             // a public build leaves out the rows for what it doesn't ship: imported HD suits, the HD menu art and the
             // developer tools (the music quality row stays: owner 2026-10-05, all four modes are the game's own music)
             if (RecompSettings.PublicBuild) rows.RemoveAll(r => HiddenInPublic.Contains(r.Label));
@@ -1344,6 +1404,7 @@ namespace MphRecomp.Frontend
                 rows.RemoveAll(r => HiddenOnDesktop.Contains(r.Label) && !(padGyro && r.Label.Contains("gyro")));
             }
             if (!RecompSettings.DesktopHost) rows.RemoveAll(r => r.Label == "frame\nrate"); // Android: the display picks
+            if (!RenderScaleOffered) rows.RemoveAll(r => r.Label == "render\nscale");
             if (DataFolderPlace() == null) rows.RemoveAll(r => r.Label == "data\nfolder");
             if (!_settings.DeveloperMode) rows.RemoveAll(r => r.Label == "dev\ntools" || r.Label == "status\ntext");
             if (!_settings.SkipBootLogos) rows.RemoveAll(r => r.Label == "skip\nintro");
@@ -1364,7 +1425,7 @@ namespace MphRecomp.Frontend
         // out of the importers in every build since Reports R8: see ImportGames.Offered and CampaignRenderer.StartGearLoad)
         private static readonly HashSet<string> HiddenInPublic = new(StringComparer.Ordinal)
         {
-            "developer", "dev\ntools", "controls\npage",
+            "developer", "dev\ntools", "controls\npage", "customize\nhud",
             // the campaign's Prime radar + mini map (owner 2026-10-17: map work, not in the next release; a
             // multiplayer match's radar comes with the SHOW HUNTERS ON RADAR rule instead, every build)
             "hud",
@@ -1373,7 +1434,16 @@ namespace MphRecomp.Frontend
             // high frame rate (owner 2026-10-18: "leave high frame rate out for now"): the PC's frame rate and smooth
             // frames stay at the display's rate and off (CampaignRenderer, DesktopApp)
             "frame\nrate", "smooth\nframes",
+            // not in the fixes-only release (owner 2026-11-17: the fixes first, the features right after; a public
+            // build keeps each at its default, which is the old behaviour): the arena menu background, holiday mode,
+            // the third-person camera's side, the profile pack and cloud save, the per-game song lists
+            "arena\nbackground", "holiday\nmode", "camera\nside", "export\nprofile", "import\nprofile", "cloud save",
+            "arena\nsongs", "menu\nsongs",
         };
+
+        // RENDER SCALE's row, and the renderer reading the saved value (CampaignRenderScale.cs): dev builds until the owner
+        // picks (2026-11-16), so a public build draws at 100% whatever the file says
+        public static bool RenderScaleOffered => !RecompSettings.PublicBuild;
 
         // the FIRST HUNT tab's pieces (shown only when First Hunt is imported, as "extras")
         private static readonly HashSet<string> FirstHuntRows = new(StringComparer.Ordinal)
@@ -1863,7 +1933,7 @@ namespace MphRecomp.Frontend
 
         // PAUSED: the Controls page's four control-type boxes, centred, as a list of four choices. chat: an online match's,
         // CHAT under RESUME (the lobby's CHAT page: OnlineMenus.Chat.cs), five boxes at the same spacing, centred on the old four
-        private int BuildPausePage(MenuPage controls, MenuPage options, bool chat)
+        private int BuildPausePage(MenuPage controls, MenuPage options, bool chat, bool photo = false)
         {
             MenuPage page = _file.AddPage(index => new MenuPage
             {
@@ -1885,7 +1955,7 @@ namespace MphRecomp.Frontend
             float step = n >= 2 ? _p.ChoiceBoxes[n - 1].Y - _p.ChoiceBoxes[n - 2].Y : 0; // (one box to the next)
             bool desktop = OperatingSystem.IsWindows(); // QUIT TO DESKTOP: Windows only, under QUIT TO MAIN MENU
             // (rows past the ROM's four; a public build has no MOD SETTINGS, so CHAT or QUIT TO DESKTOP takes its row)
-            int extra = Math.Max(0, (chat ? 1 : 0) + (desktop ? 1 : 0) - (RecompSettings.PublicBuild ? 1 : 0));
+            int extra = Math.Max(0, (chat ? 1 : 0) + (photo ? 1 : 0) + (desktop ? 1 : 0) - (RecompSettings.PublicBuild ? 1 : 0));
             float up = -step * extra;
             foreach (MenuItem it in _p.Frame.Where(it => HasWidget(it, "blackdrop") || HasWidget(it, "topdrop"))) // backdrop, top band
             {
@@ -1904,6 +1974,7 @@ namespace MphRecomp.Frontend
             // MOD SETTINGS: hidden in public builds with OPTIONS' MODS (owner 2026-11-07 "remove for now")
             if (RecompSettings.PublicBuild) choices.RemoveAll(c => c.Call == PauseModSettings);
             if (chat) choices.Insert(1, ("chat", PauseChatCall));
+            if (photo) choices.Insert(1, ("photo\nmode", PausePhoto)); // (CampaignRenderer.PhotoMode.cs)
             if (desktop) choices.Add(("quit to\ndesktop", PauseQuitDesktop));
             const float dx = 66; // the boxes span x 8..116 on the Controls page; centred on the touch screen
             float shift = up;
@@ -2303,6 +2374,8 @@ namespace MphRecomp.Frontend
         {
             Import.Tick();
             TickTabs(); // a settings tab switched to at once (RecompMenus.SettingsPages.cs)
+            TickProfile(); // IMPORT PROFILE: the file picker's answer (RecompMenus.Profile.cs)
+            TickCloud(); // CLOUD SAVE: a pull due (RecompMenus.Cloud.cs)
             TickReplays(); // REPLAYS: PLAY's launch waits for the file-start sound (RecompMenus.Replays.cs)
             TickOnline(); // ONLINE PLAY: the network's results and the server's pushes (OnlineMenus.cs)
             if (_captureId != null && Environment.TickCount64 - _captureStart > CaptureMs)
@@ -2344,6 +2417,7 @@ namespace MphRecomp.Frontend
             EnterOnline(menu, page); // ONLINE PLAY's pages (OnlineMenus.cs)
             EnterImportCards(menu, page); // IMPORT GAMES' cards (RecompMenus.ImportCards.cs)
             EnterSections(menu, page); // CONTROLS (RecompMenus.Controls.cs)
+            EnterRumble(menu, page); // OPTIONS > RUMBLE PAK (RecompMenus.Rumble.cs)
             if (IsControlsPage(page) && _controlsButtonItems.Count > 0) EnterControls(menu);
             if (_hiddenItems.TryGetValue(page, out List<int>? hide))
             {
@@ -2358,6 +2432,7 @@ namespace MphRecomp.Frontend
         public bool OnCall(MenuEngine menu, int call, bool inPause)
         {
             if (menu.Page != null && IsControlsPage(menu.Page.Index) && _controlsButtonItems.Count > 0 && ControlsCall(menu, call)) return true;
+            if (RumbleCall(menu, call)) return true; // OPTIONS > RUMBLE PAK (RecompMenus.Rumble.cs)
             if (call < 1000) return false;
             _stepMenu = menu;
             _inPause = inPause;
@@ -2411,7 +2486,14 @@ namespace MphRecomp.Frontend
                 else Import.Popup.Ask("quit to the main menu?", yes =>
                 {
                     if (yes) Requested?.Invoke(FrontendRequestKind.QuitToMenu);
+                }, pressed: yes =>
+                {
+                    // (the game hands over to the menus during YES's flash: CampaignRenderer.LeaveForMenus.cs)
+                    if (yes) Requested?.Invoke(FrontendRequestKind.QuitPressed);
                 });
+                return true;
+            case PausePhoto:
+                Requested?.Invoke(FrontendRequestKind.PhotoMode);
                 return true;
             case PauseQuitDesktop:
                 AskQuitToDesktop();

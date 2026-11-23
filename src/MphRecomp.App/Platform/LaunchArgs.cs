@@ -82,6 +82,12 @@ public sealed class PadState
         }
     }
 
+    // the pointer aim still waiting for the next step, left in place (smooth frames' aim preview, CampaignLookAhead.cs)
+    public System.Numerics.Vector2 PeekAim()
+    {
+        lock (_aimGate) return new System.Numerics.Vector2(_aimX, _aimY);
+    }
+
     public System.Numerics.Vector2 TakeAim()
     {
         lock (_aimGate)

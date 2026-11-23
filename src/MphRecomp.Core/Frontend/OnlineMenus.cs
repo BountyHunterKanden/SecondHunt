@@ -75,8 +75,10 @@ namespace MphRecomp.Frontend
         private const int OnWhoCall = 2560; // + the row
         private const int OnPlayersCall = 2564, OnPlayersLeftCall = 2565, OnPlayersRightCall = 2566;
         private const int OnBotsCall = 2567, OnBotsLeftCall = 2568, OnBotsRightCall = 2569, OnCreateGameCall = 2570;
+        private const int OnWhoBackCall = 2571; // WHO CAN JOIN's back arrow: CREATE's SELECT HUNTER, or EDIT LOBBY's lobby
         private const int OnSeatCall = 2580; // + the seat
         private const int OnRulesCall = 2588; // the host's EDIT RULES (GAME panel): as its own seat card's tap
+        private const int OnLobbyEditCall = 2589; // the host's EDIT LOBBY (GAME panel, beside EDIT RULES): WHO CAN JOIN on its own
         private const int OnInviteCall = 2590, OnStartCall = 2591, OnLeaveCall = 2592;
         private const int OnBotLevelCall = 2593, OnBotLevelLeftCall = 2594, OnBotLevelRightCall = 2595;
         private const int OnTeamCall = 2596; // + the seat (to 2599)
@@ -113,6 +115,7 @@ namespace MphRecomp.Frontend
         private int _wPanel = -1, _wSide = -1, _wTitle = -1, _wPlayers = -1, _wPlayersL = -1, _wPlayersR = -1, _wBots = -1, _wBotsL = -1, _wBotsR = -1, _wCreate = -1;
         private readonly int[] _wRow = { -1, -1, -1, -1 };
         private int _lbPanel = -1, _lbSide = -1, _lbTitle = -1, _lbInvite = -1, _lbStart = -1, _lbRules = -1;
+        private int _lbRulesHalf = -1, _lbLobby = -1; // (EDIT RULES | EDIT LOBBY side by side; _lbRules full width without EDIT LOBBY)
         private readonly int[] _lbSeat = { -1, -1, -1, -1 }, _lbTeam = { -1, -1, -1, -1 };
         private int _wLevel = -1, _wLevelL = -1, _wLevelR = -1;
         private readonly Dictionary<int, int> _onBack = new(); // each page's back arrow
@@ -140,6 +143,17 @@ namespace MphRecomp.Frontend
         private static int s_who, s_seats = 4, s_bots, s_botLevel = 1;
         private bool _creating;
         private volatile bool _createCancelled;
+        // the host's EDIT LOBBY (owner 2026-11-11: "can also be edited when you go back and edit match rules"; 2026-11-22: its
+        // own button, EDIT RULES no longer goes on to it): WHO CAN JOIN alone, as UPDATE. _whoEdit: the game it edits; its UPDATE leaves _whoPending for the lobby's
+        // entry, which sends it with the rules edit (one UpdateGame). The people in it are the floor; an older served game's match
+        // host keeps the seats it opened with (_whoOpenCap: the PLAYERS this device first saw for it).
+        // (Who -1: unchanged; Relevel: every bot to Level, else each keeps its own and new ones get Level)
+        private sealed record WhoEdit(OnlineMatch For, int People, int Who, int Bots, int Level, bool Relevel);
+        private OnlineMatch? _whoEdit, _whoOpenFor;
+        private WhoEdit? _whoPending;
+        private int _whoFloor = 2, _whoPeopleMax = MaxSeats, _whoOpenCap;
+        private int _whoSeats0, _whoBots0, _whoWho0, _whoLevel0;
+        private bool WhoEditing => _whoEdit != null && _whoEdit == Runner && MultiplayerMenu.OnlineEditing;
         // the lobby: the game this device hosts or joined (its match owns the connection), and who's in it (the server's cards)
         private OnlineMatch? _hosting, _joined;
         private bool _intoMatch; // the loading / fade pages between START and the match screen: keep the game
@@ -238,7 +252,10 @@ namespace MphRecomp.Frontend
 
         private string? ProfileDir => _settingsPath != null ? Path.GetDirectoryName(_settingsPath) : null;
         private static Uri ServerUri => new(OnlineServerOverride ?? OnlineServer);
+        public static Uri CloudServerUri => ServerUri; // (CLOUD SAVE: Profile/CloudSync.cs)
         internal static string? OnlineServerOverride { get; set; } // (tools: a local test server)
+        // the login's app: a dev build adds "-dev", which keeps its profile off the Gaming Hub (server 0.10.1; owner 2026-11-11)
+        public static string GameApp => (OperatingSystem.IsAndroid() ? "android" : "desktop") + (RecompSettings.PublicBuild ? "" : "-dev");
         private static string VersionKey => OnlineMatch.VersionKey(LanSession.RomKeyFor(Paths.MphKey));
 
         private void InstallOnline()
@@ -293,11 +310,12 @@ namespace MphRecomp.Frontend
             // the ROM panel moved and resized to span x0..x1
             MenuItem Panel(int i, float x0, float x1) => Clone(panel, i, (x0 + x1) / 2 - PanelMid, 0, stretchX: x1 - x0 - PanelWidth,
                 stretchDown: PanelStretchDown);
-            void Back(MenuPage page, int to)
+            void Back(MenuPage page, int to) => BackCall(page, to, OnLeaveCall);
+            void BackCall(MenuPage page, int to, int call)
             {
                 page.AddItem(i => Clone(backIcon, i, 0, 0));
                 _onBack[page.Index] = page.AddItem(i => Clone(backButton, i, 0, 0, actions: backButton.Actions
-                    .Select(a => to >= 0 ? WithTarget(a, to) : WithCall(a, OnLeaveCall)).ToList())).Index;
+                    .Select(a => to >= 0 ? WithTarget(a, to) : WithCall(a, call)).ToList())).Index;
             }
 
             // ---- the hub (H_C) ----
@@ -361,14 +379,14 @@ namespace MphRecomp.Frontend
                 _gSeat[k] = detail.AddItem(i => Input(i, x0, top, x1, bottom, LicSeatCall + seat)).Index;
             }
 
-            // ---- WHO CAN JOIN (W_A): after CREATE's SELECT HUNTER, back to it ----
+            // ---- WHO CAN JOIN (W_A): after CREATE's SELECT HUNTER, back to it (the host's EDIT LOBBY: back to the lobby) ----
             MenuPage who = AddFramePage(MultiplayerMenu.HunterPage);
             s_onWho = who.Index;
             _wPanel = who.AddItem(i => Panel(i, Mx(70), Mx(1270))).Index;
             // the YOUR GAME box ends above CREATE (the panel shortened by 200 mockup pixels)
             _wSide = who.AddItem(i => Clone(panel, i, (Mx(1310) + Mx(1850)) / 2 - PanelMid, 0, stretchX: Mx(1850) - Mx(1310) - PanelWidth,
                 stretchDown: PanelStretchDown - Mw(200))).Index;
-            Back(who, MultiplayerMenu.HunterPage);
+            BackCall(who, -1, OnWhoBackCall);
             _wTitle = who.AddItem(i => Clone(title, i, 0, 0, stringId: _strings.Add("WHO CAN JOIN"))).Index;
             for (int r = 0; r < WhoRows; r++)
             {
@@ -415,6 +433,9 @@ namespace MphRecomp.Frontend
             InstallLobbyBots(lobby, Input); // (the host's LEVEL / REMOVE / ADD BOT: OnlineMenus.LobbyBots.cs)
             // (owner 2026-10-16: the host's EDIT RULES in the GAME panel, over INVITE FRIENDS; both a little lower for it)
             _lbRules = lobby.AddItem(i => Input(i, Mx(1450), My(LbRulesY), Mx(1830), My(LbRulesY + LbBarH), OnRulesCall)).Index;
+            // (owner 2026-11-22: EDIT RULES = mode, arena, rules, hunter; EDIT LOBBY = WHO CAN JOIN: who, PLAYERS, BOTS, BOT LEVEL)
+            _lbRulesHalf = lobby.AddItem(i => Input(i, Mx(1450), My(LbRulesY), Mx(LbHalfL), My(LbRulesY + LbBarH), OnRulesCall)).Index;
+            _lbLobby = lobby.AddItem(i => Input(i, Mx(LbHalfR), My(LbRulesY), Mx(1830), My(LbRulesY + LbBarH), OnLobbyEditCall)).Index;
             _lbInvite = lobby.AddItem(i => Input(i, Mx(1450), My(LbInviteY), Mx(1830), My(LbInviteY + LbBarH), OnInviteCall)).Index;
             _lbStart = lobby.AddItem(i => Input(i, Mx(1446), My(LbStartY), Mx(1836), My(LbStartY + 88), OnStartCall)).Index;
 
@@ -427,6 +448,7 @@ namespace MphRecomp.Frontend
             InstallFind(AddFramePage, Input, Touch, Panel, Back, title); // (FIND GAME, the vote: OnlineMenus.Find.cs)
             InstallChat(AddFramePage, Input, Panel, Back, title); // (CHAT, REPORT A HUNTER, the lobby's CHAT bar: OnlineMenus.Chat.cs)
             InstallResultNames(Touch);
+            InstallResultFriends(Input, Touch); // (OnlineMenus.ResultsFriend.cs: ADD FRIEND on RESULTS)
             InstallHub(AddFramePage, Input, Panel, Back, title, hub); // (GAMING HUB, LEADERBOARDS, the license's STATS: OnlineMenus.Hub.cs)
             _pageSnap = ReadOnlinePages();
             OnlineIdentity.Preload(ProfileDir); // (the friend code's key derivation, off the UI thread: it hitched the ONLINE SETTINGS entry)
@@ -514,6 +536,8 @@ namespace MphRecomp.Frontend
             for (int k = 0; k < LobbySeats8; k++) Like(s_onLobby, _lbTeam8[k], OptionBoxPage, _soundToggle);
             Like(s_onLobby, _lbInvite, MultiplayerMenu.CreateJoinPage, _soundListRow);
             Like(s_onLobby, _lbRules, MultiplayerMenu.CreateJoinPage, _soundListRow);
+            Like(s_onLobby, _lbRulesHalf, MultiplayerMenu.CreateJoinPage, _soundListRow);
+            Like(s_onLobby, _lbLobby, MultiplayerMenu.CreateJoinPage, _soundListRow);
             Like(s_onLobby, _lbStart, MultiplayerMenu.LobbyPage, _soundMpStart);
             ApplyLobbyBotsSounds(Like);
             ApplyFriendsSounds(Like);
@@ -522,6 +546,7 @@ namespace MphRecomp.Frontend
             ApplySettingsSounds(Like);
             ApplyFindSounds(Like);
             ApplyChatSounds(Like);
+            ApplyResultsFriendSounds(Like);
         }
 
         private static (float X0, float Top, float X1, float Bottom) FriendJoinRect(int row)
@@ -560,9 +585,11 @@ namespace MphRecomp.Frontend
                 CountHeadToHead(); // (after an online match)
                 ReportMatchResult(); // (a network match this device hosted: head to head on the server, OnlineMenus.Records.cs)
                 ShowResultNames(menu); // (its names open their licenses)
+                ShowResultFriends(menu); // (and ADD FRIEND beside them)
             }
             // CREATE's setup pages (and the host's "change hunter") keep the connection and the hosted game
-            bool setup = MultiplayerMenu.InOnlineSetup && page >= MultiplayerMenu.ModePage && page <= MultiplayerMenu.HunterPage;
+            bool setup = MultiplayerMenu.InOnlineSetup && (page >= MultiplayerMenu.ModePage && page <= MultiplayerMenu.HunterPage
+                || page == s_onWho && WhoEditing); // (and the host's WHO CAN JOIN after them)
             // (and a seat card's HUNTER LICENSE, back to the lobby)
             bool seatLicense = page == s_onLicense && _licReturn == s_onLobby || KeepsLobby(page) // (and CHAT, its keyboard: OnlineMenus.Chat.cs)
                 || LobbySongsPage(page); // (and a rules page's MUSIC list: RecompMenus.Music.cs)
@@ -592,7 +619,7 @@ namespace MphRecomp.Frontend
             if (page == s_onWho)
             {
                 ShowWho(menu, focus: true);
-                RefreshOnline(lists: false); // (connected for CREATE)
+                if (!WhoEditing) RefreshOnline(lists: false); // (connected for CREATE; an edit's match has the connection)
             }
             else if (page == s_onLobby)
             {
@@ -615,24 +642,42 @@ namespace MphRecomp.Frontend
                 // back from "change hunter": the host's seat in the match takes the new pick (the template's player is
                 // the match's: NetMatchSession.Build keeps the humans' objects), and everyone hears it; a joiner's as its LOOK
                 (Hunter hunter, string? skin, string? character) = MultiplayerMenu.MyLook;
+                // (and the host's MODE / RULES tabs and WHO CAN JOIN's UPDATE, if it came from them)
+                bool rulesEdited = MultiplayerMenu.TakeOnlineRulesEdit();
+                WhoEdit? who = _whoPending is { } wp && wp.For == Runner ? wp : null;
+                _whoPending = null;
+                _whoEdit = null;
                 if (_hosting != null && _hostTemplate is { Players.Count: > 0 } t)
                 {
                     t.Players[0].Hunter = hunter;
                     t.Players[0].Skin = skin;
                     t.Players[0].Character = character;
                     t.Players[0].ColourPick = MultiplayerMenu.MyColour;
-                    if (MultiplayerMenu.TakeOnlineRulesEdit()) TakeRulesEdit(_hosting, t);
+                    bool rules = rulesEdited && CopyRulesEdit(t);
+                    if (who != null) _hosting.Net.SetSeats(WhoBots(t, who), who.People);
+                    if (rules || who != null) SendGameEdit(_hosting, t, who);
                     _hosting.Net.SetHostChoosing(false);
                     _hosting.Net.LobbyChanged();
                 }
                 else if (_joined is OnlineMatch j)
                 {
                     j.Net.SetLook(hunter, character, skin, choosing: false, Me().Rank, MultiplayerMenu.MyColour);
-                    // (a served game's owner back from its MODE / RULES tabs: the match host's lobby takes them)
-                    if (j.Net.IsOwner && MultiplayerMenu.TakeOnlineRulesEdit() && j.Net.OwnerLobby() is MatchSettings lobby)
+                    // (a served game's owner back from its MODE / RULES tabs or WHO CAN JOIN: the match host's lobby takes
+                    // them, the rules and bots in one OWNER message; the people go to its server with the card)
+                    if (j.Net.IsOwner && (rulesEdited || who != null) && j.Net.OwnerLobby() is MatchSettings lobby)
                     {
-                        TakeRulesEdit(j, lobby);
-                        j.Net.OwnerRules(lobby);
+                        bool rules = rulesEdited && CopyRulesEdit(lobby);
+                        if (who != null)
+                        {
+                            List<MatchPlayer> bots = WhoBots(lobby, who);
+                            lobby.Players.RemoveAll(p => p.Bot);
+                            lobby.Players.AddRange(bots);
+                        }
+                        if (rules || who != null)
+                        {
+                            j.Net.OwnerRules(lobby, bots: who != null);
+                            SendGameEdit(j, lobby, who);
+                        }
                     }
                 }
                 ShowLobby(menu, focus: true);
@@ -714,11 +759,12 @@ namespace MphRecomp.Frontend
             TickLobby();
             TickFind();
             TickChat();
+            TickNotice(); // (a server restart notice: OnlineMenus.Reconnect.cs)
             if (_client is { Connected: false })
             {
                 Console.Error.WriteLine("online: the server connection dropped: " + _client.CloseReason);
+                LostServer(_client); // (the jittered wait, the party and search to put back: OnlineMenus.Reconnect.cs)
                 CloseOnline(); // (dropped: connect again)
-                _netError = "lost the server. connecting again...";
                 Redraw();
             }
             if (_client == null)
@@ -738,18 +784,17 @@ namespace MphRecomp.Frontend
             bool friendsPage = page == s_onFriends || page == s_onAdd || page == s_onLicense;
             if (invite != null && (page == s_onHub || page == s_onBrowse || page == s_onDetail || friendsPage)) Invited(invite);
             if (page != s_onHub && page != s_onBrowse && page != s_onDetail && !friendsPage) return;
-            if (changed || Environment.TickCount64 >= _nextRefresh) RefreshOnline(lists: page != s_onDetail);
+            if (RefreshDue(changed)) RefreshOnline(lists: page != s_onDetail); // (pushes: at most once a second)
             if (changed && page == s_onLicense) FetchLicense();
         }
 
         private void Post(Action a) => _posts.Enqueue(a);
 
         // no connection on a page that shows the server's lists (the hub, BROWSE, a game, the friends pages, ONLINE SETTINGS):
-        // connect again, sooner after a drop and then less often (2, 4, 8, 15, 30 s; release test T1: after a match the hub
-        // stayed "offline" until it was opened again)
+        // connect again, sooner after a drop and then less often (ReconnectBackoff, 0.10.3: 1, 2, 4 ... 30 s with jitter; release
+        // test T1: after a match the hub stayed "offline" until it was opened again)
         private int _retries;
         private long _retryAt;
-        private static readonly int[] RetryMs = { 2000, 4000, 8000, 15000, 30000 };
         // the hub's counts and lists while connected (N18: the health line ~40 B + three small lists each time)
         private const long RefreshEveryMs = 10000;
 
@@ -761,12 +806,6 @@ namespace MphRecomp.Frontend
             if (!listing || _connecting || _joining || _creating || _hosting != null || _previewMe != null) return;
             if (Environment.TickCount64 < _retryAt) return;
             RefreshOnline(lists: true);
-        }
-
-        private void ConnectFailed()
-        {
-            _retryAt = Environment.TickCount64 + RetryMs[Math.Min(_retries, RetryMs.Length - 1)];
-            _retries++;
         }
 
         // the lobby: who came and went (the server's member pushes; the host's match also says so through PlayersChanged)
@@ -789,7 +828,7 @@ namespace MphRecomp.Frontend
             // choosing a hunter from it)
             int page = _onlineMenu?.Page?.Index ?? -1;
             bool inLobby = (m == _hosting || m == _joined) && (page == s_onLobby || page == s_onLicense && _licReturn == s_onLobby
-                || MultiplayerMenu.InOnlineSetup && page == MultiplayerMenu.HunterPage || KeepsLobby(page));
+                || MultiplayerMenu.InOnlineSetup && (page == MultiplayerMenu.HunterPage || page == s_onWho && WhoEditing) || KeepsLobby(page));
             m.Net.LobbyTick(inLobby);
             if (changed) Redraw();
         }
@@ -827,12 +866,16 @@ namespace MphRecomp.Frontend
                 CloseOnline();
                 client = null;
             }
+            // RESULTS' kept match (PLAY AGAIN): a login now would cut its connection; the lists through it instead
+            if (client != null) AskRestoredLicense(client); // (after RESTORE: OnlineMenus.License.cs)
+            if (client == null && KeptRoster(lists)) return; // (OnlineMenus.ResultsFriend.cs)
             if (client == null)
             {
                 _connecting = true;
                 OnlinePlayer me = Me();
                 string? dir = ProfileDir;
                 string? license = Multiplayer != null ? LicenseJson(Multiplayer.License) : null;
+                LoadLicenseHold(); // (after RESTORE: no upload until the player picks; OnlineMenus.License.cs)
                 Task.Run(async () =>
                 {
                     try
@@ -845,17 +888,20 @@ namespace MphRecomp.Frontend
                         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_onlineStop.Token);
                         timeout.CancelAfter(TimeSpan.FromSeconds(15));
                         OnlineClient c = back ?? await OnlineClient.ConnectAsync(ServerUri, id, OnlineNames.Clean(me.Name),
-                            OperatingSystem.IsAndroid() ? "android" : "desktop", timeout.Token);
+                            GameApp, timeout.Token);
                         if (back != null) Console.WriteLine("online: the match's connection is the hub's again");
                         _ = UploadLicense(c, license);
                         _ = FlushResults(c, dir); // (head-to-head reports still waiting: LAN matches, a lost connection)
                         _ = MphRecomp.Replay.SharedReplays.SyncAsync(c, dir, ServerUri); // (friends' shared replays waiting + the block setting; own served-match recordings taken)
+                        MphRecomp.Profile.CloudSync.Current?.HubConnected(CloudSaveRules.Supported(c)); // (CLOUD SAVE pulls again)
                         Post(() =>
                         {
                             _connecting = false;
                             _client = c;
                             _netError = null;
                             _retries = 0;
+                            _retryAt = 0;
+                            RestoreAfterReconnect(c); // (after a drop: the party and the search again; OnlineMenus.Reconnect.cs)
                             KnowFindable(c.Findable);
                             if (c.Held == null) ChargeQuitPenalty(c, "the online login"); // (a held seat: its rejoin decides)
                             if (!RunWhenConnected()) OfferRejoin(c); // (a settings row that waited on it: OnlineMenus.Settings.cs)
@@ -868,7 +914,7 @@ namespace MphRecomp.Frontend
                     }
                     catch (Exception ex) // (every kind: an unlisted one, such as Wine's crypto error, left "connecting..." for good)
                     {
-                        Console.Error.WriteLine("online: can't connect: " + ex);
+                        Console.Error.WriteLine("online: can't connect: " + (_reconnecting ? ex.Message : ex)); // (0.10.3: a retry, one line)
                         Post(() =>
                         {
                             _connecting = false;
@@ -962,7 +1008,7 @@ namespace MphRecomp.Frontend
         // an imported arena isn't listed with NO EXTRA ARENA GAMES or on a device that doesn't have it (owner 2026-10-10, N28)
         private bool ExtrasWanted(GameCard g) => !(OnlineSettings.NoExtraPickups && g.Info.ExtraPickups)
             && !(OnlineSettings.NoExtraCharacters && g.Info.ExtraCharacters)
-            && !(ExtraArenas.IsExtra(g.Info.Arena) && (OnlineSettings.NoExtraArenas || !ExtraArenas.Have(g.Info.Arena)));
+            && !(ExtraArenas.IsExtra(g.Info.Arena) && (OnlineSettings.NoExtraArenas || !ExtraArenas.CanJoin(g.Info.Arena)));
 
         private static GameMode? ModeOf(GameCard g) => Enum.TryParse(g.Info.Mode, out GameMode m) ? m : null;
 
@@ -997,6 +1043,7 @@ namespace MphRecomp.Frontend
             else if (page == s_onChat) ShowChat(menu, focus: false);
             else if (page == s_onGHub) ShowGamingHub(menu, focus: false);
             else if (page == s_onLeaders) ShowLeaders(menu, focus: false);
+            else if (page == MultiplayerMenu.ResultsPage) ShowResultFriends(menu, fetch: false);
         }
 
         private void ShowHub(MenuEngine menu)
@@ -1058,9 +1105,14 @@ namespace MphRecomp.Frontend
                 && (call < LicenseFirstCall || call > LicenseLastCall) && (call < LicTabCall || call > LicTabLastCall)
                 && (call < SettingsFirstCall || call > SettingsLastCall)
                 && (call < FindFirstCall || call > FindLastCall) && (call < ChatFirstCall || call > ChatLastCall)
-                && (call < OnTeam8Call || call > OnTeam8LastCall) && (call < LobbyBotsFirstCall || call > LobbyBotsLastCall)
-                && (call < HubFirstCall || call > HubLastCall)) return false;
+                && (call < OnTeam8Call || call > OnTeam8LastCall) && !IsLobbyBotsCall(call)
+                && (call < HubFirstCall || call > HubLastCall) && (call < ResFriendFirstCall || call > ResFriendLastCall)) return false;
             _onlineMenu = menu;
+            if (call is >= ResFriendFirstCall and <= ResFriendLastCall)
+            {
+                ResultsFriendCall(menu, call); // (OnlineMenus.ResultsFriend.cs)
+                return true;
+            }
             if (call is >= HubFirstCall and <= HubLastCall)
             {
                 HubCall(menu, call); // (OnlineMenus.Hub.cs)
@@ -1093,7 +1145,7 @@ namespace MphRecomp.Frontend
                 menu.GoTo(_licReturn >= 0 ? _licReturn : s_onHub); // (HUNTER LICENSE's back: where it was opened from)
                 return true;
             }
-            if (call is >= OnTeam8Call and <= OnTeam8LastCall or >= LobbyBotsFirstCall and <= LobbyBotsLastCall)
+            if (call is >= OnTeam8Call and <= OnTeam8LastCall || IsLobbyBotsCall(call))
             {
                 LobbyCall(menu, call); // (before FRIENDS' catch-all below: P8's TEAM boxes never got here before)
                 return true;
@@ -1103,13 +1155,13 @@ namespace MphRecomp.Frontend
                 FriendsCall(menu, call);
                 return true;
             }
-            if (call is >= OnWhoCall and <= OnCreateGameCall or >= OnBotLevelCall and <= OnBotLevelRightCall)
+            if (call is >= OnWhoCall and <= OnWhoBackCall or >= OnBotLevelCall and <= OnBotLevelRightCall)
             {
                 WhoCall(menu, call);
                 return true;
             }
             if (call is >= OnSeatCall and <= OnLeaveCall or >= OnTeamCall and <= OnLastCall or >= OnTeam8Call and <= OnTeam8LastCall
-                or >= LobbyBotsFirstCall and <= LobbyBotsLastCall)
+                || IsLobbyBotsCall(call))
             {
                 LobbyCall(menu, call);
                 return true;
@@ -1200,7 +1252,7 @@ namespace MphRecomp.Frontend
         // the hub counts only games without one (release 0.2.0 F2: an Echoes arena this device lacks was counted + joinable)
         private string? JoinBlock(GameInfo i) =>
             i.Version != VersionKey ? "other version"
-            : ExtraArenas.IsExtra(i.Arena) && !ExtraArenas.Have(i.Arena) ? "needs echoes import"
+            : ExtraArenas.IsExtra(i.Arena) && !ExtraArenas.CanJoin(i.Arena) ? "needs echoes import"
             : ExtraArenas.IsExtra(i.Arena) && OnlineSettings.NoExtraArenas ? "extra arenas off"
             : OnlineSettings.NoExtraPickups && i.ExtraPickups ? "extra pickups off"
             : OnlineSettings.NoExtraCharacters && i.ExtraCharacters ? "extra characters off"
@@ -1273,7 +1325,10 @@ namespace MphRecomp.Frontend
 
         private void ShowWho(MenuEngine menu, bool focus)
         {
-            s_bots = Math.Clamp(s_bots, 0, s_seats - 2);
+            // (owner 2026-11-22: PLAYERS = the people's seats alone, the bots beside them: up to 8 - PLAYERS. An edit: no
+            // fewer seats than the people in the game, no more than its server takes)
+            s_seats = Math.Clamp(s_seats, WhoEditing ? _whoFloor : 2, WhoPeopleMost);
+            s_bots = Math.Clamp(s_bots, 0, MaxSeats - s_seats);
             if (!WhoShown.Contains(s_who)) s_who = 1; // (FRIENDS + RIVALS hidden: friends)
             if (focus)
             {
@@ -1282,30 +1337,40 @@ namespace MphRecomp.Frontend
             }
         }
 
+        // the most people's seats PLAYERS goes to (an edit of an older served game: what its server takes)
+        private int WhoPeopleMost => WhoEditing ? Math.Clamp(_whoPeopleMax, _whoFloor, MaxSeats) : MaxSeats;
+
         private void WhoCall(MenuEngine menu, int call)
         {
+            int floor = WhoEditing ? _whoFloor : 2, most = WhoPeopleMost; // (the fewest people a game has)
             switch (call)
             {
             case >= OnWhoCall and < OnWhoCall + WhoRows:
                 s_who = call - OnWhoCall;
                 break;
             case OnPlayersCall:
-                s_seats = s_seats >= MaxSeats ? 2 : s_seats + 1;
+                s_seats = s_seats >= most ? floor : s_seats + 1;
                 break;
             case OnPlayersLeftCall:
             case OnPlayersRightCall:
-                s_seats = Math.Clamp(s_seats + (call == OnPlayersRightCall ? 1 : -1), 2, MaxSeats);
+                s_seats = Math.Clamp(s_seats + (call == OnPlayersRightCall ? 1 : -1), floor, most);
                 break;
             case OnBotsCall:
-                s_bots = s_bots >= s_seats - 2 ? 0 : s_bots + 1;
+                s_bots = s_bots >= MaxSeats - s_seats ? 0 : s_bots + 1;
                 break;
             case OnBotsLeftCall:
             case OnBotsRightCall:
-                s_bots = Math.Clamp(s_bots + (call == OnBotsRightCall ? 1 : -1), 0, s_seats - 2);
+                s_bots = Math.Clamp(s_bots + (call == OnBotsRightCall ? 1 : -1), 0, MaxSeats - s_seats);
                 break;
             case OnCreateGameCall:
-                CreateGame(menu);
+                if (WhoEditing) ApplyWhoEdit(menu);
+                else CreateGame(menu);
                 break;
+            case OnWhoBackCall:
+                // (EDIT LOBBY's: back to the lobby, the edit dropped; CREATE's: back to its SELECT HUNTER)
+                if (WhoEditing) _whoPending = null;
+                menu.GoTo(WhoEditing ? s_onLobby : MultiplayerMenu.HunterPage);
+                return;
             case OnBotLevelCall:
                 s_botLevel = (s_botLevel + 1) % 3;
                 break;
@@ -1317,7 +1382,7 @@ namespace MphRecomp.Frontend
             ShowWho(menu, focus: false);
         }
 
-        // CREATE: the game on the server (who sees it: WHO CAN JOIN; seats for people = PLAYERS - BOTS), this device hosting
+        // CREATE: the game on the server (who sees it: WHO CAN JOIN; people's seats = PLAYERS, the bots beside them), this device hosting
         // its match from the setup (seat 0 = this player, then the bots), then the lobby
         private void CreateGame(MenuEngine menu)
         {
@@ -1347,10 +1412,83 @@ namespace MphRecomp.Frontend
             Hunter[] others = BotHunters.Where(h => h != template.Players[0].Hunter).OrderBy(_ => Random.Shared.Next()).ToArray();
             // (P8: more bots than hunters left: they repeat, as the vanilla menu's)
             for (int b = 0; b < s_bots && others.Length > 0; b++) template.Players.Add(MultiplayerMenu.OnlineBot(others[b % others.Length], s_botLevel));
-            int people = Math.Max(2, s_seats - s_bots);
+            int people = Math.Clamp(s_seats, 2, MaxSeats);
             bool open = s_who == 0, friends = s_who is 0 or 1 or 2, rivals = s_who is 0 or 2;
             HostGame(menu, client, template, people, open, friends, rivals,
                 $"{people} people + {s_bots} bots level {s_botLevel}, {WhoChoices[s_who].Label}");
+        }
+
+        // the host's EDIT RULES: WHO CAN JOIN as its game is now (the seats, its bots, who sees it) and the edit's bounds
+        private bool PrefillWho(OnlineMatch mine)
+        {
+            List<LobbySeat> seats = SeatsNow();
+            if (seats.Count == 0) return false;
+            int people = seats.Count(x => x.Kind is SeatKind.You or SeatKind.Person);
+            List<MatchPlayer> bots = seats.Where(x => x.Kind == SeatKind.Bot && x.Player != null).Select(x => x.Player!).ToList();
+            int cap = PeopleCap(mine);
+            GameInfo info = mine.Game.Info;
+            if (_whoOpenFor != mine)
+            {
+                _whoOpenFor = mine;
+                _whoOpenCap = info.MaxPlayers;
+            }
+            _whoFloor = Math.Clamp(people, 2, MaxSeats);
+            // (an older server's match host keeps the seats it opened with, at least the vanilla 4: OnlineMatch.SeatsSinceServer)
+            _whoPeopleMax = mine.Served && !mine.Client.ServerAtLeast(OnlineMatch.SeatsSinceServer)
+                ? Math.Max(MphRead.Entities.PlayerEntity.VanillaMaxPlayers, Math.Max(_whoOpenCap, cap)) : MaxSeats;
+            s_bots = bots.Count;
+            s_seats = Math.Clamp(Math.Max(cap, people), _whoFloor, MaxSeats);
+            s_who = info.Public ? 0 : !info.Friends ? 3 : info.Rivals && ShowRivals ? 2 : 1;
+            if (bots.Count > 0) s_botLevel = Math.Clamp(bots[0].BotLevel, 0, 2);
+            (_whoSeats0, _whoBots0, _whoWho0, _whoLevel0) = (s_seats, s_bots, s_who, s_botLevel);
+            return true;
+        }
+
+        // the edit's UPDATE: back to the lobby, whose entry sends it with any MODE / RULES changes (one card update)
+        private void ApplyWhoEdit(MenuEngine menu)
+        {
+            if (Runner is not OnlineMatch m || m != _whoEdit) return;
+            if (!m.Client.Connected)
+            {
+                Import.Popup?.Inform("can't reach the server.\n\ntry again in a moment.");
+                return;
+            }
+            // (its bounds, with whoever joined meanwhile: the lobby kept going)
+            int people = SeatsNow().Count(x => x.Kind is SeatKind.You or SeatKind.Person);
+            _whoFloor = Math.Max(_whoFloor, Math.Clamp(people, 2, MaxSeats));
+            ShowWho(menu, focus: false);
+            bool relevel = s_botLevel != _whoLevel0 && s_bots > 0;
+            bool same = s_seats == _whoSeats0 && s_bots == _whoBots0 && s_who == _whoWho0 && !relevel;
+            _whoPending = same ? null : new WhoEdit(m, s_seats, s_who == _whoWho0 ? -1 : s_who, s_bots, s_botLevel, relevel);
+            menu.GoTo(s_onLobby);
+        }
+
+        // the edit's bots in its game (after the rules edit, for the characters it allows): the first of the game's, the new
+        // level on them if it changed (their teams kept), then new ones
+        private static List<MatchPlayer> WhoBots(MatchSettings t, WhoEdit who)
+        {
+            var bots = new List<MatchPlayer>();
+            foreach (MatchPlayer b in t.Players.Where(p => p.Bot).Take(who.Bots))
+            {
+                if (!who.Relevel)
+                {
+                    bots.Add(b);
+                    continue;
+                }
+                MatchPlayer again = MultiplayerMenu.OnlineBotLike(b, who.Level);
+                again.Team = b.Team;
+                bots.Add(again);
+            }
+            var probe = new MatchSettings { PirateBlaster = t.PirateBlaster, ExtraCharacters = t.ExtraCharacters };
+            probe.Players.AddRange(t.Players.Where(p => !p.Bot));
+            probe.Players.AddRange(bots);
+            while (bots.Count < who.Bots)
+            {
+                MatchPlayer next = NextBot(probe, null, who.Level);
+                bots.Add(next);
+                probe.Players.Add(next);
+            }
+            return bots;
         }
 
         // the game on the server and this device hosting its match (CREATE, and PLAY AGAIN after the host left), then the lobby
@@ -1466,14 +1604,19 @@ namespace MphRecomp.Frontend
             foreach (PlayerCard c in cards) seats.Add(new LobbySeat(SeatKind.Person, null, c, c.Code == hostCode));
             int people = seats.Count;
             List<int> bots = Enumerable.Range(0, s.Players.Count).Where(IsBot).ToList();
-            int total = Math.Min(MaxSeats, Math.Max(people, m.Game.Info.MaxPlayers + bots.Count));
+            int cap = PeopleCap(m);
+            int total = Math.Min(MaxSeats, Math.Max(people, cap + bots.Count));
             int fit = Math.Max(0, Math.Min(bots.Count, total - people));
-            int open = Math.Max(0, Math.Min(total - people - fit, m.Game.Info.MaxPlayers - people));
-            open = Math.Min(open + FreedSeats(m), Math.Max(0, MaxSeats - people - fit)); // (seats bots left: ADD BOT, OnlineMenus.LobbyBots.cs)
+            int open = Math.Max(0, Math.Min(total - people - fit, cap - people));
+            // (the people's open seats, then the bots: "humans first, bots last", a bot's seat only with its bot; owner 2026-11-22)
             for (int i = 0; i < open; i++) seats.Add(new LobbySeat(SeatKind.Open, null, null, false));
             for (int i = 0; i < fit; i++) seats.Add(new LobbySeat(SeatKind.Bot, BotOf(bots[i]), null, false, bots[i]));
             return seats.Take(LobbySeats8).ToList();
         }
+
+        // the people a game takes: its host's LOBBY says (its People, after a PLAYERS edit too), else the server's card (an
+        // older host's)
+        private static int PeopleCap(OnlineMatch m) => m.Net.People > 0 ? m.Net.People : m.Game.Info.MaxPlayers;
 
         private void ShowLobby(MenuEngine menu, bool focus)
         {
@@ -1498,7 +1641,10 @@ namespace MphRecomp.Frontend
             ShowLobbyBots(menu, seats);
             if (!host) menu.SetState(_lbInvite, MenuState.Hidden);
             else if (menu.ItemState(_lbInvite) == MenuState.Hidden) menu.SetState(_lbInvite, MenuState.Idle);
-            Show(menu, _lbRules, host);
+            bool lobbyEdit = host && Runner is OnlineMatch runs && LobbyEditable(runs);
+            Show(menu, _lbRules, host && !lobbyEdit);
+            Show(menu, _lbRulesHalf, lobbyEdit);
+            Show(menu, _lbLobby, lobbyEdit);
             if (!host) menu.SetState(_lbStart, MenuState.Hidden);
             else if (Runner!.Net.Joined == 0) menu.SetState(_lbStart, MenuState.State5);
             else if (menu.ItemState(_lbStart) is MenuState.State5 or MenuState.Hidden) menu.SetState(_lbStart, MenuState.Idle);
@@ -1517,7 +1663,7 @@ namespace MphRecomp.Frontend
                 int k = call - OnSeatCall;
                 if (k >= seats.Count) break;
                 if (seats[k].Kind == SeatKind.You && Multiplayer != null && (_hosting ?? _joined) is OnlineMatch mine) EditOwnSeat(menu, mine);
-                else if (seats[k].Kind == SeatKind.Bot && Runner != null) StepBotHunter(seats[k]); // (OnlineMenus.LobbyBots.cs)
+                else if (seats[k].Kind == SeatKind.Bot && Runner != null) PickBotHunter(menu, seats[k]); // (SELECT HUNTER for the bot: OnlineMenus.LobbyBots.cs)
                 else if (seats[k].Kind == SeatKind.Open && Runner != null) Invite();
                 else if (seats[k].Kind == SeatKind.Person && seats[k].Card is PlayerCard card) OpenLicense(menu, card); // (the game stays)
                 break;
@@ -1540,14 +1686,17 @@ namespace MphRecomp.Frontend
                 if (seats[k].Index < teams.Length) hm.Net.SetTeam(seats[k].Index, 1 - teams[seats[k].Index]);
                 break;
             }
-            case >= LobbyBotsFirstCall and <= LobbyBotsLastCall:
-                LobbyBotsCall(call);
+            case var bots when IsLobbyBotsCall(bots):
+                LobbyBotsCall(menu, call);
                 break;
             case OnInviteCall:
                 if (Runner != null) Invite();
                 break;
             case OnRulesCall:
                 if (Runner is OnlineMatch hosted && Multiplayer != null) EditOwnSeat(menu, hosted);
+                break;
+            case OnLobbyEditCall:
+                if (Runner is OnlineMatch edits && Multiplayer != null) EditLobby(menu, edits);
                 break;
             case OnStartCall:
                 if (Runner is OnlineMatch m) TryStart(m);
@@ -1566,8 +1715,8 @@ namespace MphRecomp.Frontend
         }
 
         // this player's own seat card (or the host's EDIT RULES): SELECT HUNTER, then back here; the others see "choosing a
-        // hunter" meanwhile. The host's has its MODE / RULES tabs live, and its changes come back to this lobby
-        // (TakeRulesEdit); a guest's is the hunter only.
+        // hunter" meanwhile. The host's has its MODE / RULES tabs live, and its changes come back to this lobby (CopyRulesEdit,
+        // SendGameEdit); a guest's is the hunter only. (owner 2026-11-22: WHO CAN JOIN is EDIT LOBBY's now, not after this)
         private void EditOwnSeat(MenuEngine menu, OnlineMatch mine)
         {
             if (mine.Net.IsHost) mine.Net.SetHostChoosing(true);
@@ -1576,7 +1725,22 @@ namespace MphRecomp.Frontend
                 (Hunter look, string? sk, string? ch) = MultiplayerMenu.MyLook;
                 mine.Net.SetLook(look, ch, sk, choosing: true, Me().Rank, MultiplayerMenu.MyColour);
             }
+            _whoEdit = null;
+            _whoPending = null;
             Multiplayer!.BeginOnlineSetup(menu, s_onLobby, s_onLobby, fresh: false, edit: mine.Net.RunsLobby);
+        }
+
+        // the host's EDIT LOBBY (owner 2026-11-22: "edit lobby brings you to just that screen"): WHO CAN JOIN on its own as its
+        // game is now (who sees it, PLAYERS, BOTS, BOT LEVEL); UPDATE sends it from the lobby's entry (SendGameEdit), back drops
+        // it. Not a Find Game match that starts itself. (Wave 1a, owner 2026-11-22: in public builds too)
+        private bool LobbyEditable(OnlineMatch mine) => mine.Net.RunsLobby && mine != _findHost;
+
+        private void EditLobby(MenuEngine menu, OnlineMatch mine)
+        {
+            if (!LobbyEditable(mine) || !PrefillWho(mine)) return;
+            _whoEdit = mine;
+            _whoPending = null;
+            Multiplayer!.BeginOnlineSetup(menu, s_onLobby, s_onLobby, fresh: false, edit: true, first: s_onWho);
         }
 
         // START: nobody joined, a team mode with an empty team, someone still on the results (start without them?) or still
@@ -1887,7 +2051,10 @@ namespace MphRecomp.Frontend
                 _joined = null;
                 int at = _onlineMenu?.Page?.Index ?? -1;
                 if (at == s_onLobby || at == s_onLicense && _licReturn == s_onLobby || at == s_onChat) _onlineMenu!.GoTo(wasIn ? s_onHub : JoinBack);
-                else if (MultiplayerMenu.InOnlineSetup && at == MultiplayerMenu.HunterPage) _onlineMenu!.GoTo(s_onHub); // (choosing)
+                else if (MultiplayerMenu.InOnlineSetup && (at == MultiplayerMenu.HunterPage || at == s_onWho && MultiplayerMenu.OnlineEditing))
+                {
+                    _onlineMenu!.GoTo(s_onHub); // (choosing, or the owner's WHO CAN JOIN)
+                }
                 if (cancelled) Import.Popup?.Close();
                 else if (ex is OnlineException { Code: "no_games" } && _onlineMenu != null) NoOpenGames(_onlineMenu);
                 else Import.Popup?.Inform(ex switch
@@ -1909,9 +2076,9 @@ namespace MphRecomp.Frontend
         private (MatchSettings Template, int People)? _rehost;
 
         // the host back from its MODE / RULES tabs (the lobby's own seat): the setup's mode, arena and rules into the hosted
-        // game's template (its people and bots stay), the joiners hear it with the lobby (LobbyChanged), and the server's
-        // card (the browse list, FIND GAME's filters) is updated too
-        private void TakeRulesEdit(OnlineMatch hosting, MatchSettings t)
+        // game's template (its people and bots stay; false: the setup can't make a game), the joiners hear it with the lobby
+        // (LobbyChanged), and the server's card (the browse list, FIND GAME's filters) is updated too (SendGameEdit)
+        private bool CopyRulesEdit(MatchSettings t)
         {
             MatchSettings now;
             try
@@ -1921,7 +2088,7 @@ namespace MphRecomp.Frontend
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException or IndexOutOfRangeException)
             {
                 Import.Popup?.Inform("can't change this game.\n\n" + ex.Message.ToLowerInvariant());
-                return;
+                return false;
             }
             t.Mode = now.Mode;
             t.Arena = now.Arena;
@@ -1939,16 +2106,36 @@ namespace MphRecomp.Frontend
             t.ExtraCharacters = now.ExtraCharacters;
             if (!MatchSettings.IsTeamMode(t.Mode)) foreach (MatchPlayer p in t.Players) p.Team = -1;
             Console.WriteLine($"online: host changed the game to {t.Mode} in {t.Arena}");
+            return true;
+        }
+
+        // the server's card after an edit: the rules, and WHO CAN JOIN's people and who sees it (its server tells a served
+        // game's match host the people). A refused WHO CAN JOIN edit: the host's seats back as the card has them, and why
+        private void SendGameEdit(OnlineMatch m, MatchSettings t, WhoEdit? who)
+        {
+            (bool, bool, bool)? flags = who is { Who: >= 0 } w ? (w.Who == 0, w.Who is 0 or 1 or 2, w.Who is 0 or 2) : null;
+            if (who != null)
+            {
+                Console.WriteLine($"online: host changed the game to {who.People} people + {who.Bots} bots"
+                    + (who.Who >= 0 ? ", " + WhoChoices[who.Who].Label : ""));
+            }
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await hosting.UpdateGameAsync(t);
+                    await m.UpdateGameAsync(t, who?.People, flags);
                 }
                 catch (Exception ex) when (ex is OnlineException or System.Net.WebSockets.WebSocketException or OperationCanceledException
                     or ObjectDisposedException or InvalidOperationException or IOException)
                 {
                     Console.Error.WriteLine("online: can't update the game's card: " + ex.Message);
+                    if (who == null) return;
+                    Post(() =>
+                    {
+                        if (m.Disposed) return;
+                        if (m == _hosting) m.Net.SetSeats(null, m.Game.Info.MaxPlayers);
+                        Import.Popup?.Inform("couldn't change who can join.\n\n" + Problem(ex));
+                    });
                 }
             });
         }
@@ -2116,6 +2303,11 @@ namespace MphRecomp.Frontend
             MenuPage? page = menu.Page;
             Multiplayer?.OnlineColourLive(menu); // (the lobby's colour box closes if the lobby goes)
             if (page?.Index != s_onLobby) Multiplayer?.NoOnlineColourBadge();
+            if (page?.Index == MultiplayerMenu.ResultsPage)
+            {
+                DrawResultsFriends(menu, tris); // (an online match's RESULTS: ADD FRIEND)
+                return;
+            }
             if (page == null || !IsOnlinePage(page) || page.Index == s_onSettings) return; // (ONLINE SETTINGS: a section page, DrawControls)
             _drawMenu = menu;
             _out = tris;
@@ -2171,9 +2363,9 @@ namespace MphRecomp.Frontend
             TextS(FindOn ? "find game" : "quick match", Mx(440), My(276), 0, Orange, q, SizeS);
             TextS(!FindOn ? "jump into a game now" : _finding ? "searching..." : _party != null ? $"search with your party of {_party.Members.Count}"
                 : "any mode, players near you", Mx(440), My(342), 0, White, q, SizeM);
-            string status = _connecting ? "connecting..." : !Live && _netError != null ? "offline: " + _netError
+            string status = Trying ? TryingText : !Live && _netError != null ? "offline: " + _netError
                 : _hunters >= 0 ? $"{_hunters} hunter{(_hunters == 1 ? "" : "s")} online" : "";
-            TextS(Fit(status, 34), Mx(440), My(388), 0, !Live && _netError != null && !_connecting ? Red : Cyan, q, SizeM);
+            TextS(Fit(status, 34), Mx(440), My(388), 0, !Live && _netError != null && !Trying ? Red : Cyan, q, SizeM);
             Capsule(Mx(440), My(448), Mw(420), Mw(76), "go", Live, -1, glows, SizeS);
             // BROWSE, CREATE
             int open = _games.Count(g => JoinBlock(g.Info) == null);
@@ -2269,7 +2461,7 @@ namespace MphRecomp.Frontend
             if (count == 0)
             {
                 int tag = _bTitle;
-                string first = _connecting ? "connecting..." : !Live ? "can't reach the server." : _games.Count == 0 ? "no open games right now."
+                string first = Trying ? TryingText : !Live ? "can't reach the server." : _games.Count == 0 ? "no open games right now."
                     : "no games match the filters.";
                 string second = !Live && !_connecting ? _netError ?? "" : "tap refresh to look again.";
                 Text(first, 128, -80, 2, White, tag);
@@ -2365,7 +2557,10 @@ namespace MphRecomp.Frontend
             Fill(Mx(1314), My(200), Mx(1846), My(238), HeaderBar.R, HeaderBar.G, HeaderBar.B, 1, side);
             TextS("your game", Mx(1580), My(208), 2, Dark, side, SizeM);
             float y = 266;
-            foreach ((string k, string v) in Multiplayer?.OnlineSummary() ?? Array.Empty<(string, string)>())
+            // (EDIT LOBBY: the game as it is now, not the setup pages' last state: the host came straight from the lobby)
+            IReadOnlyList<(string, string)> summary = WhoEditing && (_hosting ?? _joined)?.Net.Settings is MatchSettings live
+                ? LiveSummary(live) : Multiplayer?.OnlineSummary() ?? Array.Empty<(string, string)>();
+            foreach ((string k, string v) in summary)
             {
                 TextS(k, Mx(1336), My(y), 0, Pale, side, SizeM);
                 TextS(Fit(v, 16), Mx(1824), My(y), 1, White, side, SizeM);
@@ -2374,9 +2569,27 @@ namespace MphRecomp.Frontend
             WhoValue(0, "bots", s_bots, _wBots, glows);
             WhoValue(1, "players", s_seats, _wPlayers, glows);
             WhoValue(2, "bot level", s_botLevel + 1, _wLevel, glows);
+            if (WhoEditing)
+            {
+                // (the host's edit: its match's connection; an older served game's people bound)
+                bool up = Runner?.Client.Connected == true, most = _whoPeopleMax < MaxSeats && s_seats >= _whoPeopleMax;
+                Capsule(Mx(1330), My(760), Mw(500), Mw(110), "update", up, _wCreate, glows, SizeS);
+                string note = !up ? "offline" : most ? $"up to {_whoPeopleMax} people on this server" : "";
+                TextS(Fit(note, 30), Mx(1580), My(890), 2, up ? Cyan : Red, _wCreate, SizeX);
+                return;
+            }
             Capsule(Mx(1330), My(760), Mw(500), Mw(110), "create", Live, _wCreate, glows, SizeS);
-            string status = _connecting ? "connecting..." : !Live && _netError != null ? "offline: " + _netError : "";
-            TextS(Fit(status, 30), Mx(1580), My(890), 2, _connecting ? Cyan : Red, _wCreate, SizeX);
+            string status = Trying ? TryingText : !Live && _netError != null ? "offline: " + _netError : "";
+            TextS(Fit(status, 30), Mx(1580), My(890), 2, Trying ? Cyan : Red, _wCreate, SizeX);
+        }
+
+        // EDIT LOBBY's YOUR GAME box: the made game's mode, arena, goal and time (as the lobby's GAME panel)
+        private static IReadOnlyList<(string, string)> LiveSummary(MatchSettings s)
+        {
+            var facts = new List<(string, string)> { ("mode", ModeName(s.Mode)), ("arena", ArenaLabel(s.Arena)) };
+            if (GoalLine(s) is (string, string) goal) facts.Add(goal);
+            if (s.TimeLimitSeconds is float t && t > 0) facts.Add(("time limit", $"{(int)t / 60}:{(int)t % 60:00}"));
+            return facts;
         }
 
         // a label, the setup's option arrows and a value box (A or a tap on the box steps it round, the arrows step it)
@@ -2423,12 +2636,10 @@ namespace MphRecomp.Frontend
                 Fill(x0, top, x1, bottom, 0, 0, 0, 0.47f, tag);
                 Box(x0, top, x1, bottom, tag);
                 Glow(glows, tag, x0, top, x1, bottom, tag);
-                bool addBot = host && seat.Kind == SeatKind.Open && CanAddBot(seats);
                 bool botBoxes = host && seat.Kind == SeatKind.Bot && seat.Index >= 0 && seat.Player != null;
                 if (eight && seat.Kind == SeatKind.Open)
                 {
                     DrawSeatCard8(seat, k, tag, host, false, false, -1);
-                    if (addBot) DrawAddBot(k, true, glows);
                     continue;
                 }
                 if (seat.Kind == SeatKind.Open)
@@ -2437,7 +2648,6 @@ namespace MphRecomp.Frontend
                     Model(@"startgame\adbot", Mx(cx + 69), My(cy + 120), Mw(90), Mw(90), tag);
                     TextS("open", Mx(cx + 240), My(cy + 110), 0, OnGrey, tag, SizeM);
                     if (host) TextS("invite", Mx(cx + 240), My(cy + 176), 0, Orange, tag, SizeM);
-                    if (addBot) DrawAddBot(k, false, glows);
                     continue;
                 }
                 // the seat in the lobby: its ping (yours: this device's), choosing a hunter, back from the results
@@ -2460,22 +2670,28 @@ namespace MphRecomp.Frontend
                 if (eight)
                 {
                     DrawSeatCard8(seat, k, tag, host, choosing, away, ping);
-                    if (you) DrawOnlineColourBadge(seat, Mx(cx + 20 + 120 - 22), My(cy + 16 + 120 - 22), Mw(22), tag);
+                    // (the half-height card's own corner: cx/cy above are the 2 x 2 grid's, rows 352 apart, which put
+                    // the badge of a seat on row 2+ under the panel; owner screenshot 2026-11-21)
+                    (float bx, float by) = LobbyCardCorner(k, seats.Count);
+                    if (you) DrawOnlineColourBadge(seat, Mx(bx + 20 + 120 - 22), My(by + 16 + 120 - 22), Mw(22), tag);
                     continue;
                 }
-                HunterDisc(seat, Mx(cx + 24), My(cy + 75), Mw(180), tag);
+                // (a host's bot card: a smaller picture with its arrows either side, the words moved over; OnlineMenus.LobbyBots.cs)
+                float tx = botBoxes ? BotCard(false).TextX : 240;
+                if (botBoxes) HunterDisc(seat, Mx(cx + BotCard(false).X), My(cy + BotCard(false).Y), Mw(BotCard(false).D), tag);
+                else HunterDisc(seat, Mx(cx + 24), My(cy + 75), Mw(180), tag);
                 if (you) DrawOnlineColourBadge(seat, Mx(cx + 24 + 180 - 32), My(cy + 75 + 180 - 32), Mw(32), tag);
                 string name = seat.Card != null ? StreamerPrivacy.Display(seat.Card.Name, seat.Card.Tag) : StreamerPrivacy.Name(seat.Player?.Nickname ?? "", seat.Kind == SeatKind.You);
-                TextS(Fit(name.ToLowerInvariant(), 15), Mx(cx + 240), My(cy + 96), 0, White, tag, SizeM);
+                TextS(Fit(name.ToLowerInvariant(), 15), Mx(cx + tx), My(cy + 96), 0, White, tag, SizeM);
                 string what = seat.Player != null ? HunterWord(seat.Player) : "";
                 if (seat.Host) what += (what.Length > 0 ? "   " : "") + "host";
-                if (choosing) TextS("choosing a hunter...", Mx(cx + 240), My(cy + 150), 0, Cyan, tag, SizeX);
-                else if (away) TextS("on the results...", Mx(cx + 240), My(cy + 150), 0, OnGrey, tag, SizeX);
-                else TextS(what, Mx(cx + 240), My(cy + 150), 0, Orange, tag, SizeX);
+                if (choosing) TextS("choosing a hunter...", Mx(cx + tx), My(cy + 150), 0, Cyan, tag, SizeX);
+                else if (away) TextS("on the results...", Mx(cx + tx), My(cy + 150), 0, OnGrey, tag, SizeX);
+                else TextS(what, Mx(cx + tx), My(cy + 150), 0, Orange, tag, SizeX);
                 // (the host's own card: no hint, its EDIT RULES is in the GAME panel; owner 2026-10-16)
                 string third = you ? (host ? "" : "tap to change hunter")
                     : seat.Kind != SeatKind.Bot ? "" : host ? "" : $"bot level {seat.Player?.BotLevel + 1 ?? 1}";
-                TextS(third, Mx(cx + 240), My(cy + 196), 0, you ? Pale : OnGrey, tag, SizeX);
+                TextS(third, Mx(cx + tx), My(cy + 196), 0, you ? Pale : OnGrey, tag, SizeX);
                 if (ping >= 0) Ping(Mx(cx + 240), My(cy + 238), Mw(34), ping, tag);
                 // ready: in the lobby with a hunter (the check), else the red X; nothing for someone the match doesn't have yet
                 if (seat.Index >= 0 && !botBoxes) // (a host's bot card: REMOVE where the check goes)
@@ -2502,8 +2718,18 @@ namespace MphRecomp.Frontend
             }
             if (host)
             {
-                Bar(Mx(1450), My(LbRulesY), Mx(1830), My(LbRulesY + LbBarH), _lbRules, glows);
-                TextS("edit rules", Mx(1640), My(LbRulesY + 13), 2, Orange, _lbRules, SizeX);
+                if (_drawMenu is MenuEngine dm && dm.ItemState(_lbLobby) != MenuState.Hidden)
+                {
+                    Bar(Mx(1450), My(LbRulesY), Mx(LbHalfL), My(LbRulesY + LbBarH), _lbRulesHalf, glows);
+                    TextS("edit rules", Mx((1450 + LbHalfL) / 2), My(LbRulesY + 13), 2, Orange, _lbRulesHalf, SizeX);
+                    Bar(Mx(LbHalfR), My(LbRulesY), Mx(1830), My(LbRulesY + LbBarH), _lbLobby, glows);
+                    TextS("edit lobby", Mx((LbHalfR + 1830) / 2), My(LbRulesY + 13), 2, Orange, _lbLobby, SizeX);
+                }
+                else
+                {
+                    Bar(Mx(1450), My(LbRulesY), Mx(1830), My(LbRulesY + LbBarH), _lbRules, glows);
+                    TextS("edit rules", Mx(1640), My(LbRulesY + 13), 2, Orange, _lbRules, SizeX);
+                }
                 Bar(Mx(1450), My(LbInviteY), Mx(1830), My(LbInviteY + LbBarH), _lbInvite, glows);
                 TextS("invite friends", Mx(1640), My(LbInviteY + 13), 2, Orange, _lbInvite, SizeX);
                 Capsule(Mx(1446), My(LbStartY), Mw(390), Mw(88), "start", Runner!.Net.Joined > 0, _lbStart, glows, SizeM);
@@ -2514,12 +2740,14 @@ namespace MphRecomp.Frontend
                 TextS("waiting for the host", Mx(1640), My(770), 2, Pale, side, SizeX);
                 TextS("to start...", Mx(1640), My(810), 2, Pale, side, SizeX);
             }
+            if (host) DrawAddBot(seats, glows); // (over the seats' corner: OnlineMenus.LobbyBots.cs)
             DrawLobbyChat(glows, seats); // (OnlineMenus.Chat.cs)
             if (_onBack.TryGetValue(s_onLobby, out int back)) TextS("leave", Mx(200), My(990), 0, Orange, back, SizeM);
         }
 
         // the GAME panel's host buttons (EDIT RULES, INVITE FRIENDS, START), top edges; TALK goes at 922 (OnlineMenus.Voice.cs)
         private const float LbRulesY = 698, LbInviteY = 756, LbBarH = 50, LbStartY = 816;
+        private const float LbHalfL = 1636, LbHalfR = 1644; // (EDIT RULES | EDIT LOBBY: the bar's two halves, a gap between)
 
         // a seat's round icon: SELECT HUNTER's (TROOPER / DARK SAMUS too, RecompMenus.SeatIcons.cs), or the person disc (a
         // hunter not known yet)
@@ -2534,8 +2762,9 @@ namespace MphRecomp.Frontend
             mp.OnlineColourBadge(menu, x, y, r, who, OnlineColourPlayers, PickOnlineColour);
         }
 
-        // the lobby's players with this player's own look and colour as picked here (the lobby can lag a pick), and its
-        // seat; null: no lobby, or a team game
+        // the lobby's players with this player's own look as picked here (the lobby can lag a pick), and its seat; its colour
+        // is the one the lobby says it wears (the host gives a pick only a free colour: LookAlikes.ColourBook), or for 2 s
+        // after a pick here the picked one; null: no lobby, or a team game
         private (List<MatchPlayer> Players, int Index)? OnlineColourPlayers()
         {
             OnlineMatch? m = _hosting ?? _joined;
@@ -2548,15 +2777,19 @@ namespace MphRecomp.Frontend
             (Hunter hunter, string? skin, string? character) = MultiplayerMenu.MyLook;
             players[at] = new MatchPlayer
             {
-                Hunter = hunter, Skin = skin, Character = character, ColourPick = MultiplayerMenu.MyColour, Recolor = own.Recolor,
+                Hunter = hunter, Skin = skin, Character = character, Recolor = own.Recolor,
+                ColourPick = Environment.TickCount64 - _colourPickedAt < 2000 ? MultiplayerMenu.MyColour : own.ColourPick,
                 Team = own.Team, Nickname = own.Nickname, RankLevel = own.RankLevel,
             };
             return (players, at);
         }
 
+        private long _colourPickedAt = long.MinValue / 2;
+
         // a colour picked in the box: the host's seat in its lobby (everyone hears it), a joiner's as its LOOK
         private void PickOnlineColour(int colour)
         {
+            _colourPickedAt = Environment.TickCount64;
             if (_hosting != null && _hostTemplate is { Players.Count: > 0 } t)
             {
                 t.Players[0].ColourPick = colour;
@@ -2596,7 +2829,10 @@ namespace MphRecomp.Frontend
         }
 
         // an arena as the menus name it (the room's in-game name; a game from an older build may send the room's)
-        private static string ArenaLabel(string arena) => (MatchArenas.Find(arena)?.InGameName is { Length: > 0 } n ? n : arena).ToLowerInvariant();
+        private static string ArenaLabel(string arena)
+        {
+            return (MatchArenas.Find(arena)?.InGameName is { Length: > 0 } n ? n : arena).ToLowerInvariant();
+        }
 
         // ---- pieces ----
 

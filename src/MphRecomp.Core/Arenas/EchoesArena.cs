@@ -33,6 +33,11 @@ namespace MphRecomp.Arenas
             // public build: RegisterFrom, ImportGames.Offered)
             public string Pak { get; init; } = "Metroid6.pak";
             public bool Dev { get; init; }
+            // the room's own music when the match's music choice is the default (a MusicLibrary key: a Prime music import
+            // track; MatchMusic.PlayRoom), null = MPH's
+            public string? Music { get; init; }
+            // the game whose disc it's on (an import recipe's "game"): "mp2" Echoes, "mp1" Prime 1 (the Main Quarry)
+            public string Game { get; init; } = "mp2";
         }
 
         public static readonly IReadOnlyList<Def> All = new[]
@@ -45,6 +50,17 @@ namespace MphRecomp.Arenas
             new Def("M06_ShootingGallery", 0xd97a600b, "ECHOES SHOOTING GALLERY", "Shooting Gallery", "echoes_m06", 1006),
             // a story room as an arena (owner 2026-10-31, MiningPlaza.cs): Agon Wastes; public since the 2026-11-01 release
             new Def("M07_MiningPlaza", 0x427fad9a, "ECHOES MINING PLAZA", "Mining Plaza", "echoes_m07", 1007) { Pak = "Metroid3.pak" },
+            // Prime 1's Phazon Mines room (owner 2026-11-15, MainQuarry.cs): dev-only until the owner signs it off
+            new Def(MainQuarry.Key, 0x643d038f, "PRIME MAIN QUARRY", "Main Quarry", "prime_m01", 1008)
+                { Pak = "metroid5.pak", Game = "mp1", Dev = true, Music = MainQuarry.MusicKey },
+            // Prime 1's Magmoor Caverns and Phendrana Drifts rooms (owner 2026-11-16, Prime1Rooms.cs): dev-only for now
+            new Def(Prime1Room.MonitorStationKey, 0x0c57a641, "PRIME MONITOR STATION", "Monitor Station", "prime_m02", 1009)
+                { Pak = "Metroid6.pak", Game = "mp1", Dev = true, Music = Prime1Room.MonitorStationMusic },
+            new Def(Prime1Room.ShorelinesKey, 0xf7285979, "PRIME PHENDRANA SHORELINES", "Phendrana Shorelines", "prime_m03", 1010)
+                { Pak = "Metroid3.pak", Game = "mp1", Dev = true, Music = Prime1Room.ShorelinesMusic },
+            // Echoes' Sanctuary Fortress room, frozen as the campaign leaves it (owner 2026-11-16, MainGyroChamber.cs): dev-only for now
+            new Def(MainGyroChamber.Key, 0x73342a54, "ECHOES MAIN GYRO CHAMBER", "Main Gyro Chamber", "echoes_m08", 1011)
+                { Pak = "Metroid5.pak", Dev = true, Music = MainGyroChamber.MusicKey },
         };
 
         public static Def? Find(string keyOrName) => All.FirstOrDefault(d =>
@@ -64,9 +80,9 @@ namespace MphRecomp.Arenas
             // (then the owner's baked pickup placements, any arena: PlacedPickups, so the ids before them stay; then
             // Shooting Gallery's turret, after them so their ids stay too: EchoesTurret)
             SceneSetup.HostExtraEntities = (scene, room, entities) =>
-                MiningPlazaCrates.Extra(scene, room, MiningPlazaGate.Extra(scene, room, MiningPlazaPillars.Extra(scene, room, EchoesGrapple.Extra(scene, room, EchoesTurret.Extra(scene, room, PlacedPickups.Extra(scene, room, EchoesMovement.Extra(scene, room,
-                    EchoesBreakables.Extra(scene, room, EchoesCrates.Extra(scene, room, EchoesAmmo.Extra(scene, room, entities))))))))));
-            MphRead.Formats.CollisionDetection.HostEntityCollision = e => e is EchoesBreakableEntity || e is EchoesTurretEntity || e is EchoesTurretBaseEntity || e is MiningPlazaPillarEntity || e is MiningPlazaGateEntity || e is MiningPlazaCrateEntity;
+                MainQuarryCrane.Extra(scene, room, MiningPlazaCrates.Extra(scene, room, MiningPlazaGate.Extra(scene, room, MiningPlazaPillars.Extra(scene, room, EchoesGrapple.Extra(scene, room, EchoesTurret.Extra(scene, room, PlacedPickups.Extra(scene, room, EchoesMovement.Extra(scene, room,
+                    EchoesBreakables.Extra(scene, room, EchoesCrates.Extra(scene, room, EchoesAmmo.Extra(scene, room, entities)))))))))));
+            MphRead.Formats.CollisionDetection.HostEntityCollision = e => e is EchoesBreakableEntity || e is EchoesTurretEntity || e is EchoesTurretBaseEntity || e is MiningPlazaPillarEntity || e is MiningPlazaGateEntity || e is MiningPlazaCrateEntity || e is MainQuarryCraneEntity || e is MainQuarryPanelEntity;
             MphRead.Entities.BeamProjectileEntity.HostHitPush = EchoesTurret.Knock;   // (only the turret's shots)
             // the view before a match's first spawn (these rooms have no intro sequence): the arena picture's lens
             MphRead.Entities.PlayerEntity.HostPreSpawnView = PreSpawnView;
@@ -123,6 +139,9 @@ namespace MphRecomp.Arenas
             public List<BreakSpot>? Breakables { get; set; }
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             public List<FluidSpot>? Fluids { get; set; }
+            // Main Gyro Chamber's morph ball tunnels (min xyz, max xyz): the alt-form hop's boxes (EchoesMovement); absent elsewhere
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public List<float[]>? HopZones { get; set; }
             // the actors whose solid shape is in the area's collision but whose model isn't in its render mesh (Spires'
             // pillars; T6 N3 2026-10-10): drawn in their own passes (EchoesStatics); absent in arenas without them
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -141,6 +160,8 @@ namespace MphRecomp.Arenas
             public List<MiningPlazaCrates.CrateSpot>? SandCrates { get; set; }
             // Mining Plaza's Luminoth gate (MiningPlazaGate: opens mid-match); absent elsewhere
             public MiningPlazaGate.GateSpot? Gate { get; set; }
+            // Main Quarry's crane, the wall it breaks and its scan panel (MainQuarryCrane); absent elsewhere
+            public MainQuarryCrane.CraneSpot? Crane { get; set; }
             public List<string> Notes { get; set; } = new();
         }
 
@@ -310,8 +331,8 @@ namespace MphRecomp.Arenas
 
         // into the MPH file system under root; the jump pads' launches are solved here when root is the game's own
         public static Info Import(Pak metroid6, Def def, string root, float scale = DefaultScale, Action<string>? log = null, Pak? audio = null, Pak? hud = null,
-            Pak? gunFx = null)
-            => Import(metroid6, def, Layout.FileSystem(root, def), scale, null, log, fsRoot: root, audio: audio, hud: hud, gunFx: gunFx);
+            Pak? gunFx = null, Pak? misc = null)
+            => Import(metroid6, def, Layout.FileSystem(root, def), scale, null, log, fsRoot: root, audio: audio, hud: hud, gunFx: gunFx, misc: misc);
 
         // tuned: the jump pads as a recipe holds them, one per cannon in ArenaCannons.Find's order (what a tuning run
         // left in arena.json's Cannons); null = solve them with MphRead's own player physics, which needs the arena
@@ -323,12 +344,16 @@ namespace MphRecomp.Arenas
         // EchoesSpider.ImportFx; null: the drawn stand-in)
         public static Info Import(Pak metroid6, Def def, Layout files, float scale, IReadOnlyList<ArenaCannons.Cannon>? tuned,
             Action<string>? log = null, Action<float, string>? progress = null, string? fsRoot = null, CancellationToken ct = default,
-            IReadOnlyList<ItemType>? crates = null, Pak? audio = null, Pak? hud = null, Pak? gunFx = null, byte[]? jingle = null, Pak? spiderFx = null)
+            IReadOnlyList<ItemType>? crates = null, Pak? audio = null, Pak? hud = null, Pak? gunFx = null, byte[]? jingle = null, Pak? spiderFx = null, Pak? misc = null)
         {
             var info = new Info { Key = def.Key, Scale = scale };
             progress?.Invoke(0, $"{def.InGameName}: collision and objects");
             Mrea area = Mrea.Read(metroid6.Get(def.Mrea));
             List<Mrea.ScriptObject> scripts = area.ReadScripts();
+            List<Scly1.Obj> objs1 = area.ReadScripts1();   // Prime 1's (the Main Quarry), empty for Echoes
+            // Main Gyro Chamber: the room as the campaign leaves it (MainGyroChamber.Freeze, thread 6a6158)
+            bool gyro = def.Key == MainGyroChamber.Key;
+            if (gyro) MainGyroChamber.Freeze(scripts, info.Notes);
             Vector3 Map(float x, float y, float z) => new Vector3(x, z, -y) * scale;   // Echoes Z up -> MPH Y up, metres -> units
 
             // collision
@@ -343,6 +368,8 @@ namespace MphRecomp.Arenas
                 if (n.LengthSquared < 1e-10f) continue;
                 n.Normalize();
                 ulong flags = col.TriangleFlags[t];
+                // Main Gyro Chamber: the Window behind first puzzle's own collision gone, a hole (MainGyroChamber.WindowHole)
+                if (gyro && MainGyroChamber.WindowHole(col, t, Mrea.Collision.SurfaceOf(flags), info.Notes)) continue;
                 var ed = new CollisionDataEditor { Plane = new Vector4(n, Vector3.Dot(n, a)), LayerMask = (ushort)(4 | PrimaryAxis(n)) };
                 ed.Points.Add(a); ed.Points.Add(b); ed.Points.Add(c);
                 ed.Terrain = TerrainOf(Mrea.Collision.SurfaceOf(flags));
@@ -351,29 +378,36 @@ namespace MphRecomp.Arenas
                 // Prime's 0.85 floor slope (PlayerCollision, Echoes arenas only)
                 if ((flags & (1UL << 31)) == 0) ed.Flags |= CollisionFlags.Bit12;
                 // a spider ball track (bit 61; docs/SPIDER_BALL.md): alt forms hold on to it with the spider ball button
-                if ((flags & Mrea.SpiderBall) != 0) ed.Flags |= CollisionFlags.SpiderTrack;
+                if ((flags & Mrea.SpiderBall) != 0 && !gyro) ed.Flags |= CollisionFlags.SpiderTrack;   // (no spider ball in Main Gyro Chamber)
                 editors.Add(ed);
                 tris.Add((a, b, c));
             }
-            bool plaza = def.Key == MiningPlaza.Key;
+            bool plaza = def.Key == MiningPlaza.Key, quarry = def.Key == MainQuarry.Key;
             int areaTris = tris.Count;
-            if (plaza)
+            void Solid(Vector3 a, Vector3 b, Vector3 c, Mrea.Surface surface)
             {
-                // Mining Plaza's sealed exits: solid as their own actors are (MiningPlaza.Seals)
-                MiningPlaza.Seals(metroid6, scripts, Map, (a, b, c, surface) =>
-                {
-                    Vector3 n = Vector3.Cross(b - a, c - a).Normalized();
-                    var ed = new CollisionDataEditor { Plane = new Vector4(n, Vector3.Dot(n, a)), LayerMask = (ushort)(4 | PrimaryAxis(n)) };
-                    ed.Points.Add(a); ed.Points.Add(b); ed.Points.Add(c);
-                    ed.Terrain = TerrainOf(surface);
-                    editors.Add(ed);
-                    tris.Add((a, b, c));
-                }, info.Notes);
+                Vector3 n = Vector3.Cross(b - a, c - a).Normalized();
+                var ed = new CollisionDataEditor { Plane = new Vector4(n, Vector3.Dot(n, a)), LayerMask = (ushort)(4 | PrimaryAxis(n)) };
+                ed.Points.Add(a); ed.Points.Add(b); ed.Points.Add(c);
+                ed.Terrain = TerrainOf(surface);
+                editors.Add(ed);
+                tris.Add((a, b, c));
             }
+            // Mining Plaza's sealed exits: solid as their own actors are (MiningPlaza.Seals)
+            if (plaza) MiningPlaza.Seals(metroid6, scripts, Map, Solid, info.Notes);
+            // Main Gyro Chamber: a crate in each morph ball tunnel mouth (found in the area's own collision), then its seals
+            List<float[]> gyroPlugs = gyro ? MainGyroChamber.TunnelPlugs(metroid6, new ArenaRaycaster(tris.GetRange(0, areaTris)), Map, info.Notes) : new();
+            if (gyro) MainGyroChamber.Seals(metroid6, scripts, Map, gyroPlugs, Solid, info.Notes);
+            // the Main Quarry's sealed doors and scenery; its crane, wall and panel in the bots' graph only (MainQuarry.Seals)
+            if (quarry) MainQuarry.Seals(metroid6, objs1, Map, Solid, (a, b, c) => tris.Add((a, b, c)), info);
+            // more Prime 1 rooms (Prime1Rooms.cs, thread fbb8db): sealed doors, solid platforms, Monitor Station's lava floor
+            Prime1Room? p1 = Prime1Room.Find(def.Key);
+            p1?.Seals(metroid6, objs1, Map, new ArenaRaycaster(tris.GetRange(0, areaTris)), Solid,
+                (a, b, c) => { Solid(a, b, c, Mrea.Surface.Stone); editors[^1].Terrain = Terrain.Lava; }, info.Notes);
             info.CollisionPolygons = editors.Count;
             var ray = new ArenaRaycaster(tris);
             // Mining Plaza's actors are lit by the area's own shape, not shadowed by their own collision
-            ArenaRaycaster lightRay = plaza ? new ArenaRaycaster(tris.GetRange(0, areaTris)) : ray;
+            ArenaRaycaster lightRay = plaza || quarry || gyro || p1 != null ? new ArenaRaycaster(tris.GetRange(0, areaTris)) : ray;
             info.Min = new[] { ray.Min.X, ray.Min.Y, ray.Min.Z };
             info.Max = new[] { ray.Max.X, ray.Max.Y, ray.Max.Z };
 
@@ -395,10 +429,12 @@ namespace MphRecomp.Arenas
             bool Fresh(Vector3 p) { if (used.Any(u => (u - p).LengthSquared < 0.25f)) return false; used.Add(p); return true; }
             Vector3 OnFloor(Vector3 p) => ray.FloorBelow(p + Vector3.UnitY * 0.3f, 3f) ?? p;
             short id = 0;
-            if (plaza)
+            if (plaza || quarry || gyro || p1 != null)
             {
                 // stand-ins until the owner's own spawns (the dev placer's spawn mode, PlacedPickups); no room pickups
-                foreach ((Vector3 p, Vector3 facing) in MiningPlaza.StandInSpawns(scripts, Map, ray))
+                foreach ((Vector3 p, Vector3 facing) in p1 != null ? p1.StandInSpawns(objs1, Map, ray)
+                    : quarry ? MainQuarry.StandInSpawns(objs1, Map, ray) : gyro ? MainGyroChamber.StandInSpawns(scripts, Map, ray)
+                    : MiningPlaza.StandInSpawns(scripts, Map, ray))
                 {
                     if (!Fresh(p)) continue;
                     ents.Add(new PlayerSpawnEntityEditor { Id = id++, LayerMask = 0xFFFF, NodeName = ArenaModelWriter.RoomNode,
@@ -406,7 +442,7 @@ namespace MphRecomp.Arenas
                     info.Spawns++;
                 }
             }
-            foreach (Mrea.ScriptObject o in scripts.Where(o => !plaza && o.Type == "SPWN" && o.Active))
+            foreach (Mrea.ScriptObject o in scripts.Where(o => !plaza && !gyro && o.Type == "SPWN" && o.Active))
             {
                 float[] x = o.Transform;
                 Vector3 p = OnFloor(Map(x[0], x[1], x[2]));
@@ -417,7 +453,7 @@ namespace MphRecomp.Arenas
                     Position = p, Up = Vector3.UnitY, Facing = facing, Availability = 0, Active = true, TeamIndex = -1 });
                 info.Spawns++;
             }
-            foreach (Mrea.ScriptObject o in scripts.Where(o => !plaza && o.Active && o.Type == "PCKP"))
+            foreach (Mrea.ScriptObject o in scripts.Where(o => !plaza && !gyro && o.Active && o.Type == "PCKP"))
             {
                 ushort interval = 450;                               // Echoes pickups respawn in 15 s
                 uint what = o.Root.Find(PickupItemId)?.U32 ?? uint.MaxValue;
@@ -564,6 +600,7 @@ namespace MphRecomp.Arenas
                         .Select(g => $"{g.Count()} {g.Key}s ({g.First().Health} MPH health, " + (g.First().RespawnFrames > 0 ? $"back after {g.First().RespawnFrames} steps)" : "stay broken)")))
                         + "; boxes " + string.Join(" ", info.Breakables.Select(b => $"{b.Max[0] - b.Min[0]:0.0}x{b.Max[1] - b.Min[1]:0.0}x{b.Max[2] - b.Min[2]:0.0}")));
                 }
+                p1?.Fluids(objs1, Map, info, fluids);
                 if (info.Fluids?.Any(f => f.Kind == "darkwater") == true)
                 {
                     info.Notes.Add($"{info.Fluids.Count(f => f.Kind == "darkwater")} Dark Water pools (MPH acid: 1 energy every 8 steps standing in one), surfaces "
@@ -578,6 +615,11 @@ namespace MphRecomp.Arenas
                 breakLights ??= area.ReadLights()[0];
                 AddStatics(area, scripts, metroid6, Map, tris, lightRay, breakLights, info, placed);
                 if (plaza) MiningPlaza.Looks(metroid6, scripts, Map, lightRay, breakLights, info, placed);
+                if (gyro) MainGyroChamber.Looks(metroid6, scripts, gyroPlugs, Map, lightRay, breakLights, info, placed);
+                if (quarry) MainQuarry.Looks(metroid6, objs1, Map, lightRay, breakLights, info, placed);
+                if (quarry) MainQuarry.Crates(metroid6, objs1, Map, lightRay, breakLights, info, placed);
+                p1?.Looks(metroid6, objs1, Map, lightRay, breakLights, info, placed);
+                p1?.Crates(metroid6, objs1, Map, lightRay, breakLights, info, placed);
                 if (plaza)
                 {
                     MiningPlaza.Pillars(metroid6, scripts, Map, lightRay, breakLights, info, placed);
@@ -592,6 +634,8 @@ namespace MphRecomp.Arenas
             info.Grapples = EchoesGrapple.Import(def.Key, scripts, Map, info.Notes);
             // orb cannons -> jump pads (launch solved below, once the arena loads)
             List<ArenaCannons.Cannon> cannons = ArenaCannons.Find(scripts, ray, Map, scale, info.KillHeight, info.Notes);
+            // Main Gyro Chamber: a pad on each frozen elevator, after the cannon's (MainGyroChamber)
+            if (gyro) cannons.AddRange(MainGyroChamber.ElevatorPads(scripts, ray, Map, info.Notes));
             foreach (ArenaCannons.Cannon c in cannons) c.EntityId = id++;
             if (tuned != null) ApplyTuning(def, cannons, tuned);
             info.Cannons = cannons;
@@ -631,7 +675,7 @@ namespace MphRecomp.Arenas
                     anchors.AddRange(placed.Spawns.Where(sp => sp.Pos is { Length: 3 }).Select(sp => P(sp.Pos)));
                 }
                 return stateRays != null ? ArenaNav.BuildSets(stateRays, anchors, info.KillHeight, jumps, navWater, heavyFrom)
-                    : ArenaNav.Build(navRay, anchors, info.KillHeight, jumps, navWater);
+                    : ArenaNav.Build(navRay, anchors, info.KillHeight, jumps, navWater, noBots: p1?.NoBots, human: p1 != null);
             }
             ArenaNav.Graph nav = Nav();
             info.NavNodes = nav.Nodes.Count;
@@ -651,6 +695,8 @@ namespace MphRecomp.Arenas
                 {
                     sky = os.U32;
                 }
+                if (quarry) sky = MainQuarry.Sky(metroid6, objs1, info.Notes);
+                if (p1 != null) sky = p1.Sky(metroid6, objs1, info.Notes);
                 // the turret's effects first: the models their particles draw join the placed passes (with the generated
                 // layer: the grates' break pieces are only there). An arena with grates and no turret (Sidehopper Station)
                 // gets the grates' break alone, in a turret.json of no pieces (no turret: that comes from the arena's spot)
@@ -684,8 +730,14 @@ namespace MphRecomp.Arenas
                 EchoesSpider.ImportSound(audio, files.HdDir, info.Notes, EchoesSpider.HasTrack(def.Key));
                 EchoesSpider.ImportFx(spiderFx, files.HdDir, info.Notes, EchoesSpider.HasTrack(def.Key));
                 // Mining Plaza's pillars' effects and sounds
-                MiningPlazaPillars.ImportLook(metroid6, audio, files.HdDir, info.Notes, info.Pillars is { Count: > 0 } || info.Gate != null || info.SandCrates is { Count: > 0 }, jingle,
+                // (not for Prime1Room rooms: their crates break in Prime 1's look, from Prime1Fx)
+                MiningPlazaPillars.ImportLook(metroid6, audio, files.HdDir, info.Notes,
+                    p1 == null && !quarry && (info.Pillars is { Count: > 0 } || info.Gate != null || info.SandCrates is { Count: > 0 }), jingle,
                     moreFx: MiningPlaza.CrateFx(info));
+                // Prime 1 rooms' snow, water splashes and underwater look (Prime1Fx.cs; audio and misc: mp1's AudioGrp.pak, MiscData.pak)
+                // (and the Main Quarry's: its crates' and its crane's and wall's own, MainQuarryCrane.Fx / Sfx)
+                if (p1 != null || quarry) Prime1Fx.Import(metroid6, audio, misc, objs1, ray, scale, files.HdDir, info.Notes,
+                    crates: info.SandCrates is { Count: > 0 }, moreFx: quarry ? MainQuarryCrane.Fx : null, moreSfx: quarry ? MainQuarryCrane.Sfx : null);
                 // the multiplayer menu's ARENA picture (Vanilla multiplayer menu M5): rendered from the HD look just
                 // written, aimed at the spawns and pickups (thumb.png beside it)
                 progress?.Invoke(0.75f, $"{def.InGameName}: the arena's picture");
@@ -994,6 +1046,7 @@ namespace MphRecomp.Arenas
             for (int t = 0; t < geo.TriangleCount; t++)
             {
                 Cmdl.Material m = geo.Materials[geo.TriangleMaterial[t]];
+                if (area.Prime1 && (m.Flags & Cmdl.Occluder) != 0) continue;   // Prime 1 occluders: never drawn (Echoes' 0x200 differs)
                 if (!(m.BlendSrc == 1 && m.BlendDst == 0)) { skipped++; continue; }   // blended surfaces (glass, glows) left out
                 bool lightmapped = (m.Flags & 0x800) != 0 && m.TexIds.Length > 0;
                 uint? diffuse = m.TexIds.Length > (lightmapped ? 1 : 0) ? m.TexIds[lightmapped ? 1 : 0] : null;
@@ -1081,6 +1134,7 @@ namespace MphRecomp.Arenas
                 MiningPlazaPillars.SetRoom(d.Id, info);
                 MiningPlazaCrates.SetRoom(d.Id, info);
                 MiningPlazaGate.SetRoom(d.Id, info);
+                MainQuarryCrane.SetRoom(d.Id, info);
                 EchoesStatics.SetRoom(d.Id, info);
                 EchoesMovement.SetRoom(d.Id, info);
                 ArenaNav.SetRoom(d.Id, info);
@@ -1138,7 +1192,13 @@ namespace MphRecomp.Arenas
 
         // register the imported arenas once the MPH file system is known (MatchArenas.All calls this), and again when the
         // import root changes or an import there rewrote an arena
+        // under the host room lock: the replay list's warm-up thread and the menus both get here at load (owner 2026-11-20)
         public static void EnsureRegistered()
+        {
+            lock (Metadata.HostRoomLock) RegisterIfChanged();
+        }
+
+        static void RegisterIfChanged()
         {
             string root;
             try
@@ -1171,6 +1231,7 @@ namespace MphRecomp.Arenas
                 MiningPlazaPillars.SetRoom(d.Id, null);
                 MiningPlazaCrates.SetRoom(d.Id, null);
                 MiningPlazaGate.SetRoom(d.Id, null);
+                MainQuarryCrane.SetRoom(d.Id, null);
                 EchoesStatics.SetRoom(d.Id, null);
                 EchoesMovement.SetRoom(d.Id, null);
                 ArenaNav.SetRoom(d.Id, null);

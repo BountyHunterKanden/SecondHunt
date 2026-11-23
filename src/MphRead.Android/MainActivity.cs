@@ -540,7 +540,10 @@ public class MainActivity : Activity
         {
             var a = Arenas();
             _soloArena = Wrap(_soloArena + d, a.Count);
-            return $"Arena: {ArenaLabel(a[_soloArena])}";
+            // (has a menu background shot from the picker below)
+            MphRecomp.Frontend.MenuBackdropShots.LoadPicked(GetExternalFilesDir(null)?.AbsolutePath);
+            bool shot = MphRecomp.Frontend.MenuBackdropShots.HasShot(a[_soloArena].Name);
+            return $"Arena: {ArenaLabel(a[_soloArena])}" + (shot ? "  [menu shot taken]" : "");
         });
         // dev: the character in any of its recolours (owner 2026-10-29), MatchSkins' --es lookvariant for seat 0
         AddSelector(d =>
@@ -600,6 +603,22 @@ public class MainActivity : Activity
             if (SoloTargetCounts[_soloTargets] > 0) intent.PutExtra("bots", SoloTargetCounts[_soloTargets].ToString()).PutExtra("targets", "1");
             if (_soloInfUa) intent.PutExtra("infua", "1");
             StartActivity(intent);
+        });
+        // LOOK > MENUS ARENA BACKGROUND's camera for the arena above (owner 2026-11-20): photo mode's free camera, no walls;
+        // SHOT saves it to <data>/menu_shots.json (CampaignRenderer.MenuShotPick.cs), BACK = pause menu
+        AddButton("Menu background shot picker: arena above (fly, SHOT / A saves the camera)", () =>
+        {
+            var a = Arenas();
+            StartActivity(new Intent(this, typeof(CampaignActivity))
+                .PutExtra("match", "Battle")
+                .PutExtra("solo", "1")
+                .PutExtra("bots", "0")
+                .PutExtra("arena", a[_soloArena % a.Count].Name)
+                .PutExtra("hunter", "Samus")
+                .PutExtra("gun", "settings")
+                .PutExtra("fp", "1")
+                .PutExtra("spawnnow", "1")
+                .PutExtra("menushot", "1"));
         });
         // Brawl Zero Suit Samus on her own rig (owner 2026-10-15): her Brawl idle + run, Samus's strafes / backwards / aim,
         // aiming with her gun arm or Samus's whole upper body; the solo arena picked above, 3 idle bots to shoot at
@@ -999,28 +1018,12 @@ public class MainActivity : Activity
 
     void Extract(string romPath)
     {
-        try
+        // the shared import (RomSetup.Extract): a re-extract replaces the earlier ROM's revision
+        if (RomSetup.Extract(romPath, FilesDir!.AbsolutePath, Log))
         {
-            string files = FilesDir!.AbsolutePath;
-            System.IO.Directory.SetCurrentDirectory(files);
-            var prev = System.Console.Out;
-            System.Console.SetOut(new ForwardWriter(Log));
-            try { Log("Extracting…"); MphRead.Extract.Setup(romPath); }
-            finally { System.Console.SetOut(prev); }
-
-            string tree = System.IO.Path.Combine(files, "files");
-            int count = System.IO.Directory.Exists(tree)
-                ? System.IO.Directory.GetFiles(tree, "*", System.IO.SearchOption.AllDirectories).Length : 0;
-            if (count == 0) { Log("ERROR: no files extracted (unrecognized ROM?)."); return; }
-            string root = "unknown";
-            var dirs = System.IO.Directory.GetDirectories(tree);
-            if (dirs.Length > 0) root = System.IO.Path.GetFileName(dirs[0]);
-            System.IO.File.WriteAllText(System.IO.Path.Combine(files, ".extracted"),
-                $"version={MphRead.AppInfo.Version}\nrom={root}\nfiles={count}");
-            Log($"\n✅ Extraction complete. {root}, {count} files.");
+            Log("\n✅ Extraction complete.");
             RunOnUiThread(ShowRooms);
         }
-        catch (System.Exception ex) { Log("EXTRACTION FAILED: " + ex); }
     }
 
     void Log(string msg)

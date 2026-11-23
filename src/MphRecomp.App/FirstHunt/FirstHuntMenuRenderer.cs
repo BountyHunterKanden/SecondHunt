@@ -93,7 +93,7 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
                 if (settings.FhShMenuMusic)
                 {
                     _shMusic = new GameMusicPlayer(settings.Music) { MasterVolume = GameMusicPlayer.MasterGain(settings.MusicVolume) };
-                    _shSong = MusicLibrary.Resolve(settings.MenuMusic ?? "", Path.GetDirectoryName(_settingsPath), settings.HiddenSongs, null, new Random());
+                    _shSong = MusicLibrary.Resolve(settings.MenuMusic ?? "", Path.GetDirectoryName(_settingsPath), settings.MenuHiddenSongs(), null, new Random());
                 }
                 menus.Music = (track, loop) =>
                 {
@@ -119,8 +119,8 @@ internal sealed class FirstHuntMenuRenderer : IGlScreen
                 (FhTrainingResult? training, FhMatchResult? match) = TakeResult();
                 if (training == null && match == null)
                 {
-                    // entering First Hunt = the cart's power-on: the opening, then the title
-                    menus.Start();
+                    // entering First Hunt = the cart's power-on: the opening, then the title (opened only after the
+                    // movie: opening it first played the title's sound and music before the movie, which the cart doesn't)
                     StartMovie(FhMovie.Opening, () => _menus?.Start());
                 }
                 else

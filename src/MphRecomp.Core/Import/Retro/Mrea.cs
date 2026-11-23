@@ -7,8 +7,9 @@ namespace MphRecomp.Import.Retro
     // An Echoes area (MREA v0x19): the section table unpacked from its LZO clusters, the area collision (triangles +
     // 64-bit material flags) and the script layers (objects with their property trees). Ported from the research
     // prototypes in extract_out/multiplayer/mp2 (mp2geo/mp2_mrea.py, mp2/scly.py), as PrimeWorldEditor's CAreaLoader /
-    // CCollisionLoader / CScriptLoader read them (MIT). World geometry: ReadGeometry; lights: ReadLights.
-    public sealed class Mrea
+    // CCollisionLoader / CScriptLoader read them (MIT). World geometry: ReadGeometry; lights: ReadLights. Prime 1's MREA
+    // v0xF (Mrea1.cs) reads into the same sections, with its few differences under Prime1.
+    public sealed partial class Mrea
     {
         public const uint Magic = 0xDEADBEEF, EchoesVersion = 0x19;
 
@@ -28,6 +29,7 @@ namespace MphRecomp.Import.Retro
 
         public static Mrea Read(byte[] raw)
         {
+            if (Be.U32(raw, 0) == Magic && Be.U32(raw, 4) == Prime1Version) return ReadPrime1(raw);
             if (Be.U32(raw, 0) != Magic || Be.U32(raw, 4) != EchoesVersion)
             {
                 throw new InvalidOperationException($"not an Echoes MREA ({Be.U32(raw, 0):x8} v{Be.U32(raw, 4):x})");
@@ -105,14 +107,18 @@ namespace MphRecomp.Import.Retro
             o += 8 + (int)Be.U32(s, o + 4);                 // octree (kind, size, body)
             int matCount = (int)Be.U32(s, o); o += 4;
             var mats = new ulong[matCount];
-            for (int i = 0; i < matCount; i++) mats[i] = (ulong)Be.U32(s, o + 8 * i) << 32 | Be.U32(s, o + 8 * i + 4);
-            o += 8 * matCount;
+            int matSize = Prime1 ? 4 : 8;                    // Prime 1's materials are 32-bit
+            for (int i = 0; i < matCount; i++) mats[i] = Prime1 ? Prime1Flags(Be.U32(s, o + 4 * i)) : (ulong)Be.U32(s, o + 8 * i) << 32 | Be.U32(s, o + 8 * i + 4);
+            o += matSize * matCount;
             o = SkipBytes(s, o);                             // vertex material indices
             o = SkipBytes(s, o);                             // edge material indices
             int triMatCount = (int)Be.U32(s, o); int triMats = o + 4; o += 4 + triMatCount;
             int edgeCount = (int)Be.U32(s, o); int edges = o + 4; o += 4 + 4 * edgeCount;
             int triIdxCount = (int)Be.U32(s, o); int tris = o + 4; o += 4 + 2 * triIdxCount;
-            int unk = (int)Be.U32(s, o); o += 4 + 2 * unk;  // Echoes-only u16 array, purpose unknown
+            if (!Prime1)
+            {
+                int unk = (int)Be.U32(s, o); o += 4 + 2 * unk;  // Echoes-only u16 array, purpose unknown
+            }
             int vertCount = (int)Be.U32(s, o); o += 4;
             var c = new Collision { Vertices = new float[vertCount * 3] };
             for (int i = 0; i < vertCount * 3; i++) c.Vertices[i] = Be.F32(s, o + 4 * i);
@@ -151,10 +157,10 @@ namespace MphRecomp.Import.Retro
             var ends = new int[nm];
             for (int i = 0; i < nm; i++) ends[i] = (int)Be.U32(set, o + 4 * i);
             o += 4 * nm;
-            var geo = new Cmdl { Version = 3, Materials = new Cmdl.Material[nm] };
+            var geo = new Cmdl { Version = Prime1 ? 2u : 3u, Materials = new Cmdl.Material[nm] };
             for (int i = 0; i < nm; i++)
             {
-                Cmdl.Material m = Cmdl.ReadMaterial(set, o + (i > 0 ? ends[i - 1] : 0), o + ends[i], echoes: true);
+                Cmdl.Material m = Cmdl.ReadMaterial(set, o + (i > 0 ? ends[i - 1] : 0), o + ends[i], echoes: !Prime1);
                 m.TexIds = new uint[m.Tex.Length];
                 for (int t = 0; t < m.Tex.Length; t++) m.TexIds[t] = texIds[m.Tex[t]];
                 geo.Materials[i] = m;
@@ -177,7 +183,7 @@ namespace MphRecomp.Import.Retro
                 {
                     byte[] s = Sections[k + si];
                     int mat = (int)Be.U32(s, 12);
-                    int p = Align32(0x30 + (int)Be.U32(s, 0x1C));
+                    int p = Align32((Prime1 ? 0x2C : 0x30) + (int)Be.U32(s, 0x1C));   // Echoes' header is 4 longer
                     uint vd = geo.Materials[mat].VertexAttributes;
                     bool shortUv = (geo.Materials[mat].Flags & 0x2000) != 0;
                     while (p < s.Length)
@@ -218,7 +224,7 @@ namespace MphRecomp.Import.Retro
                         else throw new InvalidOperationException($"model {mi} surface {si}: primitive {op:x2}");
                     }
                 }
-                k += ns + 2;   // the surfaces, then Echoes' surface lookup + one unknown section
+                k += Prime1 ? ns : ns + 2;   // the surfaces, then (Echoes) its surface lookup + one unknown section
             }
             geo.Positions = pos.ToArray(); geo.Normals = nrm.ToArray(); geo.Uv0 = uv.ToArray(); geo.ShortUvs = suv.ToArray();
             geo.Triangles = tris.ToArray(); geo.TriangleMaterial = tmat.ToArray();
@@ -331,6 +337,7 @@ namespace MphRecomp.Import.Retro
         public List<ScriptObject> ReadScripts(bool includeGenerated = false)
         {
             var res = new List<ScriptObject>();
+            if (Prime1) return res;   // Prime 1's layers are Scly1's (ReadScripts1)
             for (int i = 0; i < LayerCount; i++)
             {
                 ReadLayer(Sections[ScriptSection + i], res);

@@ -44,6 +44,7 @@ internal sealed partial class CampaignRenderer
     {
         IGyroAimSource? g = _gyro;
         PlayerEntity? player = _host?.Player;
+        _lookGyroScale = 0; // (the aim preview's: set below when the gyro aims this step)
         if (g == null || !g.Running || player == null)
         {
             return default;
@@ -72,7 +73,9 @@ internal sealed partial class CampaignRenderer
             degrees *= GyroMph.ZoomScale(player);
         }
         // IMPERIALIST GYRO SPEED when unpaired (ZoomAim)
-        degrees *= MphRecomp.Input.ZoomAim.GyroScale(player.EquipInfo.Zoomed);
+        float scale = MphRecomp.Input.ZoomAim.GyroScale(player.EquipInfo.Zoomed);
+        degrees *= scale;
+        _lookGyroScale = (g.ZoomScaling ? GyroMph.ZoomScale(player) : 1) * scale;
         g.NoteTaken(degrees);
         return GyroAim.ToMphAim(degrees);
     }

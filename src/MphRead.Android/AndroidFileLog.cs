@@ -3,6 +3,7 @@ using System.Text;
 using Android.Content;
 using AndroidLog = Android.Util.Log;
 using AppLog = MphRecomp.App.Platform.Log;
+using LogFormat = MphRecomp.App.Platform.LogFormat;
 
 namespace MphRecomp.App;
 
@@ -16,7 +17,9 @@ namespace MphRecomp.App;
 // Android-side lines that call Android.Util.Log directly, e.g. RenderActivity's MPHRender) into the file, each marked
 // "[logcat]", so the file has everything the old pid-filtered logcat SHARE LOG had.
 // (11-06) Each run's file starts with the date, pid and process, every line carries its thread id like logcat's
-// threadtime ("HH:MM:SS.mmm  tid L tag: message"), and lines dropped on a full queue leave a "N lines dropped" marker.
+// threadtime, and lines dropped on a full queue leave a "N lines dropped" marker. (11-16, log parity) Lines are
+// LogFormat's, the same as Windows: "2026-11-14T10:52:03.417-06:00  tid L tag: message", the title line has the run id,
+// and MphApp writes the run's MPHRun lines (app, device, ROM, settings) first thing.
 // The main process also writes how the app's last processes ended (Android 11+ exit reasons: crash, native crash, ANR,
 // low memory, killed, swiped away), since a dying process can't log its own last moments and logcat's --pid never
 // had the system's side of it.
@@ -31,7 +34,7 @@ internal static class AndroidFileLog
     // lines Write put in the file that logcat will echo (tag + line -> how many still to come), so the copy skips them
     static readonly ConcurrentDictionary<string, int> _echo = new();
     static readonly System.Text.RegularExpressions.Regex _logcatLine =
-        new(@"^\d\d-\d\d (\S+)\s+\d+\s+(\d+) (\w) (.*?)\s*: (.*)$", System.Text.RegularExpressions.RegexOptions.Compiled);
+        new(@"^(\d\d)-(\d\d) (\S+)\s+\d+\s+(\d+) (\w) (.*?)\s*: (.*)$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     public static string? Path => _path;
 
@@ -54,7 +57,8 @@ internal static class AndroidFileLog
                 }
             }
             var file = new StreamWriter(new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite), new UTF8Encoding(false));
-            file.WriteLine($"--- {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz}, pid {Android.OS.Process.MyPid()}, process {(process.Length == 0 ? "main" : process)} ---");
+            string app = context.ApplicationInfo?.LoadLabel(context.PackageManager!) ?? context.PackageName ?? "app";
+            file.WriteLine(LogFormat.Title(app, $"{(process.Length == 0 ? "main" : process)}, pid {Android.OS.Process.MyPid()}"));
             _path = path;
             var writer = new Thread(() => Drain(file)) { IsBackground = true, Name = "filelog" };
             writer.Start();
@@ -83,13 +87,13 @@ internal static class AndroidFileLog
             {
                 _echo.Clear(); // (logcat dropped some: forget, at worst a few lines twice)
             }
-            foreach (string part in message.Split('\n'))
+            (string catTag, string catMessage) = ForLogcat(tag, message); // (the key is what logcat will print)
+            foreach (string part in catMessage.Split('\n'))
             {
-                _echo.AddOrUpdate(EchoKey(tag, part), 1, (_, n) => n + 1);
+                _echo.AddOrUpdate(EchoKey(catTag, part), 1, (_, n) => n + 1);
             }
         }
-        char l = level switch { AppLog.Level.Debug => 'D', AppLog.Level.Info => 'I', AppLog.Level.Warn => 'W', _ => 'E' };
-        Add($"{DateTime.Now:HH:mm:ss.fff} {Android.OS.Process.MyTid(),5} {l} {tag}: {message}");
+        Add(LogFormat.Line(level, Android.OS.Process.MyTid(), tag, message));
     }
 
     // full queue (disk stuck): the line is dropped and counted, and Drain writes the count once it catches up
@@ -166,8 +170,8 @@ internal static class AndroidFileLog
     }
 
     // `logcat -v threadtime --pid=<ours>` (from this process's first line, then live) into the file, minus the lines
-    // Write already put there. Lines look like "MM-DD HH:MM:SS.mmm  pid  tid L tag: message"; they go in as
-    // "HH:MM:SS.mmm  tid L tag: message [logcat]" (their own time, so they can sit a few ms out of order)
+    // Write already put there. Lines look like "MM-DD HH:MM:SS.mmm  pid  tid L tag: message"; they go in as the file's
+    // other lines, "<ISO time>  tid L tag: message [logcat]" (their own time, so they can sit a few ms out of order)
     static void CopyLogcat()
     {
         try
@@ -190,19 +194,41 @@ internal static class AndroidFileLog
                 {
                     continue; // ("--------- beginning of main" and the like)
                 }
-                string tag = m.Groups[4].Value, text = m.Groups[5].Value, key = EchoKey(tag, text);
+                string tag = m.Groups[6].Value, text = m.Groups[7].Value, key = EchoKey(tag, text);
                 if (_echo.TryGetValue(key, out int n))
                 {
                     if (n <= 1) _echo.TryRemove(key, out _);
                     else _echo[key] = n - 1;
                     continue;
                 }
-                Add($"{m.Groups[1].Value} {m.Groups[2].Value,5} {m.Groups[3].Value} {tag}: {text} [logcat]");
+                Add(LogFormat.Line(LogcatStamp(m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value), m.Groups[4].Value,
+                    m.Groups[5].Value[0], tag, text + " [logcat]"));
             }
         }
         catch (Exception ex)
         {
             AndroidLog.Warn("MPHLog", "logcat copy stopped: " + ex.Message);
+        }
+    }
+
+    // a logcat line's "MM-DD HH:MM:SS.mmm" as LogFormat's ISO time (logcat has no year: this one, or last year's for a
+    // December line read in January)
+    static string LogcatStamp(string month, string day, string time)
+    {
+        try
+        {
+            DateTime now = DateTime.Now;
+            DateTime t = DateTime.ParseExact($"{now.Year}-{month}-{day} {time}", "yyyy-MM-dd HH:mm:ss.fff",
+                System.Globalization.CultureInfo.InvariantCulture);
+            if (t > now.AddDays(1))
+            {
+                t = t.AddYears(-1);
+            }
+            return LogFormat.Stamp(new DateTimeOffset(t, TimeZoneInfo.Local.GetUtcOffset(t)));
+        }
+        catch
+        {
+            return $"{month}-{day} {time}";
         }
     }
 
@@ -233,9 +259,9 @@ internal static class AndroidFileLog
                     12 => "a dependency died", 13 => "other", 14 => "frozen", 15 => "package state changed",
                     16 => "app updated", _ => "reason " + reason,
                 };
-                Add($"{DateTime.Now:HH:mm:ss.fff} {"",5} I MPHExit: {DateTimeOffset.FromUnixTimeMilliseconds(e.Timestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss} "
+                Add(LogFormat.Line(LogFormat.Stamp(), "", 'I', "MPHExit", $"{LogFormat.Stamp(DateTimeOffset.FromUnixTimeMilliseconds(e.Timestamp).ToLocalTime())} "
                     + $"{e.ProcessName} pid {e.Pid}: {name}, status {e.Status}, importance {e.Importance}, pss {e.Pss / 1024} MB, rss {e.Rss / 1024} MB"
-                    + (string.IsNullOrEmpty(e.Description) ? "" : ", " + e.Description));
+                    + (string.IsNullOrEmpty(e.Description) ? "" : ", " + e.Description)));
                 if (reason == 6 && OperatingSystem.IsAndroidVersionAtLeast(31))
                 {
                     using Stream? trace = e.TraceInputStream;
@@ -249,7 +275,7 @@ internal static class AndroidFileLog
                         }
                         foreach (string line in text.Split('\n'))
                         {
-                            Add($"{DateTime.Now:HH:mm:ss.fff} {"",5} I MPHExit:   {line.TrimEnd('\r')}");
+                            Add(LogFormat.Line(LogFormat.Stamp(), "", 'I', "MPHExit", "  " + line.TrimEnd('\r')));
                         }
                     }
                 }
@@ -257,11 +283,18 @@ internal static class AndroidFileLog
         }
         catch (Exception ex)
         {
-            Add($"{DateTime.Now:HH:mm:ss.fff} {"",5} W MPHExit: exit reasons unavailable: {ex.Message}");
+            Add(LogFormat.Line(LogFormat.Stamp(), "", 'W', "MPHExit", "exit reasons unavailable: " + ex.Message));
         }
     }
 
     static string EchoKey(string tag, string line) => tag + "\u0001" + line;
+
+    // how a line goes to logcat: a tagged one ("MPHPlay[weapon,omega]", LogFormat) under its area, its tags first in the text
+    public static (string Tag, string Message) ForLogcat(string tag, string message)
+    {
+        string area = LogFormat.Area(tag);
+        return area.Length == tag.Length ? (tag, message) : (area, tag[area.Length..] + " " + message);
+    }
 
     static void Drain(StreamWriter file)
     {
@@ -277,13 +310,13 @@ internal static class AndroidFileLog
                 int dropped = Interlocked.Exchange(ref _dropped, 0);
                 if (dropped > 0)
                 {
-                    file.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {"",5} W MPHLog: {dropped} lines dropped here (the log queue was full)");
+                    file.WriteLine(LogFormat.Line(LogFormat.Stamp(), "", 'W', "MPHLog", $"{dropped} lines dropped here (the log queue was full)"));
                 }
                 file.WriteLine(line);
                 bytes += line.Length + 1;
                 if (bytes > MaxBytes)
                 {
-                    file.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {"",5} W MPHLog: log file full ({MaxBytes >> 20} MB), the rest of this run is in logcat only");
+                    file.WriteLine(LogFormat.Line(LogFormat.Stamp(), "", 'W', "MPHLog", $"log file full ({MaxBytes >> 20} MB), the rest of this run is in logcat only"));
                 }
                 if (_lines.Count == 0)
                 {
@@ -357,8 +390,10 @@ internal static class AndroidFileLog
             }
             string text = _line.ToString();
             _line.Clear();
-            AndroidFileLog.Write(AppLog.Level.Info, "DOTNET", text);
-            AndroidLog.Info("DOTNET", text);
+            string tag = LogFormat.ConsoleTag(text); // (network lines get [net])
+            AndroidFileLog.Write(AppLog.Level.Info, tag, text);
+            (tag, text) = AndroidFileLog.ForLogcat(tag, text);
+            AndroidLog.Info(tag, text);
         }
     }
 }

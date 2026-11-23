@@ -12,7 +12,9 @@ namespace MphRead
     // when you start selecting various ones and toggling the all that completely breaks the rest of the checkmarks").
     // Opens SONG LIST > HUNTERS and one of its areas headless (the HUNTERS songs need no import), toggles rows through
     // RecompMenus.OnCall as A presses do, and after each step checks every shown checkbox's drawn mark (tick, dash or
-    // none) against its row's state, and that the hidden-songs list has no repeats.
+    // none) against its row's state, and that the hidden-songs list has no repeats. Then the menu / arena split (owner
+    // 2026-11-13: "two different playlists"): a file with no menu list starts it as a copy of the match one, MENU SONGS'
+    // switches change the menu list alone and ARENA SONGS' the match list alone, and each picker draws from its own.
     internal static class SongCheckTest
     {
         const BindingFlags Any = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
@@ -33,9 +35,16 @@ namespace MphRead
             void Call(string name, params object[] a) => t.GetMethod(name, Any)!.Invoke(r, a);
             t.GetField("_stepMenu", Any)!.SetValue(r, s.Menu);
             Type pickType = t.GetField("_songPick", Any)!.FieldType;
-            t.GetField("_songPick", Any)!.SetValue(r, Enum.Parse(pickType, "Hide"));
+            void Mode(string pick) => t.GetField("_songPick", Any)!.SetValue(r, Enum.Parse(pickType, pick));
+            Mode("HideArena");
             var settings = (MphRecomp.Config.RecompSettings)Get(r, "_settings");
+            List<string> Hidden() => (List<string>)t.GetProperty("HiddenList", Any)!.GetValue(r)!;
             int fails = 0;
+            void Expect(bool ok, string what)
+            {
+                if (!ok) fails++;
+                Console.WriteLine($"  {(ok ? "ok  " : "FAIL")} {what}");
+            }
             void Settle(int page)
             {
                 for (int f = 0; f < 600 && (s.Menu.Page?.Index != page || s.Menu.PendingPage != -1); f++) s.Tick();
@@ -51,7 +60,7 @@ namespace MphRead
                 var list = (IList)Get(rows, "Rows");
                 int offset = (int)Get(rows, "Offset");
                 var box = (int[])Get(rows, "Box");
-                var hidden = settings.HiddenSongs;
+                var hidden = Hidden();
                 if (hidden.Count != hidden.Distinct().Count())
                 {
                     Console.WriteLine($"  FAIL {what}: hidden songs repeat ({hidden.Count} entries, {hidden.Distinct().Count()} distinct)");
@@ -100,6 +109,45 @@ namespace MphRead
             Check("HUNTERS after", gameRows);
             Press(gameRows, 0); Check("HUNTERS all: off", gameRows);
             Press(gameRows, 0); Check("HUNTERS all: on", gameRows);
+
+            // the split
+            Console.WriteLine("menu / arena split");
+            // (a song from another area, so this area's rows start all on)
+            string other = MphRecomp.PrimeMusic.HuntersMusic.All.First(x => MphRecomp.PrimeMusic.MusicCatalog.Of(x).Category != area).Id;
+            settings.HiddenSongs = new List<string> { other };
+            settings.HiddenMenuSongs = null;
+            List<string> seeded = settings.MenuHiddenSongs();
+            Expect(seeded.SequenceEqual(settings.HiddenSongs) && !ReferenceEquals(seeded, settings.HiddenSongs),
+                $"no menu list: seeded from the match list ({String.Join(",", seeded)})");
+            seeded.Clear();
+            Expect(settings.HiddenSongs.Count == 1 && settings.MenuHiddenSongs().Count == 0, "the seeded menu list is its own copy");
+            List<string> arena = settings.HiddenSongs.ToList();
+            Mode("HideMenu");
+            Call("OpenBrowseArea", area);
+            Settle((int)Get(areaRows, "Page"));
+            Check("menu: all on", areaRows);
+            Press(areaRows, 1); Check("menu: song 1 off", areaRows);
+            Expect(settings.MenuHiddenSongs().Count == 1 && settings.HiddenSongs.SequenceEqual(arena),
+                $"menu song off: menu list {settings.MenuHiddenSongs().Count}, match list unchanged {settings.HiddenSongs.SequenceEqual(arena)}");
+            Press(areaRows, 0); Check("menu: all off", areaRows);
+            int menuOff = settings.MenuHiddenSongs().Count;
+            Expect(menuOff >= 3 && settings.HiddenSongs.SequenceEqual(arena), $"menu all off: menu list {menuOff}, match list unchanged");
+            Mode("HideArena");
+            Call("OpenBrowseArea", area);
+            Settle((int)Get(areaRows, "Page"));
+            Check("arena: all on", areaRows);
+            Press(areaRows, 2); Check("arena: song 2 off", areaRows);
+            Expect(settings.HiddenSongs.Count == arena.Count + 1 && settings.MenuHiddenSongs().Count == menuOff,
+                $"arena song off: match list {settings.HiddenSongs.Count}, menu list unchanged {settings.MenuHiddenSongs().Count == menuOff}");
+            int Shown(string pick)
+            {
+                Mode(pick);
+                return ((IList)t.GetMethod("ShownSongs", Any)!.Invoke(r, null)!).Count;
+            }
+            int all = MphRecomp.PrimeMusic.MusicLibrary.Imported((string)t.GetProperty("ImportRoot", Any)!.GetValue(r)!).Count;
+            int match = Shown("Match"), menuShown = Shown("Menu");
+            Expect(match == all - settings.HiddenSongs.Count && menuShown == all - menuOff,
+                $"pickers: match music {match} of {all} (want {all - settings.HiddenSongs.Count}), menu music {menuShown} (want {all - menuOff})");
             Console.WriteLine(fails == 0 ? "song check test: PASS" : $"song check test: FAIL ({fails})");
         }
     }

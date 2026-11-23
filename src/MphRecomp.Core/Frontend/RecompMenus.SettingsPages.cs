@@ -28,13 +28,14 @@ namespace MphRecomp.Frontend
         // through STREAMING)
         private static readonly (string Header, string[] Labels)[] CampaignSections =
         {
-            ("SAMUS", new[] { "samus\nsuit", "import\ngames", "camera" }),
+            ("SAMUS", new[] { "samus\nsuit", "import\ngames", "camera", "camera\nside" }),
             ("TROOPER", new[] { "campaign trooper\ntype" }), // owner 10-28: the campaign Trooper's type, once he has a file
             ("SYLUX", new[] { "campaign sylux\ntype" }), // owner 11-08: the same for a Sylux campaign file
             ("ALT FORMS", new[] { "alt form\nhop" }), // owner 11-09: the hop, or helper jump pads
             ("MAP", new[] { "map\nlook", "map\nmode" }),
             ("LOGBOOK", new[] { "logbook\nscans" }), // owner 2026-10-31
             ("SAVES", new[] { "import/export\nds save" }), // the one DS SAVE box row (RecompMenus.DsSave.cs)
+            ("SPEEDRUN", new[] { "speedrun\ntimer", "speedrun\nsplits" }), // the speedrun timer rows (RecompMenus.Speedrun.cs)
         };
         private static readonly (string Header, string[] Labels)[] MultiplayerSections =
         {
@@ -51,11 +52,11 @@ namespace MphRecomp.Frontend
         };
         private static readonly (string Header, string[] Labels)[] LookSections =
         {
-            ("MENUS", new[] { "menu\nart", "second hunt\nlogo" }),
-            ("HUD", new[] { "campaign\nradar", "radar\npickups", "hud", "hud\nsway", "shot\nindicator", "helmet\nopacity", "visor\nopacity", "readout\nopacity", "lock readouts\nto visor", "line\nart" }),
+            ("MENUS", new[] { "menu\nart", "arena\nbackground", "second hunt\nlogo" }),
+            ("HUD", new[] { "campaign\nradar", "radar\npickups", "hud", "customize\nhud", "hud\nsway", "shot\nindicator", "helmet\nopacity", "visor\nopacity", "readout\nopacity", "lock readouts\nto visor", "line\nart" }),
             ("VIEW", new[] { "field of\nview", "aim\nview" }),
             ("HUNTERS", new[] { "death", "vanilla\norbs" }), // (owner 2026-11-09: no ICE row, the hunters wear vanilla's ice)
-            ("DISPLAY", new[] { "frame\nrate", "smooth\nframes" }),
+            ("DISPLAY", new[] { "frame\nrate", "smooth\nframes", "render\nscale" }),
         };
         // (owner 2026-10-17: "look and sound should be split. look should be menus/hud and sound should be its own tab")
         private static readonly (string Header, string[] Labels)[] SoundSections =
@@ -68,7 +69,7 @@ namespace MphRecomp.Frontend
         {
             ("STARTUP", new[] { "skip boot\nlogos", "skip\nintro" }), // owner 2026-10-29
             ("UPDATES", new[] { "update\nalerts", "updates" }),
-            ("FILES", new[] { "data\nfolder" }), // Windows only (GitHub #12, owner 2026-11-04)
+            ("FILES", new[] { "data\nfolder", "export\nprofile", "import\nprofile" }), // data folder: Windows only (GitHub #12, owner 2026-11-04); profile: docs/PROFILE_SYNC.md
             ("HELP", new[] { "crash\nlog", "share\nlog", DiscordLabel, "credits" }), // owner 10-27: Discord above credits
         };
         private static readonly (string Header, string[] Labels)[] DevSections =
@@ -92,9 +93,12 @@ namespace MphRecomp.Frontend
             "crash\nlog" => RecompSettings.DesktopHost ? "open crash log" : "share crash log",
             "share\nlog" => RecompSettings.DesktopHost ? "save log" : "share log",
             "updates" => "check for updates",
-            "song\nlist" => "song list",
+            "arena\nsongs" => "arena songs",
+            "menu\nsongs" => "menu songs",
             "import\ngames" => "import games",
             "export ds\nsave" => "export ds save",
+            "export\nprofile" => "export profile",
+            "import\nprofile" => "import profile",
             _ => null
         };
 
@@ -247,7 +251,11 @@ namespace MphRecomp.Frontend
         }
 
         // back: OPTIONS (the pause menu, paused: FrontendSession's Redirect); ONLINE PLAY's own page: its hub
-        private void SettingsBack(MenuEngine menu, SectionPage sp) => menu.GoTo(sp == _onlineHubPage ? s_onHub : OptionsPage);
+        private void SettingsBack(MenuEngine menu, SectionPage sp)
+        {
+            MphRecomp.Profile.CloudSync.Current?.Push("settings"); // (CLOUD SAVE: leaving SETTINGS is a sync point)
+            menu.GoTo(sp == _onlineHubPage ? s_onHub : OptionsPage);
+        }
 
         // the tabs' places: each as wide as its name wants (its letters + a margin), across TabX0..TabX1
         private List<(SectionPage Page, float X0, float X1)> TabLayout()

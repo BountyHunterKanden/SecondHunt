@@ -39,6 +39,12 @@ namespace MphRecomp.Online
         public event Action<OnlineMsg>? EventReceived;
         public bool Connected => _ws.State == WebSocketState.Open && _loop is { IsCompleted: false };
         public string? CloseReason { get; private set; }
+        // server 0.10.3: the restart notice in force (ServerNoticeEvent, or the welcome's Restart); null = none.
+        // NoticeAt: when it came (Environment.TickCount64), for a countdown
+        public ServerNoticeEvent? Notice { get; private set; }
+        public long NoticeAt { get; private set; }
+        // the server closed this connection for a restart (its KickedEvent said so): reconnect sooner
+        public bool ClosedForRestart => CloseReason?.Contains("restarting", StringComparison.OrdinalIgnoreCase) == true;
 
         private OnlineClient()
         {
@@ -46,7 +52,7 @@ namespace MphRecomp.Online
 
         // device: the scrambled device ID sent with the login (null = this device's DeviceTag; tests pass their own)
         public static async Task<OnlineClient> ConnectAsync(Uri server, OnlineIdentity identity, string name, string app,
-            CancellationToken ct = default, string? device = null)
+            CancellationToken ct = default, string? device = null, bool cloudOnly = false)
         {
             var client = new OnlineClient();
             try
@@ -63,6 +69,10 @@ namespace MphRecomp.Online
                         + $"{OnlineProtocol.Version}: update the game");
                 }
                 client.ServerVersion = challenge.Server;
+                if (cloudOnly && !client.ServerAtLeast(CloudGetReq.SinceServer))
+                {
+                    throw new OnlineException("old_server", "this server has no cloud save"); // (an older one would take it for a login)
+                }
                 byte[] nonce = Convert.FromBase64String(challenge.Nonce);
                 await client.SendAsync(new HelloMsg
                 {
@@ -72,6 +82,8 @@ namespace MphRecomp.Online
                     Proto = OnlineProtocol.Version,
                     Name = name,
                     Device = device ?? DeviceTag.Current,
+                    Notices = true, // (0.10.3: this app understands ev_notice)
+                    CloudOnly = cloudOnly,
                 }, ct);
                 OnlineMsg? reply = await OnlineProtocol.ReceiveAsync(client._ws, ct);
                 if (reply is ErrorMsg error)
@@ -87,6 +99,10 @@ namespace MphRecomp.Online
                 client.ChatLeft = welcome.ChatLeft;
                 client.ChatMutedUntil = welcome.ChatMutedUntil;
                 client.Held = welcome.Held;
+                if (welcome.Restart > 0)
+                {
+                    client.SetNotice(new ServerNoticeEvent { Kind = NoticeKind.Restart, Seconds = welcome.Restart });
+                }
                 client._loop = Task.Run(client.ReceiveLoop);
                 return client;
             }
@@ -169,6 +185,12 @@ namespace MphRecomp.Online
                     {
                         CloseReason = kicked.Reason;
                     }
+                    if (msg is ServerNoticeEvent notice)
+                    {
+                        SetNotice(notice);
+                        EventReceived?.Invoke(msg);
+                        continue;
+                    }
                     if (msg is ChatEvent chat)
                     {
                         Chat.Add(chat);
@@ -187,6 +209,12 @@ namespace MphRecomp.Online
             {
                 waiting.TrySetResult(new ErrorMsg { Code = "disconnected", Text = CloseReason ?? "disconnected" });
             }
+        }
+
+        private void SetNotice(ServerNoticeEvent notice)
+        {
+            NoticeAt = Environment.TickCount64;
+            Notice = notice.Kind == NoticeKind.Cancel ? null : notice;
         }
 
         public async ValueTask DisposeAsync()

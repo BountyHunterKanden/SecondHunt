@@ -8,8 +8,10 @@ namespace MphRecomp.Import.Retro3
 {
     // Corruption sounds (docs/MP3_HYPER_EFFECTS_FORMATS.md section 5, from our own survey of the disc):
     //   CAUD (version 9): name, groups, a few header values, flags (1 = loops), then entries: u32 size + that many bytes,
-    //     each starting u64 CSMP id, f32, u32, u32, f32, f32, f32 volume (1.0 = full), ... (the rest unparsed). Several
-    //     entries = alternatives (an impact picks one).
+    //     each starting u64 CSMP id, f32, u32, u32, f32, f32, f32 volume (1.0 = full), u32 fade-out ms, s32 pitch and
+    //     s32 spread (cents: each play starts at a random whole pitch - spread..pitch + spread, main.dol 0x803849f4; the
+    //     shot's samus_phazon_fire is -300 +- 50, 3 semitones down), ... (the rest unparsed). Several entries =
+    //     alternatives (an impact picks one).
     //   CSMP: "CSMP" u32 version, then chunks (4cc + u32 size): INFO, PAD, DATA = a standard 0x60-byte Nintendo DSP-ADPCM
     //     header (samples, nibbles, rate, loop flag, format, loop start/end, current, 16 coefficients, gain, ps, yn1,
     //     yn2, ...) and its 8-byte frames, mono.
@@ -19,7 +21,7 @@ namespace MphRecomp.Import.Retro3
         public string Name = "";
         public uint Flags;
         public bool Loops => (Flags & 1) != 0;
-        public readonly List<(ulong Csmp, float Volume)> Entries = new();
+        public readonly List<(ulong Csmp, float Volume, int Pitch, int Spread)> Entries = new();
 
         public static Caud3 Load(byte[] b)
         {
@@ -44,14 +46,16 @@ namespace MphRecomp.Import.Retro3
                 int size = (int)Be.U32(b, o);
                 int e = o + 4;
                 if (size < 32 || e + size > b.Length) throw new InvalidDataException($"CAUD {c.Name}: entry {i} runs past the file");
-                c.Entries.Add((Part.U64(b, e), Be.F32(b, e + 28)));
+                c.Entries.Add((Part.U64(b, e), Be.F32(b, e + 28), size >= 44 ? (int)Be.U32(b, e + 36) : 0, size >= 44 ? (int)Be.U32(b, e + 40) : 0));
                 o = e + size;
             }
             return c;
         }
 
-        // a CSMP as 16-bit PCM: samples, rate, loops
-        public static (short[] Pcm, int Rate, bool Loop) Decode(byte[] b)
+        // a CSMP as 16-bit PCM: samples, rate, loops, the sample its loop restarts at. The DSP header's loop start and end
+        // are in samples, the end inclusive (samus_phazoncharge_ready_lp: 51520..118968 of 118970, so 1.61 s in); a
+        // looping sample's PCM ends at its loop end (the smoothest seam, and the samples after it never play)
+        public static (short[] Pcm, int Rate, bool Loop, int LoopStart) Decode(byte[] b)
         {
             if (Encoding.Latin1.GetString(b, 0, 4) != "CSMP") throw new InvalidDataException("not a Corruption sample (CSMP)");
             int o = 8, data = -1, dataSize = 0;
@@ -71,6 +75,9 @@ namespace MphRecomp.Import.Retro3
             int samples = (int)Be.U32(b, data);
             int rate = (int)Be.U32(b, data + 8);
             bool loop = Be.U16(b, data + 12) != 0;
+            int loopStart = loop ? (int)Be.U32(b, data + 0x10) : 0;
+            int loopEnd = loop ? (int)Be.U32(b, data + 0x14) : 0;
+            if (loopEnd > loopStart && loopEnd + 1 < samples) samples = loopEnd + 1;
             var coef = new short[16];
             for (int i = 0; i < 16; i++) coef[i] = Be.I16(b, data + 28 + i * 2);
             var pcm = new short[samples];
@@ -85,7 +92,7 @@ namespace MphRecomp.Import.Retro3
                 at += k;
                 p += DspAdpcm.FrameBytes;
             }
-            return (pcm, rate, loop);
+            return (pcm, rate, loop, loopStart >= 0 && loopStart < samples ? loopStart : 0);
         }
     }
 }
