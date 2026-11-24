@@ -173,7 +173,7 @@ namespace MphRead.Entities
             // example issue - Kanden visible for one frame before Data Shrine 03 cam seq starts
             // should be culled because the cam seq frustum info has already been loaded, and is facing away from him,
             // even though the player's view is still what's on the screen (at least that seems to be what's happening)
-            if (IsMainPlayer || HostFirstPersonView || VisLogCheck(IsVisible(NodeRef))) // recomp: VisLogCheck logs only (PlayerVisLog.cs)
+            if (IsMainPlayer || HostFirstPersonView || VisLogCheck(IsVisible(NodeRef)) || HostDrawAnyPart) // recomp: VisLogCheck logs only; HostDrawAnyPart: a match's players aren't culled by room part (PlayerVisLog.cs)
             {
                 drawBiped = !IsMainPlayer && !HostFirstPersonView || CameraType != CameraType.First || CameraSequence.Current != null
                     || _camSwitchTimer < Values.CamSwitchTime * 2 // todo: FPS stuff

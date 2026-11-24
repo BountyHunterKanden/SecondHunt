@@ -13,6 +13,18 @@ namespace MphRead.Entities
     {
         public static Action<string>? HostVisLog { get; set; }
 
+        // recomp: in a multiplayer match no player's body (or shield wall, or Halfturret) is culled by its room part (owner
+        // 2026-11-24: "squash this once and for all in all cases"; public report after 0.5.2: High Ground, the other player
+        // invisible near the statue). A player is filed under a room part and drawn only while the doorway walk from the
+        // camera reaches that part. Online, another human's part is rebuilt on each device from network positions, and every
+        // fix so far (10-16 snap, 11-11 far force-field doorways, 11-18 PartHoldsSpot) repaired one more way that part or
+        // walk goes wrong; a wrong part is a body left out in plain sight with only its shadow, which is drawn before the
+        // check. The part is an optimisation for a DS: the depth buffer already hides a body behind a wall, and a match has
+        // at most 8. So the check no longer decides a match player's draw at all. Campaign keeps the part cull (its hunters'
+        // parts are the sim's own, and rooms rely on it). Off (tests, timing): HostDrawPlayersAnyPart = false.
+        public static bool HostDrawPlayersAnyPart { get; set; } = true;
+        public static bool HostDrawAnyPart => HostDrawPlayersAnyPart && GameState.Multiplayer;
+
         private static int _visLogLines;
         private const int VisLogMaxLines = 400;
         private bool _visLogGone;
@@ -21,7 +33,7 @@ namespace MphRead.Entities
         // the room-part check in Draw, passed through: logs a vanish/return of a player in view
         private bool VisLogCheck(bool visible)
         {
-            VisLogUpdate(visible ? null : "its room part isn't drawn");
+            VisLogUpdate(visible ? null : HostDrawAnyPart ? "its room part isn't drawn; body drawn all the same" : "its room part isn't drawn");
             return visible;
         }
 
@@ -58,7 +70,7 @@ namespace MphRead.Entities
             _visLogGone = true;
             _visLogFrames = 1;
             NodeRef at = _scene.GetNodeRefContaining(Position);
-            VisLogWrite($"seat {SlotIndex} {Hunter} in view but NOT DRAWN ({why}) frame {_scene.FrameCount}:"
+            VisLogWrite($"seat {SlotIndex} {Hunter} in view but {(why.Contains("all the same") ? "its part is wrong or unseen" : "NOT DRAWN")} ({why}) frame {_scene.FrameCount}:"
                 + $" its part {NodeRef.PartIndex} (drawn {_scene.IsNodeRefVisible(NodeRef)}),"
                 + $" geometry here part {at.PartIndex} (drawn {(at.PartIndex != -1 && _scene.IsNodeRefVisible(at))}),"
                 + $" camera part {Main.CameraInfo.NodeRef.PartIndex}, dist {dist:0.0}, angle {angle:0}, alpha {_curAlpha:0.00},"

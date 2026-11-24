@@ -416,7 +416,7 @@ namespace MphRead.Entities
 
         public override void GetDrawInfo()
         {
-            if (!IsVisible(NodeRef))
+            if (!IsVisible(NodeRef) && !PlayerEntity.HostDrawAnyPart) // recomp: (PlayerVisLog.cs HostDrawAnyPart)
             {
                 return;
             }

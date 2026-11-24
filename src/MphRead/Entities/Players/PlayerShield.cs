@@ -341,7 +341,7 @@ namespace MphRead.Entities
             {
                 return;
             }
-            if (!IsMainPlayer && !IsVisible(NodeRef))
+            if (!IsMainPlayer && !IsVisible(NodeRef) && !HostDrawAnyPart) // (HostDrawAnyPart: PlayerVisLog.cs)
             {
                 return;
             }
